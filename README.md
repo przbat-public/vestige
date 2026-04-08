@@ -4,9 +4,7 @@
 
 ### The cognitive engine that gives AI a brain.
 
-[![GitHub stars](https://img.shields.io/github/stars/samvallad33/vestige?style=social)](https://github.com/samvallad33/vestige)
-[![Release](https://img.shields.io/github/v/release/samvallad33/vestige)](https://github.com/samvallad33/vestige/releases/latest)
-[![Tests](https://img.shields.io/badge/tests-1238%20passing-brightgreen)](https://github.com/samvallad33/vestige/actions)
+[![Upstream](https://img.shields.io/badge/upstream-samvallad33%2Fvestige-blue)](https://github.com/samvallad33/vestige)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-green)](https://modelcontextprotocol.io)
 
@@ -14,21 +12,56 @@
 
 Built on 130 years of memory research — FSRS-6 spaced repetition, prediction error gating, synaptic tagging, spreading activation, memory dreaming — all running in a single Rust binary with a 3D neural visualization dashboard. 100% local. Zero cloud.
 
-[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-21-mcp-tools) | [Docs](docs/)
+[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-24-mcp-tools) | [Docs](docs/)
 
 </div>
 
 ---
 
-## What's New in v2.0 "Cognitive Leap"
+> **Fork notice** — This is an extended fork of [samvallad33/vestige](https://github.com/samvallad33/vestige) (v2.0.3, "Live Memory Materialization"). The upstream project created an impressive cognitive memory system for AI agents. This fork pushes it further in three directions:
+>
+> 1. **Deeper cognitive science** — metacognition, Bayesian confidence estimation, epistemic classification, proactive interference resolution, and 10 scientific validation tests mapped to published research (Ebbinghaus, Bjork & Bjork, Collins & Loftus, Anderson, Frey & Morris, Diekelmann & Born, Roediger & Karpicke).
+> 2. **Production-grade dashboard** — full internationalization (EN/PL), light/dark mode, accessibility (WCAG patterns), component decomposition into a reusable UI library, semantic design tokens.
+> 3. **Competitive feature parity** — features inspired by analysis of 12+ memory systems (MemGPT/Letta, Zep/Graphiti, Cognee, Mem0, LightMem, A-Mem, MemoryOS, and others), adapted and integrated into Vestige's Rust architecture.
+>
+> All original features, tools, and APIs remain fully compatible. See [CHANGELOG.md](CHANGELOG.md) for the full diff.
 
-- **3D Memory Dashboard** — SvelteKit + Three.js neural visualization with real-time WebSocket events, bloom post-processing, force-directed graph layout. Watch your AI's mind in real-time.
-- **WebSocket Event Bus** — Every cognitive operation broadcasts events: memory creation, search, dreaming, consolidation, retention decay
-- **HyDE Query Expansion** — Template-based Hypothetical Document Embeddings for dramatically improved search quality on conceptual queries
-- **Nomic v2 MoE (experimental)** — fastembed 5.11 with optional Nomic Embed Text v2 MoE (475M params, 8 experts) + Metal GPU acceleration. Default: v1.5 (8192 token context)
-- **Command Palette** — `Cmd+K` navigation, keyboard shortcuts, responsive mobile layout, PWA installable
-- **FSRS Decay Visualization** — SVG retention curves with predicted decay at 1d/7d/30d, endangered memory alerts
-- **29 cognitive modules** — 1,238 tests, 79,600+ LOC
+---
+
+## What's New in v3.1.0 "Metacognitive Expansion"
+
+### Metacognitive Tools (new in v3.1)
+- **`reflect`** — deliberate self-examination of memories. Detects contradictions, knowledge gaps, stale decisions, overconfident memories, pattern clusters. Based on Flavell (1979), Schön (1983), Nelson & Narens (1990)
+- **`temporal`** — temporal fact versioning. Query valid-now, expired, historical facts. Mark facts as no longer valid. Based on bi-temporal theory (Snodgrass 1999) and Graphiti temporal knowledge graphs
+- **`confidence`** — multi-dimensional confidence scoring. Evaluate encoding, retrieval, temporal, and evidence strength. Audit poorly-calibrated memories. Based on Kahneman (2011), Tetlock (2015)
+- **Dashboard integration** — Self-Reflection and Confidence Audit accessible from the Settings page
+- **18 cognitive journey tests** — each mapped to published research (Bjork, Roediger & Karpicke, Collins & Loftus, Brown & Kulik, and more)
+
+### Inherited from v3.0.0 "Cognitive Expansion"
+- **Metacognition layer** — the search pipeline monitors its own quality, tracks hit/miss rates, detects knowledge gaps
+- **Bayesian confidence** — access-pattern-based confidence with credible intervals via Beta distribution
+- **Epistemic classification** — memories classified as facts, experiences, observations, or opinions
+- **Proactive interference resolution** — fan-effect penalty for competing memories (Anderson, 1974)
+- **Memory evolution** (A-Mem) — new memories auto-discover and link to related existing memories
+- **Context compression** (LightMem) — key sentence extraction for token budget compliance
+- **Privacy governance** — `right_to_erasure()` for GDPR-style complete removal
+- **10 scientific validation tests** — each mapped to published research
+- **Tutorial page** — comprehensive guide (analogies, lifecycle, science, FAQ, glossary) written for beginners, in English and Polish
+
+### Dashboard
+- **Internationalization** — full EN + PL via i18next
+- **Light / dark mode** — oklch-based semantic design tokens with `prefers-color-scheme` detection
+- **Accessibility** — skip-to-content, route announcer, `aria-live`, keyboard navigation, reduced motion
+- **UI component library** — Button, Card, Badge, ProgressBar, SearchInput, EmptyState, LoadingSpinner, StatCard
+- **Component decomposition** — focused sub-components across all pages
+- **10 pages** — Graph, Memories, Timeline, Feed, Explore, Intentions, Stats, Settings, Tutorial, Not Found
+
+### Inherited from upstream v2.0.3
+- React 19 + Vite 6 + Three.js 3D neural graph with WebSocket events
+- Jina Reranker v2 Base Multilingual (278M params)
+- Triple hybrid search (BM25 + semantic + RRF)
+- HyDE query expansion, FSRS-6 spaced repetition, 29 cognitive modules
+- Command palette, PWA support, FSRS decay visualization
 
 ---
 
@@ -111,7 +144,7 @@ Vestige v2.0 ships with a real-time 3D visualization of your AI's memory. Every 
 - Command palette (`Cmd+K`), keyboard shortcuts, responsive mobile layout
 - Installable as PWA for quick access
 
-**Tech:** SvelteKit 2 + Svelte 5 + Three.js + Tailwind CSS 4 + WebSocket
+**Tech:** React 19 + Vite 6 + React Router 7 + Three.js + Tailwind CSS 4 + i18next + WebSocket
 
 The dashboard runs automatically at `http://localhost:3927/dashboard` when the MCP server starts.
 
@@ -121,28 +154,33 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  SvelteKit Dashboard (apps/dashboard)                │
-│  Three.js 3D Graph · WebGL + Bloom · Real-time WS   │
+│  React Dashboard (apps/dashboard)                   │
+│  React 19 · Vite 6 · Three.js 3D Graph · i18next    │
+│  Light/Dark Mode · a11y · EN/PL · WebSocket         │
 ├─────────────────────────────────────────────────────┤
-│  Axum HTTP + WebSocket Server (port 3927)            │
-│  15 REST endpoints · WS event broadcast              │
+│  Axum HTTP + WebSocket Server (port 3927)           │
+│  18 REST endpoints · WS event broadcast             │
 ├─────────────────────────────────────────────────────┤
-│  MCP Server (stdio JSON-RPC)                         │
-│  21 tools · 29 cognitive modules                     │
+│  MCP Server (stdio JSON-RPC)                        │
+│  24 tools · 29 cognitive modules                    │
 ├─────────────────────────────────────────────────────┤
-│  Cognitive Engine                                    │
-│  ┌──────────┐ ┌──────────┐ ┌───────────────┐       │
-│  │ FSRS-6   │ │ Spreading│ │ Prediction    │       │
-│  │ Scheduler│ │ Activation│ │ Error Gating  │       │
-│  └──────────┘ └──────────┘ └───────────────┘       │
-│  ┌──────────┐ ┌──────────┐ ┌───────────────┐       │
-│  │ Memory   │ │ Synaptic │ │ Hippocampal   │       │
-│  │ Dreamer  │ │ Tagging  │ │ Index         │       │
-│  └──────────┘ └──────────┘ └───────────────┘       │
+│  Cognitive Engine                                   │
+│  ┌──────────┐ ┌────────────┐ ┌───────────────┐      │
+│  │ FSRS-6   │ │ Spreading  │ │ Prediction    │      │
+│  │ Scheduler│ │ Activation │ │ Error Gating  │      │
+│  └──────────┘ └────────────┘ └───────────────┘      │
+│  ┌──────────┐ ┌────────────┐ ┌───────────────┐      │
+│  │ Dream    │ │ Synaptic   │ │ Hippocampal   │      │
+│  │ Engine   │ │ Tagging    │ │ Index         │      │
+│  └──────────┘ └────────────┘ └───────────────┘      │
+│  ┌──────────┐ ┌────────────┐ ┌───────────────┐      │
+│  │ Meta-    │ │ Bayesian   │ │ Epistemic     │      │
+│  │ cognition│ │ Confidence │ │ Separation    │      │
+│  └──────────┘ └────────────┘ └───────────────┘      │
 ├─────────────────────────────────────────────────────┤
-│  Storage Layer                                       │
+│  Storage Layer                                      │
 │  SQLite + FTS5 · USearch HNSW · Nomic Embed v1.5    │
-│  Optional: Nomic v2 MoE · Qwen3 Reranker · Metal   │
+│  Jina Reranker v2 · RRF · Active Forgetting         │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -155,7 +193,7 @@ RAG is a dumb bucket. Vestige is an active organ.
 | | RAG / Vector Store | Vestige |
 |---|---|---|
 | **Storage** | Store everything | **Prediction Error Gating** — only stores what's surprising or new |
-| **Retrieval** | Nearest-neighbor | **7-stage pipeline** — HyDE expansion + reranking + spreading activation |
+| **Retrieval** | Nearest-neighbor | **7-stage pipeline** — triple hybrid (BM25 + semantic + RRF) + Jina v2 reranking + spreading activation |
 | **Decay** | Nothing expires | **FSRS-6** — memories fade naturally, context stays lean |
 | **Duplicates** | Manual dedup | **Self-healing** — auto-merges "likes dark mode" + "prefers dark themes" |
 | **Importance** | All equal | **4-channel scoring** — novelty, arousal, reward, attention |
@@ -192,7 +230,7 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 
 ---
 
-## 🛠 21 MCP Tools
+## 🛠 24 MCP Tools
 
 ### Context Packets
 | Tool | What It Does |
@@ -202,7 +240,7 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 ### Core Memory
 | Tool | What It Does |
 |------|-------------|
-| `search` | 7-stage cognitive search — HyDE expansion + keyword + semantic + reranking + temporal + competition + spreading activation |
+| `search` | 7-stage cognitive search — triple hybrid (BM25 + semantic + RRF) + Jina v2 reranking + temporal + competition + spreading activation |
 | `smart_ingest` | Intelligent storage with CREATE/UPDATE/SUPERSEDE via Prediction Error Gating. Batch mode for session-end saves |
 | `memory` | Get, delete, check state, promote (thumbs up), demote (thumbs down) |
 | `codebase` | Remember code patterns and architectural decisions per-project |
@@ -214,6 +252,13 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 | `dream` | Memory consolidation — replays memories, discovers connections, synthesizes insights, persists graph |
 | `explore_connections` | Graph traversal — reasoning chains, associations, bridges between memories |
 | `predict` | Proactive retrieval — predicts what you'll need next based on context and activity |
+
+### Metacognitive (v3.1)
+| Tool | What It Does |
+|------|-------------|
+| `reflect` | Self-examination — contradictions, knowledge gaps, stale decisions, overconfident memories, pattern clusters |
+| `temporal` | Temporal fact versioning — current, expired, history, invalidate. Tracks fact evolution over time |
+| `confidence` | Confidence scoring — multi-dimensional (encoding, retrieval, temporal, evidence). Audit and calibrate |
 
 ### Autonomic
 | Tool | What It Does |
@@ -268,16 +313,20 @@ At the start of every session:
 | Metric | Value |
 |--------|-------|
 | **Language** | Rust 2024 edition (MSRV 1.91) |
-| **Codebase** | 79,600+ lines, 1,238 tests |
+| **Codebase** | 1,080+ tests + 10 scientific validation + 18 cognitive journey tests |
 | **Binary size** | ~20MB |
-| **Embeddings** | Nomic Embed Text v1.5 (768d → 256d Matryoshka, 8192 context) |
+| **Embeddings** | Nomic Embed Text v1.5 (768D → 384D Matryoshka, 8192 context) |
 | **Vector search** | USearch HNSW (20x faster than FAISS) |
-| **Reranker** | Jina Reranker v1 Turbo (38M params, +15-20% precision) |
+| **Reranker** | Jina Reranker v2 Base Multilingual (278M params) |
+| **Search** | Triple hybrid scoring (BM25 + semantic + RRF) + metacognition + interference resolution |
 | **Storage** | SQLite + FTS5 (optional SQLCipher encryption) |
-| **Dashboard** | SvelteKit 2 + Svelte 5 + Three.js + Tailwind CSS 4 |
+| **Dashboard** | React 19 + Vite 6 + React Router 7 + Three.js + Tailwind CSS 4 + i18next |
+| **Locales** | English, Polish (extensible) |
+| **Themes** | Light + Dark (oklch design tokens, `prefers-color-scheme` aware) |
 | **Transport** | MCP stdio (JSON-RPC 2.0) + WebSocket |
-| **Cognitive modules** | 29 stateful (16 neuroscience, 11 advanced, 2 search) |
-| **First run** | Downloads embedding model (~130MB), then fully offline |
+| **MCP tools** | 24 (core memory, cognitive, metacognitive, autonomic, maintenance) |
+| **Cognitive modules** | 29 stateful + metacognition + Bayesian confidence + epistemic separation |
+| **First run** | Downloads embedding + reranker models (~1.3GB), then fully offline |
 | **Platforms** | macOS (ARM/Intel), Linux (x86_64), Windows |
 
 ### Optional Features
@@ -285,12 +334,6 @@ At the start of every session:
 ```bash
 # Metal GPU acceleration (Apple Silicon — faster embedding inference)
 cargo build --release -p vestige-mcp --features metal
-
-# Nomic Embed Text v2 MoE (475M params, 305M active, 8 experts)
-cargo build --release -p vestige-mcp --features nomic-v2
-
-# Qwen3 Reranker (Candle backend, high-precision cross-encoder)
-cargo build --release -p vestige-mcp --features qwen3-reranker
 
 # SQLCipher encryption
 cargo build --release -p vestige-mcp --no-default-features --features encryption,embeddings,vector-search
@@ -375,6 +418,7 @@ AGPL-3.0 — free to use, modify, and self-host. If you offer Vestige as a netwo
 ---
 
 <p align="center">
-  <i>Built by <a href="https://github.com/samvallad33">@samvallad33</a></i><br>
-  <sub>79,600+ lines of Rust · 29 cognitive modules · 130 years of memory research · one 22MB binary</sub>
+  <i>Originally built by <a href="https://github.com/samvallad33">@samvallad33</a></i><br>
+  <i>Extended by <a href="https://github.com/przemyslawbatte">@przemyslawbatte</a></i><br>
+  <sub>24 tools · 29 cognitive modules · scientific validation · i18n · light/dark mode · one binary</sub>
 </p>

@@ -19,7 +19,7 @@ vestige/
 │   ├── vestige-init/       # npx @vestige/init installer
 │   └── vestige-mcp-npm/    # npm binary wrapper
 └── tests/
-    └── vestige-e2e-tests/  # End-to-end MCP protocol tests
+    └── e2e/                # End-to-end MCP protocol tests (crate: vestige-e2e-tests)
 ```
 
 ## Development Setup
@@ -56,13 +56,13 @@ VESTIGE_TEST_MOCK_EMBEDDINGS=1 cargo test --workspace
 ## Running Tests
 
 ```bash
-# All tests (734 total)
-VESTIGE_TEST_MOCK_EMBEDDINGS=1 cargo test --workspace
+# All lib tests (~740 total)
+VESTIGE_TEST_MOCK_EMBEDDINGS=1 cargo test --workspace --lib
 
-# Core library tests only (352 tests)
+# Core library tests only (~355 tests)
 VESTIGE_TEST_MOCK_EMBEDDINGS=1 cargo test -p vestige-core --lib
 
-# MCP server tests only (378 tests)
+# MCP server tests only (~385 tests)
 VESTIGE_TEST_MOCK_EMBEDDINGS=1 cargo test -p vestige-mcp --lib
 
 # E2E MCP protocol tests (requires release build)

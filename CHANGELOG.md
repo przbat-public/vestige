@@ -5,6 +5,165 @@ All notable changes to Vestige will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-04-08 — "Metacognitive Expansion"
+
+Building on v3.0.0's foundation, this release adds three metacognitive tools to the MCP server, exposes them through the dashboard REST API and frontend, and massively expands the tutorial.
+
+### Added
+
+#### MCP Tools — Metacognitive Layer (24 tools total, was 21)
+- **`reflect`** — deliberate self-examination of memories. Detects contradictions, knowledge gaps, stale decisions, overconfident memories, and pattern clusters. Configurable depth (quick/standard/deep) and optional topic focus. Based on Flavell (1979) metacognition, Schön (1983) reflection-in-action, Nelson & Narens (1990) metamemory monitoring
+- **`temporal`** — temporal fact versioning. Query time-sensitive knowledge: `current` (valid-now facts), `expired` (no-longer-valid), `history` (evolution of a topic over time), `invalidate` (mark a fact as no longer valid). Based on Graphiti temporal knowledge graphs (Zep 2024), bi-temporal database theory (Snodgrass 1999)
+- **`confidence`** — confidence scoring for opinions and beliefs. Multi-dimensional scores (encoding, retrieval, temporal, evidence). Actions: `score` (single memory), `audit` (find poorly-calibrated memories), `calibrate` (compare opinions vs facts retention). Based on Kahneman (2011), Tetlock (2015), Mercier & Sperber (2017)
+
+#### Dashboard REST API — 3 New Endpoints (18 total, was 15)
+- `POST /api/reflect` — trigger self-reflection with optional `focus` and `depth` params
+- `POST /api/temporal` — query temporal facts with `action`, `topic`, `memory_id`, `limit`
+- `POST /api/confidence` — run confidence audit/score with `action`, `memory_id`, `limit`
+
+#### Dashboard Frontend
+- **Metacognitive Tools panel** on Settings page — "Self-Reflection" and "Confidence Audit" buttons with result visualization (severity badges, confidence percentages, classification labels)
+- **Tutorial page massively expanded** — 6 new sections: "Think of it like..." (3 analogies: library, brain, web), "How a memory lives and dies" (5-step lifecycle), "The Science Behind Vestige" (FSRS-6, Bjork, ACT-R, Kahneman/Tetlock), FAQ (8 questions covering privacy, embeddings, MCP), Glossary (10 terms), 4 new concepts (dual strength, search, reflect, confidence). Written for high-school comprehension level
+- **Frontend API client** — `api.reflect()`, `api.temporal()`, `api.confidence()` with full TypeScript types (`ReflectResult`, `TemporalResult`, `ConfidenceResult`)
+
+#### Backend Cleanup (from earlier in session)
+- Deleted deprecated `execute_health_check`, `execute_stats` from `maintenance.rs`
+- Removed no-op consolidation steps 11-13 (operated on ephemeral in-memory state only)
+- Deduplicated dream logic in `handlers.rs` — now delegates to `crate::tools::dream::execute`
+- Centralized state distribution formula — `compute_accessibility` and `state_from_accessibility` made public in `memory_unified.rs`, reused in `memory_states.rs` and `cli.rs`
+- Added `log_err` helper in `handlers.rs` — all `map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)` replaced with structured error logging via `tracing::error!`
+
+#### Frontend Refactor (from earlier in session)
+- Migrated WebSocket from React Context to Zustand store
+- Migrated StatsPage, SettingsPage, TimelinePage, IntentionsPage to TanStack Query
+- Extracted `ImportanceScorer` component from `ExplorePage`
+- Added custom `ApiError` class — toasts handled at UI layer, not in `api.ts`
+- Fixed TypeScript union types for `IntentionItem` (proper `TriggerType`, `IntentionPriority`, `IntentionStatus`)
+- Fixed `useMemo` dependency issue in `TimeSlider`
+
+#### Cognitive Journey Tests (18 tests)
+- `cognitive_journey_tests.rs` in `vestige-core` — 18 tests validating 12 cognitive science principles:
+  - DualStrength decay/recall/lapse (Bjork & Bjork 1992)
+  - Episodic vs semantic temporal context
+  - Testing effect via compounding recalls (Roediger & Karpicke 2006)
+  - Spreading activation weight and distance decay (Collins & Loftus 1975)
+  - Memory state transitions
+  - FSRS-6 interval growth and lapse stability reduction
+  - Temporal invalidation via `valid_until`
+  - Opinion marker detection for confidence calibration
+  - Emotional enhancement via sentiment boost (Brown & Kulik 1977)
+  - Cross-session knowledge accumulation
+  - Stability-retrievability independence
+  - Dual strength retention formula (70% retrieval / 30% storage)
+
+### Changed
+- Tool count: 21 → 24 (+ reflect, temporal, confidence)
+- Dashboard REST endpoints: 15 → 18
+- Tutorial: 1 section → 8 sections (whatIs, analogies, lifecycle, concepts, science, pages, FAQ, glossary)
+- Tutorial concepts: 6 → 10 (+ dual strength, search, reflect, confidence)
+- Settings page: 2 operations → 4 operations (+ reflect, confidence audit)
+- Consolidation: 20 steps → 17 steps (removed 3 no-op steps)
+- EN/PL translations: expanded with all new tutorial content and settings labels
+
+---
+
+## [3.0.0] - 2026-04-08 — "Cognitive Expansion"
+
+Extended fork of [samvallad33/vestige](https://github.com/samvallad33/vestige) v2.0.3. A deep overhaul of both the cognitive engine and the dashboard, driven by competitive analysis of 12+ memory systems and validated against neuroscience literature.
+
+### Added
+
+#### Cognitive Engine — New Modules
+- **Metacognition monitor** (`neuroscience/metacognition.rs`) — self-monitoring search quality layer. Tracks per-query-type hit/miss rates, detects knowledge gaps, and produces `MetacognitionReport` with `SearchAdjustments` (expand search, suggest dream, flag weak areas)
+- **Bayesian confidence estimation** (`memory/confidence.rs`) — `ConfidenceEstimate` struct computes posterior confidence from access count and success ratio using Beta distribution, with credible intervals. Higher-N narrows the interval
+- **Epistemic status classification** (`memory/node.rs`) — memories are now classified as `WorldKnowledge`, `PersonalExperience`, `Observation`, or `Opinion` based on content analysis. Inferred by `epistemic_status()` method on `KnowledgeNode`
+- **Memory system classification** (`memory/node.rs`) — memories tagged as `Episodic`, `Semantic`, or `Procedural` based on node type mapping. Inferred by `memory_system()` method
+- **DreamEngine** (`advanced/dreams.rs`) — dedicated dream consolidation engine integrated into `CognitiveEngine`, replacing inline dream logic. Runs memory replay, connection discovery, and insight synthesis
+
+#### Search Pipeline — New Stages
+- **Read Path Gating** (Stage 0) — pre-search metacognition check. Records search outcome for hit/miss tracking
+- **Emotional Valence Boost** (Stage 5D) — memories with emotional markers (`!`, `CRITICAL`, `IMPORTANT`, `BUG`, `URGENT`) receive a scoring bonus
+- **Bayesian Confidence Boost** (Stage 5E) — memories with higher access-based confidence get a proportional score multiplier
+- **Memory Tier Adjustment** (Stage 5E-pre) — procedural memories boosted when query contains how-to intent; semantic memories boosted for factual queries
+- **Proactive Interference Resolution** (Stage 5F) — detects competing memories on the same topic and applies fan-effect penalty to reduce interference. Based on Anderson & Neely, 1996
+- **Context Compression** — LightMem-inspired content compression that extracts key sentences from long memories to fit token budgets
+- **Temporal Invalidation Filter** — filters out superseded memories when newer versions exist on the same topic
+
+#### Write Path — New Behaviors
+- **Memory Evolution** (A-Mem pattern) — on ingest, new memories search for semantically related existing memories and create bidirectional connections. Strengthens related memories proportional to similarity
+- **Entity Normalization** (Cognee pattern) — `normalize_tags()` lowercases, trims, and deduplicates tags on every ingest to maintain consistent taxonomy
+- **Temporal Invalidation** — when a new memory supersedes an older one, the old memory's retention is reduced (multiplied by 0.3) instead of deleted, preserving history
+- **Write Path Reinforcement** — `promote_memory` now triggers synaptic tagging and reconsolidation in addition to score adjustment
+- **Privacy Governance** — `right_to_erasure()` function for GDPR-style complete removal of a memory and all its connections, embeddings, and state transitions
+
+#### Scientific Validation
+- **10 scientific validation tests** (`scientific_validation.rs`) — each mapped to published research:
+  - T1: Ebbinghaus forgetting curve (exponential decay)
+  - T2: Testing effect retrieval boost (Roediger & Karpicke, 2006)
+  - T3: Prediction error gating (novelty detection)
+  - T4: Spacing effect (distributed practice)
+  - T5: Synaptic tagging and capture (Frey & Morris, 1997)
+  - T6: Hebbian repeated co-activation strengthening
+  - T7: Spreading activation decay (Collins & Loftus, 1975)
+  - T8: Proactive interference / fan effect (Anderson, 1974)
+  - T9: Dual-strength dissociation (Bjork & Bjork, 1992)
+  - T10: Sleep consolidation replay (Diekelmann & Born, 2010)
+- **Benchmark evaluation harness** (`benchmark_eval.rs`) — scenario-based evaluation with `run_scenario()` for measuring search precision across different memory patterns
+
+#### Dashboard — Internationalization
+- **i18next + react-i18next** — full i18n framework with lazy-loaded locale bundles
+- **English (en) and Polish (pl)** — complete translation coverage for all 9 pages, navigation, status messages, node types, epistemic classifications, and error states
+- **Language switcher** (`LanguageSwitcher.tsx`) — persists selection in `localStorage`, invalidates React Query cache on switch, updates `document.documentElement.lang`
+- **Localized date formatting** — `toLocaleDateString()` uses active i18n language
+
+#### Dashboard — Accessibility
+- **Skip-to-content link** — keyboard-accessible skip link in layout
+- **Route announcer** (`RouteAnnouncer.tsx`) — `aria-live="assertive"` region announces page navigation for screen readers
+- **Semantic HTML** — all interactive elements use proper roles, `aria-pressed`, `aria-current="page"`, `aria-label`
+- **Keyboard navigation** — all controls are focusable and operable via keyboard
+- **Reduced motion** — `prefers-reduced-motion` media query disables animations
+
+#### Dashboard — Theming
+- **Light and dark mode** — CSS custom properties (oklch color space) defined in `:root` (light) and `.dark` (dark) with `@custom-variant dark` for Tailwind v4
+- **Theme toggle** (`ThemeToggle.tsx`) — persists choice in `localStorage`, respects `prefers-color-scheme` as default
+- **Semantic design tokens** — `--background`, `--foreground`, `--card`, `--muted`, `--primary`, `--secondary`, `--accent`, `--destructive`, `--border`, `--ring`, `--success`, `--warning`, `--danger` plus node-type colors
+- **Glass effects** — glassmorphism in dark mode, solid card backgrounds in light mode
+
+#### Dashboard — UI Component Library
+- **Shared UI primitives** — `Button` (7 variants via CVA), `Card` (5 sub-components), `Badge` (6 variants + custom colors), `ProgressBar` (accessible), `SearchInput`, `EmptyState`, `LoadingSpinner`, `StatCard`
+- **`cn()` utility** (`lib/utils.ts`) — `clsx` + `tailwind-merge` for conflict-free class composition
+- **`useTheme` hook** (`hooks/use-theme.ts`) — reactive theme state with `toggle()` and `isDark`
+
+#### Dashboard — Component Decomposition
+- **Layout** split into `Sidebar.tsx`, `CommandPalette.tsx`, `LanguageSwitcher.tsx`, `ThemeToggle.tsx`, `RouteAnnouncer.tsx`
+- **MemoriesPage** split into `MemoryListItem.tsx`, `MemoryDetail.tsx`
+- All 9 pages refactored to use shared UI primitives and i18n
+
+### Changed
+- Version: 2.0.3 → 3.0.0
+- Dashboard tech: React 19 + Vite 6 + React Router 7 + Three.js + Tailwind CSS 4 + i18next
+- CSS: hardcoded colors → semantic oklch design tokens with light/dark variants
+- All UI strings: hardcoded English → `t()` calls with EN/PL translation files
+- `CognitiveEngine`: added `metacognition: MetacognitionMonitor` and `dream_engine: DreamEngine` fields
+- `KnowledgeNode`: added `confidence()`, `memory_system()`, `epistemic_status()` methods
+- `Memory` TypeScript interface: added `epistemicStatus` and `memorySystem` fields
+- Search pipeline: 7 stages → 7 stages + 6 sub-stages (0, 5D, 5E-pre, 5E, 5F, compression)
+- `smart_ingest`: now runs entity normalization, memory evolution, and temporal invalidation
+- Glass/ambient effects: now theme-aware (dark-only glow, light-friendly cards)
+
+### Dependencies Added
+- `i18next`, `react-i18next`, `i18next-resources-to-backend` (internationalization)
+- `clsx`, `tailwind-merge` (class composition)
+- `class-variance-authority` (component variants)
+
+---
+
+## [2.0.3] - 2026-03-03 — "Live Memory Materialization"
+
+Upstream release. See [samvallad33/vestige v2.0.3](https://github.com/samvallad33/vestige/releases/tag/v2.0.3).
+
+---
+
 ## [2.0.0] - 2026-02-22 — "Cognitive Leap"
 
 The biggest release in Vestige history. A complete visual and cognitive overhaul.

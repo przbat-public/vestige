@@ -12,7 +12,14 @@ use serde_json::Value;
 use super::events::VestigeEvent;
 use super::state::AppState;
 
-/// Redirect root to the SvelteKit dashboard
+fn log_err(context: &str) -> impl Fn(vestige_core::StorageError) -> StatusCode + '_ {
+    move |e| {
+        tracing::error!(error = %e, context = context, "Dashboard handler error");
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+/// Redirect root to the React dashboard
 pub async fn serve_dashboard() -> Redirect {
     Redirect::permanent("/dashboard")
 }
@@ -40,7 +47,7 @@ pub async fn list_memories(
         // Use hybrid search
         let results = state.storage
             .hybrid_search(query, limit, 0.3, 0.7)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(log_err("storage operation"))?;
 
         let formatted: Vec<Value> = results
             .into_iter()
@@ -78,7 +85,7 @@ pub async fn list_memories(
     // No search query — list all memories
     let mut nodes = state.storage
         .get_all_nodes(limit, offset)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     // Apply filters
     if let Some(ref node_type) = params.node_type {
@@ -154,7 +161,7 @@ pub async fn delete_memory(
 ) -> Result<Json<Value>, StatusCode> {
     let deleted = state.storage
         .delete_node(&id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     if deleted {
         state.emit(VestigeEvent::MemoryDeleted {
@@ -174,7 +181,7 @@ pub async fn promote_memory(
 ) -> Result<Json<Value>, StatusCode> {
     let node = state.storage
         .promote_memory(&id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     state.emit(VestigeEvent::MemoryPromoted {
         id: node.id.clone(),
@@ -196,7 +203,7 @@ pub async fn demote_memory(
 ) -> Result<Json<Value>, StatusCode> {
     let node = state.storage
         .demote_memory(&id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     state.emit(VestigeEvent::MemoryDemoted {
         id: node.id.clone(),
@@ -217,7 +224,7 @@ pub async fn get_stats(
 ) -> Result<Json<Value>, StatusCode> {
     let stats = state.storage
         .get_stats()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     let embedding_coverage = if stats.total_nodes > 0 {
         (stats.nodes_with_embeddings as f64 / stats.total_nodes as f64) * 100.0
@@ -256,7 +263,7 @@ pub async fn get_timeline(
     let start = Utc::now() - Duration::days(days);
     let nodes = state.storage
         .query_time_range(Some(start), Some(Utc::now()), limit)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     // Group by day
     let mut by_day: std::collections::BTreeMap<String, Vec<Value>> = std::collections::BTreeMap::new();
@@ -304,7 +311,7 @@ pub async fn health_check(
 ) -> Result<Json<Value>, StatusCode> {
     let stats = state.storage
         .get_stats()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     let status = if stats.total_nodes == 0 {
         "empty"
@@ -328,7 +335,7 @@ pub async fn health_check(
 // MEMORY GRAPH
 // ============================================================================
 
-/// Redirect legacy graph to SvelteKit dashboard graph page
+/// Redirect legacy graph to dashboard graph page
 pub async fn serve_graph() -> Redirect {
     Redirect::permanent("/dashboard/graph")
 }
@@ -355,7 +362,7 @@ pub async fn get_graph(
     } else if let Some(ref query) = params.query {
         let results = state.storage
             .search(query, 1)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(log_err("storage operation"))?;
         results.first()
             .map(|n| n.id.clone())
             .ok_or(StatusCode::NOT_FOUND)?
@@ -363,14 +370,14 @@ pub async fn get_graph(
         // Default: most connected memory (for a rich initial graph)
         let most_connected = state.storage
             .get_most_connected_memory()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(log_err("storage operation"))?;
         if let Some(id) = most_connected {
             id
         } else {
             // Fallback: most recent memory
             let recent = state.storage
                 .get_all_nodes(1, 0)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                .map_err(log_err("storage operation"))?;
             recent.first()
                 .map(|n| n.id.clone())
                 .ok_or(StatusCode::NOT_FOUND)?
@@ -380,7 +387,7 @@ pub async fn get_graph(
     // Get subgraph
     let (nodes, edges) = state.storage
         .get_memory_subgraph(&center_id, depth, max_nodes)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     if nodes.is_empty() {
         return Err(StatusCode::NOT_FOUND);
@@ -450,7 +457,7 @@ pub async fn search_memories(
     let results = state
         .storage
         .hybrid_search(&params.q, limit, 0.3, 0.7)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -497,120 +504,39 @@ pub async fn search_memories(
 // COGNITIVE OPERATIONS (v2.0)
 // ============================================================================
 
-/// Trigger a dream cycle via CognitiveEngine
+/// Trigger a dream cycle — delegates to the DreamEngine in `tools::dream`
 pub async fn trigger_dream(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, StatusCode> {
     let cognitive = state.cognitive.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let start = std::time::Instant::now();
-    let memory_count: usize = 50;
 
-    // Load memories for dreaming
-    let all_nodes = state
-        .storage
-        .get_all_nodes(memory_count as i32, 0)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    if all_nodes.len() < 5 {
-        return Ok(Json(serde_json::json!({
-            "status": "insufficient_memories",
-            "message": format!("Need at least 5 memories. Current: {}", all_nodes.len()),
-        })));
-    }
-
-    // Emit start event
     state.emit(VestigeEvent::DreamStarted {
-        memory_count: all_nodes.len(),
+        memory_count: 50,
         timestamp: Utc::now(),
     });
 
-    // Build dream memories
-    let dream_memories: Vec<vestige_core::DreamMemory> = all_nodes
-        .iter()
-        .map(|n| vestige_core::DreamMemory {
-            id: n.id.clone(),
-            content: n.content.clone(),
-            embedding: state.storage.get_node_embedding(&n.id).ok().flatten(),
-            tags: n.tags.clone(),
-            created_at: n.created_at,
-            access_count: n.reps as u32,
-        })
-        .collect();
+    let args = Some(serde_json::json!({ "memory_count": 50 }));
+    let result = crate::tools::dream::execute(&state.storage, cognitive, args)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Dream cycle failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    // Run dream through CognitiveEngine
-    let cog = cognitive.lock().await;
-    let pre_dream_count = cog.dreamer.get_connections().len();
-    let dream_result = cog.dreamer.dream(&dream_memories).await;
-    let insights = cog.dreamer.synthesize_insights(&dream_memories);
-    let all_connections = cog.dreamer.get_connections();
-    drop(cog);
+    let memories_replayed = result["memoriesReplayed"].as_u64().unwrap_or(0) as usize;
+    let connections = result["connectionsPersisted"].as_u64().unwrap_or(0) as usize;
+    let insights_count = result["insights"].as_array().map_or(0, |a| a.len());
+    let duration_ms = result["stats"]["total_duration_ms"].as_u64().unwrap_or(0);
 
-    // Persist new connections
-    let new_connections = &all_connections[pre_dream_count..];
-    let mut connections_persisted = 0u64;
-    let now = Utc::now();
-    for conn in new_connections {
-        let link_type = match conn.connection_type {
-            vestige_core::DiscoveredConnectionType::Semantic => "semantic",
-            vestige_core::DiscoveredConnectionType::SharedConcept => "shared_concepts",
-            vestige_core::DiscoveredConnectionType::Temporal => "temporal",
-            vestige_core::DiscoveredConnectionType::Complementary => "complementary",
-            vestige_core::DiscoveredConnectionType::CausalChain => "causal",
-        };
-        let record = vestige_core::ConnectionRecord {
-            source_id: conn.from_id.clone(),
-            target_id: conn.to_id.clone(),
-            strength: conn.similarity,
-            link_type: link_type.to_string(),
-            created_at: now,
-            last_activated: now,
-            activation_count: 1,
-        };
-        if state.storage.save_connection(&record).is_ok() {
-            connections_persisted += 1;
-        }
-
-        // Emit connection events
-        state.emit(VestigeEvent::ConnectionDiscovered {
-            source_id: conn.from_id.clone(),
-            target_id: conn.to_id.clone(),
-            connection_type: link_type.to_string(),
-            weight: conn.similarity,
-            timestamp: now,
-        });
-    }
-
-    let duration_ms = start.elapsed().as_millis() as u64;
-
-    // Emit completion event
     state.emit(VestigeEvent::DreamCompleted {
-        memories_replayed: dream_memories.len(),
-        connections_found: connections_persisted as usize,
-        insights_generated: insights.len(),
+        memories_replayed,
+        connections_found: connections,
+        insights_generated: insights_count,
         duration_ms,
         timestamp: Utc::now(),
     });
 
-    Ok(Json(serde_json::json!({
-        "status": "dreamed",
-        "memoriesReplayed": dream_memories.len(),
-        "connectionsPersisted": connections_persisted,
-        "insights": insights.iter().map(|i| serde_json::json!({
-            "type": format!("{:?}", i.insight_type),
-            "insight": i.insight,
-            "sourceMemories": i.source_memories,
-            "confidence": i.confidence,
-            "noveltyScore": i.novelty_score,
-        })).collect::<Vec<Value>>(),
-        "stats": {
-            "newConnectionsFound": dream_result.new_connections_found,
-            "connectionsPersisted": connections_persisted,
-            "memoriesStrengthened": dream_result.memories_strengthened,
-            "memoriesCompressed": dream_result.memories_compressed,
-            "insightsGenerated": dream_result.insights_generated.len(),
-            "durationMs": duration_ms,
-        }
-    })))
+    Ok(Json(result))
 }
 
 #[derive(Debug, Deserialize)]
@@ -642,7 +568,7 @@ pub async fn explore_connections(
             let results = state
                 .storage
                 .hybrid_search(&source_node.content, limit as i32, 0.3, 0.7)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                .map_err(log_err("storage operation"))?;
 
             let formatted: Vec<Value> = results
                 .iter()
@@ -670,7 +596,7 @@ pub async fn explore_connections(
             let (nodes, edges) = state
                 .storage
                 .get_memory_subgraph(&req.from_id, 2, limit)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                .map_err(log_err("storage operation"))?;
 
             let nodes_json: Vec<Value> = nodes
                 .iter()
@@ -716,7 +642,7 @@ pub async fn predict_memories(
     let recent = state
         .storage
         .get_all_nodes(10, 0)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     let predictions: Vec<Value> = recent
         .iter()
@@ -811,7 +737,7 @@ pub async fn trigger_consolidation(
     let result = state
         .storage
         .run_consolidation()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -841,7 +767,7 @@ pub async fn retention_distribution(
     let nodes = state
         .storage
         .get_all_nodes(1000, 0)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(log_err("storage operation"))?;
 
     // Build distribution buckets
     let mut buckets = [0u32; 10]; // 0-10%, 10-20%, ..., 90-100%
@@ -892,6 +818,82 @@ pub struct IntentionListParams {
     pub status: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateIntentionRequest {
+    pub content: String,
+    pub trigger_type: String,
+    pub trigger_value: String,
+    pub priority: Option<String>,
+    pub deadline: Option<String>,
+}
+
+/// Create a new intention via the dashboard
+pub async fn create_intention(
+    State(state): State<AppState>,
+    Json(req): Json<CreateIntentionRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let priority = match req.priority.as_deref().unwrap_or("medium") {
+        "high" => 3,
+        "low" => 1,
+        _ => 2, // medium
+    };
+    let deadline = req.deadline.as_ref().and_then(|d| {
+        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+            .ok()
+            .map(|nd| nd.and_hms_opt(23, 59, 59).unwrap())
+            .map(|ndt| chrono::DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+    });
+
+    let trigger_data = serde_json::json!({
+        "type": req.trigger_type,
+        "value": req.trigger_value,
+    }).to_string();
+
+    let record = vestige_core::IntentionRecord {
+        id: id.clone(),
+        content: req.content.clone(),
+        trigger_type: req.trigger_type.clone(),
+        trigger_data,
+        priority,
+        status: "active".to_string(),
+        created_at: Utc::now(),
+        deadline,
+        fulfilled_at: None,
+        reminder_count: 0,
+        last_reminded_at: None,
+        notes: None,
+        tags: vec![],
+        related_memories: vec![],
+        snoozed_until: None,
+        source_type: "dashboard".to_string(),
+        source_data: None,
+    };
+
+    state.storage.save_intention(&record)
+        .map_err(log_err("storage operation"))?;
+
+    let priority_label = match priority {
+        3 => "high",
+        1 => "low",
+        _ => "medium",
+    };
+
+    Ok(Json(serde_json::json!({
+        "id": id,
+        "intention": {
+            "id": id,
+            "content": req.content,
+            "trigger_type": req.trigger_type,
+            "trigger_value": req.trigger_value,
+            "status": "active",
+            "priority": priority_label,
+            "created_at": record.created_at.to_rfc3339(),
+            "deadline": deadline.map(|d| d.to_rfc3339()),
+        }
+    })))
+}
+
 /// List intentions
 pub async fn list_intentions(
     State(state): State<AppState>,
@@ -921,4 +923,90 @@ pub async fn list_intentions(
         "total": count,
         "filter": status_filter,
     })))
+}
+
+// ============================================================================
+// METACOGNITIVE TOOLS (v2.1)
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct ReflectRequest {
+    pub focus: Option<String>,
+    pub depth: Option<String>,
+}
+
+pub async fn trigger_reflect(
+    State(state): State<AppState>,
+    Json(req): Json<ReflectRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    let cognitive = state.cognitive.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let args = Some(serde_json::json!({
+        "focus": req.focus,
+        "depth": req.depth.unwrap_or_else(|| "standard".to_string()),
+    }));
+
+    let result = crate::tools::reflect::execute(&state.storage, cognitive, args)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Reflect failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(result))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TemporalRequest {
+    pub action: String,
+    pub topic: Option<String>,
+    pub memory_id: Option<String>,
+    pub limit: Option<i64>,
+}
+
+pub async fn query_temporal(
+    State(state): State<AppState>,
+    Json(req): Json<TemporalRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    let args = Some(serde_json::json!({
+        "action": req.action,
+        "topic": req.topic,
+        "memory_id": req.memory_id,
+        "limit": req.limit.unwrap_or(20),
+    }));
+
+    let result = crate::tools::temporal::execute(&state.storage, args)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Temporal query failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(result))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfidenceRequest {
+    pub action: String,
+    pub memory_id: Option<String>,
+    pub limit: Option<i64>,
+}
+
+pub async fn query_confidence(
+    State(state): State<AppState>,
+    Json(req): Json<ConfidenceRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    let args = Some(serde_json::json!({
+        "action": req.action,
+        "memory_id": req.memory_id,
+        "limit": req.limit.unwrap_or(20),
+    }));
+
+    let result = crate::tools::confidence::execute(&state.storage, args)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Confidence query failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(result))
 }

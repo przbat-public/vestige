@@ -304,4 +304,80 @@ mod tests {
 
         assert!(doc1_score.unwrap() > doc2_score.unwrap());
     }
+
+    // ========== RRF-specific deep tests ==========
+
+    #[test]
+    fn test_rrf_rewards_documents_in_both_lists() {
+        let keyword = vec![
+            ("only-kw".to_string(), 1.0),
+            ("both".to_string(), 0.5),
+        ];
+        let semantic = vec![
+            ("only-sem".to_string(), 1.0),
+            ("both".to_string(), 0.5),
+        ];
+
+        let results = reciprocal_rank_fusion(&keyword, &semantic, 60.0);
+
+        let both_score = results.iter().find(|(k, _)| k == "both").unwrap().1;
+        let only_kw = results.iter().find(|(k, _)| k == "only-kw").unwrap().1;
+        let only_sem = results.iter().find(|(k, _)| k == "only-sem").unwrap().1;
+
+        assert!(
+            both_score > only_kw,
+            "RRF should rank 'both' higher than single-list docs"
+        );
+        assert!(
+            both_score > only_sem,
+            "RRF should rank 'both' higher than single-list docs"
+        );
+    }
+
+    #[test]
+    fn test_rrf_is_scale_invariant() {
+        let kw_high = vec![
+            ("a".to_string(), 100.0),
+            ("b".to_string(), 50.0),
+        ];
+        let sem_low = vec![
+            ("b".to_string(), 0.01),
+            ("a".to_string(), 0.005),
+        ];
+
+        let results = reciprocal_rank_fusion(&kw_high, &sem_low, 60.0);
+
+        // 'a' is rank 0 in kw and rank 1 in sem → score = 1/60 + 1/61
+        // 'b' is rank 1 in kw and rank 0 in sem → score = 1/61 + 1/60
+        // Both should have identical combined scores since they have symmetrical ranks.
+        let a_score = results.iter().find(|(k, _)| k == "a").unwrap().1;
+        let b_score = results.iter().find(|(k, _)| k == "b").unwrap().1;
+        assert!(
+            (a_score - b_score).abs() < 1e-6,
+            "Symmetric ranks should yield equal RRF scores regardless of raw score magnitudes"
+        );
+    }
+
+    #[test]
+    fn test_rrf_k_parameter_affects_score_distribution() {
+        let keyword = vec![
+            ("top".to_string(), 1.0),
+            ("mid".to_string(), 0.5),
+            ("low".to_string(), 0.1),
+        ];
+        let semantic: Vec<(String, f32)> = vec![];
+
+        let results_k1 = reciprocal_rank_fusion(&keyword, &semantic, 1.0);
+        let results_k60 = reciprocal_rank_fusion(&keyword, &semantic, 60.0);
+
+        // With k=1, top result gets 1/(1+0) = 1.0, second gets 1/(1+1) = 0.5
+        // With k=60, top result gets 1/(60+0) ≈ 0.017, second gets 1/(60+1) ≈ 0.016
+        // Low k → larger gap between ranks; high k → more uniform
+        let gap_k1 = results_k1[0].1 - results_k1[1].1;
+        let gap_k60 = results_k60[0].1 - results_k60[1].1;
+        assert!(
+            gap_k1 > gap_k60,
+            "Lower k should produce larger score gaps between ranks"
+        );
+    }
 }

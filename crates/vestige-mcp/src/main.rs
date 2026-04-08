@@ -7,7 +7,7 @@
 //! Core Features:
 //! - FSRS-6 spaced repetition algorithm (21 parameters, 30% more efficient than SM-2)
 //! - Bjork dual-strength memory model
-//! - Local semantic embeddings (768-dim BGE, no external API)
+//! - Local semantic embeddings (nomic-embed-text-v1.5, 384D Matryoshka, no external API)
 //! - HNSW vector search (20x faster than FAISS)
 //! - Hybrid search (BM25 + semantic + RRF fusion)
 //!
@@ -234,8 +234,9 @@ async fn main() {
                 };
 
                 if should_run {
-                    match storage_clone.run_consolidation() {
-                        Ok(result) => {
+                    let s = storage_clone.clone();
+                    match tokio::task::spawn_blocking(move || s.run_consolidation()).await {
+                        Ok(Ok(result)) => {
                             info!(
                                 nodes_processed = result.nodes_processed,
                                 decay_applied = result.decay_applied,
@@ -246,8 +247,11 @@ async fn main() {
                                 "Periodic auto-consolidation complete"
                             );
                         }
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             warn!("Periodic auto-consolidation failed: {}", e);
+                        }
+                        Err(e) => {
+                            warn!("Consolidation task panicked: {}", e);
                         }
                     }
                 }
@@ -341,14 +345,26 @@ async fn main() {
     }
 
     // Create MCP server with shared event channel for dashboard broadcasts
-    let server = McpServer::new_with_events(storage, cognitive, event_tx);
+    let server = McpServer::new_with_events(storage.clone(), cognitive, event_tx);
 
     // Create stdio transport
     let transport = StdioTransport::new();
 
     info!("Starting MCP server on stdio...");
 
-    // Run the server
+    // Run the server with graceful shutdown on SIGINT/SIGTERM
+    let shutdown_storage = Arc::clone(&storage);
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        info!("Received shutdown signal — checkpointing WAL");
+        let s = shutdown_storage;
+        let _ = tokio::task::spawn_blocking(move || {
+            s.wal_checkpoint()
+        }).await;
+        info!("WAL checkpoint complete — exiting");
+        std::process::exit(0);
+    });
+
     if let Err(e) = transport.run(server).await {
         error!("Server error: {}", e);
         std::process::exit(1);

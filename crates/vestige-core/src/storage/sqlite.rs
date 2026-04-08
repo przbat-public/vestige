@@ -29,7 +29,7 @@ use crate::fts::sanitize_fts5_query;
 use crate::embeddings::{matryoshka_truncate, Embedding, EmbeddingService, EMBEDDING_DIMENSIONS};
 
 #[cfg(feature = "vector-search")]
-use crate::search::{linear_combination, VectorIndex};
+use crate::search::{reciprocal_rank_fusion, VectorIndex};
 
 #[cfg(all(feature = "embeddings", feature = "vector-search"))]
 use crate::search::hyde;
@@ -81,6 +81,29 @@ pub struct SmartIngestResult {
 }
 
 // ============================================================================
+// ENTITY NORMALIZATION (Cognee pattern)
+// ============================================================================
+
+/// Canonicalize tags to prevent fragmentation across surface forms.
+/// "Bug Fix", "bug-fix", "bugfix", "BUG_FIX" all → "bug-fix".
+/// Deduplicates after normalization and preserves order.
+fn normalize_tags(tags: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::with_capacity(tags.len());
+    for tag in tags {
+        let normalized = tag
+            .trim()
+            .to_lowercase()
+            .replace(' ', "-")
+            .replace('_', "-");
+        if !normalized.is_empty() && seen.insert(normalized.clone()) {
+            result.push(normalized);
+        }
+    }
+    result
+}
+
+// ============================================================================
 // STORAGE
 // ============================================================================
 
@@ -89,9 +112,28 @@ pub struct SmartIngestResult {
 /// Uses separate reader/writer connections for interior mutability.
 /// All methods take `&self` (not `&mut self`), making Storage `Send + Sync`
 /// so the MCP layer can use `Arc<Storage>` instead of `Arc<Mutex<Storage>>`.
+///
+/// ## Lock ordering (must be followed to prevent deadlocks)
+///
+/// When acquiring multiple locks in the same scope, always lock in this order:
+///  1. `writer`
+///  2. `reader` / `reader_secondary`
+///  3. `scheduler`
+///  4. `vector_index`
+///  5. `query_cache`
+///
+/// Most methods lock only ONE of these. The few that need two (e.g.
+/// `mark_reviewed` locks `scheduler` then `writer`) follow this order.
+///
+/// ## Reader pool
+///
+/// Two reader connections (`reader` + `reader_secondary`) are available for
+/// concurrent read operations on SQLite WAL. Hot paths use `acquire_reader()`
+/// which tries the secondary first to reduce contention.
 pub struct Storage {
     writer: Mutex<Connection>,
     reader: Mutex<Connection>,
+    reader_secondary: Mutex<Connection>,
     scheduler: Mutex<FSRSScheduler>,
     #[cfg(feature = "embeddings")]
     embedding_service: EmbeddingService,
@@ -169,9 +211,12 @@ impl Storage {
         // Apply migrations on writer only
         super::migrations::apply_migrations(&writer_conn)?;
 
-        // Open reader connection to same path
+        // Open primary + secondary reader connections to same path (SQLite WAL
+        // supports concurrent readers, so two connections reduce lock contention).
         let reader_conn = Connection::open(&path)?;
         Self::configure_connection(&reader_conn)?;
+        let reader_secondary_conn = Connection::open(&path)?;
+        Self::configure_connection(&reader_secondary_conn)?;
 
         #[cfg(feature = "embeddings")]
         let embedding_service = EmbeddingService::new();
@@ -190,6 +235,7 @@ impl Storage {
         let storage = Self {
             writer: Mutex::new(writer_conn),
             reader: Mutex::new(reader_conn),
+            reader_secondary: Mutex::new(reader_secondary_conn),
             scheduler: Mutex::new(FSRSScheduler::default()),
             #[cfg(feature = "embeddings")]
             embedding_service,
@@ -205,7 +251,13 @@ impl Storage {
         Ok(storage)
     }
 
-    /// Load existing embeddings into vector index
+    /// Load existing embeddings into vector index, migrating dimensions if needed.
+    ///
+    /// Three migration paths handled on startup:
+    /// - **same dims** (384 → 384): loaded directly, no work.
+    /// - **larger stored** (768 → 384): Matryoshka truncate + L2-normalize.
+    /// - **smaller stored** (256 → 384): must re-embed from content
+    ///   (Matryoshka can't *extend* dimensions). Runs once, updates DB in-place.
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     fn load_embeddings_into_index(&self) -> Result<()> {
         let reader = self.reader.lock()
@@ -222,32 +274,125 @@ impl Storage {
         drop(stmt);
         drop(reader);
 
+        let mut needs_reembed: Vec<String> = Vec::new();
+
         let mut index = self
             .vector_index
             .lock()
             .map_err(|_| StorageError::Init("Vector index lock poisoned".to_string()))?;
 
-        for (node_id, embedding_bytes) in embeddings {
-            if let Some(embedding) = Embedding::from_bytes(&embedding_bytes) {
-                // Handle Matryoshka migration: old 768-dim → truncate to 256-dim
-                let vector = if embedding.dimensions != EMBEDDING_DIMENSIONS {
-                    matryoshka_truncate(embedding.vector)
+        for (node_id, embedding_bytes) in &embeddings {
+            if let Some(embedding) = Embedding::from_bytes(embedding_bytes) {
+                if embedding.dimensions == EMBEDDING_DIMENSIONS {
+                    if let Err(e) = index.add(node_id, &embedding.vector) {
+                        tracing::warn!("Failed to load embedding for {}: {}", node_id, e);
+                    }
+                } else if embedding.dimensions > EMBEDDING_DIMENSIONS {
+                    let vector = matryoshka_truncate(embedding.vector);
+                    if let Err(e) = index.add(node_id, &vector) {
+                        tracing::warn!("Failed to load embedding for {}: {}", node_id, e);
+                    }
                 } else {
-                    embedding.vector
-                };
-                if let Err(e) = index.add(&node_id, &vector) {
-                    tracing::warn!("Failed to load embedding for {}: {}", node_id, e);
+                    needs_reembed.push(node_id.clone());
                 }
             }
+        }
+
+        drop(index);
+
+        if !needs_reembed.is_empty() {
+            let count = needs_reembed.len();
+            eprintln!(
+                "[vestige] Dimension migration: re-embedding {} memories ({} → {} dims)…",
+                count,
+                embeddings.first()
+                    .and_then(|(_, b)| Embedding::from_bytes(b))
+                    .map(|e| e.dimensions)
+                    .unwrap_or(0),
+                EMBEDDING_DIMENSIONS,
+            );
+            self.migrate_embeddings(&needs_reembed)?;
+            eprintln!("[vestige] Dimension migration complete ({} memories re-embedded)", count);
         }
 
         Ok(())
     }
 
+    /// Re-embed a batch of memories and update both the DB and the vector index.
+    #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+    fn migrate_embeddings(&self, node_ids: &[String]) -> Result<()> {
+        let reader = self.acquire_reader()?;
+        let placeholders = node_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT id, content FROM knowledge_nodes WHERE id IN ({})",
+            placeholders
+        );
+        let mut stmt = reader.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> =
+            node_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        let rows: Vec<(String, String)> = stmt
+            .query_map(params.as_slice(), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+        drop(reader);
+
+        let texts: Vec<&str> = rows.iter().map(|(_, c)| c.as_str()).collect();
+        let new_embeddings = self.embedding_service.embed_batch(&texts)
+            .map_err(|e| StorageError::Init(format!("Re-embedding failed: {}", e)))?;
+
+        let writer = self.writer.lock()
+            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+        writer.execute_batch("BEGIN IMMEDIATE")?;
+
+        let mut update_stmt = writer.prepare_cached(
+            "UPDATE node_embeddings SET embedding = ?1 WHERE node_id = ?2"
+        )?;
+
+        let mut index = self
+            .vector_index
+            .lock()
+            .map_err(|_| StorageError::Init("Vector index lock poisoned".to_string()))?;
+
+        for ((node_id, _), emb) in rows.iter().zip(new_embeddings.iter()) {
+            let bytes = emb.to_bytes();
+            update_stmt.execute(rusqlite::params![bytes, node_id])?;
+            if let Err(e) = index.add(node_id, &emb.vector) {
+                tracing::warn!("Failed to update vector index for {}: {}", node_id, e);
+            }
+        }
+
+        drop(update_stmt);
+        writer.execute_batch("COMMIT")?;
+        drop(writer);
+
+        Ok(())
+    }
+
+    /// Acquire a reader connection from the pool.
+    ///
+    /// Tries the secondary reader first (via `try_lock`) so that the primary
+    /// reader stays available for other callers. Falls back to blocking on
+    /// the primary reader if both are contended.
+    fn acquire_reader(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
+        if let Ok(guard) = self.reader_secondary.try_lock() {
+            return Ok(guard);
+        }
+        self.reader.lock()
+            .map_err(|_| StorageError::Init("Reader lock poisoned".into()))
+    }
+
     /// Ingest a new memory
-    pub fn ingest(&self, input: IngestInput) -> Result<KnowledgeNode> {
+    pub fn ingest(&self, mut input: IngestInput) -> Result<KnowledgeNode> {
         let now = Utc::now();
         let id = Uuid::new_v4().to_string();
+
+        // Entity normalization (Cognee pattern): canonicalize tags to prevent
+        // the same concept from fragmenting across different surface forms.
+        // e.g. "bug-fix", "Bug Fix", "bugfix" → "bug-fix"
+        input.tags = normalize_tags(&input.tags);
 
         let fsrs_state = self.scheduler.lock()
             .map_err(|_| StorageError::Init("Scheduler lock poisoned".into()))?
@@ -391,8 +536,39 @@ impl Storage {
 
         match decision {
             GateDecision::Create { prediction_error, related_memory_ids, reason, .. } => {
-                // Create new memory
                 let node = self.ingest(input)?;
+
+                // Memory evolution (A-Mem pattern): when a new memory is created,
+                // forge connections to related memories and give them a small
+                // retroactive boost. This models how learning something new
+                // enriches existing knowledge — related memories become more
+                // accessible because a new retrieval cue now points to them.
+                if !related_memory_ids.is_empty() {
+                    let now = Utc::now();
+                    for related_id in &related_memory_ids {
+                        let conn = ConnectionRecord {
+                            source_id: node.id.clone(),
+                            target_id: related_id.clone(),
+                            strength: 0.3 + (1.0 - prediction_error as f64) * 0.4,
+                            link_type: "semantic".to_string(),
+                            created_at: now,
+                            last_activated: now,
+                            activation_count: 1,
+                        };
+                        let _ = self.save_connection(&conn);
+
+                        let writer = self.writer.lock()
+                            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+                        writer.execute(
+                            "UPDATE knowledge_nodes SET
+                                retrieval_strength = MIN(1.0, retrieval_strength + 0.02),
+                                last_accessed = ?1
+                            WHERE id = ?2",
+                            params![now.to_rfc3339(), related_id],
+                        )?;
+                    }
+                }
+
                 Ok(SmartIngestResult {
                     decision: "create".to_string(),
                     node,
@@ -487,8 +663,16 @@ impl Storage {
                 }
             }
             GateDecision::Supersede { old_memory_id, similarity, supersede_reason, prediction_error } => {
-                // Demote the old memory and create new
+                // Demote the old memory and mark it as temporally invalidated (Graphiti pattern)
                 self.demote_memory(&old_memory_id)?;
+                {
+                    let writer = self.writer.lock()
+                        .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+                    writer.execute(
+                        "UPDATE knowledge_nodes SET valid_until = ?1 WHERE id = ?2",
+                        params![Utc::now().to_rfc3339(), old_memory_id],
+                    )?;
+                }
 
                 // Create the new improved memory
                 let node = self.ingest(input)?;
@@ -503,8 +687,22 @@ impl Storage {
                 })
             }
             GateDecision::Merge { memory_ids, avg_similarity, strategy } => {
-                // For now, create new and link to existing
                 let node = self.ingest(input)?;
+
+                // Memory evolution: link new memory to all merge candidates
+                let now = Utc::now();
+                for mid in &memory_ids {
+                    let conn = ConnectionRecord {
+                        source_id: node.id.clone(),
+                        target_id: mid.clone(),
+                        strength: avg_similarity as f64,
+                        link_type: "semantic".to_string(),
+                        created_at: now,
+                        last_activated: now,
+                        activation_count: 1,
+                    };
+                    let _ = self.save_connection(&conn);
+                }
 
                 Ok(SmartIngestResult {
                     decision: "merge".to_string(),
@@ -646,6 +844,24 @@ impl Storage {
             .query_row(params![id], Self::row_to_node)
             .optional()?;
         Ok(node)
+    }
+
+    /// Fetch multiple nodes in a single query (avoids N+1).
+    pub fn get_nodes_bulk(&self, ids: &[String]) -> Result<Vec<KnowledgeNode>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let reader = self.acquire_reader()?;
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("SELECT * FROM knowledge_nodes WHERE id IN ({})", placeholders);
+        let mut stmt = reader.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        let nodes = stmt
+            .query_map(params.as_slice(), Self::row_to_node)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(nodes)
     }
 
     /// Parse RFC3339 timestamp
@@ -951,11 +1167,78 @@ impl Storage {
         Ok(())
     }
 
-    /// Batch strengthen multiple memories on access
+    /// Batch strengthen multiple memories on access.
+    /// Runs primary boost for all IDs in a single transaction to avoid
+    /// acquiring/releasing the writer lock N times.
     pub fn strengthen_batch_on_access(&self, ids: &[&str]) -> Result<()> {
-        for id in ids {
-            self.strengthen_on_access(id)?;
+        if ids.is_empty() {
+            return Ok(());
         }
+
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        {
+            let writer = self.writer.lock()
+                .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+            writer.execute_batch("BEGIN IMMEDIATE")?;
+            let mut stmt = writer.prepare_cached(
+                "UPDATE knowledge_nodes SET
+                    last_accessed = ?1,
+                    retrieval_strength = MIN(1.0, retrieval_strength + 0.05),
+                    retention_strength = MIN(1.0, retention_strength + 0.02),
+                    times_retrieved = COALESCE(times_retrieved, 0) + 1,
+                    utility_score = CASE
+                        WHEN COALESCE(times_retrieved, 0) + 1 > 0
+                        THEN CAST(COALESCE(times_useful, 0) AS REAL) / (COALESCE(times_retrieved, 0) + 1)
+                        ELSE 0.0
+                    END
+                WHERE id = ?2",
+            )?;
+            for id in ids {
+                let _ = stmt.execute(params![now_str, id]);
+            }
+            drop(stmt);
+            writer.execute_batch("COMMIT")?;
+        }
+
+        for id in ids {
+            let _ = self.log_access(id, "search_hit");
+        }
+
+        #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+        {
+            for id in ids {
+                if let Ok(Some(embedding)) = self.get_node_embedding(id) {
+                    let index = self
+                        .vector_index
+                        .lock()
+                        .map_err(|_| StorageError::Init("Vector index lock poisoned".to_string()))?;
+                    let neighbors_result = index.search(&embedding, 6);
+                    drop(index);
+
+                    if let Ok(neighbors) = neighbors_result {
+                        let writer = self.writer.lock()
+                            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+                        for (neighbor_id, similarity) in neighbors {
+                            if neighbor_id == *id || similarity < 0.7 {
+                                continue;
+                            }
+                            let boost = 0.02 * similarity as f64;
+                            let retention_boost = 0.008 * similarity as f64;
+                            let _ = writer.execute(
+                                "UPDATE knowledge_nodes SET
+                                    retrieval_strength = MIN(1.0, retrieval_strength + ?1),
+                                    retention_strength = MIN(1.0, retention_strength + ?2)
+                                WHERE id = ?3",
+                                params![boost, retention_boost, neighbor_id],
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -998,7 +1281,7 @@ impl Storage {
     pub fn promote_memory(&self, id: &str) -> Result<KnowledgeNode> {
         let now = Utc::now();
 
-        // Strong boost: +0.2 retrieval, +0.1 retention
+        // Strong boost: +0.2 retrieval, +0.1 retention, +1 useful count
         {
             let writer = self.writer.lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
@@ -1007,7 +1290,8 @@ impl Storage {
                     last_accessed = ?1,
                     retrieval_strength = MIN(1.0, retrieval_strength + 0.20),
                     retention_strength = MIN(1.0, retention_strength + 0.10),
-                    stability = stability * 1.5
+                    stability = stability * 1.5,
+                    times_useful = COALESCE(times_useful, 0) + 1
                 WHERE id = ?2",
                 params![now.to_rfc3339(), id],
             )?;
@@ -1104,8 +1388,7 @@ impl Storage {
     pub fn get_stats(&self) -> Result<MemoryStats> {
         let now = Utc::now().to_rfc3339();
 
-        let reader = self.reader.lock()
-            .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
+        let reader = self.acquire_reader()?;
 
         let total: i64 =
             reader
@@ -1195,6 +1478,74 @@ impl Storage {
             }
 
         Ok(rows > 0)
+    }
+
+    /// GDPR Article 17 "Right to Erasure" — remove a memory and ALL associated
+    /// traces: connections, embeddings, access logs, insights that reference it.
+    /// Returns the number of artifacts erased (node + connections + embeddings + logs).
+    pub fn right_to_erasure(&self, id: &str) -> Result<i64> {
+        let mut erased = 0i64;
+        let writer = self.writer.lock()
+            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+
+        erased += writer.execute(
+            "DELETE FROM memory_connections WHERE source_id = ?1 OR target_id = ?1",
+            params![id],
+        )? as i64;
+
+        erased += writer.execute(
+            "DELETE FROM node_embeddings WHERE node_id = ?1",
+            params![id],
+        )? as i64;
+
+        erased += writer.execute(
+            "DELETE FROM access_log WHERE node_id = ?1",
+            params![id],
+        )? as i64;
+
+        erased += writer.execute(
+            "DELETE FROM memory_states WHERE memory_id = ?1",
+            params![id],
+        )? as i64;
+
+        let node_deleted = writer.execute(
+            "DELETE FROM knowledge_nodes WHERE id = ?1",
+            params![id],
+        )?;
+        erased += node_deleted as i64;
+
+        #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+        if node_deleted > 0 {
+            if let Ok(mut index) = self.vector_index.lock() {
+                let _ = index.remove(id);
+            }
+        }
+
+        Ok(erased)
+    }
+
+    /// Erase all memories matching a tag pattern (GDPR bulk erasure).
+    /// Returns (memories_erased, total_artifacts_erased).
+    pub fn erase_by_tag(&self, tag: &str) -> Result<(i64, i64)> {
+        let ids: Vec<String> = {
+            let reader = self.reader.lock()
+                .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
+            let pattern = format!("%\"{}%", tag.to_lowercase());
+            let mut stmt = reader.prepare(
+                "SELECT id FROM knowledge_nodes WHERE LOWER(tags) LIKE ?1"
+            )?;
+            stmt.query_map(params![pattern], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        let count = ids.len() as i64;
+        let mut total_artifacts = 0i64;
+        for id in &ids {
+            total_artifacts += self.right_to_erasure(id)?;
+        }
+
+        Ok((count, total_artifacts))
     }
 
     /// Search with full-text search
@@ -1392,24 +1743,35 @@ impl Storage {
             vec![]
         };
 
+        // RRF (k=60) normalizes across incomparable score scales and
+        // rewards documents appearing in both result lists.
         let combined = if !semantic_results.is_empty() {
-            linear_combination(&keyword_results, &semantic_results, keyword_weight, semantic_weight)
+            reciprocal_rank_fusion(&keyword_results, &semantic_results, 60.0)
         } else {
             keyword_results.clone()
         };
 
-        let mut results = Vec::with_capacity(limit as usize);
+        // Collect top candidate IDs and scores
+        let top_candidates: Vec<(String, f32)> = combined.into_iter().take(limit as usize).collect();
+        let top_ids: Vec<String> = top_candidates.iter().map(|(id, _)| id.clone()).collect();
 
-        for (node_id, combined_score) in combined.into_iter().take(limit as usize) {
-            if let Some(node) = self.get_node(&node_id)? {
-                let keyword_score = keyword_results
-                    .iter()
-                    .find(|(id, _)| id == &node_id)
-                    .map(|(_, s)| *s);
-                let semantic_score = semantic_results
-                    .iter()
-                    .find(|(id, _)| id == &node_id)
-                    .map(|(_, s)| *s);
+        // Bulk-fetch all nodes in one query instead of N get_node calls
+        let bulk_nodes = self.get_nodes_bulk(&top_ids)?;
+        let node_map: std::collections::HashMap<String, KnowledgeNode> =
+            bulk_nodes.into_iter().map(|n| (n.id.clone(), n)).collect();
+
+        // Build score lookup maps from keyword/semantic results
+        let kw_scores: std::collections::HashMap<&str, f32> =
+            keyword_results.iter().map(|(id, s)| (id.as_str(), *s)).collect();
+        let sem_scores: std::collections::HashMap<&str, f32> =
+            semantic_results.iter().map(|(id, s)| (id.as_str(), *s)).collect();
+
+        let mut results = Vec::with_capacity(top_candidates.len());
+
+        for (node_id, combined_score) in &top_candidates {
+            if let Some(node) = node_map.get(node_id) {
+                let keyword_score = kw_scores.get(node_id.as_str()).copied();
+                let semantic_score = sem_scores.get(node_id.as_str()).copied();
 
                 let match_type = match (keyword_score.is_some(), semantic_score.is_some()) {
                     (true, true) => MatchType::Both,
@@ -1422,11 +1784,11 @@ impl Storage {
                     (Some(kw), Some(sem)) => kw * keyword_weight + sem * semantic_weight,
                     (Some(kw), None) => kw * keyword_weight,
                     (None, Some(sem)) => sem * semantic_weight,
-                    (None, None) => combined_score,
+                    (None, None) => *combined_score,
                 };
 
                 results.push(SearchResult {
-                    node,
+                    node: node.clone(),
                     keyword_score,
                     semantic_score,
                     combined_score: weighted_score,
@@ -1435,23 +1797,36 @@ impl Storage {
             }
         }
 
+        // Bulk-fetch ACT-R activations in one query instead of N individual reads
+        let activation_map: std::collections::HashMap<String, f64> = {
+            let result_ids: Vec<String> = results.iter().map(|r| r.node.id.clone()).collect();
+            if result_ids.is_empty() {
+                std::collections::HashMap::new()
+            } else {
+                let reader = self.acquire_reader()?;
+                let placeholders = result_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                let sql = format!(
+                    "SELECT id, COALESCE(activation, 0.0) FROM knowledge_nodes WHERE id IN ({})",
+                    placeholders
+                );
+                let mut stmt = reader.prepare(&sql)?;
+                let params: Vec<&dyn rusqlite::ToSql> =
+                    result_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+                stmt.query_map(params.as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            }
+        };
+
         // Three-signal reranking (Park et al. Generative Agents 2023)
-        // final_score = 0.2*recency + 0.3*importance + 0.5*relevance
         let now = Utc::now();
         for result in &mut results {
             let hours_since = (now - result.node.last_accessed).num_seconds() as f64 / 3600.0;
             let recency = 0.995_f64.powf(hours_since.max(0.0));
 
-            // ACT-R activation as importance signal (pre-computed during consolidation)
-            let activation: f64 = self
-                .reader.lock()
-                .map(|r| r.query_row(
-                    "SELECT COALESCE(activation, 0.0) FROM knowledge_nodes WHERE id = ?1",
-                    params![result.node.id],
-                    |row| row.get(0),
-                ).unwrap_or(0.0))
-                .unwrap_or(0.0);
-            // Normalize ACT-R activation [-2, 5] → [0, 1]
+            let activation = activation_map.get(&result.node.id).copied().unwrap_or(0.0);
             let importance = ((activation + 2.0) / 7.0).clamp(0.0, 1.0);
 
             let relevance = result.combined_score as f64;
@@ -1474,8 +1849,7 @@ impl Storage {
     fn keyword_search_with_scores(&self, query: &str, limit: i32) -> Result<Vec<(String, f32)>> {
         let sanitized_query = sanitize_fts5_query(query);
 
-        let reader = self.reader.lock()
-            .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
+        let reader = self.acquire_reader()?;
         let mut stmt = reader.prepare(
             "SELECT n.id, rank FROM knowledge_nodes n
              JOIN knowledge_fts fts ON n.id = fts.id
@@ -1507,9 +1881,9 @@ impl Storage {
         }
     }
 
-    /// Semantic search returning scores
+    /// Semantic search returning (node_id, similarity_score) pairs
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-    fn semantic_search_raw(&self, query: &str, limit: i32) -> Result<Vec<(String, f32)>> {
+    pub fn semantic_search_raw(&self, query: &str, limit: i32) -> Result<Vec<(String, f32)>> {
         if !self.embedding_service.is_ready() {
             return Ok(vec![]);
         }
@@ -1828,16 +2202,17 @@ impl Storage {
             .map_err(|e| StorageError::Init(format!("Failed to read w20: {}", e)))
     }
 
-    /// Run full FSRS-6 consolidation cycle (v1.4.0)
+    /// Run full FSRS-6 consolidation cycle
     ///
-    /// 7-step automatic consolidation:
-    /// 1. Apply FSRS-6 decay with personalized w20
-    /// 2. Promote emotional memories (synaptic tagging)
-    /// 3. Generate missing embeddings
-    /// 4. Auto-dedup: merge similar memories (episodic → semantic)
-    /// 5. Compute ACT-R base-level activations from access history
-    /// 6. Prune old access log entries (keep 90 days)
-    /// 7. Optimize w20 if enough usage data exists
+    /// 17-step automatic consolidation:
+    /// 1–7. Core FSRS-6 (decay, emotional promotion, embeddings, dedup, ACT-R, prune, w20)
+    /// 8. DreamEngine 4-phase cycle
+    /// 9. Memory Compression
+    /// 10. Memory State Transitions
+    /// 11. Importance Evolution
+    /// 12. Connection Graph Maintenance
+    /// 13–14. FTS5 + PRAGMA optimize
+    /// 15–17. Autonomic (auto-promote, retention target GC, snapshot)
     pub fn run_consolidation(&self) -> Result<ConsolidationResult> {
         let start = std::time::Instant::now();
 
@@ -1903,39 +2278,54 @@ impl Storage {
         // v1.5.0: Extended consolidation steps 8-15
         // ====================================================================
 
-        // 8. Memory Dreams — synthesize insights (sync path)
+        // 8. DreamEngine 4-phase cycle (NREM1 → NREM3 → REM → Integration)
         let mut _insights_generated = 0i64;
         {
-            let dreamer = crate::advanced::dreams::MemoryDreamer::new();
             let recent = self.get_all_nodes(100, 0).unwrap_or_default();
-            let dream_memories: Vec<crate::advanced::dreams::DreamMemory> = recent
-                .iter()
-                .map(|n| crate::advanced::dreams::DreamMemory {
-                    id: n.id.clone(),
-                    content: n.content.clone(),
-                    embedding: None,
-                    tags: n.tags.clone(),
-                    created_at: n.created_at,
-                    access_count: n.reps as u32,
-                })
-                .collect();
-            if dream_memories.len() >= 5 {
-                let insights = dreamer.synthesize_insights(&dream_memories);
-                _insights_generated = insights.len() as i64;
-                for insight in &insights {
+            if recent.len() >= 5 {
+                let engine = crate::consolidation::phases::DreamEngine::new();
+                let mut emotional = crate::neuroscience::emotional_memory::EmotionalMemory::new();
+                let importance = crate::neuroscience::importance_signals::ImportanceSignals::new();
+                let mut synaptic = crate::neuroscience::synaptic_tagging::SynapticTaggingSystem::new();
+
+                let result = engine.run(&recent, &mut emotional, &importance, &mut synaptic);
+
+                for insight in &result.insights {
                     let record = InsightRecord {
                         id: Uuid::new_v4().to_string(),
                         insight: insight.insight.clone(),
-                        source_memories: insight.source_memories.clone(),
+                        source_memories: insight.source_memory_ids.clone(),
                         confidence: insight.confidence,
-                        novelty_score: insight.novelty_score,
-                        insight_type: format!("{:?}", insight.insight_type),
+                        novelty_score: insight.novelty,
+                        insight_type: insight.insight_type.clone(),
                         generated_at: Utc::now(),
                         tags: vec![],
                         feedback: None,
                         applied_count: 0,
                     };
                     let _ = self.save_insight(&record);
+                }
+                _insights_generated = result.insights.len() as i64;
+
+                // Persist creative connections discovered during REM phase
+                let now = Utc::now();
+                for conn in &result.creative_connections {
+                    let link_type = match conn.connection_type {
+                        crate::consolidation::phases::CreativeConnectionType::CrossDomain => "semantic",
+                        crate::consolidation::phases::CreativeConnectionType::Causal => "causal",
+                        crate::consolidation::phases::CreativeConnectionType::Complementary => "complementary",
+                        crate::consolidation::phases::CreativeConnectionType::Contradictory => "contradiction",
+                    };
+                    let record = ConnectionRecord {
+                        source_id: conn.memory_a_id.clone(),
+                        target_id: conn.memory_b_id.clone(),
+                        strength: conn.confidence,
+                        link_type: link_type.to_string(),
+                        created_at: now,
+                        last_activated: now,
+                        activation_count: 1,
+                    };
+                    let _ = self.save_connection(&record);
                 }
             }
         }
@@ -2001,36 +2391,17 @@ impl Storage {
             _state_transitions = batch_result.total_transitions as i64;
         }
 
-        // 11. Synaptic Capture Sweep (retroactive importance)
-        {
-            let mut sts = crate::neuroscience::synaptic_tagging::SynapticTaggingSystem::new();
-            let _ = sts.sweep_for_capture(Utc::now());
-            sts.decay_tags();
-        }
-
-        // 12. Cross-Project Learning (detect universal patterns)
-        {
-            let learner = crate::advanced::cross_project::CrossProjectLearner::new();
-            let _patterns = learner.find_universal_patterns();
-        }
-
-        // 13. Hippocampal Index Maintenance
-        {
-            let index = crate::neuroscience::hippocampal_index::HippocampalIndex::new();
-            let _ = index.prune_weak_links();
-        }
-
-        // 14. Importance Evolution (decay stale importance)
+        // 11. Importance Evolution (decay stale importance)
         {
             let tracker = crate::advanced::importance::ImportanceTracker::new();
             tracker.apply_importance_decay();
         }
 
-        // 15. Connection Graph Maintenance (decay + prune weak connections)
+        // 12. Connection Graph Maintenance (decay + prune weak connections)
         let _connections_pruned = self.prune_weak_connections(0.05).unwrap_or(0) as i64;
 
-        // 16. FTS5 index optimization — merge segments for faster keyword search
-        // 17. Run PRAGMA optimize to refresh query planner statistics
+        // 13. FTS5 index optimization — merge segments for faster keyword search
+        // 14. Run PRAGMA optimize to refresh query planner statistics
         {
             let writer = self.writer.lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
@@ -2041,14 +2412,14 @@ impl Storage {
         }
 
         // ====================================================================
-        // v1.9.0: Autonomic features (18-20)
+        // v1.9.0: Autonomic features (15-17)
         // ====================================================================
 
-        // 18. Auto-promote memories with 3+ accesses in 24h (frequency-dependent potentiation)
+        // 15. Auto-promote memories with 3+ accesses in 24h (frequency-dependent potentiation)
         let auto_promoted = self.auto_promote_frequent_access().unwrap_or(0);
         promoted += auto_promoted;
 
-        // 19. Retention Target System — auto-GC if avg retention below target
+        // 16. Retention Target System — auto-GC if avg retention below target
         let mut gc_triggered = false;
         {
             let retention_target: f64 = std::env::var("VESTIGE_RETENTION_TARGET")
@@ -2074,7 +2445,7 @@ impl Storage {
                 }
             }
 
-            // 20. Save retention snapshot for trend tracking
+            // 17. Save retention snapshot for trend tracking
             let _ = self.save_retention_snapshot(avg_retention, total, below_target, gc_triggered);
         }
 
@@ -3296,6 +3667,15 @@ impl Storage {
             result.push(row?);
         }
         Ok(result)
+    }
+
+    /// Flush WAL to the main database file for a clean shutdown.
+    /// Safe to call at any time; a no-op if WAL is already empty.
+    pub fn wal_checkpoint(&self) -> Result<()> {
+        let writer = self.writer.lock()
+            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+        writer.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
     }
 
     /// Create a consistent backup using VACUUM INTO

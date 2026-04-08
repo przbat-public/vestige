@@ -218,14 +218,25 @@ pub async fn execute(
     // Use smart ingest with prediction error gating
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     {
+        // Pre-compute nearest neighbors for prospective indexing
+        let neighbor_ids: Vec<String> = storage
+            .semantic_search_raw(&input.content, 5)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+
         let result = storage.smart_ingest(input).map_err(|e| e.to_string())?;
         let node_id = result.node.id.clone();
         let node_content = result.node.content.clone();
         let node_type = result.node.node_type.clone();
         let has_embedding = result.node.has_embedding.unwrap_or(false);
 
-        // Post-ingest cognitive side effects
-        run_post_ingest(cognitive, &node_id, &node_content, &node_type, importance_composite);
+        // Post-ingest cognitive side effects + prospective indexing
+        run_post_ingest_with_neighbors(
+            cognitive, &node_id, &node_content, &node_type,
+            importance_composite, &neighbor_ids,
+        );
 
         Ok(serde_json::json!({
             "success": true,
@@ -490,31 +501,51 @@ fn run_post_ingest(
     node_type: &str,
     importance_composite: f64,
 ) {
+    run_post_ingest_with_neighbors(cognitive, node_id, content, node_type, importance_composite, &[]);
+}
+
+/// Extended post-ingest that also creates activation-network edges
+/// to the new memory's vector-space neighbors (prospective indexing).
+fn run_post_ingest_with_neighbors(
+    cognitive: &Arc<Mutex<CognitiveEngine>>,
+    node_id: &str,
+    content: &str,
+    node_type: &str,
+    importance_composite: f64,
+    neighbor_ids: &[String],
+) {
     if let Ok(mut cog) = cognitive.try_lock() {
-        // 4C. Synaptic tagging for retroactive capture
         if importance_composite > 0.3 {
             cog.synaptic_tagging.tag_memory(node_id);
             if importance_composite > 0.7 {
-                // High importance → trigger PRP for nearby memories
                 let event = ImportanceEvent::for_memory(node_id, ImportanceEventType::NoveltySpike);
                 let _capture = cog.synaptic_tagging.trigger_prp(event);
             }
         }
 
-        // 4E. Update novelty model with new content
         cog.importance_signals.learn_content(content);
 
-        // 4F. Record in hippocampal index
         let _ = cog.hippocampal_index.index_memory(
             node_id,
             content,
             node_type,
             Utc::now(),
-            None, // semantic_embedding — generated separately
+            None,
         );
 
-        // 4G. Cross-project pattern recording
         cog.cross_project.record_project_memory(node_id, "default", None);
+
+        // Prospective indexing: link new memory to its vector-space neighbors
+        // in the spreading-activation network so future searches reach it via
+        // graph traversal, not only vector similarity.
+        for neighbor in neighbor_ids {
+            cog.activation_network.add_edge(
+                node_id.to_string(),
+                neighbor.clone(),
+                vestige_core::neuroscience::spreading_activation::LinkType::Semantic,
+                0.5,
+            );
+        }
     }
 }
 

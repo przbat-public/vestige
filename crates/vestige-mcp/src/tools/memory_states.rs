@@ -8,30 +8,10 @@ use std::sync::Arc;
 
 use vestige_core::{MemoryState, Storage};
 
-// Accessibility thresholds based on retention strength
-const ACCESSIBILITY_ACTIVE: f64 = 0.7;
-const ACCESSIBILITY_DORMANT: f64 = 0.4;
-const ACCESSIBILITY_SILENT: f64 = 0.1;
-
-/// Compute accessibility score from memory strengths
-/// Combines retention, retrieval, and storage strengths
-fn compute_accessibility(retention: f64, retrieval: f64, storage: f64) -> f64 {
-    // Weighted combination: retention is most important for accessibility
-    retention * 0.5 + retrieval * 0.3 + storage * 0.2
-}
-
-/// Determine memory state from accessibility score
-fn state_from_accessibility(accessibility: f64) -> MemoryState {
-    if accessibility >= ACCESSIBILITY_ACTIVE {
-        MemoryState::Active
-    } else if accessibility >= ACCESSIBILITY_DORMANT {
-        MemoryState::Dormant
-    } else if accessibility >= ACCESSIBILITY_SILENT {
-        MemoryState::Silent
-    } else {
-        MemoryState::Unavailable
-    }
-}
+use super::memory_unified::{
+    compute_accessibility, state_from_accessibility,
+    ACCESSIBILITY_ACTIVE, ACCESSIBILITY_DORMANT, ACCESSIBILITY_SILENT,
+};
 
 /// Input schema for get_memory_state tool
 pub fn get_schema() -> Value {

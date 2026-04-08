@@ -616,6 +616,10 @@ pub fn get_current_version(conn: &rusqlite::Connection) -> rusqlite::Result<u32>
 }
 
 /// Apply pending migrations
+///
+/// Each migration (except V7 which requires VACUUM outside a transaction)
+/// is wrapped in an explicit transaction so a partial failure rolls back
+/// cleanly instead of leaving the schema in an inconsistent state.
 pub fn apply_migrations(conn: &rusqlite::Connection) -> rusqlite::Result<u32> {
     let current_version = get_current_version(conn)?;
     let mut applied = 0;
@@ -628,15 +632,30 @@ pub fn apply_migrations(conn: &rusqlite::Connection) -> rusqlite::Result<u32> {
                 migration.description
             );
 
-            // Use execute_batch to handle multi-statement SQL including triggers
-            conn.execute_batch(migration.up)?;
-
-            // V7: Upgrade page_size to 8192 (10-30% faster large-row reads)
-            // VACUUM rewrites the DB with the new page size — can't run inside execute_batch
             if migration.version == 7 {
+                // V7 includes a VACUUM which cannot run inside a transaction.
+                // Apply the SQL statements first, then page_size + VACUUM separately.
+                conn.execute_batch(migration.up)?;
                 conn.pragma_update(None, "page_size", 8192)?;
                 conn.execute_batch("VACUUM;")?;
                 tracing::info!("Database page_size upgraded to 8192 via VACUUM");
+            } else {
+                // Wrap in a transaction so partial failures roll back atomically.
+                conn.execute_batch("BEGIN IMMEDIATE;")?;
+                match conn.execute_batch(migration.up) {
+                    Ok(()) => {
+                        conn.execute_batch("COMMIT;")?;
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Migration v{} failed: {} — rolling back",
+                            migration.version,
+                            e
+                        );
+                        let _ = conn.execute_batch("ROLLBACK;");
+                        return Err(e);
+                    }
+                }
             }
 
             applied += 1;
@@ -644,4 +663,54 @@ pub fn apply_migrations(conn: &rusqlite::Connection) -> rusqlite::Result<u32> {
     }
 
     Ok(applied)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_migrations_apply_cleanly_on_fresh_db() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let applied = apply_migrations(&conn).unwrap();
+        assert_eq!(applied, MIGRATIONS.len() as u32);
+        let version = get_current_version(&conn).unwrap();
+        assert_eq!(version, MIGRATIONS.last().unwrap().version);
+    }
+
+    #[test]
+    fn test_migrations_are_idempotent() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_migrations(&conn).unwrap();
+        let applied_again = apply_migrations(&conn).unwrap();
+        assert_eq!(applied_again, 0);
+    }
+
+    #[test]
+    fn test_partial_migration_rolls_back() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_migrations(&conn).unwrap();
+        let version_before = get_current_version(&conn).unwrap();
+
+        // Attempt to run a batch with valid + invalid SQL inside a transaction
+        conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+        let result = conn.execute_batch(
+            "CREATE TABLE _test_rollback (id INTEGER); INVALID SQL HERE;"
+        );
+        assert!(result.is_err());
+        let _ = conn.execute_batch("ROLLBACK;");
+
+        // The temp table should NOT exist after rollback
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE name = '_test_rollback'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!exists);
+
+        let version_after = get_current_version(&conn).unwrap();
+        assert_eq!(version_before, version_after);
+    }
 }

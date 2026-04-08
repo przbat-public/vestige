@@ -7,7 +7,7 @@ const os = require('os');
 const { execSync } = require('child_process');
 
 const VERSION = require('../package.json').version;
-const BINARY_VERSION = '2.0.1'; // GitHub release version for binaries
+const BINARY_VERSION = '2.0.3'; // GitHub release version for binaries
 const PLATFORM = os.platform();
 const ARCH = os.arch();
 

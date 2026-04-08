@@ -15,10 +15,10 @@ use std::sync::{Mutex, OnceLock};
 // CONSTANTS
 // ============================================================================
 
-/// Embedding dimensions after Matryoshka truncation
-/// Truncated from 768 → 256 for 3x storage savings with only ~2% quality loss
-/// (Matryoshka Representation Learning — the first N dims ARE the N-dim representation)
-pub const EMBEDDING_DIMENSIONS: usize = 256;
+/// Embedding dimensions after Matryoshka truncation.
+/// 384 dims: best quality/size tradeoff (~1% loss on MTEB vs full 768).
+/// Previous: 256 (migrated automatically on first search after upgrade).
+pub const EMBEDDING_DIMENSIONS: usize = 384;
 
 /// Maximum text length for embedding (truncated if longer)
 pub const MAX_TEXT_LENGTH: usize = 8192;
@@ -29,6 +29,18 @@ pub const BATCH_SIZE: usize = 32;
 // ============================================================================
 // GLOBAL MODEL (with Mutex for fastembed v5 API)
 // ============================================================================
+//
+// Architecture note: A single model instance behind Mutex serializes all
+// embedding operations. This is acceptable because:
+//  1. All callers use `tokio::task::spawn_blocking`, so contention happens
+//     on the blocking thread pool — not the async runtime.
+//  2. fastembed's `TextEmbedding` loads the ONNX model into memory (~200MB).
+//     Multiple instances would multiply memory usage with no shared weights.
+//
+// If throughput becomes a bottleneck (profiled, not assumed), consider:
+//  - A pool of 2-3 instances with `try_lock` round-robin (2-3× memory).
+//  - Moving to a dedicated embedding microservice.
+//  - Batching multiple embed requests into a single model call.
 
 /// Result type for model initialization
 static EMBEDDING_MODEL_RESULT: OnceLock<Result<Mutex<TextEmbedding>, String>> = OnceLock::new();
@@ -511,5 +523,78 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, 0); // First candidate should be most similar
         assert!((results[0].1 - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_embedding_dimensions_constant_is_384() {
+        assert_eq!(
+            EMBEDDING_DIMENSIONS, 384,
+            "EMBEDDING_DIMENSIONS should be 384 after Matryoshka upgrade"
+        );
+    }
+
+    #[test]
+    fn test_matryoshka_truncate_768_to_384() {
+        let full_768: Vec<f32> = (0..768).map(|i| (i as f32 * 0.01).sin()).collect();
+        let truncated = matryoshka_truncate(full_768.clone());
+
+        assert_eq!(truncated.len(), 384);
+
+        // Result should be L2-normalized
+        let norm: f32 = truncated.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 0.001,
+            "Matryoshka truncation should L2-normalize the output"
+        );
+
+        // The truncated vector's direction should match the first 384 of the original
+        let prefix = &full_768[..384];
+        let prefix_norm: f32 = prefix.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let cos_sim: f32 = truncated
+            .iter()
+            .zip(prefix.iter())
+            .map(|(a, b)| a * b / prefix_norm)
+            .sum();
+        assert!(
+            (cos_sim - 1.0).abs() < 0.01,
+            "Truncated vector should point in same direction as the prefix"
+        );
+    }
+
+    #[test]
+    fn test_matryoshka_truncate_already_384() {
+        let exact: Vec<f32> = (0..384).map(|i| (i as f32 * 0.01).cos()).collect();
+        let result = matryoshka_truncate(exact.clone());
+
+        assert_eq!(result.len(), 384);
+        // Still L2-normalized even if already the right size
+        let norm: f32 = result.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_matryoshka_truncate_smaller_than_384_passes_through() {
+        let small: Vec<f32> = vec![3.0, 4.0];
+        let result = matryoshka_truncate(small);
+
+        assert_eq!(result.len(), 2, "Vectors smaller than 384 should not be extended");
+        // Should still be normalized
+        let norm: f32 = result.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_embedding_from_bytes_roundtrip_384() {
+        let original = Embedding::new(
+            (0..384).map(|i| (i as f32 * 0.001).sin()).collect()
+        );
+        let bytes = original.to_bytes();
+        assert_eq!(bytes.len(), 384 * 4, "384 f32s should be 1536 bytes");
+
+        let restored = Embedding::from_bytes(&bytes).unwrap();
+        assert_eq!(restored.dimensions, 384);
+        for (a, b) in original.vector.iter().zip(restored.vector.iter()) {
+            assert!((a - b).abs() < 1e-7);
+        }
     }
 }

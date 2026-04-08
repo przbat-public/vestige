@@ -58,7 +58,7 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
             .expect("valid origin"),
     ];
 
-    // SvelteKit dev server — only in debug builds
+    // Vite dev server — only in debug builds
     #[cfg(debug_assertions)]
     {
         origins.push("http://localhost:5173".parse::<axum::http::HeaderValue>().expect("valid origin"));
@@ -114,7 +114,7 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
     );
 
     let router = Router::new()
-        // SvelteKit Dashboard v2.0 (embedded static build)
+        // React Dashboard v2.1 (embedded static build)
         .route("/dashboard", get(static_files::serve_dashboard_spa))
         .route("/dashboard/{*path}", get(static_files::serve_dashboard_asset))
         // Legacy embedded HTML (keep for backward compat)
@@ -145,7 +145,11 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
         .route("/api/consolidate", post(handlers::trigger_consolidation))
         .route("/api/retention-distribution", get(handlers::retention_distribution))
         // Intentions (v2.0)
-        .route("/api/intentions", get(handlers::list_intentions))
+        .route("/api/intentions", get(handlers::list_intentions).post(handlers::create_intention))
+        // Metacognitive tools (v2.1)
+        .route("/api/reflect", post(handlers::trigger_reflect))
+        .route("/api/temporal", post(handlers::query_temporal))
+        .route("/api/confidence", post(handlers::query_confidence))
         .layer(
             ServiceBuilder::new()
                 .concurrency_limit(50)

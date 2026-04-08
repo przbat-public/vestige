@@ -226,16 +226,20 @@ async fn post_mcp(
         sessions.insert(session_id.clone(), session);
         drop(sessions);
 
+        let session_header = match session_id.parse() {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode session ID").into_response(),
+        };
+
         match response {
             Some(resp) => {
                 let mut resp_headers = HeaderMap::new();
-                resp_headers.insert("mcp-session-id", session_id.parse().unwrap());
+                resp_headers.insert("mcp-session-id", session_header);
                 (StatusCode::OK, resp_headers, Json(resp)).into_response()
             }
             None => {
-                // Notifications return 202
                 let mut resp_headers = HeaderMap::new();
-                resp_headers.insert("mcp-session-id", session_id.parse().unwrap());
+                resp_headers.insert("mcp-session-id", session_header);
                 (StatusCode::ACCEPTED, resp_headers).into_response()
             }
         }
@@ -274,8 +278,13 @@ async fn post_mcp(
             sess.server.handle_request(request).await
         };
 
+        let session_header = match session_id.parse() {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode session ID").into_response(),
+        };
+
         let mut resp_headers = HeaderMap::new();
-        resp_headers.insert("mcp-session-id", session_id.parse().unwrap());
+        resp_headers.insert("mcp-session-id", session_header);
 
         match response {
             Some(resp) => (StatusCode::OK, resp_headers, Json(resp)).into_response(),

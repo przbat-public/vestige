@@ -17,9 +17,9 @@ use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 // CONSTANTS
 // ============================================================================
 
-/// Default embedding dimensions after Matryoshka truncation (768 → 256)
-/// 3x storage savings with only ~2% quality loss on MTEB benchmarks
-pub const DEFAULT_DIMENSIONS: usize = 256;
+/// Default embedding dimensions after Matryoshka truncation (768 → 384)
+/// 2x storage savings with only ~1% quality loss on MTEB benchmarks
+pub const DEFAULT_DIMENSIONS: usize = 384;
 
 /// HNSW connectivity parameter (higher = better recall, more memory)
 pub const DEFAULT_CONNECTIVITY: usize = 16;
@@ -485,5 +485,41 @@ mod tests {
         let stats = index.stats();
         assert_eq!(stats.total_vectors, 1);
         assert_eq!(stats.dimensions, DEFAULT_DIMENSIONS);
+    }
+
+    #[test]
+    fn test_default_dimensions_is_384() {
+        assert_eq!(
+            DEFAULT_DIMENSIONS, 384,
+            "Default dimensions should be 384 after Matryoshka upgrade"
+        );
+    }
+
+    #[test]
+    fn test_rejects_old_256_dim_vectors() {
+        let mut index = VectorIndex::new().unwrap();
+        let old_vector: Vec<f32> = (0..256).map(|i| (i as f32).sin()).collect();
+
+        let result = index.add("old-node", &old_vector);
+        assert!(
+            result.is_err(),
+            "256-dim vectors should be rejected by a 384-dim index"
+        );
+    }
+
+    #[test]
+    fn test_custom_dimensions_still_work() {
+        let config = VectorIndexConfig {
+            dimensions: 128,
+            ..Default::default()
+        };
+        let mut index = VectorIndex::with_config(config).unwrap();
+        let v: Vec<f32> = (0..128).map(|i| (i as f32).cos()).collect();
+
+        index.add("custom", &v).unwrap();
+        assert_eq!(index.len(), 1);
+
+        let results = index.search(&v, 1).unwrap();
+        assert_eq!(results[0].0, "custom");
     }
 }

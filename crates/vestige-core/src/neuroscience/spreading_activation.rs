@@ -513,4 +513,87 @@ mod tests {
         let c_activated = results.iter().any(|r| r.memory_id == "c");
         assert!(!c_activated);
     }
+
+    // ========== Prospective indexing tests ==========
+
+    #[test]
+    fn test_prospective_edges_make_neighbors_reachable_from_new() {
+        let mut network = ActivationNetwork::new();
+
+        // Existing memories form a cluster
+        network.add_edge("old-1".to_string(), "old-2".to_string(), LinkType::Semantic, 0.8);
+
+        // New memory ingested with prospective edges to its neighbors (directional: new→old)
+        network.add_edge("new".to_string(), "old-1".to_string(), LinkType::Semantic, 0.7);
+        network.add_edge("new".to_string(), "old-2".to_string(), LinkType::Semantic, 0.5);
+
+        // Activating "new" should reach both neighbors via its outgoing edges
+        let results = network.activate("new", 1.0);
+        let old1_activated = results.iter().any(|r| r.memory_id == "old-1");
+        let old2_activated = results.iter().any(|r| r.memory_id == "old-2");
+        assert!(old1_activated, "Prospective edge should activate neighbor old-1");
+        assert!(old2_activated, "Prospective edge should activate neighbor old-2");
+
+        // And old-2 should also be reachable transitively via old-1→old-2
+        let old1_act = results.iter().find(|r| r.memory_id == "old-1").unwrap().activation;
+        let old2_act = results.iter().find(|r| r.memory_id == "old-2").unwrap().activation;
+        assert!(
+            old1_act > old2_act,
+            "old-1 (stronger direct edge 0.7) should have higher activation than old-2 (0.5): {} vs {}",
+            old1_act, old2_act
+        );
+    }
+
+    #[test]
+    fn test_activation_values_usable_for_scoring_boost() {
+        let mut network = ActivationNetwork::new();
+
+        network.add_edge("query-hit".to_string(), "neighbor".to_string(), LinkType::Semantic, 0.9);
+        network.add_edge("query-hit".to_string(), "distant".to_string(), LinkType::Semantic, 0.2);
+
+        let results = network.activate("query-hit", 1.0);
+
+        let neighbor_act = results.iter().find(|r| r.memory_id == "neighbor").map(|r| r.activation);
+        let distant_act = results.iter().find(|r| r.memory_id == "distant").map(|r| r.activation);
+
+        assert!(neighbor_act.is_some(), "Neighbor should be activated");
+
+        if let (Some(n), Some(d)) = (neighbor_act, distant_act) {
+            assert!(
+                n > d,
+                "Strongly-connected neighbor should get higher activation than weakly-connected: {} vs {}",
+                n, d
+            );
+        }
+    }
+
+    #[test]
+    fn test_triple_hybrid_scoring_simulation() {
+        let mut network = ActivationNetwork::new();
+
+        // Simulate search results: doc-A (top hit), doc-B (connected), doc-C (disconnected)
+        network.add_edge("doc-A".to_string(), "doc-B".to_string(), LinkType::Semantic, 0.8);
+
+        let activated = network.activate("doc-A", 1.0);
+        let activation_map: std::collections::HashMap<&str, f64> = activated
+            .iter()
+            .map(|a| (a.memory_id.as_str(), a.activation))
+            .collect();
+
+        // Simulate score boosting
+        let base_score_b: f32 = 0.5;
+        let base_score_c: f32 = 0.5;
+
+        let boost_b = activation_map.get("doc-B").map(|a| (*a as f32 * 0.20).min(0.20)).unwrap_or(0.0);
+        let boost_c = activation_map.get("doc-C").map(|a| (*a as f32 * 0.20).min(0.20)).unwrap_or(0.0);
+
+        let final_b = base_score_b * (1.0 + boost_b);
+        let final_c = base_score_c * (1.0 + boost_c);
+
+        assert!(
+            final_b > final_c,
+            "Graph-connected doc-B should score higher than disconnected doc-C: {} vs {}",
+            final_b, final_c
+        );
+    }
 }

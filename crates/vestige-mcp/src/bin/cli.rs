@@ -247,30 +247,23 @@ fn run_stats(show_tagging: bool, show_states: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Compute cognitive state distribution for memories
 fn compute_state_distribution(memories: &[vestige_core::KnowledgeNode]) -> (usize, usize, usize, usize) {
-    let mut active = 0;
-    let mut dormant = 0;
-    let mut silent = 0;
-    let mut unavailable = 0;
+    use vestige_mcp::tools::memory_unified::{compute_accessibility, state_from_accessibility};
 
+    let (mut active, mut dormant, mut silent, mut unavailable) = (0, 0, 0, 0);
     for memory in memories {
-        // Accessibility = 0.5*retention + 0.3*retrieval + 0.2*storage
-        let accessibility = memory.retention_strength * 0.5
-            + memory.retrieval_strength * 0.3
-            + memory.storage_strength * 0.2;
-
-        if accessibility >= 0.7 {
-            active += 1;
-        } else if accessibility >= 0.4 {
-            dormant += 1;
-        } else if accessibility >= 0.1 {
-            silent += 1;
-        } else {
-            unavailable += 1;
+        let acc = compute_accessibility(
+            memory.retention_strength,
+            memory.retrieval_strength,
+            memory.storage_strength,
+        );
+        match state_from_accessibility(acc) {
+            vestige_core::MemoryState::Active => active += 1,
+            vestige_core::MemoryState::Dormant => dormant += 1,
+            vestige_core::MemoryState::Silent => silent += 1,
+            vestige_core::MemoryState::Unavailable => unavailable += 1,
         }
     }
-
     (active, dormant, silent, unavailable)
 }
 

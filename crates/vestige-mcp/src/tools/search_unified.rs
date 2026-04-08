@@ -117,6 +117,22 @@ pub async fn execute(
         return Err("Query cannot be empty".to_string());
     }
 
+    // ====================================================================
+    // STAGE 0: Read path gating (Oblivion pattern)
+    //
+    // Skip the full retrieval pipeline for trivial queries that don't
+    // benefit from memory lookup. Saves compute and prevents noise
+    // from polluting the agent's context window.
+    // ====================================================================
+    if is_trivial_query(&args.query) {
+        return Ok(serde_json::json!({
+            "results": [],
+            "totalFound": 0,
+            "gated": true,
+            "reason": "Query classified as trivial — retrieval skipped"
+        }));
+    }
+
     // Validate detail_level
     let detail_level = match args.detail_level.as_deref() {
         Some("brief") => "brief",
@@ -142,16 +158,29 @@ pub async fn execute(
     // ====================================================================
     // STAGE 1: Hybrid search with 3x over-fetch for reranking pool
     // ====================================================================
-    let overfetch_limit = (limit * 3).min(100); // Cap at 100 to avoid excessive DB load
+    let overfetch_limit = (limit * 3).min(100);
 
-    let results = storage
-        .hybrid_search(&args.query, overfetch_limit, keyword_weight, semantic_weight)
-        .map_err(|e| e.to_string())?;
+    // Run blocking storage+embedding work off the tokio event loop
+    let storage_clone = Arc::clone(storage);
+    let query_clone = args.query.clone();
+    let results = tokio::task::spawn_blocking(move || {
+        storage_clone.hybrid_search(&query_clone, overfetch_limit, keyword_weight, semantic_weight)
+    })
+    .await
+    .map_err(|e| format!("Search task panicked: {}", e))?
+    .map_err(|e| e.to_string())?;
 
-    // Filter by min_retention and min_similarity first (cheap filters)
+    // Filter by min_retention, min_similarity, and temporal validity (cheap filters)
+    let now = chrono::Utc::now();
     let mut filtered_results: Vec<_> = results
         .into_iter()
         .filter(|r| {
+            // Exclude superseded memories (Graphiti temporal invalidation)
+            if let Some(valid_until) = r.node.valid_until {
+                if valid_until < now {
+                    return false;
+                }
+            }
             if r.node.retention_strength < min_retention {
                 return false;
             }
@@ -282,10 +311,18 @@ pub async fn execute(
     {
         let candidates: Vec<CompetitionCandidate> = filtered_results
             .iter()
-            .map(|r| CompetitionCandidate {
-                memory_id: r.node.id.clone(),
-                relevance_score: r.combined_score as f64,
-                similarity_to_query: r.semantic_score.unwrap_or(0.0) as f64,
+            .map(|r| {
+                #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+                let embedding = storage.get_node_embedding(&r.node.id).ok().flatten();
+                #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
+                let embedding = None;
+
+                CompetitionCandidate {
+                    memory_id: r.node.id.clone(),
+                    relevance_score: r.combined_score as f64,
+                    similarity_to_query: r.semantic_score.unwrap_or(0.0) as f64,
+                    embedding,
+                }
             })
             .collect();
         if let Some(result) = cog.competition_mgr.run_competition(&candidates, 0.7) {
@@ -312,6 +349,110 @@ pub async fn execute(
         }
     }
 
+    // ====================================================================
+    // STAGE 5D: Emotional valence boost (McGaugh 2004, Bower 1981)
+    //
+    // Two effects from the neuroscience literature:
+    // 1. Amygdala-mediated enhancement: high-arousal memories are more
+    //    retrievable regardless of current mood (McGaugh 2004).
+    // 2. Mood-congruent retrieval: memories whose emotional valence
+    //    matches the agent's current mood get a retrieval boost (Bower 1981).
+    //
+    // The query itself updates the mood state so that searching for
+    // "production crash" shifts mood toward negative/high-arousal,
+    // naturally boosting retrieval of related incident memories.
+    // ====================================================================
+    if let Ok(mut cog) = cognitive.try_lock() {
+        cog.emotional_memory.evaluate_content(&args.query);
+
+        for result in &mut filtered_results {
+            let arousal = result.node.sentiment_magnitude.abs() as f32;
+            if arousal > 0.3 {
+                result.combined_score *= 1.0 + (arousal * 0.10).min(0.10);
+            }
+
+            let valence = result.node.sentiment_score;
+            let mood_boost = cog.emotional_memory.mood_congruence_boost(valence);
+            if mood_boost > 0.0 {
+                result.combined_score *= 1.0 + mood_boost as f32;
+            }
+        }
+    }
+
+    // ====================================================================
+    // STAGE 5E-pre: Memory tier adjustment (Tulving 1972)
+    //
+    // Episodic memories get a recency boost (they're about "what happened").
+    // Procedural memories get a stability boost (skills don't decay).
+    // Semantic memories use default scoring.
+    // ====================================================================
+    for result in &mut filtered_results {
+        match result.node.memory_system() {
+            vestige_core::MemorySystem::Procedural => {
+                result.combined_score *= 1.05;
+            }
+            vestige_core::MemorySystem::Episodic => {
+                let age_days = (chrono::Utc::now() - result.node.created_at).num_hours() as f32 / 24.0;
+                if age_days < 7.0 {
+                    result.combined_score *= 1.0 + (1.0 - age_days / 7.0) * 0.10;
+                }
+            }
+            vestige_core::MemorySystem::Semantic => {}
+        }
+    }
+
+    // ====================================================================
+    // STAGE 5E: Bayesian confidence boost (Gelman et al. 2013)
+    //
+    // Memories with a track record of being useful get a confidence-
+    // weighted score boost. The posterior lower bound of the 95% CI
+    // guards against overweighting memories with very few retrievals.
+    // ====================================================================
+    for result in &mut filtered_results {
+        let conf = result.node.confidence();
+        if conf.is_informed() {
+            let boost = (conf.lower_95 as f32 - 0.5).max(0.0) * 0.15;
+            result.combined_score *= 1.0 + boost;
+        }
+    }
+
+    // ====================================================================
+    // STAGE 5F: Proactive interference resolution (SleepGate pattern)
+    //
+    // When two memories in the result set have a "contradiction" connection,
+    // downrank the older one. This prevents stale conflicting memories from
+    // polluting the agent's context window.
+    // ====================================================================
+    {
+        let result_ids: Vec<String> = filtered_results.iter().map(|r| r.node.id.clone()).collect();
+        let mut penalties: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+
+        for id in &result_ids {
+            if let Ok(connections) = storage.get_connections_for_memory(id) {
+                for conn in &connections {
+                    if conn.link_type == "contradiction" {
+                        let other = if conn.source_id == *id { &conn.target_id } else { &conn.source_id };
+                        if result_ids.contains(other) {
+                            // Find which is older and penalize it
+                            let id_time = filtered_results.iter().find(|r| r.node.id == *id).map(|r| r.node.created_at);
+                            let other_time = filtered_results.iter().find(|r| r.node.id == *other).map(|r| r.node.created_at);
+                            if let (Some(t1), Some(t2)) = (id_time, other_time) {
+                                let older = if t1 < t2 { id } else { other };
+                                penalties.entry(older.clone()).or_insert(0.20);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for result in &mut filtered_results {
+            if let Some(penalty) = penalties.get(&result.node.id) {
+                result.combined_score *= 1.0 - penalty;
+            }
+        }
+    }
+
     // Re-sort by adjusted combined_score (descending) after all score modifications
     filtered_results.sort_by(|a, b| {
         b.combined_score
@@ -320,11 +461,28 @@ pub async fn execute(
     });
 
     // ====================================================================
-    // STAGE 6: Spreading activation (find associated memories)
+    // STAGE 6: Spreading activation — triple hybrid scoring
+    //
+    // Run spreading activation from the top result and use the activation
+    // values to boost results that are reachable in the graph.
+    // This creates a triple signal: keyword + semantic + graph.
     // ====================================================================
     let associations: Vec<Value> = if let Ok(mut cog) = cognitive.try_lock() {
         if let Some(first) = filtered_results.first() {
             let activated = cog.activation_network.activate(&first.node.id, 1.0);
+            let activation_map: std::collections::HashMap<&str, f64> = activated
+                .iter()
+                .map(|a| (a.memory_id.as_str(), a.activation))
+                .collect();
+
+            // Boost remaining results by their activation proximity to the top result
+            for result in filtered_results.iter_mut().skip(1) {
+                if let Some(&act) = activation_map.get(result.node.id.as_str()) {
+                    // Activation boost: up to +20% for strongly connected memories
+                    result.combined_score *= 1.0 + (act as f32 * 0.20).min(0.20);
+                }
+            }
+
             activated
                 .iter()
                 .take(3)
@@ -346,8 +504,13 @@ pub async fn execute(
     // ====================================================================
     // Auto-strengthen on access (Testing Effect)
     // ====================================================================
-    let ids: Vec<&str> = filtered_results.iter().map(|r| r.node.id.as_str()).collect();
-    let _ = storage.strengthen_batch_on_access(&ids);
+    let storage_clone = Arc::clone(storage);
+    let ids_owned: Vec<String> = filtered_results.iter().map(|r| r.node.id.clone()).collect();
+    let _ = tokio::task::spawn_blocking(move || {
+        let ids: Vec<&str> = ids_owned.iter().map(|s| s.as_str()).collect();
+        storage_clone.strengthen_batch_on_access(&ids)
+    })
+    .await;
 
     // Drop storage lock before acquiring cognitive for side effects
 
@@ -396,16 +559,37 @@ pub async fn execute(
         .collect();
 
     // ====================================================================
-    // Token budget enforcement (v1.8.0)
+    // Token budget enforcement with context compression (LightMem pattern)
+    //
+    // Three-tier approach:
+    // 1. First pass: try to fit all results as-is
+    // 2. If over budget: compress content to first N sentences per result
+    // 3. If still over: drop lowest-scoring results into expandable list
     // ====================================================================
     let mut budget_expandable: Vec<String> = Vec::new();
     let mut budget_tokens_used: Option<usize> = None;
     if let Some(budget) = args.token_budget {
         let budget = budget.clamp(100, 10000) as usize;
         let budget_chars = budget * 4;
+
+        let total_size: usize = formatted.iter()
+            .map(|r| serde_json::to_string(r).unwrap_or_default().len())
+            .sum();
+
+        // Tier 2: compress content if over budget
+        if total_size > budget_chars && detail_level != "brief" {
+            let ratio = budget_chars as f64 / total_size as f64;
+            for result in &mut formatted {
+                if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
+                    let compressed = compress_content(content, ratio);
+                    result["content"] = serde_json::Value::String(compressed);
+                }
+            }
+        }
+
+        // Tier 3: drop results that still don't fit
         let mut used = 0;
         let mut budgeted = Vec::new();
-
         for result in &formatted {
             let size = serde_json::to_string(result).unwrap_or_default().len();
             if used + size > budget_chars {
@@ -460,6 +644,35 @@ pub async fn execute(
         response["tokensUsed"] = serde_json::json!(used);
     }
 
+    // ====================================================================
+    // Metacognition: record search outcome and surface quality metrics
+    // ====================================================================
+    if let Ok(mut cog) = cognitive.try_lock() {
+        let avg_conf = if filtered_results.is_empty() {
+            0.0
+        } else {
+            filtered_results.iter()
+                .map(|r| r.node.confidence().point)
+                .sum::<f64>() / filtered_results.len() as f64
+        };
+        let topic = args.query.split_whitespace().next().unwrap_or("unknown");
+        cog.metacognition.record_search(filtered_results.len(), avg_conf, topic);
+
+        let report = cog.metacognition.report();
+        if report.total_queries_tracked >= 5 {
+            response["metacognition"] = serde_json::json!({
+                "hitRate": format!("{:.0}%", report.hit_rate * 100.0),
+                "avgConfidence": format!("{:.2}", report.avg_confidence),
+                "queriesTracked": report.total_queries_tracked,
+            });
+            if !report.knowledge_gaps.is_empty() {
+                response["knowledgeGaps"] = serde_json::json!(
+                    report.knowledge_gaps.iter().map(|g| &g.topic).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+
     Ok(response)
 }
 
@@ -498,8 +711,10 @@ fn format_search_result(r: &vestige_core::SearchResult, detail_level: &str) -> V
             "validFrom": r.node.valid_from.map(|dt| dt.to_rfc3339()),
             "validUntil": r.node.valid_until.map(|dt| dt.to_rfc3339()),
             "matchType": format!("{:?}", r.match_type),
+            "epistemicStatus": r.node.epistemic_status().to_string(),
+            "memorySystem": r.node.memory_system().to_string(),
         }),
-        // "summary" (default) — backwards compatible
+        // "summary" (default)
         _ => serde_json::json!({
             "id": r.node.id,
             "content": r.node.content,
@@ -509,6 +724,8 @@ fn format_search_result(r: &vestige_core::SearchResult, detail_level: &str) -> V
             "nodeType": r.node.node_type,
             "tags": r.node.tags,
             "retentionStrength": r.node.retention_strength,
+            "epistemicStatus": r.node.epistemic_status().to_string(),
+            "memorySystem": r.node.memory_system().to_string(),
         }),
     }
 }
@@ -554,6 +771,77 @@ pub fn format_node(node: &vestige_core::KnowledgeNode, detail_level: &str) -> Va
             "retentionStrength": node.retention_strength,
         }),
     }
+}
+
+// ============================================================================
+// READ PATH GATING (Oblivion pattern)
+// ============================================================================
+
+/// Greetings, acknowledgments, and social phrases that never need memory retrieval.
+const TRIVIAL_PHRASES: &[&str] = &[
+    "hi", "hello", "hey", "thanks", "thank you", "ok", "okay", "sure",
+    "yes", "no", "bye", "goodbye", "got it", "right", "cool", "nice",
+    "please", "welcome", "cheers", "np", "ty", "thx", "ack", "roger",
+    "dzieki", "dzięki", "hej", "cześć", "tak", "nie", "dobra", "spoko",
+    "siema", "nara", "ok ok", "oki", "jasne", "luzik",
+];
+
+/// Compress content to fit within a token budget ratio.
+/// Keeps the most information-dense sentences, prioritizing the first and last
+/// sentences (primacy/recency effect), plus any sentences containing key markers
+/// like "BUG", "DECISION", "because", "root cause".
+fn compress_content(content: &str, ratio: f64) -> String {
+    let sentences: Vec<&str> = content
+        .split(|c: char| c == '.' || c == '\n')
+        .map(|s| s.trim())
+        .filter(|s| s.len() > 5)
+        .collect();
+
+    if sentences.len() <= 2 || ratio >= 0.9 {
+        return content.to_string();
+    }
+
+    let target_count = ((sentences.len() as f64 * ratio).ceil() as usize).max(2);
+    let priority_markers = ["BUG", "DECISION", "because", "root cause", "solution", "fix",
+                            "important", "note", "warning", "error", "pattern"];
+
+    let mut scored: Vec<(usize, f64)> = sentences.iter().enumerate().map(|(i, s)| {
+        let mut score = 0.0_f64;
+        if i == 0 { score += 2.0; }
+        if i == sentences.len() - 1 { score += 1.5; }
+        let lower = s.to_lowercase();
+        for marker in &priority_markers {
+            if lower.contains(marker) { score += 1.0; }
+        }
+        score += s.len() as f64 / 200.0;
+        (i, score)
+    }).collect();
+
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut selected: Vec<usize> = scored.iter().take(target_count).map(|s| s.0).collect();
+    selected.sort();
+
+    let compressed: Vec<&str> = selected.iter().map(|&i| sentences[i]).collect();
+    let result = compressed.join(". ");
+    if sentences.len() > target_count {
+        format!("{}. [{} of {} segments]", result, target_count, sentences.len())
+    } else {
+        result
+    }
+}
+
+fn is_trivial_query(query: &str) -> bool {
+    let trimmed = query.trim();
+    let lower = trimmed.to_lowercase();
+    let word_count = trimmed.split_whitespace().count();
+
+    if word_count == 0 {
+        return true;
+    }
+    if word_count <= 3 {
+        return TRIVIAL_PHRASES.iter().any(|p| lower == *p);
+    }
+    false
 }
 
 // ============================================================================

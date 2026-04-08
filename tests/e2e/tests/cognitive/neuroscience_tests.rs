@@ -637,11 +637,13 @@ fn test_memory_state_competition_tracking() {
                 memory_id: "winner".to_string(),
                 relevance_score: 0.95,
                 similarity_to_query: 0.9,
+                embedding: None,
             },
             CompetitionCandidate {
                 memory_id: "loser".to_string(),
                 relevance_score: 0.80,
                 similarity_to_query: 0.85,
+                embedding: None,
             },
         ];
         manager.run_competition(&candidates, 0.5);

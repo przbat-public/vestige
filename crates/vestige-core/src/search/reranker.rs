@@ -2,13 +2,22 @@
 //!
 //! ## Two-Stage Retrieval with Cross-Encoder
 //!
-//! Uses fastembed's Jina Reranker v1 Turbo (38M params) cross-encoder
+//! Uses fastembed's Jina Reranker v2 Base Multilingual (278M params) cross-encoder
 //! for high-precision reranking:
 //! 1. Stage 1: Retrieve top-50 candidates via hybrid search (fast, high recall)
 //! 2. Stage 2: Cross-encoder rerank to find best top-10 (slower, high precision)
 //!
+//! Upgrade from v1 Turbo (38M) → v2 Base (278M): +19 BEIR nDCG@10, multilingual.
+//!
 //! Falls back to BM25-like term overlap scoring when the cross-encoder
 //! model is unavailable.
+//!
+//! ## Roadmap: Jina Reranker v3
+//!
+//! When fastembed adds v3 support, migration path:
+//!   - Swap `RerankerModel::JinaRerankerV2BaseMultilingual` → v3 variant
+//!   - v3 brings structured input support (title/body/query fields)
+//!   - Benchmark on existing test suite before switching (target: +5% nDCG@10)
 
 #[cfg(feature = "embeddings")]
 use crate::embeddings::get_cache_dir;
@@ -91,7 +100,7 @@ impl Default for RerankerConfig {
 /// Service for reranking search results using a cross-encoder model
 ///
 /// When the `embeddings` feature is enabled and `init_cross_encoder()` is called,
-/// uses Jina Reranker v1 Turbo for neural cross-encoder scoring.
+/// uses Jina Reranker v2 Base Multilingual (278M params) for neural cross-encoder scoring.
 /// Falls back to BM25-like term overlap when the model is unavailable.
 pub struct Reranker {
     config: RerankerConfig,
@@ -118,7 +127,7 @@ impl Reranker {
         }
     }
 
-    /// Initialize the cross-encoder model (Jina Reranker v1 Turbo, ~150MB)
+    /// Initialize the cross-encoder model (Jina Reranker v2 Base Multilingual, ~1.1GB)
     ///
     /// Downloads the model on first call. Call this during server startup,
     /// NOT in tests or hot paths.
@@ -128,13 +137,13 @@ impl Reranker {
             return; // Already initialized
         }
 
-        let options = RerankInitOptions::new(RerankerModel::JINARerankerV1TurboEn)
+        let options = RerankInitOptions::new(RerankerModel::JINARerankerV2BaseMultiligual)
             .with_cache_dir(get_cache_dir())
             .with_show_download_progress(true);
 
         match TextRerank::try_new(options) {
             Ok(model) => {
-                eprintln!("[vestige] Cross-encoder reranker loaded (Jina Reranker v1 Turbo)");
+                eprintln!("[vestige] Cross-encoder reranker loaded (Jina Reranker v2 Base Multilingual, 278M params)");
                 self.cross_encoder = Some(model);
             }
             Err(e) => {

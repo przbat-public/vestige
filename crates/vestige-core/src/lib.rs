@@ -108,16 +108,24 @@ pub mod codebase;
 /// - Spreading activation networks
 pub mod neuroscience;
 
+#[cfg(test)]
+mod scientific_validation;
+#[cfg(test)]
+mod benchmark_eval;
+#[cfg(test)]
+mod cognitive_journey_tests;
+
 // ============================================================================
 // PUBLIC API RE-EXPORTS
 // ============================================================================
 
 // Memory types
 pub use memory::{
-    ConsolidationResult, EmbeddingResult, IngestInput, KnowledgeNode, MatchType, MemoryStats,
-    NodeType, RecallInput, SearchMode, SearchResult, SimilarityResult, TemporalRange,
+    ConfidenceEstimate, ConsolidationResult, EmbeddingResult, IngestInput, KnowledgeNode,
+    MatchType, MemoryStats, NodeType, RecallInput, SearchMode, SearchResult, SimilarityResult,
+    TemporalRange,
     // GOD TIER 2026: New types
-    EdgeType, KnowledgeEdge, MemoryScope, MemorySystem,
+    EdgeType, EpistemicStatus, KnowledgeEdge, MemoryScope, MemorySystem,
 };
 
 // FSRS-6 algorithm
@@ -380,6 +388,9 @@ pub use neuroscience::{
     EmotionalEvaluation,
     EmotionalMemory,
     EmotionalMemoryStats,
+    // Metacognition (Nelson & Narens 1990)
+    MetacognitionMonitor,
+    MetacognitionReport,
 };
 
 // Embeddings (when feature enabled)

@@ -1,4 +1,4 @@
-name: Test Suite
+name: CI
 
 on:
   push:
@@ -12,10 +12,27 @@ env:
   VESTIGE_TEST_MOCK_EMBEDDINGS: "1"
 
 jobs:
+  check:
+    name: Check & Clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace
+      - run: cargo clippy --workspace -- -D warnings
+
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [check]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -26,6 +43,7 @@ jobs:
     name: MCP E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [check]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -45,7 +63,7 @@ jobs:
       - run: cargo test --package vestige-e2e-tests --test journey_tests -- --test-threads=1
 
   dashboard:
-    name: Dashboard Build
+    name: Dashboard Build & Test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -56,11 +74,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pnpm install --frozen-lockfile && pnpm --filter dashboard build
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter dashboard check
+      - run: pnpm --filter dashboard test
+      - run: pnpm --filter dashboard build
 
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
+    needs: [unit-tests]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -71,3 +93,37 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: lcov.info
+
+  release-build:
+    name: Release Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    if: github.ref == 'refs/heads/main'
+    needs: [unit-tests, mcp-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            cargo_flags: ""
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cargo_flags: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }} -p vestige-mcp ${{ matrix.cargo_flags }}
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../vestige-mcp-${{ matrix.target }}.tar.gz vestige-mcp vestige vestige-restore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vestige-mcp-${{ matrix.target }}
+          path: vestige-mcp-${{ matrix.target }}.tar.gz

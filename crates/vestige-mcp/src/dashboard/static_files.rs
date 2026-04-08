@@ -1,6 +1,6 @@
-//! Embedded SvelteKit dashboard static file server.
+//! Embedded React dashboard static file server.
 //!
-//! The built SvelteKit app is embedded into the binary at compile time
+//! The built React app is embedded into the binary at compile time
 //! using `include_dir!`. This serves it at `/dashboard/` prefix.
 
 use axum::extract::Path;
@@ -8,8 +8,8 @@ use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use include_dir::{include_dir, Dir};
 
-/// Embed the entire SvelteKit build output into the binary.
-/// Build with: cd apps/dashboard && pnpm build
+/// Embed the entire React build output into the binary.
+/// Build with: cd apps/dashboard && npm run build
 /// The build output goes to apps/dashboard/build/
 static DASHBOARD_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../apps/dashboard/build");
 
@@ -39,7 +39,7 @@ pub async fn serve_dashboard_asset(Path(path): Path<String>) -> Response {
                 (header::CONTENT_TYPE, mime),
                 (
                     header::CACHE_CONTROL,
-                    if path.contains("/_app/") {
+                    if path.contains("/assets/") || path.contains("/_app/") {
                         // Immutable assets (hashed filenames)
                         "public, max-age=31536000, immutable".to_string()
                     } else {

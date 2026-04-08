@@ -755,6 +755,10 @@ impl Default for StateDecayConfig {
 /// 2. The losers get suppressed (moved to Unavailable)
 /// 3. This implements the neuroscience concept of retrieval-induced forgetting
 ///
+/// When [`CompetitionCandidate::embedding`] vectors are provided, the manager
+/// uses actual pairwise cosine similarity instead of the query-similarity
+/// average approximation.
+///
 /// # Example
 ///
 /// ```rust
@@ -767,11 +771,13 @@ impl Default for StateDecayConfig {
 ///         memory_id: "mem1".to_string(),
 ///         relevance_score: 0.95,
 ///         similarity_to_query: 0.9,
+///         embedding: None,
 ///     },
 ///     CompetitionCandidate {
 ///         memory_id: "mem2".to_string(),
 ///         relevance_score: 0.80,
 ///         similarity_to_query: 0.85,
+///         embedding: None,
 ///     },
 /// ];
 ///
@@ -794,6 +800,24 @@ impl Default for CompetitionManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let (mut dot, mut norm_a, mut norm_b) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for (x, y) in a.iter().zip(b.iter()) {
+        let (x, y) = (*x as f64, *y as f64);
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
+    }
+    let denom = norm_a.sqrt() * norm_b.sqrt();
+    if denom < 1e-12 {
+        return 0.0;
+    }
+    (dot / denom).clamp(-1.0, 1.0)
 }
 
 impl CompetitionManager {
@@ -846,9 +870,12 @@ impl CompetitionManager {
 
         // Check each other candidate for competition
         for loser in sorted.iter().skip(1) {
-            // Calculate similarity between winner and loser
-            // Using the simpler of: both were similar to the same query
-            let similarity = (winner.similarity_to_query + loser.similarity_to_query) / 2.0;
+            let similarity = match (&winner.embedding, &loser.embedding) {
+                // Both embeddings available — use actual cosine similarity
+                (Some(w_emb), Some(l_emb)) => cosine_similarity(w_emb, l_emb),
+                // Fallback: average query-similarity as a rough proxy
+                _ => (winner.similarity_to_query + loser.similarity_to_query) / 2.0,
+            };
 
             if similarity >= similarity_threshold {
                 suppressed_ids.push(loser.memory_id.clone());
@@ -955,6 +982,11 @@ pub struct CompetitionCandidate {
     pub relevance_score: f64,
     /// How similar this memory is to the query
     pub similarity_to_query: f64,
+    /// Optional embedding vector for pairwise cosine similarity.
+    /// When present, `run_competition` uses actual cosine distance between
+    /// candidates instead of the query-similarity average approximation.
+    #[serde(skip)]
+    pub embedding: Option<Vec<f32>>,
 }
 
 /// Result of a retrieval competition.
@@ -1475,16 +1507,19 @@ mod tests {
                 memory_id: "mem1".to_string(),
                 relevance_score: 0.95,
                 similarity_to_query: 0.9,
+                embedding: None,
             },
             CompetitionCandidate {
                 memory_id: "mem2".to_string(),
                 relevance_score: 0.80,
                 similarity_to_query: 0.85,
+                embedding: None,
             },
             CompetitionCandidate {
                 memory_id: "mem3".to_string(),
                 relevance_score: 0.70,
                 similarity_to_query: 0.88,
+                embedding: None,
             },
         ];
 
@@ -1506,11 +1541,13 @@ mod tests {
                 memory_id: "mem1".to_string(),
                 relevance_score: 0.95,
                 similarity_to_query: 0.9,
+                embedding: None,
             },
             CompetitionCandidate {
                 memory_id: "mem2".to_string(),
                 relevance_score: 0.80,
                 similarity_to_query: 0.2, // Very different
+                embedding: None,
             },
         ];
 
@@ -1530,11 +1567,13 @@ mod tests {
                     memory_id: "winner".to_string(),
                     relevance_score: 0.95,
                     similarity_to_query: 0.9,
+                    embedding: None,
                 },
                 CompetitionCandidate {
                     memory_id: "loser".to_string(),
                     relevance_score: 0.80,
                     similarity_to_query: 0.85,
+                    embedding: None,
                 },
             ];
             manager.run_competition(&candidates, 0.5);
@@ -1542,6 +1581,130 @@ mod tests {
 
         assert_eq!(manager.win_count("winner"), 2);
         assert_eq!(manager.suppression_count("loser"), 2);
+    }
+
+    // ==================== Pairwise Cosine Similarity Tests ====================
+
+    #[test]
+    fn test_cosine_similarity_identical_vectors() {
+        let v = vec![1.0, 0.0, 0.0];
+        let sim = cosine_similarity(&v, &v);
+        assert!((sim - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_cosine_similarity_orthogonal_vectors() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!(sim.abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_cosine_similarity_opposite_vectors() {
+        let a = vec![1.0, 0.0];
+        let b = vec![-1.0, 0.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!((sim - (-1.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_cosine_similarity_empty_vectors() {
+        assert_eq!(cosine_similarity(&[], &[]), 0.0);
+    }
+
+    #[test]
+    fn test_cosine_similarity_mismatched_dimensions() {
+        let a = vec![1.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn test_cosine_similarity_zero_vector() {
+        let a = vec![0.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn test_competition_with_embeddings_suppresses_similar() {
+        let mut manager = CompetitionManager::new();
+
+        // Two memories with very similar embeddings — should compete
+        let candidates = vec![
+            CompetitionCandidate {
+                memory_id: "winner".to_string(),
+                relevance_score: 0.95,
+                similarity_to_query: 0.5, // query-similarity is low
+                embedding: Some(vec![1.0, 0.0, 0.0]),
+            },
+            CompetitionCandidate {
+                memory_id: "loser".to_string(),
+                relevance_score: 0.80,
+                similarity_to_query: 0.5, // query-similarity is low
+                // Nearly identical embedding → cosine ≈ 0.995
+                embedding: Some(vec![0.99, 0.1, 0.0]),
+            },
+        ];
+
+        // With the old approximation: (0.5 + 0.5) / 2 = 0.5 < 0.7 → no competition
+        // With pairwise cosine: ≈ 0.995 > 0.7 → competition triggered
+        let result = manager.run_competition(&candidates, 0.7);
+        assert!(result.is_some(), "Pairwise cosine should trigger competition");
+        assert!(result.unwrap().suppressed_ids.contains(&"loser".to_string()));
+    }
+
+    #[test]
+    fn test_competition_with_embeddings_spares_dissimilar() {
+        let mut manager = CompetitionManager::new();
+
+        // Two memories both relevant to query but semantically distant
+        let candidates = vec![
+            CompetitionCandidate {
+                memory_id: "jwt_tokens".to_string(),
+                relevance_score: 0.95,
+                similarity_to_query: 0.9,
+                embedding: Some(vec![1.0, 0.0, 0.0]),
+            },
+            CompetitionCandidate {
+                memory_id: "oauth_flows".to_string(),
+                relevance_score: 0.80,
+                similarity_to_query: 0.85,
+                // Orthogonal embedding → cosine = 0.0
+                embedding: Some(vec![0.0, 1.0, 0.0]),
+            },
+        ];
+
+        // With the old approximation: (0.9 + 0.85) / 2 = 0.875 > 0.7 → would suppress
+        // With pairwise cosine: 0.0 < 0.7 → no competition (correct!)
+        let result = manager.run_competition(&candidates, 0.7);
+        assert!(result.is_none(), "Orthogonal embeddings should not compete");
+    }
+
+    #[test]
+    fn test_competition_mixed_embeddings_falls_back() {
+        let mut manager = CompetitionManager::new();
+
+        // Winner has embedding, loser doesn't — fallback to approximation
+        let candidates = vec![
+            CompetitionCandidate {
+                memory_id: "with_emb".to_string(),
+                relevance_score: 0.95,
+                similarity_to_query: 0.9,
+                embedding: Some(vec![1.0, 0.0, 0.0]),
+            },
+            CompetitionCandidate {
+                memory_id: "without_emb".to_string(),
+                relevance_score: 0.80,
+                similarity_to_query: 0.85,
+                embedding: None,
+            },
+        ];
+
+        // Fallback: (0.9 + 0.85) / 2 = 0.875 > 0.7
+        let result = manager.run_competition(&candidates, 0.7);
+        assert!(result.is_some(), "Should fall back to approximation");
     }
 
     // ==================== State Update Service Tests ====================

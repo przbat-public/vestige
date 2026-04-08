@@ -62,6 +62,7 @@ pub mod emotional_memory;
 pub mod hippocampal_index;
 pub mod importance_signals;
 pub mod memory_states;
+pub mod metacognition;
 pub mod predictive_retrieval;
 pub mod prospective_memory;
 pub mod spreading_activation;
@@ -248,3 +249,6 @@ pub use spreading_activation::{
 pub use emotional_memory::{
     EmotionCategory, EmotionalEvaluation, EmotionalMemory, EmotionalMemoryStats,
 };
+
+// Metacognition (Nelson & Narens 1990)
+pub use metacognition::{MetacognitionMonitor, MetacognitionReport};

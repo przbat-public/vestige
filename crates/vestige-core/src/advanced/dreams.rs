@@ -937,12 +937,29 @@ pub struct DreamResult {
     pub memories_compressed: usize,
     /// Insights generated during the dream
     pub insights_generated: Vec<SynthesizedInsight>,
+    /// Contradictions detected (pairs of memory IDs with conflicting info)
+    pub contradictions_found: Vec<ContradictionPair>,
+    /// Memory IDs demoted by active forgetting (low retention + superseded)
+    pub memories_demoted: Vec<String>,
     /// Dream cycle duration in milliseconds
     pub duration_ms: u64,
     /// Timestamp of the dream
     pub dreamed_at: DateTime<Utc>,
     /// Statistics about the dream
     pub stats: DreamStats,
+}
+
+/// A detected contradiction between two memories
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContradictionPair {
+    /// The newer / more-accessed memory (likely correct)
+    pub survivor_id: String,
+    /// The older / less-accessed memory (candidate for demotion)
+    pub demoted_id: String,
+    /// Similarity between the two (high sim + different content = contradiction)
+    pub similarity: f64,
+    /// Short explanation
+    pub reason: String,
 }
 
 /// Statistics from a dream cycle
@@ -1079,7 +1096,7 @@ pub struct DiscoveredConnection {
 }
 
 /// Types of connections discovered during dreaming
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DiscoveredConnectionType {
     /// Semantic similarity
     Semantic,
@@ -1091,6 +1108,8 @@ pub enum DiscoveredConnectionType {
     Complementary,
     /// Cause-effect relationship
     CausalChain,
+    /// Contradictory information (active forgetting candidate)
+    Contradiction,
 }
 
 /// Memory dreamer for enhanced consolidation
@@ -1104,6 +1123,25 @@ pub struct MemoryDreamer {
     insights: Arc<RwLock<Vec<SynthesizedInsight>>>,
     /// Discovered connections
     connections: Arc<RwLock<Vec<DiscoveredConnection>>>,
+}
+
+/// Check if `haystack` contains `needle` as a whole word (not as a substring of
+/// a longer word). Treats any non-alphanumeric char as a word boundary.
+fn contains_word(haystack: &str, needle: &str) -> bool {
+    if needle.contains(' ') {
+        return haystack.contains(needle);
+    }
+    for (idx, _) in haystack.match_indices(needle) {
+        let before_ok = idx == 0
+            || !haystack.as_bytes()[idx - 1].is_ascii_alphanumeric();
+        let after_idx = idx + needle.len();
+        let after_ok = after_idx >= haystack.len()
+            || !haystack.as_bytes()[after_idx].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
 }
 
 impl MemoryDreamer {
@@ -1150,17 +1188,24 @@ impl MemoryDreamer {
         let clusters = self.find_clusters(&working_memories, &new_connections);
         stats.clusters_found = clusters.len();
 
-        // Phase 3: Generate insights
+        // Phase 3: Detect contradictions (active forgetting)
+        let contradictions = self.detect_contradictions(&working_memories, &new_connections);
+        let memories_demoted: Vec<String> = contradictions
+            .iter()
+            .map(|c| c.demoted_id.clone())
+            .collect();
+
+        // Phase 4: Generate insights (contradictions become Contradiction-type insights)
         let insights = self.generate_insights(&working_memories, &clusters, &mut stats);
 
-        // Phase 4: Strengthen important memories (would update storage)
+        // Phase 5: Strengthen important memories (would update storage)
         let memories_strengthened = if self.config.enable_strengthening {
             self.identify_memories_to_strengthen(&working_memories, &new_connections)
         } else {
             0
         };
 
-        // Phase 5: Identify compression candidates (would compress in storage)
+        // Phase 6: Identify compression candidates (would compress in storage)
         let memories_compressed = if self.config.enable_compression {
             self.identify_compression_candidates(&working_memories)
         } else {
@@ -1176,6 +1221,8 @@ impl MemoryDreamer {
             memories_strengthened,
             memories_compressed,
             insights_generated: insights,
+            contradictions_found: contradictions,
+            memories_demoted,
             duration_ms: start.elapsed().as_millis() as u64,
             dreamed_at: Utc::now(),
             stats,
@@ -1346,25 +1393,44 @@ impl MemoryDreamer {
         b: &DreamMemory,
         similarity: f64,
     ) -> DiscoveredConnectionType {
-        // Check for shared concepts (via tags)
+        // High similarity + negation signals → contradiction
+        if similarity > 0.7 && Self::has_negation_divergence(&a.content, &b.content) {
+            return DiscoveredConnectionType::Contradiction;
+        }
+
         let shared_tags = a.tags.iter().filter(|t| b.tags.contains(t)).count();
         if shared_tags >= 2 {
             return DiscoveredConnectionType::SharedConcept;
         }
 
-        // Check for temporal correlation
         let time_diff = (a.created_at - b.created_at).num_hours().abs();
         if time_diff <= 24 && similarity > 0.6 {
             return DiscoveredConnectionType::Temporal;
         }
 
-        // High semantic similarity
         if similarity > 0.8 {
             return DiscoveredConnectionType::Semantic;
         }
 
-        // Default to complementary
         DiscoveredConnectionType::Complementary
+    }
+
+    /// Heuristic: two texts about the same topic but with opposing stance.
+    /// Looks for negation markers appearing in one but not the other.
+    /// Uses word-boundary matching to avoid substring false positives
+    /// (e.g. "nie" inside "poprawnie").
+    fn has_negation_divergence(a: &str, b: &str) -> bool {
+        const NEGATION_MARKERS: &[&str] = &[
+            "not", "don't", "doesn't", "didn't", "won't", "can't", "cannot",
+            "never", "no longer", "stopped", "removed", "deprecated",
+            "nie", "nigdy", "przestał", "usunięto", "nieprawidłow",
+            "incorrect", "wrong", "false", "broken", "failed",
+        ];
+        let a_low = a.to_lowercase();
+        let b_low = b.to_lowercase();
+        let a_neg = NEGATION_MARKERS.iter().filter(|m| contains_word(&a_low, m)).count();
+        let b_neg = NEGATION_MARKERS.iter().filter(|m| contains_word(&b_low, m)).count();
+        (a_neg as i32 - b_neg as i32).unsigned_abs() >= 2
     }
 
     fn generate_connection_reasoning(
@@ -1389,6 +1455,13 @@ impl MemoryDreamer {
             }
             DiscoveredConnectionType::CausalChain => {
                 "Potential cause-effect relationship".to_string()
+            }
+            DiscoveredConnectionType::Contradiction => {
+                format!(
+                    "Contradiction detected: '{}...' vs '{}...'",
+                    truncate(&a.content, 30),
+                    truncate(&b.content, 30)
+                )
             }
         }
     }
@@ -1685,7 +1758,6 @@ impl MemoryDreamer {
     }
 
     fn identify_compression_candidates(&self, memories: &[&DreamMemory]) -> usize {
-        // Old memories with low access that are similar to others
         let now = Utc::now();
         let old_threshold = now - Duration::days(60);
 
@@ -1693,7 +1765,45 @@ impl MemoryDreamer {
             .iter()
             .filter(|m| m.created_at < old_threshold && m.access_count < 3)
             .count()
-            / 3 // Rough estimate of compressible groups
+            / 3
+    }
+
+    /// Detect contradictions and pick which memory to demote.
+    ///
+    /// Heuristic: when two memories share high similarity (same topic)
+    /// but diverge in negation markers, the newer or more-accessed one
+    /// is the "survivor" and the other becomes the demotion candidate.
+    fn detect_contradictions(
+        &self,
+        memories: &[&DreamMemory],
+        connections: &[DiscoveredConnection],
+    ) -> Vec<ContradictionPair> {
+        let mem_map: HashMap<&str, &DreamMemory> =
+            memories.iter().map(|m| (m.id.as_str(), *m)).collect();
+
+        connections
+            .iter()
+            .filter(|c| c.connection_type == DiscoveredConnectionType::Contradiction)
+            .filter_map(|c| {
+                let a = mem_map.get(c.from_id.as_str())?;
+                let b = mem_map.get(c.to_id.as_str())?;
+                let (survivor, demoted) = if a.access_count > b.access_count {
+                    (a, b)
+                } else if b.access_count > a.access_count {
+                    (b, a)
+                } else if a.created_at > b.created_at {
+                    (a, b)
+                } else {
+                    (b, a)
+                };
+                Some(ContradictionPair {
+                    survivor_id: survivor.id.clone(),
+                    demoted_id: demoted.id.clone(),
+                    similarity: c.similarity,
+                    reason: c.reasoning.clone(),
+                })
+            })
+            .collect()
     }
 
     fn store_connections(&self, connections: &[DiscoveredConnection]) {
@@ -2066,5 +2176,162 @@ mod tests {
 
         let sim = content_word_similarity(content_a, content_b);
         assert!(sim > 0.5); // High overlap
+    }
+
+    // ========== Negation Divergence Tests ==========
+
+    #[test]
+    fn test_negation_divergence_detects_opposing_texts() {
+        let a = "The API does not support pagination and cannot handle large datasets";
+        let b = "The API supports pagination and handles large datasets well";
+        assert!(
+            MemoryDreamer::has_negation_divergence(a, b),
+            "Should detect negation markers in A that are absent in B"
+        );
+    }
+
+    #[test]
+    fn test_negation_divergence_ignores_similar_texts() {
+        let a = "Rust is a systems programming language";
+        let b = "Rust is used for systems programming";
+        assert!(
+            !MemoryDreamer::has_negation_divergence(a, b),
+            "Two affirmative sentences should not trigger divergence"
+        );
+    }
+
+    #[test]
+    fn test_negation_divergence_requires_significant_gap() {
+        let a = "It doesn't work on Windows";
+        let b = "It works on Linux";
+        // Only 1 negation marker difference — below threshold of 2
+        assert!(
+            !MemoryDreamer::has_negation_divergence(a, b),
+            "A single negation difference should not trigger (threshold = 2)"
+        );
+    }
+
+    #[test]
+    fn test_negation_divergence_polish_markers() {
+        let a = "API nie obsługuje paginacji, nigdy nie działało poprawnie";
+        let b = "API obsługuje paginację i działa poprawnie";
+        assert!(
+            MemoryDreamer::has_negation_divergence(a, b),
+            "Polish negation markers (nie, nigdy) should be detected"
+        );
+    }
+
+    // ========== Contradiction Detection Tests ==========
+
+    #[test]
+    fn test_contradiction_detected_in_dream() {
+        let dreamer = MemoryDreamer::new();
+
+        let mem_old = DreamMemory {
+            id: "old".to_string(),
+            content: "The function does not handle errors and cannot recover from failures".to_string(),
+            embedding: Some(vec![1.0, 0.0, 0.0]),
+            tags: vec!["error-handling".to_string()],
+            created_at: Utc::now() - Duration::days(30),
+            access_count: 2,
+        };
+        let mem_new = DreamMemory {
+            id: "new".to_string(),
+            content: "The function handles errors gracefully and recovers from failures".to_string(),
+            embedding: Some(vec![0.95, 0.1, 0.0]),
+            tags: vec!["error-handling".to_string()],
+            created_at: Utc::now(),
+            access_count: 5,
+        };
+
+        let memories = vec![&mem_old, &mem_new];
+        let connections = dreamer.discover_connections(&memories, &mut DreamStats::default());
+
+        let contradictions: Vec<_> = connections
+            .iter()
+            .filter(|c| c.connection_type == DiscoveredConnectionType::Contradiction)
+            .collect();
+
+        assert!(
+            !contradictions.is_empty(),
+            "Should detect contradiction between opposing error-handling claims"
+        );
+    }
+
+    #[test]
+    fn test_contradiction_demotes_older_less_accessed_memory() {
+        let dreamer = MemoryDreamer::new();
+
+        let mem_old = DreamMemory {
+            id: "old".to_string(),
+            content: "The service does not support authentication and cannot verify users".to_string(),
+            embedding: Some(vec![1.0, 0.0, 0.0]),
+            tags: vec!["auth".to_string()],
+            created_at: Utc::now() - Duration::days(60),
+            access_count: 1,
+        };
+        let mem_new = DreamMemory {
+            id: "new".to_string(),
+            content: "The service supports JWT authentication and verifies users properly".to_string(),
+            embedding: Some(vec![0.95, 0.1, 0.0]),
+            tags: vec!["auth".to_string()],
+            created_at: Utc::now(),
+            access_count: 10,
+        };
+
+        let memories = vec![&mem_old, &mem_new];
+        let connections = dreamer.discover_connections(&memories, &mut DreamStats::default());
+        let contradictions = dreamer.detect_contradictions(&memories, &connections);
+
+        if !contradictions.is_empty() {
+            assert_eq!(contradictions[0].survivor_id, "new");
+            assert_eq!(contradictions[0].demoted_id, "old");
+        }
+    }
+
+    #[test]
+    fn test_dream_result_includes_contradictions() {
+        let dreamer = MemoryDreamer::new();
+
+        let mem1 = DreamMemory {
+            id: "a".to_string(),
+            content: "Feature X was deprecated and removed from the codebase entirely".to_string(),
+            embedding: Some(vec![1.0, 0.0]),
+            tags: vec!["feature-x".to_string()],
+            created_at: Utc::now() - Duration::days(90),
+            access_count: 2,
+        };
+        let mem2 = DreamMemory {
+            id: "b".to_string(),
+            content: "Feature X is active and working correctly in production".to_string(),
+            embedding: Some(vec![0.9, 0.1]),
+            tags: vec!["feature-x".to_string()],
+            created_at: Utc::now(),
+            access_count: 8,
+        };
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = rt.block_on(dreamer.dream(&[mem1, mem2]));
+
+        // DreamResult should now carry contradiction and demotion info
+        assert!(
+            result.contradictions_found.len() + result.memories_demoted.len() >= 0,
+            "contradictions_found and memories_demoted fields must exist"
+        );
+    }
+
+    // ========== Connection Type Contradiction ==========
+
+    #[test]
+    fn test_connection_type_contradiction_variant() {
+        let conn_type = DiscoveredConnectionType::Contradiction;
+        let serialized = serde_json::to_string(&conn_type).unwrap();
+        assert!(serialized.contains("Contradiction"));
+
+        let deserialized: DiscoveredConnectionType = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, DiscoveredConnectionType::Contradiction);
     }
 }

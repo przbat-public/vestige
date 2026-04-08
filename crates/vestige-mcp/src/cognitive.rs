@@ -3,13 +3,23 @@
 //! v1.5.0: Wires ALL unused vestige-core features into the MCP server.
 //! Each module is initialized once at startup and shared via Arc<Mutex<>>
 //! across all tool invocations.
+//!
+//! ## Roadmap
+//!
+//! - **MCP Tasks**: Expose long-running operations (dream, consolidation, backup)
+//!   as MCP Tasks with progress streaming via SSE, replacing fire-and-forget calls.
+//! - **Metacognition layer**: Add confidence calibration and retrieval-quality
+//!   self-assessment. Track hit/miss ratio per query type to adjust search
+//!   parameters (similarity threshold, RRF k-factor) dynamically.
 
 use vestige_core::{
     // Neuroscience modules
     ActivationNetwork, SynapticTaggingSystem, HippocampalIndex, ContextMatcher,
     AccessibilityCalculator, CompetitionManager, StateUpdateService,
     ImportanceSignals, NoveltySignal, ArousalSignal, RewardSignal, AttentionSignal,
-    EmotionalMemory, LinkType,
+    EmotionalMemory, LinkType, MetacognitionMonitor,
+    // Consolidation
+    DreamEngine,
     // Advanced modules
     ImportanceTracker, ReconsolidationManager, IntentDetector, ActivityTracker,
     MemoryDreamer, MemoryChainBuilder, MemoryCompressor, CrossProjectLearner,
@@ -60,9 +70,15 @@ pub struct CognitiveEngine {
     pub speculative_retriever: SpeculativeRetriever,
     pub consolidation_scheduler: ConsolidationScheduler,
 
+    // -- Consolidation --
+    pub dream_engine: DreamEngine,
+
     // -- Search --
     pub reranker: Reranker,
     pub temporal_searcher: TemporalSearcher,
+
+    // -- Metacognition (Nelson & Narens 1990) --
+    pub metacognition: MetacognitionMonitor,
 }
 
 impl Default for CognitiveEngine {
@@ -141,9 +157,15 @@ impl CognitiveEngine {
             speculative_retriever: SpeculativeRetriever::new(),
             consolidation_scheduler: ConsolidationScheduler::new(),
 
+            // Consolidation
+            dream_engine: DreamEngine::new(),
+
             // Search
             reranker: Reranker::new(RerankerConfig::default()),
             temporal_searcher: TemporalSearcher::new(),
+
+            // Metacognition
+            metacognition: MetacognitionMonitor::new(),
         }
     }
 }

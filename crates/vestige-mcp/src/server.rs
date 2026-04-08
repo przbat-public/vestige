@@ -159,7 +159,7 @@ impl McpServer {
 
     /// Handle tools/list request
     async fn handle_tools_list(&self) -> Result<serde_json::Value, JsonRpcError> {
-        // v1.8: 19 tools. Deprecated tools still work via redirects in handle_tools_call.
+        // v3.1: 24 tools. Deprecated tools still work via redirects in handle_tools_call.
         let tools = vec![
             // ================================================================
             // UNIFIED TOOLS (v1.1+)
@@ -292,6 +292,24 @@ impl McpServer {
                 name: "memory_graph".to_string(),
                 description: Some("Subgraph export for visualization. Input: center_id or query, depth (1-3), max_nodes. Returns nodes with force-directed layout positions and edges with weights. Powers memory graph visualization.".to_string()),
                 input_schema: tools::graph::schema(),
+            },
+            // ================================================================
+            // METACOGNITIVE TOOLS (v2.1+)
+            // ================================================================
+            ToolDescription {
+                name: "reflect".to_string(),
+                description: Some("Deliberate metacognitive reflection — analyzes memories for contradictions, knowledge gaps, stale decisions, overconfident memories, and pattern clusters. Unlike 'dream' (unconscious consolidation), 'reflect' is active self-examination. Returns actionable insights.".to_string()),
+                input_schema: tools::reflect::schema(),
+            },
+            ToolDescription {
+                name: "temporal".to_string(),
+                description: Some("Temporal fact versioning — query time-sensitive knowledge. Actions: 'current' (valid-now facts), 'expired' (no-longer-valid), 'history' (evolution of a topic over time), 'invalidate' (mark a fact as no longer valid).".to_string()),
+                input_schema: tools::temporal::schema(),
+            },
+            ToolDescription {
+                name: "confidence".to_string(),
+                description: Some("Confidence scoring for opinions and beliefs. Actions: 'score' (evaluate a single memory), 'audit' (find poorly-calibrated memories), 'calibrate' (compare opinions vs facts retention).".to_string()),
+                input_schema: tools::confidence::schema(),
             },
         ];
 
@@ -644,6 +662,13 @@ impl McpServer {
             // ================================================================
             "memory_health" => tools::health::execute(&self.storage, request.arguments).await,
             "memory_graph" => tools::graph::execute(&self.storage, request.arguments).await,
+
+            // ================================================================
+            // METACOGNITIVE TOOLS (v2.1+)
+            // ================================================================
+            "reflect" => tools::reflect::execute(&self.storage, &self.cognitive, request.arguments).await,
+            "temporal" => tools::temporal::execute(&self.storage, request.arguments).await,
+            "confidence" => tools::confidence::execute(&self.storage, request.arguments).await,
 
             name => {
                 return Err(JsonRpcError::method_not_found_with_message(&format!(

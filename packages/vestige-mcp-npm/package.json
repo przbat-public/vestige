@@ -1,6 +1,6 @@
 {
   "name": "vestige-mcp-server",
-  "version": "2.0.1",
+  "version": "2.0.3",
   "description": "Vestige MCP Server — Cognitive memory for AI with FSRS-6, 3D dashboard, and 29 brain modules",
   "bin": {
     "vestige-mcp": "bin/vestige-mcp.js",

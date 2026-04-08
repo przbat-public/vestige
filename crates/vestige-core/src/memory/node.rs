@@ -247,6 +247,64 @@ impl KnowledgeNode {
     pub fn get_node_type(&self) -> NodeType {
         NodeType::parse_name(&self.node_type)
     }
+
+    /// Bayesian confidence estimate from Beta(1 + useful, 1 + retrieved - useful).
+    /// Returns 95% credible interval and posterior mean.
+    pub fn confidence(&self) -> super::ConfidenceEstimate {
+        super::ConfidenceEstimate::from_counts(
+            self.times_retrieved.unwrap_or(0),
+            self.times_useful.unwrap_or(0),
+        )
+    }
+
+    /// Classify this memory into Tulving's memory systems (episodic/semantic/procedural).
+    /// Inferred from `node_type`.
+    pub fn memory_system(&self) -> super::MemorySystem {
+        match self.get_node_type() {
+            NodeType::Event | NodeType::Quote => super::MemorySystem::Episodic,
+            NodeType::Procedure | NodeType::Code => super::MemorySystem::Procedural,
+            _ => super::MemorySystem::Semantic,
+        }
+    }
+
+    /// Infer epistemic status from node type, tags, and content signals.
+    ///
+    /// Hindsight's World/Experience/Observation/Opinion classification helps
+    /// the agent calibrate trust in retrieved memories.
+    pub fn epistemic_status(&self) -> super::EpistemicStatus {
+        let lower_content = self.content.to_lowercase();
+        let tags_lower: Vec<String> = self.tags.iter().map(|t| t.to_lowercase()).collect();
+
+        if tags_lower.iter().any(|t| t == "preference" || t == "opinion") {
+            return super::EpistemicStatus::Opinion;
+        }
+        if tags_lower.iter().any(|t| t == "pattern" || t == "observation") {
+            return super::EpistemicStatus::Observation;
+        }
+
+        if lower_content.starts_with("i think")
+            || lower_content.starts_with("i prefer")
+            || lower_content.starts_with("i believe")
+            || lower_content.starts_with("imo ")
+            || lower_content.contains("in my opinion")
+        {
+            return super::EpistemicStatus::Opinion;
+        }
+
+        if lower_content.starts_with("i noticed")
+            || lower_content.starts_with("it seems")
+            || lower_content.starts_with("it appears")
+            || lower_content.contains("pattern:")
+        {
+            return super::EpistemicStatus::Observation;
+        }
+
+        match self.get_node_type() {
+            NodeType::Event | NodeType::Quote => super::EpistemicStatus::Experience,
+            NodeType::Insight => super::EpistemicStatus::Observation,
+            _ => super::EpistemicStatus::World,
+        }
+    }
 }
 
 // ============================================================================

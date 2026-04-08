@@ -6,10 +6,12 @@
 //! - Temporal memory with bi-temporal validity
 //! - Semantic embedding metadata
 
+mod confidence;
 mod node;
 mod strength;
 mod temporal;
 
+pub use confidence::ConfidenceEstimate;
 pub use node::{IngestInput, KnowledgeNode, NodeType, RecallInput, SearchMode};
 pub use strength::{DualStrength, StrengthDecay};
 pub use temporal::{TemporalRange, TemporalValidity};
@@ -100,6 +102,57 @@ impl std::str::FromStr for MemorySystem {
             "semantic" => Ok(MemorySystem::Semantic),
             "procedural" => Ok(MemorySystem::Procedural),
             _ => Err(format!("Unknown memory system: {}", s)),
+        }
+    }
+}
+
+// ============================================================================
+// EPISTEMIC STATUS (Hindsight pattern)
+// ============================================================================
+
+/// Epistemic classification of a memory — how certain is this knowledge?
+///
+/// Inspired by the Hindsight system's World/Experience/Observation/Opinion
+/// network. Different epistemic statuses warrant different retrieval trust:
+/// - World facts are treated as ground truth
+/// - Experience is autobiographical and context-dependent
+/// - Observation may be incomplete or misinterpreted
+/// - Opinion is explicitly subjective and may evolve
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum EpistemicStatus {
+    /// Verified fact, established knowledge, documented truth
+    #[default]
+    World,
+    /// First-hand experience — "I encountered this", "This happened"
+    Experience,
+    /// Observed pattern — "I noticed that", "It seems like"
+    Observation,
+    /// Subjective belief — "I think", "I prefer", user opinions
+    Opinion,
+}
+
+impl std::fmt::Display for EpistemicStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EpistemicStatus::World => write!(f, "world"),
+            EpistemicStatus::Experience => write!(f, "experience"),
+            EpistemicStatus::Observation => write!(f, "observation"),
+            EpistemicStatus::Opinion => write!(f, "opinion"),
+        }
+    }
+}
+
+impl std::str::FromStr for EpistemicStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "world" | "fact" => Ok(EpistemicStatus::World),
+            "experience" | "event" => Ok(EpistemicStatus::Experience),
+            "observation" | "pattern" => Ok(EpistemicStatus::Observation),
+            "opinion" | "preference" | "belief" => Ok(EpistemicStatus::Opinion),
+            _ => Err(format!("Unknown epistemic status: {}", s)),
         }
     }
 }

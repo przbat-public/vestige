@@ -37,6 +37,11 @@ pub mod session_context;
 pub mod health;
 pub mod graph;
 
+// v2.1: Metacognitive tools
+pub mod reflect;
+pub mod temporal;
+pub mod confidence;
+
 // Deprecated/internal tools — not advertised in the public MCP tools/list,
 // but some functions are actively dispatched for backwards compatibility
 // and internal cognitive operations. #[allow(dead_code)] suppresses warnings
@@ -63,8 +68,6 @@ pub mod memory_states;
 pub mod recall;
 #[allow(dead_code)]
 pub mod review;
-#[allow(dead_code)]
-pub mod search;
 #[allow(dead_code)]
 pub mod stats;
 #[allow(dead_code)]
