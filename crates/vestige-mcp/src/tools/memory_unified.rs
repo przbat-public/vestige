@@ -98,6 +98,10 @@ pub async fn execute(
 
 /// Get full memory node with all metadata
 async fn execute_get(storage: &Arc<Storage>, id: &str) -> Result<Value, String> {
+    if let Err(e) = storage.record_memory_access(id) {
+        tracing::debug!(error = %e, memory_id = %id, "Failed to record memory access");
+    }
+
     let node = storage.get_node(id).map_err(|e| e.to_string())?;
 
     match node {
@@ -416,6 +420,7 @@ mod tests {
                 tags: vec!["test-tag".to_string()],
                 valid_from: None,
                 valid_until: None,
+                provenance: None,
             })
             .unwrap();
         node.id

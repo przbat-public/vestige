@@ -22,6 +22,4 @@ export const queryKeys = {
   timeline: (days: number, limit: number) => ['timeline', days, limit] as const,
   intentions: (status: string) => ['intentions', status] as const,
   predictions: ['predictions'] as const,
-  explore: (fromId: string, mode: string, toId?: string) => ['explore', fromId, mode, toId] as const,
-  importance: (text: string) => ['importance', text] as const,
 };

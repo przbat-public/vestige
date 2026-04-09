@@ -49,6 +49,7 @@ pub fn schema() -> Value {
 #[serde(rename_all = "camelCase")]
 struct IngestArgs {
     content: String,
+    #[serde(alias = "node_type")]
     node_type: Option<String>,
     tags: Option<Vec<String>>,
     source: Option<String>,
@@ -118,6 +119,7 @@ pub async fn execute(
         tags,
         valid_from: None,
         valid_until: None,
+        provenance: None,
     };
 
     // ====================================================================

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/stores/api';
 import { toast } from '@/stores/toast';
 import type { ImportanceScore } from '@/types';
@@ -31,11 +32,11 @@ export function ImportanceScorer() {
     <div className="pt-8 border-t border-border">
       <h2 className="text-lg text-foreground font-semibold mb-4">{t('explore.importanceScorer')}</h2>
       <form onSubmit={score}>
-        <textarea
+        <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={t('explore.importancePlaceholder')}
-          className="w-full h-24 px-4 py-3 rounded-xl text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+          className="h-24"
         />
         <Button type="submit" variant="dream" className="mt-2" disabled={loading}>
           {loading ? t('common.loading') : t('common.score')}
@@ -51,16 +52,16 @@ export function ImportanceScorer() {
             </Badge>
           </div>
           <div className="grid grid-cols-4 gap-3">
-            {Object.entries(result.channels).map(([channel, score]) => (
+            {Object.entries(result.channels).map(([channel, val]) => (
               <div key={channel}>
                 <div className="text-xs text-muted-foreground mb-1.5 capitalize">{channel}</div>
                 <div className="h-2 bg-muted rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full bg-primary transition-all duration-500"
-                    style={{ width: `${score * 100}%` }}
+                    style={{ width: `${val * 100}%` }}
                   />
                 </div>
-                <div className="text-xs text-muted-foreground mt-1 tabular-nums">{score.toFixed(2)}</div>
+                <div className="text-xs text-muted-foreground mt-1 tabular-nums">{val.toFixed(2)}</div>
               </div>
             ))}
           </div>

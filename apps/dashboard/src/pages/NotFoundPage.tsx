@@ -1,5 +1,5 @@
-import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
 
 export function NotFoundPage() {
@@ -12,7 +12,9 @@ export function NotFoundPage() {
         <h1 className="text-lg font-semibold text-foreground">{t('notFound.title')}</h1>
         <p className="text-sm text-muted-foreground">{t('notFound.message')}</p>
         <Link to="/graph">
-          <Button variant="default" size="md">{t('notFound.goHome')}</Button>
+          <Button variant="default" size="md">
+            {t('notFound.goHome')}
+          </Button>
         </Link>
       </div>
     </div>

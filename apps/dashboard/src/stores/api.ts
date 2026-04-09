@@ -2,6 +2,7 @@ import type {
   ConfidenceResult,
   ConsolidationResult,
   DreamResult,
+  ExploreResponse,
   GraphResponse,
   HealthCheck,
   ImportanceScore,
@@ -9,11 +10,11 @@ import type {
   IntentionPriority,
   Memory,
   MemoryListResponse,
+  PredictResponse,
   ReflectResult,
   RetentionDistribution,
   SearchResult,
   SystemStats,
-  TemporalResult,
   TimelineResponse,
   TriggerType,
 } from '@/types';
@@ -70,12 +71,17 @@ export const api = {
     return fetcher<GraphResponse>(`/graph${qs}`);
   },
   dream: () => fetcher<DreamResult>('/dream', { method: 'POST' }),
-  explore: (fromId: string, action = 'associations', toId?: string, limit = 10) =>
-    fetcher<Record<string, unknown>>('/explore', {
+  explore: async (fromId: string, action = 'associations', toId?: string, limit = 10) => {
+    const raw = await fetcher<ExploreResponse>('/explore', {
       method: 'POST',
       body: JSON.stringify({ from_id: fromId, action, to_id: toId, limit }),
-    }),
-  predict: () => fetcher<Record<string, unknown>>('/predict', { method: 'POST' }),
+    });
+    return {
+      ...raw,
+      results: raw.results || raw.nodes || raw.chain || raw.bridges || [],
+    };
+  },
+  predict: () => fetcher<PredictResponse>('/predict', { method: 'POST' }),
   importance: (content: string) =>
     fetcher<ImportanceScore>('/importance', {
       method: 'POST',
@@ -100,11 +106,6 @@ export const api = {
     fetcher<ReflectResult>('/reflect', {
       method: 'POST',
       body: JSON.stringify({ focus, depth }),
-    }),
-  temporal: (action: string, topic?: string, memoryId?: string, limit = 20) =>
-    fetcher<TemporalResult>('/temporal', {
-      method: 'POST',
-      body: JSON.stringify({ action, topic, memory_id: memoryId, limit }),
     }),
   confidence: (action: string, memoryId?: string, limit = 20) =>
     fetcher<ConfidenceResult>('/confidence', {

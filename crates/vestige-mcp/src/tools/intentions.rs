@@ -166,8 +166,10 @@ struct TriggerSpec {
     #[serde(rename = "type")]
     trigger_type: Option<String>,
     at: Option<String>,
+    #[serde(alias = "in_minutes")]
     in_minutes: Option<i64>,
     codebase: Option<String>,
+    #[serde(alias = "file_pattern")]
     file_pattern: Option<String>,
     topic: Option<String>,
     condition: Option<String>,
@@ -185,7 +187,8 @@ struct SetIntentionArgs {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ContextSpec {
-    #[allow(dead_code)] // Deserialized from JSON but not yet used in context matching
+    #[allow(dead_code)]
+    #[serde(alias = "current_time")]
     current_time: Option<String>,
     codebase: Option<String>,
     file: Option<String>,
@@ -196,19 +199,22 @@ struct ContextSpec {
 #[serde(rename_all = "camelCase")]
 struct CheckIntentionsArgs {
     context: Option<ContextSpec>,
-    #[allow(dead_code)] // Deserialized from JSON for future snoozed intentions filter
+    #[allow(dead_code)]
+    #[serde(alias = "include_snoozed")]
     include_snoozed: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct IntentionIdArgs {
+    #[serde(alias = "intention_id")]
     intention_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SnoozeArgs {
+    #[serde(alias = "intention_id")]
     intention_id: String,
     minutes: Option<i64>,
 }

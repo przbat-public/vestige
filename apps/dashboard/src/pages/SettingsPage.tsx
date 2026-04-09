@@ -4,8 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { DreamResultPanel } from '@/components/DreamResultPanel';
 import { GovernancePanel } from '@/components/GovernancePanel';
 import { PipelineVisualizer } from '@/components/PipelineVisualizer';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { SectionErrorBoundary } from '@/components/SectionErrorBoundary';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { toast } from '@/stores/toast';
@@ -33,6 +35,7 @@ export function SettingsPage() {
       setDreamResult(res);
       toast(t('settings.dreamCycle'), 'success');
     },
+    onError: () => toast(t('common.error'), 'error'),
   });
 
   const consolidateMutation = useMutation({
@@ -43,6 +46,7 @@ export function SettingsPage() {
       qc.invalidateQueries({ queryKey: queryKeys.stats });
       qc.invalidateQueries({ queryKey: queryKeys.retentionDistribution });
     },
+    onError: () => toast(t('common.error'), 'error'),
   });
 
   const reflectMutation = useMutation({
@@ -51,6 +55,7 @@ export function SettingsPage() {
       setReflectResult(res);
       toast(t('settings.reflectDone'), 'success');
     },
+    onError: () => toast(t('common.error'), 'error'),
   });
 
   const confidenceMutation = useMutation({
@@ -59,13 +64,13 @@ export function SettingsPage() {
       setConfidenceResult(res);
       toast(t('settings.confidenceDone'), 'success');
     },
+    onError: () => toast(t('common.error'), 'error'),
   });
 
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full w-full">
       <h2 className="text-lg font-bold text-foreground">{t('settings.title')}</h2>
 
-      {/* System Information */}
       <Card>
         <CardHeader>
           <CardTitle>{t('settings.system')}</CardTitle>
@@ -88,7 +93,9 @@ export function SettingsPage() {
             </div>
             <div>
               <span className="text-muted-foreground">{t('settings.avgRetention')}</span>
-              <div className="text-foreground tabular-nums">{((avgRetention || stats?.averageRetention || 0) * 100).toFixed(1)}%</div>
+              <div className="text-foreground tabular-nums">
+                {((avgRetention || stats?.averageRetention || 0) * 100).toFixed(1)}%
+              </div>
             </div>
             <div>
               <span className="text-muted-foreground">{t('settings.embeddingModel')}</span>
@@ -101,7 +108,9 @@ export function SettingsPage() {
             <div>
               <span className="text-muted-foreground">{t('settings.embeddingCoverage')}</span>
               <div className="text-foreground tabular-nums">
-                {stats ? `${stats.withEmbeddings} / ${stats.totalMemories} (${stats.embeddingCoverage.toFixed(0)}%)` : '...'}
+                {stats
+                  ? `${stats.withEmbeddings} / ${stats.totalMemories} (${stats.embeddingCoverage.toFixed(0)}%)`
+                  : '...'}
               </div>
             </div>
             <div>
@@ -112,127 +121,141 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Operations */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('settings.operations')}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Dream Cycle */}
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-foreground font-medium">{t('settings.dreamCycle')}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{t('settings.dreamDesc')}</div>
+      <SectionErrorBoundary fallbackTitle={t('settings.operations')}>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('settings.operations')}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-foreground font-medium">{t('settings.dreamCycle')}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{t('settings.dreamDesc')}</div>
+              </div>
+              <Button
+                variant="dream"
+                size="sm"
+                onClick={() => dreamMutation.mutate()}
+                disabled={dreamMutation.isPending}
+              >
+                {dreamMutation.isPending ? t('settings.dreaming') : t('settings.dream')}
+              </Button>
             </div>
-            <Button
-              variant="dream"
-              size="sm"
-              onClick={() => dreamMutation.mutate()}
-              disabled={dreamMutation.isPending}
-            >
-              {dreamMutation.isPending ? t('settings.dreaming') : t('settings.dream')}
-            </Button>
-          </div>
-          {dreamResult && <DreamResultPanel result={dreamResult} />}
+            {dreamResult && <DreamResultPanel result={dreamResult} />}
 
-          {/* Consolidation */}
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-foreground font-medium">{t('settings.consolidation')}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{t('settings.consolidationDesc')}</div>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-foreground font-medium">{t('settings.consolidation')}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{t('settings.consolidationDesc')}</div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => consolidateMutation.mutate()}
+                disabled={consolidateMutation.isPending}
+              >
+                {consolidateMutation.isPending ? t('settings.consolidating') : t('settings.consolidate')}
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => consolidateMutation.mutate()}
-              disabled={consolidateMutation.isPending}
-            >
-              {consolidateMutation.isPending ? t('settings.consolidating') : t('settings.consolidate')}
-            </Button>
-          </div>
-          {consolResult && (
-            <Card className="grid grid-cols-2 gap-2 text-xs">
-              <div>{t('settings.processed')}: <span className="text-foreground tabular-nums">{consolResult.nodesProcessed}</span></div>
-              <div>{t('settings.decay')}: <span className="text-foreground tabular-nums">{consolResult.decayApplied}</span></div>
-              <div>{t('settings.embeddings')}: <span className="text-foreground tabular-nums">{consolResult.embeddingsGenerated}</span></div>
-              <div>{t('settings.duration')}: <span className="text-foreground tabular-nums">{consolResult.durationMs}ms</span></div>
-            </Card>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Metacognitive Tools */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('settings.metacognitive')}</CardTitle>
-          <CardDescription>{t('settings.metacognitiveDesc')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Reflect */}
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-foreground font-medium">{t('settings.reflect')}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{t('settings.reflectDesc')}</div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => reflectMutation.mutate()}
-              disabled={reflectMutation.isPending}
-            >
-              {reflectMutation.isPending ? t('settings.reflecting') : t('settings.reflectBtn')}
-            </Button>
-          </div>
-          {reflectResult && (
-            <Card className="space-y-2 text-xs">
-              <div className="text-foreground font-medium">{reflectResult.summary}</div>
-              {reflectResult.insights?.map((ins, i) => (
-                <div key={`${ins.type}-${i}`} className="flex gap-2 items-start border-t border-border pt-2">
-                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                    ins.severity === 'high' ? 'bg-red-500/15 text-red-500' :
-                    ins.severity === 'medium' ? 'bg-amber-500/15 text-amber-500' :
-                    'bg-primary/10 text-primary'
-                  }`}>{ins.type}</span>
-                  <span className="text-muted-foreground flex-1">{ins.description}</span>
+            {consolResult && (
+              <Card className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  {t('settings.processed')}:{' '}
+                  <span className="text-foreground tabular-nums">{consolResult.nodesProcessed}</span>
                 </div>
-              ))}
-            </Card>
-          )}
+                <div>
+                  {t('settings.decay')}:{' '}
+                  <span className="text-foreground tabular-nums">{consolResult.decayApplied}</span>
+                </div>
+                <div>
+                  {t('settings.embeddings')}:{' '}
+                  <span className="text-foreground tabular-nums">{consolResult.embeddingsGenerated}</span>
+                </div>
+                <div>
+                  {t('settings.duration')}:{' '}
+                  <span className="text-foreground tabular-nums">{consolResult.durationMs}ms</span>
+                </div>
+              </Card>
+            )}
+          </CardContent>
+        </Card>
+      </SectionErrorBoundary>
 
-          {/* Confidence Audit */}
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-foreground font-medium">{t('settings.confidenceAudit')}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{t('settings.confidenceDesc')}</div>
+      <SectionErrorBoundary fallbackTitle={t('settings.metacognitive')}>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('settings.metacognitive')}</CardTitle>
+            <CardDescription>{t('settings.metacognitiveDesc')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-foreground font-medium">{t('settings.reflect')}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{t('settings.reflectDesc')}</div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => reflectMutation.mutate()}
+                disabled={reflectMutation.isPending}
+              >
+                {reflectMutation.isPending ? t('settings.reflecting') : t('settings.reflectBtn')}
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => confidenceMutation.mutate()}
-              disabled={confidenceMutation.isPending}
-            >
-              {confidenceMutation.isPending ? t('settings.auditing') : t('settings.auditBtn')}
-            </Button>
-          </div>
-          {confidenceResult?.results && confidenceResult.results.length > 0 && (
-            <Card className="space-y-2 text-xs">
-              {confidenceResult.results.slice(0, 5).map((item) => (
-                <div key={item.id} className="flex justify-between items-start border-b border-border pb-2 last:border-0">
-                  <span className="text-muted-foreground flex-1 line-clamp-1 mr-2">{item.content}</span>
-                  <div className="flex gap-2 flex-shrink-0">
-                    <span className={`tabular-nums ${item.confidence > 0.7 ? 'text-emerald-500' : item.confidence > 0.4 ? 'text-amber-500' : 'text-red-500'}`}>
-                      {(item.confidence * 100).toFixed(0)}%
-                    </span>
-                    <span className="text-muted-foreground">{item.classification}</span>
+            {reflectResult && (
+              <Card className="space-y-2 text-xs">
+                <div className="text-foreground font-medium">{reflectResult.summary}</div>
+                {reflectResult.insights?.map((ins, i) => (
+                  <div key={`${ins.type}-${i}`} className="flex gap-2 items-start border-t border-border pt-2">
+                    <Badge
+                      variant={ins.severity === 'high' ? 'danger' : ins.severity === 'medium' ? 'warning' : 'default'}
+                    >
+                      {ins.type}
+                    </Badge>
+                    <span className="text-muted-foreground flex-1">{ins.description}</span>
                   </div>
-                </div>
-              ))}
-            </Card>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </Card>
+            )}
 
-      {/* Search Pipeline */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-foreground font-medium">{t('settings.confidenceAudit')}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{t('settings.confidenceDesc')}</div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => confidenceMutation.mutate()}
+                disabled={confidenceMutation.isPending}
+              >
+                {confidenceMutation.isPending ? t('settings.auditing') : t('settings.auditBtn')}
+              </Button>
+            </div>
+            {confidenceResult?.results && confidenceResult.results.length > 0 && (
+              <Card className="space-y-2 text-xs">
+                {confidenceResult.results.slice(0, 5).map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex justify-between items-start border-b border-border pb-2 last:border-0"
+                  >
+                    <span className="text-muted-foreground flex-1 line-clamp-1 mr-2">{item.content}</span>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <span
+                        className={`tabular-nums ${item.confidence > 0.7 ? 'text-emerald-500' : item.confidence > 0.4 ? 'text-amber-500' : 'text-red-500'}`}
+                      >
+                        {(item.confidence * 100).toFixed(0)}%
+                      </span>
+                      <span className="text-muted-foreground">{item.classification}</span>
+                    </div>
+                  </div>
+                ))}
+              </Card>
+            )}
+          </CardContent>
+        </Card>
+      </SectionErrorBoundary>
+
       <Card>
         <CardHeader>
           <CardTitle>{t('settings.pipeline')}</CardTitle>
@@ -244,7 +267,6 @@ export function SettingsPage() {
 
       {distribution && <GovernancePanel distribution={distribution} />}
 
-      {/* Architecture */}
       <Card>
         <CardHeader>
           <CardTitle>{t('settings.architecture')}</CardTitle>

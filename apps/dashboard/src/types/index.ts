@@ -86,7 +86,7 @@ export interface GraphEdge {
 export interface GraphResponse {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  center_id: string;
+  centerId: string;
   depth: number;
   nodeCount: number;
   edgeCount: number;
@@ -183,18 +183,18 @@ export interface IdentifiedEvent extends VestigeEvent {
 
 export type TriggerType = 'context' | 'time' | 'event';
 export type IntentionPriority = 'low' | 'medium' | 'high';
-export type IntentionStatus = 'active' | 'fulfilled' | 'expired' | 'snoozed' | 'completed';
+export type IntentionStatus = 'active' | 'fulfilled' | 'expired' | 'snoozed' | 'completed' | 'cancelled';
 
 export interface IntentionItem {
   id: string;
   content: string;
-  trigger_type: TriggerType;
-  trigger_value: string;
+  triggerType: TriggerType;
+  triggerValue: string;
   status: IntentionStatus;
   priority: IntentionPriority;
-  created_at: string;
+  createdAt: string;
   deadline?: string;
-  snoozed_until?: string;
+  snoozedUntil?: string;
 }
 
 // Metacognitive tools (v2.1)
@@ -250,6 +250,31 @@ export interface ConfidenceEntry {
   concern?: string;
 }
 
+export interface ExploreResult {
+  content?: string;
+  nodeType?: string;
+  score?: number;
+  similarity?: number;
+  retention?: number;
+  connectionType?: string;
+}
+
+export interface ExploreResponse {
+  results: ExploreResult[];
+  nodes?: ExploreResult[];
+  chain?: ExploreResult[];
+  bridges?: ExploreResult[];
+}
+
+export interface PredictResponse {
+  predictions: {
+    topic: string;
+    probability: number;
+    relatedMemories: string[];
+  }[];
+  context?: Record<string, unknown>;
+}
+
 export const NODE_TYPE_COLORS: Record<string, string> = {
   fact: '#00A8FF',
   concept: '#9D00FF',
@@ -299,15 +324,3 @@ export const MEMORY_SYSTEM_COLORS: Record<string, string> = {
   procedural: '#00FFD1',
 };
 
-export const EPISTEMIC_STATUS_LABELS: Record<string, string> = {
-  world: 'Fact',
-  experience: 'Experience',
-  observation: 'Observation',
-  opinion: 'Opinion',
-};
-
-export const MEMORY_SYSTEM_LABELS: Record<string, string> = {
-  episodic: 'Episodic',
-  semantic: 'Semantic',
-  procedural: 'Procedural',
-};

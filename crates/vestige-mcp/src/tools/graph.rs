@@ -302,6 +302,7 @@ mod tests {
             tags: vec!["test".to_string()],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         }).unwrap();
 
         let args = serde_json::json!({ "center_id": node.id });
@@ -327,6 +328,7 @@ mod tests {
             tags: vec!["science".to_string()],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         }).unwrap();
 
         let args = serde_json::json!({ "query": "quantum" });
@@ -348,6 +350,7 @@ mod tests {
             tags: vec![],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         }).unwrap();
 
         let args = serde_json::json!({ "center_id": node.id });

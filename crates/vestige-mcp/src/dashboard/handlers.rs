@@ -130,7 +130,7 @@ pub async fn get_memory(
 ) -> Result<Json<Value>, StatusCode> {
     let node = state.storage
         .get_node(&id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(log_err("get memory"))?
         .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(serde_json::json!({
@@ -428,7 +428,7 @@ pub async fn get_graph(
     Ok(Json(serde_json::json!({
         "nodes": nodes_json,
         "edges": edges_json,
-        "center_id": center_id,
+        "centerId": center_id,
         "depth": depth,
         "nodeCount": nodes.len(),
         "edgeCount": edges.len(),
@@ -561,7 +561,7 @@ pub async fn explore_connections(
             let source_node = state
                 .storage
                 .get_node(&req.from_id)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                .map_err(log_err("explore associations"))?
                 .ok_or(StatusCode::NOT_FOUND)?;
 
             // Use hybrid search with source content to find associated memories
@@ -734,9 +734,13 @@ pub async fn trigger_consolidation(
 
     let start = std::time::Instant::now();
 
-    let result = state
-        .storage
-        .run_consolidation()
+    let storage = state.storage.clone();
+    let result = tokio::task::spawn_blocking(move || storage.run_consolidation())
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Consolidation task panicked");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
         .map_err(log_err("storage operation"))?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -884,11 +888,11 @@ pub async fn create_intention(
         "intention": {
             "id": id,
             "content": req.content,
-            "trigger_type": req.trigger_type,
-            "trigger_value": req.trigger_value,
+            "triggerType": req.trigger_type,
+            "triggerValue": req.trigger_value,
             "status": "active",
             "priority": priority_label,
-            "created_at": record.created_at.to_rfc3339(),
+            "createdAt": record.created_at.to_rfc3339(),
             "deadline": deadline.map(|d| d.to_rfc3339()),
         }
     })))
@@ -902,24 +906,53 @@ pub async fn list_intentions(
     let status_filter = params.status.unwrap_or_else(|| "active".to_string());
 
     let intentions = if status_filter == "all" {
-        // Get all statuses
         let mut all = state.storage.get_active_intentions()
-            .unwrap_or_default();
-        all.extend(state.storage.get_intentions_by_status("fulfilled").unwrap_or_default());
-        all.extend(state.storage.get_intentions_by_status("cancelled").unwrap_or_default());
-        all.extend(state.storage.get_intentions_by_status("snoozed").unwrap_or_default());
+            .map_err(log_err("list intentions (active)"))?;
+        all.extend(state.storage.get_intentions_by_status("fulfilled")
+            .map_err(log_err("list intentions (fulfilled)"))?);
+        all.extend(state.storage.get_intentions_by_status("cancelled")
+            .map_err(log_err("list intentions (cancelled)"))?);
+        all.extend(state.storage.get_intentions_by_status("snoozed")
+            .map_err(log_err("list intentions (snoozed)"))?);
         all
     } else if status_filter == "active" {
         state.storage.get_active_intentions()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(log_err("list intentions"))?
     } else {
         state.storage.get_intentions_by_status(&status_filter)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(log_err("list intentions"))?
     };
 
     let count = intentions.len();
+    let intentions_json: Vec<Value> = intentions.iter().map(|r| {
+        let trigger_value = match serde_json::from_str::<Value>(&r.trigger_data) {
+            Ok(v) => v.get("value")
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_default(),
+            Err(e) => {
+                tracing::debug!(id = %r.id, raw = %r.trigger_data, error = %e, "Malformed trigger_data");
+                String::new()
+            }
+        };
+        let priority_label = match r.priority {
+            3 => "high",
+            1 => "low",
+            _ => "medium",
+        };
+        serde_json::json!({
+            "id": r.id,
+            "content": r.content,
+            "triggerType": r.trigger_type,
+            "triggerValue": trigger_value,
+            "status": r.status,
+            "priority": priority_label,
+            "createdAt": r.created_at.to_rfc3339(),
+            "deadline": r.deadline.map(|d| d.to_rfc3339()),
+            "snoozedUntil": r.snoozed_until.map(|d| d.to_rfc3339()),
+        })
+    }).collect();
     Ok(Json(serde_json::json!({
-        "intentions": intentions,
+        "intentions": intentions_json,
         "total": count,
         "filter": status_filter,
     })))

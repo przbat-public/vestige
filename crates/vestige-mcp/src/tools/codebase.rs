@@ -154,6 +154,7 @@ pub async fn execute_pattern(
         tags,
         valid_from: None,
         valid_until: None,
+        provenance: None,
     };
 
     let node = storage.ingest(input).map_err(|e| e.to_string())?;
@@ -220,6 +221,7 @@ pub async fn execute_decision(
         tags,
         valid_from: None,
         valid_until: None,
+        provenance: None,
     };
 
     let node = storage.ingest(input).map_err(|e| e.to_string())?;

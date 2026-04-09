@@ -31,9 +31,7 @@ export function ProgressBar({ value, max = 100, label, color, showValue = true, 
         />
       </div>
       {showValue && (
-        <span className="text-xs tabular-nums text-muted-foreground min-w-[3ch] text-right">
-          {Math.round(pct)}%
-        </span>
+        <span className="text-xs tabular-nums text-muted-foreground min-w-[3ch] text-right">{Math.round(pct)}%</span>
       )}
     </div>
   );

@@ -44,7 +44,8 @@
     "darkMode": "Ciemny motyw",
     "score": "Oceń",
     "more": "+{{count}} więcej",
-    "error": "Coś poszło nie tak"
+    "error": "Coś poszło nie tak",
+    "fetchError": "Nie udało się pobrać danych. Sprawdź połączenie i spróbuj ponownie."
   },
   "status": {
     "connected": "Połączono",
@@ -61,7 +62,8 @@
     "selected": "Zaznaczono",
     "loadingGraph": "Budowanie mapy pamięci...",
     "emptyGraph": "Brak wspomnień do wizualizacji",
-    "emptyHint": "Zacznij zapisywać wspomnienia, by zobaczyć swój graf wiedzy"
+    "emptyHint": "Zacznij zapisywać wspomnienia, by zobaczyć swój graf wiedzy",
+    "maxNodes": "Maksymalna liczba węzłów"
   },
   "memories": {
     "title": "Wspomnienia",

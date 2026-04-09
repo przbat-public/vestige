@@ -118,6 +118,7 @@ mod tests {
             tags: vec![],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         };
         let node = storage.ingest(input).unwrap();
         node.id

@@ -8,6 +8,7 @@
 //! - Proof of superiority benchmarks
 
 mod adversarial_tests;
+mod benchmark_retrieval;
 mod chaos_tests;
 mod mathematical_tests;
 mod proof_of_superiority;

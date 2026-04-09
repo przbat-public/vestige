@@ -46,10 +46,6 @@ pub fn schema() -> Value {
 struct ChangelogArgs {
     #[serde(alias = "memory_id")]
     memory_id: Option<String>,
-    #[allow(dead_code)]
-    start: Option<String>,
-    #[allow(dead_code)]
-    end: Option<String>,
     limit: Option<i32>,
 }
 
@@ -62,8 +58,6 @@ pub async fn execute(
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => ChangelogArgs {
             memory_id: None,
-            start: None,
-            end: None,
             limit: None,
         },
     };
@@ -125,7 +119,7 @@ fn execute_per_memory(
     }))
 }
 
-/// System-wide changelog: consolidations + recent state transitions
+/// System-wide changelog: consolidations + dream history + recent state transitions
 fn execute_system_wide(
     storage: &Storage,
     limit: i32,
@@ -139,6 +133,11 @@ fn execute_system_wide(
     let transitions = storage
         .get_recent_state_transitions(limit)
         .map_err(|e| e.to_string())?;
+
+    // Get dream history
+    let dreams = storage
+        .get_dream_history(limit)
+        .unwrap_or_default();
 
     // Build unified event list
     let mut events: Vec<(DateTime<Utc>, Value)> = Vec::new();
@@ -155,6 +154,22 @@ fn execute_system_wide(
                 "connectionsStrengthened": c.connections_strengthened,
                 "connectionsPruned": c.connections_pruned,
                 "insightsGenerated": c.insights_generated,
+            }),
+        ));
+    }
+
+    for d in &dreams {
+        events.push((
+            d.dreamed_at,
+            serde_json::json!({
+                "type": "dream",
+                "timestamp": d.dreamed_at.to_rfc3339(),
+                "durationMs": d.duration_ms,
+                "memoriesReplayed": d.memories_replayed,
+                "connectionFound": d.connections_found,
+                "insightsGenerated": d.insights_generated,
+                "memoriesStrengthened": d.memories_strengthened,
+                "memoriesCompressed": d.memories_compressed,
             }),
         ));
     }
@@ -212,6 +227,7 @@ mod tests {
                 tags: vec![],
                 valid_from: None,
                 valid_until: None,
+                provenance: None,
             })
             .unwrap();
         node.id

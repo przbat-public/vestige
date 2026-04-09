@@ -101,11 +101,18 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     // Main loop: forward events + heartbeats to client, handle incoming messages
     loop {
         tokio::select! {
-            // Broadcast event from cognitive engine
-            Ok(event) = event_rx.recv() => {
-                let json = event.to_json();
-                if sender.send(Message::Text(json.into())).await.is_err() {
-                    break;
+            result = event_rx.recv() => {
+                match result {
+                    Ok(event) => {
+                        let json = event.to_json();
+                        if sender.send(Message::Text(json.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("WebSocket client lagged, dropped {} events", n);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
             // Heartbeat

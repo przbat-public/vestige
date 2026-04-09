@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-vestige-core = { path = "../../crates/vestige-core", features = ["embeddings", "vector-search"] }
+vestige-core = { path = "../../crates/vestige-core", features = ["embeddings", "vector-search", "preprocessing"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 tempfile = "3"
@@ -76,6 +76,10 @@ path = "tests/journeys/spreading_activation.rs"
 name = "import_export"
 path = "tests/journeys/import_export.rs"
 
+[[test]]
+name = "preprocessing_pipeline"
+path = "tests/journeys/preprocessing_pipeline.rs"
+
 # Extreme tests - chaos, adversarial, mathematical, research validation
 [[test]]
 name = "extreme_tests"
@@ -100,3 +104,7 @@ path = "tests/extreme/research_validation_tests.rs"
 [[test]]
 name = "proof_of_superiority"
 path = "tests/extreme/proof_of_superiority.rs"
+
+[[test]]
+name = "benchmark_retrieval"
+path = "tests/extreme/benchmark_retrieval.rs"

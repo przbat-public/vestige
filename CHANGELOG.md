@@ -5,6 +5,54 @@ All notable changes to Vestige will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-04-09 — "Content Intelligence"
+
+Adds a 5-stage Content Intelligence Pipeline that enriches memories at ingest time, compound query decomposition for improved search recall, and provenance tracking for memory lineage.
+
+### Added
+
+#### Content Intelligence Pipeline (`vestige-core/src/preprocessing/`)
+- **Entity extraction** (`entities.rs`) — regex-based detection of URLs, emails, file paths, monetary values, proper nouns (person/org classification). Auto-generates `entity:` prefixed tags. Sub-ms latency, zero model downloads
+- **Coreference rewriting** (`coref.rs`) — heuristic pronoun resolution ("He said X" → "John said X") using extracted entities. Only rewrites when there's a single unambiguous referent
+- **Temporal anchoring** (`temporal.rs`) — parses "by next Friday", "starting from Monday", "3 days ago" into absolute `valid_from`/`valid_until` dates using `natural-date-rs`
+- **Relation extraction** (`relations.rs`) — extracts subject-verb-object triples from 30+ relationship verbs, feeds spreading activation network as `Causal` edges at ingest time
+- **Provenance tracking** (`provenance.rs`) — structured JSON metadata (session_id, agent, derivation chain, coref rewrites, entities, temporal anchors, relations) stored per memory
+- **Pipeline orchestrator** (`mod.rs`) — chains all 5 stages, feature-gated under `preprocessing` (default on)
+
+#### Compound Query Decomposition (`search/decompose.rs`)
+- Detects and splits multi-part queries: semicolons ("X; Y"), question chains ("What about X? And Y?"), conjunctions ("X and also Y")
+- Searches sub-queries independently, merges results via union + max-score dedup
+- **+43% MRR improvement** on compound queries, **470ns latency** per decomposition
+- Integrated into `search_unified.rs` Stage 0 (before overfetch)
+
+#### Schema & Storage
+- **Migration V10** — `ALTER TABLE knowledge_nodes ADD COLUMN provenance TEXT DEFAULT '{}'`
+- `IngestInput` and `KnowledgeNode` gain `provenance: Option<serde_json::Value>` field
+- `Storage::ingest` and `row_to_node` updated for provenance column
+
+#### MCP Schema Updates
+- `smart_ingest` gains `session_id` and `agent` optional parameters for provenance
+- `search` with `detail_level: "full"` now includes `provenance` field in results
+- `format_node` (used by timeline, memory tools) includes provenance at full detail
+
+#### Tests & Benchmarks
+- **77 unit tests** across 7 modules (entities, coref, temporal, relations, provenance, pipeline, decompose)
+- **8 integration tests** (`preprocessing_pipeline.rs`) — full pipeline journeys, edge cases, performance
+- **5 retrieval benchmarks** (`benchmark_retrieval.rs`) — 50 synthetic memories, Precision@5/Recall@5/MRR evaluation, latency measurements
+- Benchmark results: Preprocessing 98µs/memory, Decomposition 470ns/query, +11% MRR from enrichment
+
+#### Dependencies
+- `natural-date-rs` v0.3 — natural language date parsing (optional, `preprocessing` feature)
+- `regex` v1 — entity/temporal/relation pattern matching (optional, `preprocessing` feature)
+
+### Changed
+- Search pipeline: 7 stages → 8 stages (+ Stage 0: compound query decomposition)
+- Ingest pipeline: preprocessing enrichment runs between cognitive pre-ingest and IngestInput construction
+- `smart_ingest` schema: 2 new optional fields (session_id, agent)
+- Architecture docs: preprocessing module + decompose module documented
+
+---
+
 ## [3.1.0] - 2026-04-08 — "Metacognitive Expansion"
 
 Building on v3.0.0's foundation, this release adds three metacognitive tools to the MCP server, exposes them through the dashboard REST API and frontend, and massively expands the tutorial.

@@ -22,6 +22,6 @@
       "@graph/*": ["./src/graph/*"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "vitest.config.ts"],
   "exclude": ["src/lib", "src/routes"]
 }

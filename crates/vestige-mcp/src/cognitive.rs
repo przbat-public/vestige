@@ -193,6 +193,7 @@ mod tests {
             tags: vec!["test".to_string()],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         }).unwrap();
         result.id
     }

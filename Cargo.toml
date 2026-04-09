@@ -4,6 +4,7 @@ members = [
     "crates/vestige-core",
     "crates/vestige-mcp",
     "tests/e2e",
+    "benchmarks/locomo",
 ]
 exclude = [
     "fastembed-rs",

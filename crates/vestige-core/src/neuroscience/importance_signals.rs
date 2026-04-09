@@ -380,12 +380,18 @@ impl PredictionModel {
 
         let patterns = match self.patterns.read() {
             Ok(p) => p,
-            Err(_) => return 0.5,
+            Err(_) => {
+                tracing::warn!("PredictionModel: patterns RwLock poisoned, returning neutral score");
+                return 0.5;
+            }
         };
 
         let total = match self.total_count.read() {
             Ok(t) => *t,
-            Err(_) => return 0.5,
+            Err(_) => {
+                tracing::warn!("PredictionModel: total_count RwLock poisoned, returning neutral score");
+                return 0.5;
+            }
         };
 
         if total == 0 || patterns.is_empty() {
@@ -1106,7 +1112,10 @@ impl RewardSignal {
     pub fn compute(&self, memory_id: &str) -> f64 {
         let history = match self.outcome_history.read() {
             Ok(h) => h,
-            Err(_) => return 0.5, // Default neutral
+            Err(_) => {
+                tracing::warn!("RewardSignal: outcome_history RwLock poisoned");
+                return 0.5;
+            }
         };
 
         match history.get(memory_id) {
@@ -1471,7 +1480,10 @@ impl AttentionSignal {
         self.learning_mode_active
             .read()
             .map(|m| *m)
-            .unwrap_or(false)
+            .unwrap_or_else(|_| {
+                tracing::warn!("AttentionSignal: learning_mode RwLock poisoned");
+                false
+            })
     }
 
     /// Detect learning mode from a session

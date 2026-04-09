@@ -65,15 +65,32 @@ pub async fn execute(
                         })).collect::<Vec<_>>(),
                         "confidence": chain.confidence,
                         "total_hops": chain.total_hops,
+                        "source": "cognitive_engine",
                     }))
                 }
                 None => {
+                    drop(cog);
+                    // Fallback: check persisted graph for direct connection
+                    let mut steps = Vec::new();
+                    if let Ok(connections) = storage.get_connections_for_memory(from) {
+                        if let Some(conn) = connections.iter().find(|c| c.source_id == to_id || c.target_id == to_id) {
+                            steps.push(serde_json::json!({
+                                "memory_id": to_id,
+                                "connection_type": conn.link_type,
+                                "connection_strength": conn.strength,
+                                "reasoning": "Direct connection found in persistent graph",
+                                "source": "persistent_graph",
+                            }));
+                        }
+                    }
+                    let msg = if steps.is_empty() { "No chain found between these memories" } else { "Chain found via persistent graph fallback" };
                     Ok(serde_json::json!({
                         "action": "chain",
                         "from": from,
                         "to": to_id,
-                        "steps": [],
-                        "message": "No chain found between these memories"
+                        "steps": steps,
+                        "message": msg,
+                        "source": if steps.is_empty() { "none" } else { "persistent_graph" },
                     }))
                 }
             }
@@ -135,13 +152,46 @@ pub async fn execute(
             let to_id = to.ok_or("'to' is required for bridges action")?;
             let bridges = cog.chain_builder.find_bridge_memories(from, to_id);
             let limited: Vec<_> = bridges.iter().take(limit).collect();
-            Ok(serde_json::json!({
-                "action": "bridges",
-                "from": from,
-                "to": to_id,
-                "bridges": limited,
-                "count": limited.len(),
-            }))
+            if !limited.is_empty() {
+                Ok(serde_json::json!({
+                    "action": "bridges",
+                    "from": from,
+                    "to": to_id,
+                    "bridges": limited,
+                    "count": limited.len(),
+                    "source": "cognitive_engine",
+                }))
+            } else {
+                drop(cog);
+                // Fallback: find memories connected to both endpoints in persistent graph
+                let mut bridge_ids = Vec::new();
+                if let (Ok(from_conns), Ok(to_conns)) = (
+                    storage.get_connections_for_memory(from),
+                    storage.get_connections_for_memory(to_id),
+                ) {
+                    let from_neighbors: std::collections::HashSet<&str> = from_conns.iter()
+                        .map(|c| if c.source_id == from { c.target_id.as_str() } else { c.source_id.as_str() })
+                        .collect();
+                    for conn in &to_conns {
+                        let neighbor = if conn.source_id == to_id { &conn.target_id } else { &conn.source_id };
+                        if from_neighbors.contains(neighbor.as_str()) && neighbor != from && neighbor != to_id {
+                            bridge_ids.push(serde_json::json!({
+                                "memory_id": neighbor,
+                                "source": "persistent_graph",
+                            }));
+                            if bridge_ids.len() >= limit { break; }
+                        }
+                    }
+                }
+                Ok(serde_json::json!({
+                    "action": "bridges",
+                    "from": from,
+                    "to": to_id,
+                    "bridges": bridge_ids,
+                    "count": bridge_ids.len(),
+                    "source": if bridge_ids.is_empty() { "none" } else { "persistent_graph" },
+                }))
+            }
         }
         _ => Err(format!("Unknown action: '{}'. Expected: chain, associations, bridges", action)),
     }
@@ -309,6 +359,7 @@ mod tests {
             tags: vec!["test".to_string()],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         }).unwrap().id;
 
         let id2 = storage.ingest(vestige_core::IngestInput {
@@ -320,6 +371,7 @@ mod tests {
             tags: vec!["test".to_string()],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         }).unwrap().id;
 
         // Save connection directly to storage (bypassing cognitive engine)

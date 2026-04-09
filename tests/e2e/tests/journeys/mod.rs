@@ -16,4 +16,5 @@ pub mod consolidation_workflow;
 pub mod import_export;
 pub mod ingest_recall_review;
 pub mod intentions_workflow;
+pub mod preprocessing_pipeline;
 pub mod spreading_activation;

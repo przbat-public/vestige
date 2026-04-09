@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 
 use chrono::Utc;
 use crate::cognitive::CognitiveEngine;
-use vestige_core::{CreativeConnectionType, DreamHistoryRecord, LinkType, Storage};
+use vestige_core::{CreativeConnectionType, DreamHistoryRecord, InsightRecord, LinkType, Storage};
 
 pub fn schema() -> serde_json::Value {
     serde_json::json!({
@@ -202,6 +202,49 @@ pub async fn execute(
         }
     }
 
+    // Persist insights to database
+    {
+        let now = Utc::now();
+        let mut insights_persisted = 0u64;
+        for insight in &dream_result.insights {
+            let record = InsightRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                insight: insight.insight.clone(),
+                source_memories: insight.source_memory_ids.clone(),
+                confidence: insight.confidence as f64,
+                novelty_score: insight.novelty as f64,
+                insight_type: insight.insight_type.clone(),
+                generated_at: now,
+                tags: vec!["dream".to_string()],
+                feedback: None,
+                applied_count: 0,
+            };
+            if storage.save_insight(&record).is_ok() {
+                insights_persisted += 1;
+            }
+        }
+        for insight in &extra_insights {
+            let record = InsightRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                insight: insight.insight.clone(),
+                source_memories: insight.source_memories.clone(),
+                confidence: insight.confidence,
+                novelty_score: insight.novelty_score,
+                insight_type: format!("{:?}", insight.insight_type),
+                generated_at: now,
+                tags: vec!["dream".to_string(), "synthesized".to_string()],
+                feedback: None,
+                applied_count: 0,
+            };
+            if storage.save_insight(&record).is_ok() {
+                insights_persisted += 1;
+            }
+        }
+        if insights_persisted > 0 {
+            tracing::info!(insights_persisted, "Dream: persisted {} insights to database", insights_persisted);
+        }
+    }
+
     // Clear waking tags after dream processes them
     let tags_cleared = storage.clear_waking_tags().unwrap_or(0);
 
@@ -288,6 +331,7 @@ mod tests {
                 tags: vec!["dream-test".to_string()],
                 valid_from: None,
                 valid_until: None,
+                provenance: None,
             })
             .unwrap();
         }
@@ -414,6 +458,7 @@ mod tests {
                 tags: vec!["dream-roundtrip".to_string()],
                 valid_from: None,
                 valid_until: None,
+                provenance: None,
             }).unwrap();
         }
 
@@ -472,6 +517,7 @@ mod tests {
                 tags: vec!["save-conn-test".to_string()],
                 valid_from: None,
                 valid_until: None,
+                provenance: None,
             }).unwrap();
             ids.push(result.id);
         }
@@ -553,6 +599,7 @@ mod tests {
                 tags: tags.iter().map(|t| t.to_string()).collect(),
                 valid_from: None,
                 valid_until: None,
+                provenance: None,
             }).unwrap();
         }
 

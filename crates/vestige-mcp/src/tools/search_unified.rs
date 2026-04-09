@@ -4,14 +4,18 @@
 //! Always uses hybrid search internally (keyword + semantic + RRF fusion).
 //! Implements Testing Effect (Roediger & Karpicke 2006) by auto-strengthening memories on access.
 //!
-//! v1.5.0: Enhanced 7-stage cognitive pipeline:
+//! v2.1.0: Enhanced cognitive pipeline with retrieval quality improvements
+//!   (Yuan et al. 2026: retrieval method = 20pp accuracy range vs 3-8pp for write strategy)
+//!
 //!   1. Reranker (over-fetch 3x, rerank down)
-//!   2. Temporal boosting (recency + validity)
-//!   3. Memory state accessibility filtering
-//!   4. Context matching (topic overlap)
-//!   5. Spreading activation associations
-//!   6. Predictive memory recording
-//!   7. Reconsolidation (mark labile)
+//!   2. Result deduplication (remove near-identical results — saves context tokens)
+//!   3. Temporal boosting (recency + validity)
+//!   4. Freshness-aware ranking (prefer newer when scores close + topics overlap)
+//!   5. Memory state accessibility filtering
+//!   6. Context matching (topic overlap)
+//!   7. Spreading activation associations
+//!   8. Score-adaptive pruning (drop results below dynamic threshold)
+//!   9. Side effects: predictive memory recording + reconsolidation
 
 use chrono::Utc;
 use serde::Deserialize;
@@ -57,7 +61,7 @@ pub fn schema() -> Value {
             },
             "detail_level": {
                 "type": "string",
-                "description": "Level of detail in results. 'brief' = id/type/tags/score only (saves tokens). 'summary' = default 8-field response. 'full' = all fields including FSRS state and timestamps.",
+                "description": "Level of detail in results. 'brief' = id/type/tags/score only (saves tokens). 'summary' = default 8-field response. 'full' = all fields including FSRS state, timestamps, and provenance metadata.",
                 "enum": ["brief", "summary", "full"],
                 "default": "summary"
             },
@@ -82,10 +86,13 @@ pub fn schema() -> Value {
 struct SearchArgs {
     query: String,
     limit: Option<i32>,
+    #[serde(alias = "min_retention")]
     min_retention: Option<f64>,
+    #[serde(alias = "min_similarity")]
     min_similarity: Option<f32>,
     #[serde(alias = "detail_level")]
     detail_level: Option<String>,
+    #[serde(alias = "context_topics")]
     context_topics: Option<Vec<String>>,
     #[serde(alias = "token_budget")]
     token_budget: Option<i32>,
@@ -157,18 +164,72 @@ pub async fn execute(
 
     // ====================================================================
     // STAGE 1: Hybrid search with 3x over-fetch for reranking pool
+    //          + compound query decomposition for multi-part queries
     // ====================================================================
     let overfetch_limit = (limit * 3).min(100);
 
-    // Run blocking storage+embedding work off the tokio event loop
-    let storage_clone = Arc::clone(storage);
-    let query_clone = args.query.clone();
-    let results = tokio::task::spawn_blocking(move || {
-        storage_clone.hybrid_search(&query_clone, overfetch_limit, keyword_weight, semantic_weight)
-    })
-    .await
-    .map_err(|e| format!("Search task panicked: {}", e))?
-    .map_err(|e| e.to_string())?;
+    // Check for compound queries and decompose if needed
+    #[cfg(feature = "vector-search")]
+    let decomposition = vestige_core::search::decompose::decompose_query(&args.query);
+
+    #[cfg(feature = "vector-search")]
+    let results = if decomposition.is_compound {
+        // Run separate searches for each sub-query and merge results
+        let mut all_results = Vec::new();
+        for sub_query in &decomposition.sub_queries {
+            let storage_clone = Arc::clone(storage);
+            let sq = sub_query.clone();
+            let sub_results = tokio::task::spawn_blocking(move || {
+                storage_clone.hybrid_search(&sq, overfetch_limit, keyword_weight, semantic_weight)
+            })
+            .await
+            .map_err(|e| format!("Search task panicked: {}", e))?
+            .map_err(|e| e.to_string())?;
+            all_results.push(sub_results);
+        }
+
+        // Merge: union, dedup by node_id, keep max combined_score
+        let mut best: std::collections::HashMap<String, vestige_core::SearchResult> = std::collections::HashMap::new();
+        for batch in all_results {
+            for r in batch {
+                let id = r.node.id.clone();
+                let score = r.combined_score;
+                match best.get(&id) {
+                    Some(existing) if existing.combined_score >= score => {}
+                    _ => { best.insert(id, r); }
+                }
+            }
+        }
+        let mut merged: Vec<_> = best.into_values().collect();
+        merged.sort_by(|a, b| {
+            b.combined_score
+                .partial_cmp(&a.combined_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        merged
+    } else {
+        // Single query — standard hybrid search
+        let storage_clone = Arc::clone(storage);
+        let query_clone = args.query.clone();
+        tokio::task::spawn_blocking(move || {
+            storage_clone.hybrid_search(&query_clone, overfetch_limit, keyword_weight, semantic_weight)
+        })
+        .await
+        .map_err(|e| format!("Search task panicked: {}", e))?
+        .map_err(|e| e.to_string())?
+    };
+
+    #[cfg(not(feature = "vector-search"))]
+    let results = {
+        let storage_clone = Arc::clone(storage);
+        let query_clone = args.query.clone();
+        tokio::task::spawn_blocking(move || {
+            storage_clone.hybrid_search(&query_clone, overfetch_limit, keyword_weight, semantic_weight)
+        })
+        .await
+        .map_err(|e| format!("Search task panicked: {}", e))?
+        .map_err(|e| e.to_string())?
+    };
 
     // Filter by min_retention, min_similarity, and temporal validity (cheap filters)
     let now = chrono::Utc::now();
@@ -210,9 +271,38 @@ pub async fn execute(
             filtered_results.truncate(limit as usize);
         }
     } else {
-        // Couldn't acquire cognitive lock — truncate to limit
+        tracing::debug!("Search stage 2: cognitive lock contention, skipping reranker");
         filtered_results.truncate(limit as usize);
     }
+
+    // ====================================================================
+    // STAGE 2B: Result deduplication (SmartSearch insight — Yuan et al. 2026)
+    //
+    // Near-identical memories waste context tokens without adding information.
+    // When two results share >85% word overlap, keep only the higher-ranked one.
+    // This runs AFTER reranking so we keep the best-scored version.
+    // ====================================================================
+    let pre_dedup_count = filtered_results.len();
+    if filtered_results.len() > 1 {
+        let mut keep = vec![true; filtered_results.len()];
+        for i in 0..filtered_results.len() {
+            if !keep[i] { continue; }
+            for j in (i + 1)..filtered_results.len() {
+                if !keep[j] { continue; }
+                if content_overlap(&filtered_results[i].node.content, &filtered_results[j].node.content) > 0.85 {
+                    keep[j] = false;
+                }
+            }
+        }
+        let mut deduped = Vec::with_capacity(filtered_results.len());
+        for (idx, result) in filtered_results.into_iter().enumerate() {
+            if keep[idx] {
+                deduped.push(result);
+            }
+        }
+        filtered_results = deduped;
+    }
+    let dedup_removed = pre_dedup_count - filtered_results.len();
 
     // ====================================================================
     // STAGE 3: Temporal boosting (recency + validity windows)
@@ -229,6 +319,34 @@ pub async fn execute(
             let temporal_factor = recency * validity;
             result.combined_score =
                 result.combined_score * 0.85 + (result.combined_score * temporal_factor as f32) * 0.15;
+        }
+    }
+
+    // ====================================================================
+    // STAGE 3B: Freshness-aware ranking for overlapping topics
+    //
+    // When two memories cover the same topic and have similar scores,
+    // prefer the newer one. Facts change — the latest version is usually
+    // more accurate. This only fires when tag overlap is high AND scores
+    // are within 15% of each other.
+    // ====================================================================
+    if filtered_results.len() > 1 {
+        for i in 0..filtered_results.len() {
+            for j in (i + 1)..filtered_results.len() {
+                let score_i = filtered_results[i].combined_score;
+                let score_j = filtered_results[j].combined_score;
+                let max_score = score_i.max(score_j);
+                if max_score <= 0.0 { continue; }
+
+                let score_gap = (score_i - score_j).abs() / max_score;
+                if score_gap > 0.15 { continue; }
+
+                let tag_overlap = tag_jaccard(&filtered_results[i].node.tags, &filtered_results[j].node.tags);
+                if tag_overlap < 0.5 { continue; }
+
+                let newer_idx = if filtered_results[i].node.created_at > filtered_results[j].node.created_at { i } else { j };
+                filtered_results[newer_idx].combined_score *= 1.0 + (tag_overlap as f32 * 0.10);
+            }
         }
     }
 
@@ -461,6 +579,27 @@ pub async fn execute(
     });
 
     // ====================================================================
+    // STAGE 5G: Score-adaptive pruning (SmartSearch truncation insight)
+    //
+    // Instead of always returning a fixed top-K, drop results that fall
+    // below a dynamic threshold relative to the top score. This prevents
+    // low-confidence noise from polluting the agent's context window.
+    //
+    // Threshold: result must score at least 30% of the top result's score.
+    // Only prunes when we have at least 3 results (don't over-prune small sets).
+    // ====================================================================
+    let pre_prune_count = filtered_results.len();
+    if filtered_results.len() >= 3 {
+        if let Some(top_score) = filtered_results.first().map(|r| r.combined_score) {
+            if top_score > 0.0 {
+                let threshold = top_score * 0.30;
+                filtered_results.retain(|r| r.combined_score >= threshold);
+            }
+        }
+    }
+    let prune_removed = pre_prune_count - filtered_results.len();
+
+    // ====================================================================
     // STAGE 6: Spreading activation — triple hybrid scoring
     //
     // Run spreading activation from the top result and use the activation
@@ -521,13 +660,17 @@ pub async fn execute(
         // 7A. Record query for predictive memory
         let _ = cog.predictive_memory.record_query(&args.query, &[]);
 
-        // 7B. Record each accessed memory for predictive/speculative models
+        // 7B. Record each accessed memory for predictive/speculative models + persistent state
         for result in &filtered_results {
             let _ = cog.predictive_memory.record_memory_access(
                 &result.node.id,
                 &result.node.content.chars().take(100).collect::<String>(),
                 &result.node.tags,
             );
+
+            if let Err(e) = storage.record_memory_access(&result.node.id) {
+                tracing::debug!(error = %e, memory_id = %result.node.id, "Failed to record memory access");
+            }
 
             cog.speculative_retriever.record_access(
                 &result.node.id,
@@ -629,6 +772,13 @@ pub async fn execute(
     if suppressed_count > 0 {
         response["competitionSuppressed"] = serde_json::json!(suppressed_count);
     }
+    // Include retrieval quality stats
+    if dedup_removed > 0 {
+        response["deduplicated"] = serde_json::json!(dedup_removed);
+    }
+    if prune_removed > 0 {
+        response["pruned"] = serde_json::json!(prune_removed);
+    }
     // Include learning mode detection
     if learning_mode {
         response["learningModeDetected"] = serde_json::json!(true);
@@ -713,6 +863,7 @@ fn format_search_result(r: &vestige_core::SearchResult, detail_level: &str) -> V
             "matchType": format!("{:?}", r.match_type),
             "epistemicStatus": r.node.epistemic_status().to_string(),
             "memorySystem": r.node.memory_system().to_string(),
+            "provenance": r.node.provenance,
         }),
         // "summary" (default)
         _ => serde_json::json!({
@@ -761,6 +912,7 @@ pub fn format_node(node: &vestige_core::KnowledgeNode, detail_level: &str) -> Va
             "lapses": node.lapses,
             "validFrom": node.valid_from.map(|dt| dt.to_rfc3339()),
             "validUntil": node.valid_until.map(|dt| dt.to_rfc3339()),
+            "provenance": node.provenance,
         }),
         // "summary" (default)
         _ => serde_json::json!({
@@ -830,6 +982,41 @@ fn compress_content(content: &str, ratio: f64) -> String {
     }
 }
 
+/// Word-level Jaccard overlap between two content strings.
+/// Returns 0.0 (no overlap) to 1.0 (identical word sets).
+fn content_overlap(a: &str, b: &str) -> f64 {
+    let words_a: std::collections::HashSet<&str> = a.split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| w.len() > 2)
+        .collect();
+    let words_b: std::collections::HashSet<&str> = b.split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| w.len() > 2)
+        .collect();
+
+    let union_size = words_a.union(&words_b).count();
+    if union_size == 0 {
+        return 0.0;
+    }
+    let intersection_size = words_a.intersection(&words_b).count();
+    intersection_size as f64 / union_size as f64
+}
+
+/// Tag-level Jaccard similarity between two tag vectors.
+fn tag_jaccard(a: &[String], b: &[String]) -> f64 {
+    if a.is_empty() && b.is_empty() {
+        return 0.0;
+    }
+    let set_a: std::collections::HashSet<&str> = a.iter().map(|s| s.as_str()).collect();
+    let set_b: std::collections::HashSet<&str> = b.iter().map(|s| s.as_str()).collect();
+    let union_size = set_a.union(&set_b).count();
+    if union_size == 0 {
+        return 0.0;
+    }
+    let intersection_size = set_a.intersection(&set_b).count();
+    intersection_size as f64 / union_size as f64
+}
+
 fn is_trivial_query(query: &str) -> bool {
     let trimmed = query.trim();
     let lower = trimmed.to_lowercase();
@@ -877,6 +1064,7 @@ mod tests {
             tags: vec![],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         };
         let node = storage.ingest(input).unwrap();
         node.id

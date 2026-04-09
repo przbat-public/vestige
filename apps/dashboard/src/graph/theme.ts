@@ -50,9 +50,9 @@ const DARK_THEME: GraphThemeConfig = {
   bloomStrength: 0.5,
   bloomRadius: 0.3,
   bloomThreshold: 0.85,
-  edgeColor: 0x5a5a9a,
+  edgeColor: 0x8888cc,
   edgeAdditiveBlending: true,
-  edgeBaseOpacity: 0.15,
+  edgeBaseOpacity: 0.4,
   nodeEmissiveScale: 1.0,
   nodeRoughness: 0.3,
   nodeMetalness: 0.1,
@@ -65,8 +65,8 @@ const DARK_THEME: GraphThemeConfig = {
   postVignetteRadius: 0.95,
   autoRotateSpeed: 0.4,
   toneExposure: 1.1,
-  flowParticleColor: 0x8b9cf7,
-  flowParticleSize: 4.0,
+  flowParticleColor: 0xa0b0ff,
+  flowParticleSize: 5.0,
   curveAmount: 1.0,
 };
 
@@ -84,9 +84,9 @@ const LIGHT_THEME: GraphThemeConfig = {
   bloomStrength: 0.1,
   bloomRadius: 0.2,
   bloomThreshold: 0.95,
-  edgeColor: 0x94a3b8,
+  edgeColor: 0x6b7a8f,
   edgeAdditiveBlending: false,
-  edgeBaseOpacity: 0.35,
+  edgeBaseOpacity: 0.5,
   nodeEmissiveScale: 0.2,
   nodeRoughness: 0.6,
   nodeMetalness: 0.0,
@@ -100,7 +100,7 @@ const LIGHT_THEME: GraphThemeConfig = {
   autoRotateSpeed: 0.4,
   toneExposure: 1.0,
   flowParticleColor: 0x6366f1,
-  flowParticleSize: 2.5,
+  flowParticleSize: 3.5,
   curveAmount: 0.7,
 };
 

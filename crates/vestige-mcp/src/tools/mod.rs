@@ -42,33 +42,15 @@ pub mod reflect;
 pub mod temporal;
 pub mod confidence;
 
-// Deprecated/internal tools — not advertised in the public MCP tools/list,
-// but some functions are actively dispatched for backwards compatibility
-// and internal cognitive operations. #[allow(dead_code)] suppresses warnings
-// for the unused schema/struct items within these modules.
-#[allow(dead_code)]
-pub mod checkpoint;
-#[allow(dead_code)]
-pub mod codebase;
-#[allow(dead_code)]
-pub mod consolidate;
+// Internal tools — not advertised in MCP tools/list but actively dispatched
+// for backwards-compatible operations in server.rs.
 #[allow(dead_code)]
 pub mod context;
 #[allow(dead_code)]
 pub mod feedback;
 #[allow(dead_code)]
-pub mod ingest;
-#[allow(dead_code)]
-pub mod intentions;
-#[allow(dead_code)]
-pub mod knowledge;
-#[allow(dead_code)]
 pub mod memory_states;
 #[allow(dead_code)]
-pub mod recall;
-#[allow(dead_code)]
 pub mod review;
-#[allow(dead_code)]
-pub mod stats;
 #[allow(dead_code)]
 pub mod tagging;

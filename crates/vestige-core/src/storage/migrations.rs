@@ -49,6 +49,11 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "v2.0.0 Cognitive Leap: emotional memory, flashbulb encoding, temporal hierarchy",
         up: MIGRATION_V9_UP,
     },
+    Migration {
+        version: 10,
+        description: "v3.1.0 Content Intelligence: provenance tracking for memory lineage",
+        up: MIGRATION_V10_UP,
+    },
 ];
 
 /// A database migration
@@ -254,7 +259,8 @@ CREATE INDEX IF NOT EXISTS idx_states_access ON memory_states(last_access);
 CREATE INDEX IF NOT EXISTS idx_states_suppression ON memory_states(suppression_until);
 
 -- 5. FSRS_CARDS TABLE (Extended Review State)
--- Stores complete FSRS-6 card state for spaced repetition
+-- NOTE: Dead schema — FSRS state lives on knowledge_nodes columns (inlined).
+-- Table retained for potential future migration to normalized FSRS storage.
 CREATE TABLE IF NOT EXISTS fsrs_cards (
     memory_id TEXT PRIMARY KEY,
     difficulty REAL NOT NULL DEFAULT 5.0,
@@ -316,6 +322,8 @@ const MIGRATION_V4_UP: &str = r#"
 -- ============================================================================
 
 -- Knowledge edges for temporal reasoning
+-- NOTE: Dead schema — bi-temporal edge model designed but not yet wired.
+-- Active connections use memory_connections table instead.
 CREATE TABLE IF NOT EXISTS knowledge_edges (
     id TEXT PRIMARY KEY,
     source_id TEXT NOT NULL,
@@ -603,6 +611,22 @@ ALTER TABLE dream_history ADD COLUMN emotional_memories_processed INTEGER DEFAUL
 ALTER TABLE dream_history ADD COLUMN creative_connections_found INTEGER DEFAULT 0;
 
 UPDATE schema_version SET version = 9, applied_at = datetime('now');
+"#;
+
+/// V10: Content Intelligence Pipeline — Provenance tracking
+///
+/// Stores structured JSON metadata about how each memory was created, enriched,
+/// and derived. Enables memory lineage tracing and preprocessing audit.
+const MIGRATION_V10_UP: &str = r#"
+-- ============================================================================
+-- PROVENANCE TRACKING (Content Intelligence Pipeline)
+-- ============================================================================
+
+-- JSON metadata: session_id, agent, derived_from, derivation_type,
+-- coref_rewrites, auto_entities, temporal_anchors_found, relations_extracted
+ALTER TABLE knowledge_nodes ADD COLUMN provenance TEXT DEFAULT '{}';
+
+UPDATE schema_version SET version = 10, applied_at = datetime('now');
 "#;
 
 /// Get current schema version from database

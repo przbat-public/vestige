@@ -1,0 +1,1033 @@
+{
+  "vestige_version": "3.2.0",
+  "answer_model": "gpt-4o-mini",
+  "judge_model": "gpt-4o-mini",
+  "overall_llm_score": 0.41,
+  "per_category": {
+    "single_hop": {
+      "llm_score": 0.2222222222222222,
+      "count": 18
+    },
+    "temporal": {
+      "llm_score": 0.3333333333333333,
+      "count": 24
+    },
+    "multi_hop": {
+      "llm_score": 0.0,
+      "count": 3
+    },
+    "open_domain": {
+      "llm_score": 0.5272727272727272,
+      "count": 55
+    }
+  },
+  "retrieval_metrics": {
+    "recall_at_5": 0.6584415584415585,
+    "recall_at_10": 0.8038961038961039,
+    "mrr": 0.47273809523809623,
+    "count": 1540
+  },
+  "evaluation_time_secs": 464.7377710342407,
+  "evaluated": [
+    {
+      "question": "What type of car did Evan get after his old Prius broke down?",
+      "ground_truth": "new Prius",
+      "predicted_answer": "Evan got a new Prius after his old Prius broke down.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, stating that Evan got a new Prius after his old one broke down.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What is the general sentiment about the upcoming grand opening?",
+      "ground_truth": "excitement",
+      "predicted_answer": "The general sentiment about the upcoming grand opening is very positive and excited. Both Jon and Gina express enthusiasm and anticipation for the event, with Jon stating he can't wait to see everything come together and Gina expressing her excitement and pride in Jon's hard work. They both look forward to making great memories at the grand opening.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same sentiment of excitement and positivity regarding the grand opening, aligning well with the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What has Melanie painted?",
+      "ground_truth": "Horse, sunset, sunrise",
+      "predicted_answer": "Melanie has painted nature-inspired works, including a painting she worked on with her kids, which they completed together. She also mentioned making a bowl in pottery class that she painted with colors and patterns to catch the eye and make people smile.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not mention the specific subjects of the paintings (horse, sunset, sunrise) as stated in the ground truth answer. Instead, it focuses on nature-inspired works and pottery, which does not convey the same information.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Dave sell the car he restored last year?",
+      "ground_truth": "Last year",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the same information as the ground truth answer, which specifies that the car was sold last year.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "Where does Joanna get her ideas for the characters from?",
+      "ground_truth": "people she knows, things she saw, her imagination",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not address the question about where Joanna gets her ideas for characters, while the ground truth answer provides specific sources of inspiration.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "Which activity helps Nate escape and stimulates his imagination?",
+      "ground_truth": "watching fantasy and sci-fi movies",
+      "predicted_answer": "Nate finds spending time with his pets and engaging in his hobbies to be a way to escape from reality and stimulate his imagination. He mentions that these activities let him take a break and have a powerful effect on his happiness.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not match the ground truth answer, as it focuses on spending time with pets and hobbies rather than specifically mentioning watching fantasy and sci-fi movies.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "When did Joanna plan on going to Nate's to watch him play with his turtles?",
+      "ground_truth": "10 November, 2022",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific date that Joanna planned to go to Nate's, which is required to match the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "Who have written notes of gratitude to Maria?",
+      "ground_truth": "Cindy, Laura",
+      "predicted_answer": "I don't have enough information.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the names of those who have written notes of gratitude to Maria, which is the information requested in the question.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "Which part of Tokyo is described as Tokyo's Times Square by Calvin?",
+      "ground_truth": "Shibuya Crossing",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the correct information about the part of Tokyo described as Tokyo's Times Square, which is Shibuya Crossing.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What advice does Gina give to Jon about running a successful business?",
+      "ground_truth": "build relationships with customers, create a strong brand image, stay positive",
+      "predicted_answer": "Gina advises Jon to stay passionate, focused, and resilient, reminding him that challenges will come but he should believe in himself and keep going. She also emphasizes the importance of having a good support system, networking, and reaching out to people in his field for help and contacts. Additionally, she suggests using social media channels and collaborating with local influencers to market his dance studio effectively.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not match the ground truth answer as it includes different advice and additional details that are not present in the ground truth. The core elements of building relationships, creating a strong brand image, and staying positive are not explicitly mentioned in the predicted answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Which bands has Dave enjoyed listening to?",
+      "ground_truth": "Aerosmith, The Fireworks",
+      "predicted_answer": "I don't have enough information.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the names of the bands Dave enjoyed listening to, which is required to match the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What is the toughest part of car restoration according to Dave?",
+      "ground_truth": "Paying extra attention to detail",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the same information as the ground truth answer, which specifies that the toughest part is paying extra attention to detail.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "When did the Deboran and Jolene agree to go surfing?",
+      "ground_truth": "in October 2023",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific information about the timing of when Deboran and Jolene agreed to go surfing, which is clearly stated in the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "When did Jon receive mentorship to promote his venture?",
+      "ground_truth": "15 June, 2023",
+      "predicted_answer": "Jon received mentorship on 15 June 2023.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, stating the date Jon received mentorship.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Why did Jolene have to reschedule their meeting with Deborah on September 8, 2023?",
+      "ground_truth": "Jolene already had plans",
+      "predicted_answer": "Jolene had to reschedule their meeting because Deborah mentioned that she already had plans for the day they initially agreed upon, which was Wednesday at 4 PM.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer incorrectly attributes the reason for rescheduling to Deborah's plans instead of Jolene's plans, which is the key detail in the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Why does Audrey make jewelry out of recycled objects?",
+      "ground_truth": "To show love for creativity and sustainability",
+      "predicted_answer": "Audrey makes jewelry out of recycled objects as a way to show her love of creativity and sustainability. She believes it's a great way to reduce waste and each piece holds a special story and appeal. Additionally, she started making jewelry as a hobby and then began selling it, donating a portion of her profits to a cause that's close to her heart, which combines her passions of making jewelry and making a difference.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same core information about Audrey's motivation for making jewelry out of recycled objects, emphasizing creativity and sustainability, while also providing additional context that does not contradict the ground truth.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What are some changes Caroline has faced during her transition journey?",
+      "ground_truth": "Changes to her body, losing unsupportive friends",
+      "predicted_answer": "Caroline has reflected on how far she has come since she started transitioning three years ago. She has faced struggles but has developed significantly since coming out. She has also mentioned feeling powerful when sharing her journey and how it has inspired others to be better allies. Additionally, she has expressed gratitude for the support she has received from friends, family, and mentors throughout her journey, especially after a tough breakup.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not address the specific changes Caroline has faced during her transition journey, such as changes to her body and losing unsupportive friends. Instead, it focuses on her reflections and feelings, which do not match the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What musical artists/bands has Melanie seen?",
+      "ground_truth": "Summer Sounds, Matt Patterson",
+      "predicted_answer": "Melanie has seen Matt Patterson perform at a concert for her daughter's birthday.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer only mentions one of the artists (Matt Patterson) and does not include the other artist (Summer Sounds) from the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What is Gina's favorite style of dance?",
+      "ground_truth": "Contemporary",
+      "predicted_answer": "Gina's favorite style of dance is contemporary.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, just phrased differently.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How many letters has Joanna recieved?",
+      "ground_truth": "Two",
+      "predicted_answer": "Joanna received one letter after writing an online blog post about a hard moment in her life.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer states that Joanna received one letter, while the ground truth answer indicates she received two letters, which is a discrepancy in the information conveyed.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What is Nate's favorite book series about?",
+      "ground_truth": "dragons",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the same information as the ground truth answer, which specifies that Nate's favorite book series is about dragons.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What is the name of John's cousin's dog?",
+      "ground_truth": "Luna",
+      "predicted_answer": "The name of John's cousin's dog is Luna.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, just in a more elaborate form.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How many roadtrips did Evan take in May 2023?",
+      "ground_truth": "two",
+      "predicted_answer": "Evan took two road trips in May 2023. The first was to the Rockies, which he mentioned on 18 May, and the second was to Jasper, which he mentioned on 24 May.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer by stating that Evan took two road trips in May 2023.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Caroline draw a self-portrait?",
+      "ground_truth": "The week before 23 August 2023",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific information about when Caroline drew a self-portrait, which is required to match the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "How did Jolene and her partner initially meet?",
+      "ground_truth": "In an engineering class in college",
+      "predicted_answer": "Jolene and her partner initially met in an engineering class in college.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, just phrased slightly differently.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Joanna start writing her third screenplay?",
+      "ground_truth": "May 2022",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific information requested about when Joanna started writing her third screenplay, which is clearly stated in the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What fuels Calvin's soul?",
+      "ground_truth": "Performing live",
+      "predicted_answer": "Calvin's soul is fueled by making a difference and sharing his own story through music. He expresses that moments of positive feedback and connection with people motivate him to keep creating and pursuing his passion.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer introduces additional elements about making a difference and sharing his story, which are not present in the ground truth answer that specifically states \"performing live.\" The core idea of what fuels Calvin's soul is not accurately captured.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What food did Sam share a photo of on 19 August, 2023?",
+      "ground_truth": "bowl of spinach, avocado, and strawberries",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the information about the food Sam shared a photo of, which is explicitly stated in the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What does help Calvin stay connected to the creative process?",
+      "ground_truth": "Calvin stays connected to the creative process by always staying up-to-date on world events and watching documentaries about artists.",
+      "predicted_answer": "Calvin stays connected to the creative process by watching music videos, concerts, and documentaries about artists and their creative processes in his relaxation room with a TV. He finds it cool to learn more about how other artists create.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer introduces additional details about watching music videos and concerts, which are not mentioned in the ground truth answer. It also specifies a \"relaxation room with a TV,\" which is not part of the original information. Thus, it does not convey the same information as the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What did Andrew suggest as a way to reduce carbon footprint?",
+      "ground_truth": "biking or using public transport",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the same information as the ground truth answer, which specifies biking or using public transport as suggestions.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What alternative career might Nate consider after gaming?",
+      "ground_truth": "an animalkeeper at a localzoo and workingwith turtles; as heknows a great dealabout turtles andhow to care for them,and he enjoys it.",
+      "predicted_answer": "Nate mentioned that he is thinking of joining a new gaming team after his next tournament, but he also expressed interest in creating gaming content for YouTube. This suggests that he might consider a career in content creation or streaming as an alternative to competitive gaming.",
+      "category": 3,
+      "category_name": "multi_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not match the ground truth answer, which specifically mentions a career as an animal keeper at a local zoo and working with turtles. The predicted answer focuses on gaming-related careers, which is not the same information.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Which countries did James visit in July 2022?",
+      "ground_truth": "Canada, Greenland",
+      "predicted_answer": "In July 2022, James visited Canada, specifically Toronto and Vancouver.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer includes additional specific locations (Toronto and Vancouver) that are not mentioned in the ground truth answer, which only lists the countries (Canada and Greenland).",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What was the video game console that Jolene's parents got her at age 10?",
+      "ground_truth": "nintendo game console",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the information requested about the specific video game console, which is a Nintendo game console.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What did Joanna receive from her brother that brought back childhood memories?",
+      "ground_truth": "a handwritten letter",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the information that Joanna received a handwritten letter, which is the key detail in the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What career path has Caroline decided to persue?",
+      "ground_truth": "counseling or mental health for Transgender people",
+      "predicted_answer": "Caroline has decided to pursue a career in counseling and mental health.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, specifying that Caroline is pursuing a career in counseling and mental health, which aligns with the focus on transgender people.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How has John's fitness improved since starting boot camps with his family?",
+      "ground_truth": "More energy, gains in strength and endurance",
+      "predicted_answer": "Since starting boot camps with his family, John has noticed that they have had lots more energy and have gained strength and endurance. They are pushing themselves and supporting each other, which has been super motivating.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information about John's fitness improvement, mentioning increased energy, strength, and endurance, while also adding context about family support and motivation.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How many car shows has Dave attended?",
+      "ground_truth": "two",
+      "predicted_answer": "Dave attended one car show, which he mentioned on 8 October 2023.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer states that Dave attended one car show, while the ground truth answer indicates he attended two. This is a clear discrepancy in the information conveyed.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What organization does Audrey donate a portion of his profits to?",
+      "ground_truth": "Animal shelter",
+      "predicted_answer": "Audrey donates a portion of her profits to an animal shelter.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, just with a slight difference in pronoun usage.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What was the setting for John and his wife's first dance?",
+      "ground_truth": "Cozy restaurant",
+      "predicted_answer": "John and his wife's first dance took place at a cozy restaurant, described as dreamy with music and candlelight.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, specifying that the setting was a cozy restaurant.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What event did John volunteer at last weekend?",
+      "ground_truth": "career fair at a local school",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the information about the event John volunteered at, which is required to match the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What is Joanna inspired by?",
+      "ground_truth": "Personal experiences,her own journey ofself discovery, Nate,nature, validation,stories about findingcourage and takingrisks, people she knows, stuff she sees, imagination",
+      "predicted_answer": "Joanna is inspired by writing, as she describes it as a way to express her feelings and a form of solace and creativity. She mentions that writing has become a huge part of her life and that it gives her a chance to make something good out of her thoughts and feelings. Additionally, she feels inspired when her writing touches others, as indicated by a letter she received from someone who found comfort in her story.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer focuses solely on Joanna's inspiration from writing and its impact on her, while the ground truth answer includes a broader range of inspirations such as personal experiences, nature, and stories about courage. The two answers do not convey the same information.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What is Tim excited to see at Universal Studios?",
+      "ground_truth": "The Harry Potter stuff",
+      "predicted_answer": "Tim is super stoked for the Harry Potter stuff at Universal Studios.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, expressing Tim's excitement about the Harry Potter attractions at Universal Studios.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Gina mention Shia Labeouf?",
+      "ground_truth": " 23 July, 2023",
+      "predicted_answer": "Gina mentioned Shia Labeouf on 23 July, 2023.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, stating the date when Gina mentioned Shia Labeouf.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When is Andrew going to go hiking with Audrey?",
+      "ground_truth": "August",
+      "predicted_answer": "Andrew and Audrey are planning to go hiking together next month, as mentioned in their conversation on 1 October 2023.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer specifies \"next month\" in relation to the date of 1 October 2023, which would imply November, not August. Therefore, it does not match the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What kind of flooring is Jon looking for in his dance studio?",
+      "ground_truth": "Marley flooring",
+      "predicted_answer": "Jon is looking for Marley flooring for his dance studio, which is commonly used in dance studios because it is grippy, allows for movement, and is tough and easy to keep clean.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer correctly identifies the type of flooring Jon is looking for (Marley flooring) and provides additional relevant information about its suitability for dance studios.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What is the topic of discussion between John and Tim on 11 December, 2023?",
+      "ground_truth": "Academic achievements and sports successes",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the same information as the ground truth answer, which specifies the topics of discussion.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "How does John feel about being seen as a mentor by some of the younger players?",
+      "ground_truth": "It feels great",
+      "predicted_answer": "John feels great about being seen as a mentor by some of the younger players. He finds it really rewarding to have their trust and admiration, and he enjoys being a positive role model for them, stating that it is fulfilling to make a positive impact on their lives.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same positive sentiment as the ground truth answer, elaborating on John's feelings and experiences as a mentor, which aligns with the essence of the original response.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Which type of vacation would Evan prefer with his family, walking tours in metropolitan cities or camping trip in the outdoors?",
+      "ground_truth": "camping trip in the outdoors",
+      "predicted_answer": "I don't have enough information.",
+      "category": 3,
+      "category_name": "multi_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not match the ground truth answer, as it fails to provide a preference for either type of vacation. The ground truth clearly states that Evan prefers a camping trip in the outdoors.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What is one of Nate's favorite dairy-free treats besides coconut milk ice cream?",
+      "ground_truth": "dairy-free chocolate mousse",
+      "predicted_answer": "One of Nate's favorite dairy-free treats besides coconut milk ice cream is dairy-free chocolate mousse.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, just phrased differently.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What is Caroline excited about in the adoption process?",
+      "ground_truth": "creating a family for kids who need one",
+      "predicted_answer": "Caroline is excited about building her own family and providing a safe and loving home for kids who haven't had that before. She sees adoption as a way of giving back and showing love and acceptance.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same core idea as the ground truth answer, emphasizing Caroline's excitement about creating a family for children in need and providing a loving home.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How does Dave feel about the reactions of people when they see the finished restoration project?",
+      "ground_truth": "satisfying and worth the hard work",
+      "predicted_answer": "Dave feels proud and satisfied when he sees the relief and joy on people's faces when their car is fixed. He expresses that it makes him feel like he is making a difference in their lives, which gives him a sense of purpose and accomplishment.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same sentiment of satisfaction and worthiness regarding the reactions of people to the restoration project, aligning with the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did John and his programming friends host an online programming competition?",
+      "ground_truth": "Last week before 13 October 2022.",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific information about when the competition was hosted, which is required to match the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "How old are Deborah's cats?",
+      "ground_truth": "Max is 8 years old and Luna is 5 years old",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the ages of Deborah's cats, which is the information requested in the question.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "When did John go to a convention with colleagues?",
+      "ground_truth": "March 2023",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific information requested about when John went to a convention, which is March 2023.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "When did Audrey move to a new place?",
+      "ground_truth": "June 2023",
+      "predicted_answer": "Audrey moved to a new place on 26 June, 2023.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer provides a specific date in June 2023, which is consistent with the ground truth answer that states June 2023.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Which city have both Jean and John visited?",
+      "ground_truth": "Rome",
+      "predicted_answer": "Both Gina and Jon have visited Rome.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer incorrectly names \"Gina\" and \"Jon\" instead of \"Jean\" and \"John,\" which changes the subjects of the statement.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How old are Deborah's cats?",
+      "ground_truth": "Max is 8 years old and Luna is 5 years old",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the ages of Deborah's cats, which is the information requested in the question.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "After how many weeks did Tim reconnect with the fellow Harry Potter fan from California?",
+      "ground_truth": "three weeks",
+      "predicted_answer": "Tim reconnected with the fellow Harry Potter fan from California on 9 August 2023 and mentioned it in the conversation. He then attended a Harry Potter conference in the UK on 13 October 2023. This is a span of 9 weeks.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer provides specific dates and a calculation of weeks but ultimately states that it was a span of 9 weeks, which contradicts the ground truth answer of three weeks.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What kind of stress was Sam dealing with in October 2023?",
+      "ground_truth": "work-related stress",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the same information as the ground truth answer, which specifies that Sam was dealing with work-related stress.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "When did Evan start taking painting classes?",
+      "ground_truth": "Few days before 19 August, 2023.",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific information about when Evan started taking painting classes, which is required to match the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What kind of deal did John get in December?",
+      "ground_truth": "Deal with a renowned outdoor gear company",
+      "predicted_answer": "In December, John got an amazing deal with a renowned outdoor gear company, which included awesome hiking stuff and outdoor gear.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same essential information as the ground truth answer, specifying that John got a deal with a renowned outdoor gear company, while adding extra details that do not change the core meaning.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What did Jolene design inspired by their love for space and engines?",
+      "ground_truth": "Notebooks",
+      "predicted_answer": "Jolene designed notebooks with elements like galaxies and circuitry, inspired by her love for space and engines.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, specifying that Jolene designed notebooks inspired by her love for space and engines.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Nate get his first two turtles?",
+      "ground_truth": "2019",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific year 2019, which is the correct information regarding when Nate got his first two turtles.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What gifts has Calvin received from his artist friends?",
+      "ground_truth": "gold chain, custom-made guitar with an octopus on it",
+      "predicted_answer": "I don't have enough information.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the gifts that Calvin received, which are specified in the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "How do Melanie and Caroline describe their journey through life together?",
+      "ground_truth": "An ongoing adventure of learning and growing.",
+      "predicted_answer": "Melanie and Caroline describe their journey through life together as one of support, growth, and shared experiences. Caroline shares her passion for helping others through counseling and mental health work, emphasizing the importance of the support she has received from friends and family during her transition. Melanie expresses her joy in spending time with her kids and the special moments they create as a family. Both women appreciate the significance of their experiences, with Caroline highlighting how her journey has inspired her to help others, and Melanie celebrating the love and connection within her family. Their conversations reflect a mutual understanding and encouragement as they navigate their respective paths.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer provides additional details and context that are not present in the ground truth answer. While it conveys themes of growth and support, it does not succinctly match the description of their journey as simply \"an ongoing adventure of learning and growing.\"",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What was grandma's gift to Caroline?",
+      "ground_truth": "necklace",
+      "predicted_answer": "Caroline's grandma gave her a necklace as a gift, which is super special to her. It stands for love, faith, and strength.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer by stating that the gift from grandma to Caroline is a necklace.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How does Evan describe the island he grew up on?",
+      "ground_truth": "A happy place",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the same information as the ground truth answer, which describes the island as a happy place.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What recipes has Joanna made?",
+      "ground_truth": "dairy free vanilla cake with strawberry filling and coconut cream frosting, parfait, strawberry chocolate cake, chocolate coconut cupcakes, chocolate raspberry tart, chocolate cake with raspberries, blueberry cheesecake bars",
+      "predicted_answer": "Joanna has made the following recipes:\n\n1. A dairy-free chocolate raspberry tart with an almond flour crust, chocolate ganache, and fresh raspberries.\n2. A dairy-free chocolate cake with raspberries, made with almond flour, coconut oil, chocolate, and raspberries.\n3. A dessert made with blueberries, coconut milk, and a gluten-free crust.\n4. A dessert with almond milk (specific details not provided).\n\nAdditionally, she mentioned trying a new dairy-free recipe that was a winner with her family, but did not specify what it was.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer lists different recipes than those in the ground truth answer and includes additional details that do not match the original recipes provided.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Which outdoor gear company likely signed up John for an endorsement deal?",
+      "ground_truth": "Under Armour",
+      "predicted_answer": "I don't have enough information.",
+      "category": 3,
+      "category_name": "multi_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific information that Under Armour is the company likely to have signed John for an endorsement deal, which is the required information.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Gina get her tattoo?",
+      "ground_truth": "A few years ago",
+      "predicted_answer": "Gina got her tattoo a few years ago.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, just with slightly different wording.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How is Gina's store doing?",
+      "ground_truth": "The store is doing great.",
+      "predicted_answer": "Gina's store is doing good. She mentioned that she has been keeping up with fashion trends to offer the best pieces to customers and that it's been a lot of work, but she is really enjoying it. Additionally, she acquired new unique pieces for her store and launched a limited edition line to showcase her style and creativity.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys that Gina's store is doing well and provides additional context about her efforts and achievements, which aligns with the positive sentiment of the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did John plan his next meeting with his siblings?",
+      "ground_truth": "In September, 2022",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the specific information about the meeting date, which is required to match the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "When did Evan announce his marriage to his extended family?",
+      "ground_truth": "January 5, 2024",
+      "predicted_answer": "Evan announced his marriage to his extended family on 5 January 2024.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, just in a slightly different format.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Which language is Tim learning?",
+      "ground_truth": "German",
+      "predicted_answer": "Tim is learning German.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, stating that Tim is learning German.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What emotions did John feel during the small party with the veterans?",
+      "ground_truth": "heartwarming",
+      "predicted_answer": "During the small party with the veterans, John felt heartwarming emotions as he saw the veterans make connections and find camaraderie. He described the experience as awesome, filled with smiles and new friendships, which kept him motivated.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same core emotion of \"heartwarming\" and elaborates on the positive feelings John experienced during the party, aligning with the ground truth.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What charity event did John organize recently in 2024?",
+      "ground_truth": "benefit basketball game",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the information about the charity event that John organized, which is a benefit basketball game.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What is John trying out to improve his strength and flexibility after recovery from ankle injury?",
+      "ground_truth": "yoga",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the same information as the ground truth answer, which specifies that John is trying out yoga.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Nate win a lot of money in a video game tournament?",
+      "ground_truth": "September 2022",
+      "predicted_answer": "Nate won his fourth video game tournament on 8 July 2022, and he mentioned that he was really proud that he could make money doing what he loves.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer provides a different date (July 8, 2022) and does not match the ground truth answer (September 2022).",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What did Evan and his partner share with their extended family on January 5, 2024?",
+      "ground_truth": "their marriage",
+      "predicted_answer": "Evan and his partner shared the news of their marriage with their extended family on January 5, 2024.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, indicating that Evan and his partner shared their marriage with their extended family.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What did Joanna make for one of the ladies at her writing club?",
+      "ground_truth": "a bookmark",
+      "predicted_answer": "Joanna made a cute little bookmark for one of the ladies at her writing club.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, specifying that Joanna made a bookmark for one of the ladies at her writing club.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Calvin visit some of the sights in Boston with a former high school friend?",
+      "ground_truth": "October 24, 2023",
+      "predicted_answer": "Calvin visited some sights in Boston with a high school friend on 24 October 2023.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, just phrased slightly differently.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Calvin have a car incident?",
+      "ground_truth": "on the Friday before 21 June, 2023",
+      "predicted_answer": "Calvin had a car accident on 16 June 2023.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer specifies the date of the car incident as 16 June 2023, which is indeed the Friday before 21 June 2023, thus conveying the same information as the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What class is Sam taking to learn how to make healthier meals?",
+      "ground_truth": "cooking class",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the information requested in the question and fails to convey the same information as the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How did Melanie's children handle the accident?",
+      "ground_truth": "They were scared but resilient",
+      "predicted_answer": "Melanie's children were scared during the accident, but she reassured them and explained that their brother would be okay. She described them as tough kids.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys that Melanie's children were scared, which aligns with the ground truth, and it also implies their resilience by describing them as tough kids.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "How does Evan describe the woman and his feelings for her that he met in Canada?",
+      "ground_truth": "He says she's cool, incredible, like something out of a movie, and that he feels alive around her. Every moment with her is fun and energetic, also Evan feels really lucky to have someone who gets him.",
+      "predicted_answer": "Evan describes the woman he met in Canada as \"incredible\" and says that being with her makes him \"feel alive.\" He mentions that every moment with her is \"really fun and energizing,\" and he expresses that it was \"like love at first sight,\" feeling a spark inside him when they met.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same essential information about Evan's feelings and descriptions of the woman, including her being \"incredible,\" the feeling of being \"alive,\" and the fun and energetic moments they share, even though it adds the phrase \"like love at first sight.\"",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Evan's son fall off his bike?",
+      "ground_truth": "Thursday before December 17, 2023.",
+      "predicted_answer": "Evan's son fell off his bike on Tuesday, 12 December 2023.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer states that Evan's son fell off his bike on December 12, 2023, which is not the same as the ground truth answer indicating it was the Thursday before December 17, 2023.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What event did John participate in to show support for veterans' rights?",
+      "ground_truth": "marching event",
+      "predicted_answer": "John participated in a project to support military veterans, which included organizing a small party where veterans could share their stories and connect with each other. He also asked family and friends to join a virtual support group to advocate for the military.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not match the ground truth answer, as it describes different activities (a project and a virtual support group) rather than the specific event of a marching event.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "What games does Jolene recommend for Deborah?",
+      "ground_truth": "Zelda BOTW for Switch , Animal Crossing: New Horizons, Overcooked 2",
+      "predicted_answer": "Jolene recommends \"Zelda BOTW\" for Switch, \"Animal Crossing: New Horizons,\" and \"Overcooked 2.\"",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, listing the same games recommended by Jolene.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Which Disney movie did Dave mention as one of his favorites?",
+      "ground_truth": "Ratatouille",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the information requested about which Disney movie Dave mentioned as one of his favorites, whereas the ground truth answer specifies \"Ratatouille.\"",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What event is Maria getting ready for at the shelter on May 25, 2023?",
+      "ground_truth": "fundraiser",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the same information as the ground truth answer, which specifies that Maria is getting ready for a fundraiser.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What was James' big moment with Samantha in October 2023?",
+      "ground_truth": "They decided to live together and rented an apartment not far from McGee's bar.",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not convey the information about James and Samantha deciding to live together and renting an apartment, which is the key detail in the ground truth answer.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What is a shared frustration regarding dog ownership for Audrey and Andrew?",
+      "ground_truth": "Not being able to find pet friendly spots.",
+      "predicted_answer": "A shared frustration regarding dog ownership for Audrey and Andrew is the challenge of finding suitable living arrangements for their dogs. Andrew mentions the difficulty of finding a pet-friendly place to live, while Audrey acknowledges the importance of considering space and energy needs for dogs.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer focuses on finding suitable living arrangements and space for dogs, which is not the same as the specific frustration of not being able to find pet-friendly spots.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What does Joanna recommend to make a living room comfy like hers?",
+      "ground_truth": "couch for multiple people, fluffy blanket, lights that can be dimmed",
+      "predicted_answer": "I don't have enough information.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide any information related to Joanna's recommendations for making a living room comfy, which is required to match the ground truth answer.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "How did Evan get into watercolor painting?",
+      "ground_truth": "friend's advice",
+      "predicted_answer": "Evan got into watercolor painting because his friend introduced him to it and gave him some advice, which hooked him right away.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, indicating that Evan's entry into watercolor painting was influenced by his friend's advice.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Which city was Calvin visiting in August 2023?",
+      "ground_truth": "Miami",
+      "predicted_answer": "I don't have enough information.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 0.0,
+      "judgment": "B - The predicted answer does not provide the correct information about the city Calvin was visiting, which is Miami.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What milestone did Jolene achieve recently on 4 February, 2023?",
+      "ground_truth": "Design and build a sustainable water purifier for a rural community",
+      "predicted_answer": "On 4 February, 2023, Jolene achieved a major milestone by designing and building a sustainable water purifier for a rural community in need.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, detailing the milestone achieved by Jolene on the specified date.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "When did Nate win a big Valorant tourney?",
+      "ground_truth": "The Saturday before 7November, 2022",
+      "predicted_answer": "Nate won a big Valorant tournament on 5 November 2022.",
+      "category": 2,
+      "category_name": "temporal",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, specifying the date of the tournament win accurately.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "Who inspired Dave's passion for car engineering?",
+      "ground_truth": "His Dad",
+      "predicted_answer": "Dave's passion for car engineering was inspired by spending hours in his dad's garage when he was little, tinkering with engines.",
+      "category": 1,
+      "category_name": "single_hop",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, indicating that Dave's dad is the source of his inspiration for car engineering.",
+      "evidence_found_in_top_5": false
+    },
+    {
+      "question": "Which city is John excited to have a game at?",
+      "ground_truth": "Seattle",
+      "predicted_answer": "John is excited to have a game in Seattle next month.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer by stating that John is excited about a game in Seattle.",
+      "evidence_found_in_top_5": true
+    },
+    {
+      "question": "What do sunflowers represent according to Caroline?",
+      "ground_truth": "warmth and happiness",
+      "predicted_answer": "According to Caroline, sunflowers represent warmth and happiness.",
+      "category": 4,
+      "category_name": "open_domain",
+      "llm_score": 1.0,
+      "judgment": "A - The predicted answer conveys the same information as the ground truth answer, stating that sunflowers represent warmth and happiness according to Caroline.",
+      "evidence_found_in_top_5": true
+    }
+  ]
+}

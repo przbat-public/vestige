@@ -7,6 +7,7 @@
 //! - Temporal-aware search
 //! - Reranking for precision (GOD TIER 2026)
 
+pub mod decompose;
 mod hybrid;
 pub mod hyde;
 mod keyword;

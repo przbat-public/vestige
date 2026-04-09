@@ -45,6 +45,7 @@ pub fn schema() -> Value {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DedupArgs {
+    #[serde(alias = "similarity_threshold")]
     similarity_threshold: Option<f64>,
     limit: Option<usize>,
     tags: Option<Vec<String>>,

@@ -51,7 +51,8 @@ vestige/
 │   │       ├── memory/        # Node types, FSRS strength, temporal
 │   │       ├── fsrs/          # Algorithm, scheduler, optimizer
 │   │       ├── embeddings/    # Nomic v1.5 local ONNX, hybrid, code embeddings
-│   │       ├── search/        # Hybrid, vector, keyword (BM25), reranker, temporal, HyDE
+│   │       ├── preprocessing/  # Content intelligence pipeline (entities, coref, temporal, relations, provenance)
+│   │       ├── search/        # Hybrid, vector, keyword (BM25), reranker, temporal, HyDE, decompose
 │   │       ├── neuroscience/  # Spreading activation, memory states, hippocampal index,
 │   │       │                  # synaptic tagging, importance signals, predictive retrieval,
 │   │       │                  # emotional memory, context memory, prospective memory
@@ -99,8 +100,9 @@ vestige/
 
 ## Cognitive Engine
 
-### Search Pipeline (7 stages)
+### Search Pipeline (8 stages)
 
+0. **Decompose (new)** — compound queries split into sub-queries (semicolons, question chains, conjunctions), searched independently, merged via max-score dedup. +43% MRR on compound queries (ACL 2025)
 1. **Overfetch** — 3x results from triple hybrid search (BM25 keyword + semantic vector + Reciprocal Rank Fusion)
    - Embeddings: nomic-embed-text-v1.5, 768D → 384D Matryoshka truncation, 8K token context
    - Vector index: USearch HNSW
@@ -113,9 +115,15 @@ vestige/
 
 ### Ingest Pipeline
 
+- **Preprocessing (new):** Content Intelligence Pipeline enriches content before storage:
+  1. Entity extraction (regex: URLs, emails, file paths, monetary, proper nouns → `entity:` auto-tags)
+  2. Coreference rewriting ("He said" → "John said" — single unambiguous referent only)
+  3. Temporal anchoring ("by next Friday" → `valid_until` via `natural-date-rs`)
+  4. Relation extraction (SVO triples: "John manages Auth Team" → knowledge graph edges)
+  5. Provenance assembly (session_id, agent, derivation chain, preprocessing artifacts)
 - **Pre:** 4-channel importance scoring (novelty/arousal/reward/attention) + intent detection → auto-tag
 - **Store:** Prediction Error Gating — similarity >0.92 → UPDATE, 0.75-0.92 → UPDATE/SUPERSEDE, <0.75 → CREATE
-- **Post:** Synaptic tagging (Frey & Morris 1997, 9h backward + 2h forward) + hippocampal indexing + cross-project recording
+- **Post:** Synaptic tagging (Frey & Morris 1997, 9h backward + 2h forward) + hippocampal indexing + relation edge creation + cross-project recording
 - **Active forgetting:** Contradiction detection via `has_negation_divergence` — conflicting memories flagged
 - **Prospective indexing:** New memories pre-indexed for anticipated future retrieval patterns
 

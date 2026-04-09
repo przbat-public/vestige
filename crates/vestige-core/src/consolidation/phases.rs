@@ -841,6 +841,7 @@ mod tests {
             temporal_level: None,
             has_embedding: None,
             embedding_model: None,
+            provenance: None,
         }
     }
 

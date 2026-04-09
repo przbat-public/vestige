@@ -233,6 +233,11 @@ impl McpServer {
                 description: Some("Garbage collect stale memories below retention threshold. Defaults to dry_run=true for safety.".to_string()),
                 input_schema: tools::maintenance::gc_schema(),
             },
+            ToolDescription {
+                name: "split_memories".to_string(),
+                description: Some("Find compound/multi-topic memories that should be split into atomic pieces. Returns memories with splitting suggestions. Use dry_run=false to auto-delete compounds after reading them. Then re-ingest each as separate atomic items via smart_ingest batch mode.".to_string()),
+                input_schema: tools::maintenance::split_memories_schema(),
+            },
             // ================================================================
             // AUTO-SAVE & DEDUP TOOLS (v1.3+)
             // ================================================================
@@ -631,6 +636,7 @@ impl McpServer {
             "backup" => tools::maintenance::execute_backup(&self.storage, request.arguments).await,
             "export" => tools::maintenance::execute_export(&self.storage, request.arguments).await,
             "gc" => tools::maintenance::execute_gc(&self.storage, request.arguments).await,
+            "split_memories" => tools::maintenance::execute_split_memories(&self.storage, request.arguments).await,
 
             // ================================================================
             // AUTO-SAVE & DEDUP TOOLS (v1.3+)
@@ -720,13 +726,12 @@ impl McpServer {
             let storage_clone = Arc::clone(&self.storage);
             let cognitive_clone = Arc::clone(&self.cognitive);
             tokio::spawn(async move {
-                // Expire labile reconsolidation windows
                 if let Ok(mut cog) = cognitive_clone.try_lock() {
                     let _expired = cog.reconsolidation.reconsolidate_expired();
                 }
 
-                match storage_clone.run_consolidation() {
-                    Ok(result) => {
+                match tokio::task::spawn_blocking(move || storage_clone.run_consolidation()).await {
+                    Ok(Ok(result)) => {
                         tracing::info!(
                             tool_calls = count,
                             decay_applied = result.decay_applied,
@@ -736,8 +741,11 @@ impl McpServer {
                             "Inline consolidation triggered (scheduler)"
                         );
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         tracing::warn!("Inline consolidation failed: {}", e);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Inline consolidation task panicked: {}", e);
                     }
                 }
             });
@@ -1212,8 +1220,8 @@ mod tests {
         let result = response.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
 
-        // v1.9: 21 tools (4 unified + 1 core + 2 temporal + 5 maintenance + 2 auto-save + 3 cognitive + 1 restore + 1 session_context + 2 autonomic)
-        assert_eq!(tools.len(), 21, "Expected exactly 21 tools in v1.9+");
+        // v3.2: 25 tools (4 unified + 1 core + 2 temporal + 6 maintenance + 2 auto-save + 3 cognitive + 1 restore + 1 session_context + 2 autonomic + 3 metacognitive)
+        assert_eq!(tools.len(), 25, "Expected exactly 25 tools in v3.2+");
 
         let tool_names: Vec<&str> = tools
             .iter()
@@ -1247,6 +1255,7 @@ mod tests {
         assert!(tool_names.contains(&"backup"));
         assert!(tool_names.contains(&"export"));
         assert!(tool_names.contains(&"gc"));
+        assert!(tool_names.contains(&"split_memories"));
 
         // Auto-save & dedup tools (v1.3)
         assert!(tool_names.contains(&"importance_score"));

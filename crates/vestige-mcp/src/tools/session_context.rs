@@ -447,8 +447,10 @@ struct TriggerData {
     #[serde(rename = "type")]
     trigger_type: Option<String>,
     at: Option<String>,
+    #[serde(alias = "in_minutes")]
     in_minutes: Option<i64>,
     codebase: Option<String>,
+    #[serde(alias = "file_pattern")]
     file_pattern: Option<String>,
     topic: Option<String>,
 }
@@ -484,6 +486,7 @@ mod tests {
             tags: tags.into_iter().map(|s| s.to_string()).collect(),
             valid_from: None,
             valid_until: None,
+            provenance: None,
         };
         let node = storage.ingest(input).unwrap();
         node.id
@@ -656,6 +659,7 @@ mod tests {
             tags: vec!["pattern".to_string(), "codebase:vestige".to_string()],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         };
         storage.ingest(input).unwrap();
 

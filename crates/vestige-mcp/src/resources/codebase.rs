@@ -55,9 +55,16 @@ async fn read_structure(storage: &Arc<Storage>) -> Result<String, String> {
             valid_at: None,
         };
 
-        for node in storage.recall(input).unwrap_or_default() {
-            if seen_ids.insert(node.id.clone()) {
-                all_nodes.push(node);
+        match storage.recall(input) {
+            Ok(nodes) => {
+                for node in nodes {
+                    if seen_ids.insert(node.id.clone()) {
+                        all_nodes.push(node);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(term = %term, error = %e, "Codebase resource: recall failed");
             }
         }
     }
@@ -105,7 +112,10 @@ async fn read_patterns(storage: &Arc<Storage>, query: Option<&str>) -> Result<St
         valid_at: None,
     };
 
-    let nodes = storage.recall(input).unwrap_or_default();
+    let nodes = storage.recall(input).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Codebase resource: patterns recall failed");
+        vec![]
+    });
 
     let patterns: Vec<serde_json::Value> = nodes
         .iter()
@@ -147,7 +157,10 @@ async fn read_decisions(storage: &Arc<Storage>, query: Option<&str>) -> Result<S
         valid_at: None,
     };
 
-    let nodes = storage.recall(input).unwrap_or_default();
+    let nodes = storage.recall(input).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Codebase resource: decisions recall failed");
+        vec![]
+    });
 
     let decisions: Vec<serde_json::Value> = nodes
         .iter()

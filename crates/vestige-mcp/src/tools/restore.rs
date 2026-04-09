@@ -46,6 +46,7 @@ struct RecallResult {
 #[serde(rename_all = "camelCase")]
 struct MemoryBackup {
     content: String,
+    #[serde(alias = "node_type")]
     node_type: Option<String>,
     tags: Option<Vec<String>>,
     source: Option<String>,
@@ -115,6 +116,7 @@ pub async fn execute(
             tags: memory.tags.clone().unwrap_or_default(),
             valid_from: None,
             valid_until: None,
+            provenance: None,
         };
 
         match storage.ingest(input) {

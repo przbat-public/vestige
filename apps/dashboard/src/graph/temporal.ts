@@ -38,32 +38,6 @@ export function filterByDate(nodes: GraphNode[], edges: GraphEdge[], cutoffDate:
 }
 
 /**
- * Calculate what retention would have been at a given historical date.
- * Uses FSRS-6 decay formula: R(t) = exp(-t / S)
- */
-export function retentionAtDate(
-  _currentRetention: number,
-  stability: number,
-  nodeCreatedAt: string,
-  targetDate: Date,
-  _now: Date = new Date(),
-): number {
-  void _currentRetention;
-  void _now;
-  const S = Math.max(stability, 0.1);
-  const targetMs = targetDate.getTime();
-  const createdMs = new Date(nodeCreatedAt).getTime();
-
-  if (targetMs < createdMs) return 0;
-
-  // Time elapsed from creation to target date (in days)
-  const elapsedDays = (targetMs - createdMs) / (24 * 60 * 60 * 1000);
-
-  // R(t) = e^(-t/S)
-  return Math.exp(-elapsedDays / S);
-}
-
-/**
  * Get the date range from a set of nodes (oldest to newest).
  */
 export function getDateRange(nodes: GraphNode[]): { oldest: Date; newest: Date } {

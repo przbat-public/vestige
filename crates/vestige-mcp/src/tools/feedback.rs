@@ -306,6 +306,7 @@ mod tests {
                 tags: vec![],
                 valid_from: None,
                 valid_until: None,
+                provenance: None,
             })
             .unwrap();
         node.id
@@ -546,6 +547,7 @@ mod tests {
                 tags: vec![],
                 valid_from: None,
                 valid_until: None,
+                provenance: None,
             })
             .unwrap();
         let node_id = node.id.clone();

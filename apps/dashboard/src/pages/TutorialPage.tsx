@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface StepProps {
   number: number;
@@ -40,7 +40,9 @@ interface ConceptProps {
 function Concept({ emoji, title, explanation }: ConceptProps) {
   return (
     <div className="flex gap-3 p-3 rounded-lg bg-card border border-border">
-      <span className="text-2xl flex-shrink-0" role="img">{emoji}</span>
+      <span className="text-2xl flex-shrink-0" role="img">
+        {emoji}
+      </span>
       <div>
         <div className="text-sm font-medium text-foreground">{title}</div>
         <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{explanation}</div>
@@ -85,27 +87,59 @@ export function TutorialPage() {
   const { t } = useTranslation();
 
   const steps = [
-    { title: t('tutorial.steps.graph.title'), description: t('tutorial.steps.graph.desc'), tip: t('tutorial.steps.graph.tip') },
-    { title: t('tutorial.steps.memories.title'), description: t('tutorial.steps.memories.desc'), tip: t('tutorial.steps.memories.tip') },
+    {
+      title: t('tutorial.steps.graph.title'),
+      description: t('tutorial.steps.graph.desc'),
+      tip: t('tutorial.steps.graph.tip'),
+    },
+    {
+      title: t('tutorial.steps.memories.title'),
+      description: t('tutorial.steps.memories.desc'),
+      tip: t('tutorial.steps.memories.tip'),
+    },
     { title: t('tutorial.steps.timeline.title'), description: t('tutorial.steps.timeline.desc') },
     { title: t('tutorial.steps.feed.title'), description: t('tutorial.steps.feed.desc') },
-    { title: t('tutorial.steps.explore.title'), description: t('tutorial.steps.explore.desc'), tip: t('tutorial.steps.explore.tip') },
+    {
+      title: t('tutorial.steps.explore.title'),
+      description: t('tutorial.steps.explore.desc'),
+      tip: t('tutorial.steps.explore.tip'),
+    },
     { title: t('tutorial.steps.intentions.title'), description: t('tutorial.steps.intentions.desc') },
     { title: t('tutorial.steps.stats.title'), description: t('tutorial.steps.stats.desc') },
-    { title: t('tutorial.steps.settings.title'), description: t('tutorial.steps.settings.desc'), tip: t('tutorial.steps.settings.tip') },
+    {
+      title: t('tutorial.steps.settings.title'),
+      description: t('tutorial.steps.settings.desc'),
+      tip: t('tutorial.steps.settings.tip'),
+    },
   ];
 
   const concepts = [
     { emoji: '🧠', title: t('tutorial.concepts.retention.title'), explanation: t('tutorial.concepts.retention.desc') },
-    { emoji: '💪', title: t('tutorial.concepts.dualStrength.title'), explanation: t('tutorial.concepts.dualStrength.desc') },
+    {
+      emoji: '💪',
+      title: t('tutorial.concepts.dualStrength.title'),
+      explanation: t('tutorial.concepts.dualStrength.desc'),
+    },
     { emoji: '😴', title: t('tutorial.concepts.dream.title'), explanation: t('tutorial.concepts.dream.desc') },
-    { emoji: '🔗', title: t('tutorial.concepts.connections.title'), explanation: t('tutorial.concepts.connections.desc') },
+    {
+      emoji: '🔗',
+      title: t('tutorial.concepts.connections.title'),
+      explanation: t('tutorial.concepts.connections.desc'),
+    },
     { emoji: '📉', title: t('tutorial.concepts.decay.title'), explanation: t('tutorial.concepts.decay.desc') },
     { emoji: '🏷️', title: t('tutorial.concepts.types.title'), explanation: t('tutorial.concepts.types.desc') },
-    { emoji: '⏰', title: t('tutorial.concepts.intentions.title'), explanation: t('tutorial.concepts.intentions.desc') },
+    {
+      emoji: '⏰',
+      title: t('tutorial.concepts.intentions.title'),
+      explanation: t('tutorial.concepts.intentions.desc'),
+    },
     { emoji: '🔍', title: t('tutorial.concepts.search.title'), explanation: t('tutorial.concepts.search.desc') },
     { emoji: '🪞', title: t('tutorial.concepts.reflect.title'), explanation: t('tutorial.concepts.reflect.desc') },
-    { emoji: '📊', title: t('tutorial.concepts.confidence.title'), explanation: t('tutorial.concepts.confidence.desc') },
+    {
+      emoji: '📊',
+      title: t('tutorial.concepts.confidence.title'),
+      explanation: t('tutorial.concepts.confidence.desc'),
+    },
   ];
 
   const analogies = [
@@ -130,9 +164,7 @@ export function TutorialPage() {
       {/* Header */}
       <div>
         <h1 className="text-xl font-bold text-foreground">{t('tutorial.title')}</h1>
-        <p className="text-sm text-muted-foreground mt-1 leading-relaxed max-w-2xl">
-          {t('tutorial.intro')}
-        </p>
+        <p className="text-sm text-muted-foreground mt-1 leading-relaxed max-w-2xl">{t('tutorial.intro')}</p>
       </div>
 
       {/* What is Vestige */}
@@ -166,38 +198,58 @@ export function TutorialPage() {
         <CardContent className="space-y-4">
           <div className="space-y-3">
             <div className="flex gap-3 items-start">
-              <span className="w-7 h-7 rounded-full bg-emerald-500/15 text-emerald-500 text-xs font-bold flex items-center justify-center flex-shrink-0">1</span>
+              <span className="w-7 h-7 rounded-full bg-emerald-500/15 text-emerald-500 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                1
+              </span>
               <div>
                 <div className="text-sm font-medium text-foreground">{t('tutorial.howMemoryWorks.s1.title')}</div>
-                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{t('tutorial.howMemoryWorks.s1.desc')}</div>
+                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">
+                  {t('tutorial.howMemoryWorks.s1.desc')}
+                </div>
               </div>
             </div>
             <div className="flex gap-3 items-start">
-              <span className="w-7 h-7 rounded-full bg-blue-500/15 text-blue-500 text-xs font-bold flex items-center justify-center flex-shrink-0">2</span>
+              <span className="w-7 h-7 rounded-full bg-blue-500/15 text-blue-500 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                2
+              </span>
               <div>
                 <div className="text-sm font-medium text-foreground">{t('tutorial.howMemoryWorks.s2.title')}</div>
-                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{t('tutorial.howMemoryWorks.s2.desc')}</div>
+                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">
+                  {t('tutorial.howMemoryWorks.s2.desc')}
+                </div>
               </div>
             </div>
             <div className="flex gap-3 items-start">
-              <span className="w-7 h-7 rounded-full bg-violet-500/15 text-violet-500 text-xs font-bold flex items-center justify-center flex-shrink-0">3</span>
+              <span className="w-7 h-7 rounded-full bg-violet-500/15 text-violet-500 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                3
+              </span>
               <div>
                 <div className="text-sm font-medium text-foreground">{t('tutorial.howMemoryWorks.s3.title')}</div>
-                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{t('tutorial.howMemoryWorks.s3.desc')}</div>
+                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">
+                  {t('tutorial.howMemoryWorks.s3.desc')}
+                </div>
               </div>
             </div>
             <div className="flex gap-3 items-start">
-              <span className="w-7 h-7 rounded-full bg-amber-500/15 text-amber-500 text-xs font-bold flex items-center justify-center flex-shrink-0">4</span>
+              <span className="w-7 h-7 rounded-full bg-amber-500/15 text-amber-500 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                4
+              </span>
               <div>
                 <div className="text-sm font-medium text-foreground">{t('tutorial.howMemoryWorks.s4.title')}</div>
-                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{t('tutorial.howMemoryWorks.s4.desc')}</div>
+                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">
+                  {t('tutorial.howMemoryWorks.s4.desc')}
+                </div>
               </div>
             </div>
             <div className="flex gap-3 items-start">
-              <span className="w-7 h-7 rounded-full bg-rose-500/15 text-rose-500 text-xs font-bold flex items-center justify-center flex-shrink-0">5</span>
+              <span className="w-7 h-7 rounded-full bg-rose-500/15 text-rose-500 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                5
+              </span>
               <div>
                 <div className="text-sm font-medium text-foreground">{t('tutorial.howMemoryWorks.s5.title')}</div>
-                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{t('tutorial.howMemoryWorks.s5.desc')}</div>
+                <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">
+                  {t('tutorial.howMemoryWorks.s5.desc')}
+                </div>
               </div>
             </div>
           </div>
@@ -270,16 +322,46 @@ export function TutorialPage() {
           <CardTitle>{t('tutorial.glossary.title')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-xs">
-          <div><span className="font-medium text-foreground">Retention</span> — <span className="text-muted-foreground">{t('tutorial.glossary.retention')}</span></div>
-          <div><span className="font-medium text-foreground">Storage Strength</span> — <span className="text-muted-foreground">{t('tutorial.glossary.storage')}</span></div>
-          <div><span className="font-medium text-foreground">Retrieval Strength</span> — <span className="text-muted-foreground">{t('tutorial.glossary.retrieval')}</span></div>
-          <div><span className="font-medium text-foreground">FSRS</span> — <span className="text-muted-foreground">{t('tutorial.glossary.fsrs')}</span></div>
-          <div><span className="font-medium text-foreground">Embedding</span> — <span className="text-muted-foreground">{t('tutorial.glossary.embedding')}</span></div>
-          <div><span className="font-medium text-foreground">Dream Cycle</span> — <span className="text-muted-foreground">{t('tutorial.glossary.dream')}</span></div>
-          <div><span className="font-medium text-foreground">Spreading Activation</span> — <span className="text-muted-foreground">{t('tutorial.glossary.activation')}</span></div>
-          <div><span className="font-medium text-foreground">Consolidation</span> — <span className="text-muted-foreground">{t('tutorial.glossary.consolidation')}</span></div>
-          <div><span className="font-medium text-foreground">Node Type</span> — <span className="text-muted-foreground">{t('tutorial.glossary.nodeType')}</span></div>
-          <div><span className="font-medium text-foreground">MCP</span> — <span className="text-muted-foreground">{t('tutorial.glossary.mcp')}</span></div>
+          <div>
+            <span className="font-medium text-foreground">Retention</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.retention')}</span>
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Storage Strength</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.storage')}</span>
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Retrieval Strength</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.retrieval')}</span>
+          </div>
+          <div>
+            <span className="font-medium text-foreground">FSRS</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.fsrs')}</span>
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Embedding</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.embedding')}</span>
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Dream Cycle</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.dream')}</span>
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Spreading Activation</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.activation')}</span>
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Consolidation</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.consolidation')}</span>
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Node Type</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.nodeType')}</span>
+          </div>
+          <div>
+            <span className="font-medium text-foreground">MCP</span> —{' '}
+            <span className="text-muted-foreground">{t('tutorial.glossary.mcp')}</span>
+          </div>
         </CardContent>
       </Card>
 

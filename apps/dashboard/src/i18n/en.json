@@ -44,7 +44,8 @@
     "darkMode": "Dark mode",
     "score": "Score",
     "more": "+{{count}} more",
-    "error": "Something went wrong"
+    "error": "Something went wrong",
+    "fetchError": "Failed to load data. Check your connection and try again."
   },
   "status": {
     "connected": "Connected",
@@ -61,7 +62,8 @@
     "selected": "Selected",
     "loadingGraph": "Building your memory map...",
     "emptyGraph": "No memories to visualize yet",
-    "emptyHint": "Start saving memories to see your knowledge graph grow"
+    "emptyHint": "Start saving memories to see your knowledge graph grow",
+    "maxNodes": "Maximum nodes to display"
   },
   "memories": {
     "title": "Memories",

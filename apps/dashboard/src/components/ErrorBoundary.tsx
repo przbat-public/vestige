@@ -42,7 +42,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 this.setState({ hasError: false, error: null });
                 window.location.href = '/dashboard/';
               }}
-              className="px-4 py-2 rounded-xl bg-primary/20 text-primary text-sm hover:bg-primary/30 transition"
+              className="inline-flex items-center justify-center gap-2 rounded-xl text-sm font-medium px-4 py-2 bg-primary/20 text-primary hover:bg-primary/30 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {t('error.reload')}
             </button>

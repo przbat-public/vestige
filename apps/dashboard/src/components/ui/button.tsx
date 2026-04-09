@@ -1,4 +1,4 @@
-import { type VariantProps, cva } from 'class-variance-authority';
+import { cva, type VariantProps } from 'class-variance-authority';
 import { forwardRef } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -13,7 +13,8 @@ const buttonVariants = cva(
         ghost: 'hover:bg-accent hover:text-accent-foreground',
         success: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25',
         danger: 'bg-red-500/15 text-red-600 dark:text-red-400 hover:bg-red-500/25',
-        dream: 'bg-violet-500/15 text-violet-600 dark:text-violet-400 hover:bg-violet-500/25 border border-violet-500/20',
+        dream:
+          'bg-violet-500/15 text-violet-600 dark:text-violet-400 hover:bg-violet-500/25 border border-violet-500/20',
       },
       size: {
         sm: 'h-8 px-3 text-xs',

@@ -31,6 +31,7 @@ fn make_ingest_input(
         source,
         valid_from,
         valid_until,
+        provenance: None,
     }
 }
 

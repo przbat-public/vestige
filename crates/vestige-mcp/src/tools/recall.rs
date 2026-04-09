@@ -41,6 +41,7 @@ pub fn schema() -> Value {
 struct RecallArgs {
     query: String,
     limit: Option<i32>,
+    #[serde(alias = "min_retention")]
     min_retention: Option<f64>,
 }
 
@@ -122,6 +123,7 @@ mod tests {
             tags: vec![],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         };
         let node = storage.ingest(input).unwrap();
         node.id

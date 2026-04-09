@@ -8,7 +8,7 @@ use serde::Serialize;
 
 /// Every cognitive operation emits one of these events.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", content = "data")]
+#[serde(tag = "type", content = "data", rename_all_fields = "camelCase")]
 pub enum VestigeEvent {
     // -- Memory lifecycle --
     MemoryCreated {

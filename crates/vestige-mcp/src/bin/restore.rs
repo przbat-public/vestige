@@ -60,6 +60,7 @@ fn main() -> anyhow::Result<()> {
             tags: memory.tags.unwrap_or_default(),
             valid_from: None,
             valid_until: None,
+            provenance: None,
         };
 
         match storage.ingest(input) {

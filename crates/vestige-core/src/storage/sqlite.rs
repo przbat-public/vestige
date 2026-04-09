@@ -409,6 +409,10 @@ impl Storage {
         let next_review = now + Duration::days(fsrs_state.scheduled_days as i64);
         let valid_from_str = input.valid_from.map(|dt| dt.to_rfc3339());
         let valid_until_str = input.valid_until.map(|dt| dt.to_rfc3339());
+        let provenance_json = input.provenance
+            .as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "{}".to_string()))
+            .unwrap_or_else(|| "{}".to_string());
 
         {
             let writer = self.writer.lock()
@@ -419,13 +423,15 @@ impl Storage {
                     stability, difficulty, reps, lapses, learning_state,
                     storage_strength, retrieval_strength, retention_strength,
                     sentiment_score, sentiment_magnitude, next_review, scheduled_days,
-                    source, tags, valid_from, valid_until, has_embedding, embedding_model
+                    source, tags, valid_from, valid_until, has_embedding, embedding_model,
+                    provenance
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6,
                     ?7, ?8, ?9, ?10, ?11,
                     ?12, ?13, ?14,
                     ?15, ?16, ?17, ?18,
-                    ?19, ?20, ?21, ?22, ?23, ?24
+                    ?19, ?20, ?21, ?22, ?23, ?24,
+                    ?25
                 )",
                 params![
                     id,
@@ -452,6 +458,7 @@ impl Storage {
                     valid_until_str,
                     0,
                     Option::<String>::None,
+                    provenance_json,
                 ],
             )?;
         }
@@ -575,7 +582,11 @@ impl Storage {
                     superseded_id: None,
                     similarity: None,
                     prediction_error: Some(prediction_error),
-                    reason: format!("Created new memory: {:?}. Related: {:?}", reason, related_memory_ids),
+                    reason: if related_memory_ids.is_empty() {
+                        format!("Created new memory: {:?}", reason)
+                    } else {
+                        format!("Created new memory: {:?}. Considered (not linked): {:?}", reason, related_memory_ids)
+                    },
                 })
             }
             GateDecision::Update { target_id, similarity, update_type, prediction_error } => {
@@ -883,7 +894,10 @@ impl Storage {
     /// Convert a row to KnowledgeNode
     fn row_to_node(row: &rusqlite::Row) -> rusqlite::Result<KnowledgeNode> {
         let tags_json: String = row.get("tags")?;
-        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_else(|e| {
+            tracing::warn!(raw = %tags_json, error = %e, "Corrupt tags JSON in node row");
+            vec![]
+        });
 
         let created_at: String = row.get("created_at")?;
         let updated_at: String = row.get("updated_at")?;
@@ -948,6 +962,9 @@ impl Storage {
             emotional_valence: row.get("emotional_valence").ok(),
             flashbulb: row.get::<_, Option<bool>>("flashbulb").ok().flatten(),
             temporal_level: row.get::<_, Option<String>>("temporal_level").ok().flatten(),
+            // v3.1.0 provenance
+            provenance: row.get::<_, Option<String>>("provenance").ok().flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
         })
     }
 
@@ -2281,7 +2298,10 @@ impl Storage {
         // 8. DreamEngine 4-phase cycle (NREM1 → NREM3 → REM → Integration)
         let mut _insights_generated = 0i64;
         {
-            let recent = self.get_all_nodes(100, 0).unwrap_or_default();
+            let recent = self.get_all_nodes(100, 0).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Consolidation: failed to load nodes for dream engine");
+                vec![]
+            });
             if recent.len() >= 5 {
                 let engine = crate::consolidation::phases::DreamEngine::new();
                 let mut emotional = crate::neuroscience::emotional_memory::EmotionalMemory::new();
@@ -2303,7 +2323,9 @@ impl Storage {
                         feedback: None,
                         applied_count: 0,
                     };
-                    let _ = self.save_insight(&record);
+                    if let Err(e) = self.save_insight(&record) {
+                        tracing::warn!(error = %e, insight = %insight.insight, "Failed to persist dream insight");
+                    }
                 }
                 _insights_generated = result.insights.len() as i64;
 
@@ -2325,7 +2347,14 @@ impl Storage {
                         last_activated: now,
                         activation_count: 1,
                     };
-                    let _ = self.save_connection(&record);
+                    if let Err(e) = self.save_connection(&record) {
+                        tracing::warn!(
+                            error = %e,
+                            source = %conn.memory_a_id,
+                            target = %conn.memory_b_id,
+                            "Failed to persist creative connection"
+                        );
+                    }
                 }
             }
         }
@@ -2334,7 +2363,10 @@ impl Storage {
         let mut _memories_compressed = 0i64;
         {
             let mut compressor = crate::advanced::compression::MemoryCompressor::new();
-            let all_nodes = self.get_all_nodes(500, 0).unwrap_or_default();
+            let all_nodes = self.get_all_nodes(500, 0).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Consolidation: failed to load nodes for compression");
+                vec![]
+            });
             let thirty_days_ago = Utc::now() - Duration::days(30);
             let old_memories: Vec<crate::advanced::compression::MemoryForCompression> = all_nodes
                 .iter()
@@ -2368,7 +2400,10 @@ impl Storage {
         let _state_transitions: i64;
         {
             let service = crate::neuroscience::memory_states::StateUpdateService::new();
-            let all_nodes = self.get_all_nodes(500, 0).unwrap_or_default();
+            let all_nodes = self.get_all_nodes(500, 0).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Consolidation: failed to load nodes for state transitions");
+                vec![]
+            });
             let mut lifecycles: Vec<crate::neuroscience::memory_states::MemoryLifecycle> = all_nodes
                 .iter()
                 .map(|n| {
@@ -3086,7 +3121,10 @@ impl Storage {
 
     fn row_to_intention(row: &rusqlite::Row) -> rusqlite::Result<IntentionRecord> {
         let tags_json: String = row.get("tags")?;
-        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_else(|e| {
+            tracing::warn!(raw = %tags_json, error = %e, "Corrupt tags JSON in intention row");
+            vec![]
+        });
         let related_json: String = row.get("related_memories")?;
         let related: Vec<String> = serde_json::from_str(&related_json).unwrap_or_default();
 
@@ -3203,9 +3241,15 @@ impl Storage {
 
     fn row_to_insight(row: &rusqlite::Row) -> rusqlite::Result<InsightRecord> {
         let source_json: String = row.get("source_memories")?;
-        let source_memories: Vec<String> = serde_json::from_str(&source_json).unwrap_or_default();
+        let source_memories: Vec<String> = serde_json::from_str(&source_json).unwrap_or_else(|e| {
+            tracing::warn!(raw = %source_json, error = %e, "Corrupt source_memories JSON in insight row");
+            vec![]
+        });
         let tags_json: String = row.get("tags")?;
-        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_else(|e| {
+            tracing::warn!(raw = %tags_json, error = %e, "Corrupt tags JSON in insight row");
+            vec![]
+        });
 
         Ok(InsightRecord {
             id: row.get("id")?,
@@ -3592,6 +3636,42 @@ impl Storage {
         Ok(result.and_then(|s| {
             DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))
         }))
+    }
+
+    /// Get recent dream history records
+    pub fn get_dream_history(&self, limit: i32) -> Result<Vec<DreamHistoryRecord>> {
+        let reader = self.reader.lock()
+            .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
+        let mut stmt = reader.prepare(
+            "SELECT dreamed_at, duration_ms, memories_replayed, connections_found,
+                    insights_generated, memories_strengthened, memories_compressed,
+                    phase_nrem1_ms, phase_nrem3_ms, phase_rem_ms, phase_integration_ms,
+                    summaries_generated, emotional_memories_processed, creative_connections_found
+             FROM dream_history ORDER BY dreamed_at DESC LIMIT ?1"
+        )?;
+        let records = stmt.query_map(params![limit], |row| {
+            let dreamed_str: String = row.get(0)?;
+            let dreamed_at = DateTime::parse_from_rfc3339(&dreamed_str)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+            Ok(DreamHistoryRecord {
+                dreamed_at,
+                duration_ms: row.get(1)?,
+                memories_replayed: row.get(2)?,
+                connections_found: row.get(3)?,
+                insights_generated: row.get(4)?,
+                memories_strengthened: row.get(5)?,
+                memories_compressed: row.get(6)?,
+                phase_nrem1_ms: row.get(7)?,
+                phase_nrem3_ms: row.get(8)?,
+                phase_rem_ms: row.get(9)?,
+                phase_integration_ms: row.get(10)?,
+                summaries_generated: row.get(11)?,
+                emotional_memories_processed: row.get(12)?,
+                creative_connections_found: row.get(13)?,
+            })
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(records)
     }
 
     /// Count memories created since a given timestamp

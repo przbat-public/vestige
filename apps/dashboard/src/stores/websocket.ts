@@ -52,8 +52,8 @@ function connect() {
       const parsed: VestigeEvent = JSON.parse(event.data);
       if (parsed.type === 'Heartbeat') {
         useWebSocket.setState({
-          memoryCount: (parsed.data?.memory_count as number) ?? 0,
-          avgRetention: (parsed.data?.avg_retention as number) ?? 0,
+          memoryCount: (parsed.data?.memoryCount as number) ?? 0,
+          avgRetention: (parsed.data?.avgRetention as number) ?? 0,
         });
         return;
       }
@@ -62,7 +62,7 @@ function connect() {
         events: [identified, ...s.events].slice(0, MAX_EVENTS),
       }));
     } catch {
-      // ignore malformed
+      console.warn('[vestige] Malformed WebSocket message:', event.data);
     }
   };
 

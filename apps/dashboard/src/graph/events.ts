@@ -93,19 +93,17 @@ export function mapEventToEffects(event: VestigeEvent, ctx: GraphMutationContext
     case 'MemoryCreated': {
       const data = event.data as {
         id?: string;
-        content?: string;
-        node_type?: string;
+        contentPreview?: string;
+        nodeType?: string;
         tags?: string[];
-        retention?: number;
       };
       if (!data.id) break;
 
-      // Build a GraphNode from event data
       const newNode: GraphNode = {
         id: data.id,
-        label: (data.content ?? '').slice(0, 60),
-        type: data.node_type ?? 'fact',
-        retention: data.retention ?? 0.9,
+        label: (data.contentPreview ?? '').slice(0, 60),
+        type: data.nodeType ?? 'fact',
+        retention: 0.9,
         tags: data.tags ?? [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -141,35 +139,33 @@ export function mapEventToEffects(event: VestigeEvent, ctx: GraphMutationContext
 
     case 'ConnectionDiscovered': {
       const data = event.data as {
-        source_id?: string;
-        target_id?: string;
+        sourceId?: string;
+        targetId?: string;
         weight?: number;
-        connection_type?: string;
+        connectionType?: string;
       };
-      if (!data.source_id || !data.target_id) break;
+      if (!data.sourceId || !data.targetId) break;
 
-      const srcPos = nodePositions.get(data.source_id);
-      const tgtPos = nodePositions.get(data.target_id);
+      const srcPos = nodePositions.get(data.sourceId);
+      const tgtPos = nodePositions.get(data.targetId);
 
       const newEdge: GraphEdge = {
-        source: data.source_id,
-        target: data.target_id,
+        source: data.sourceId,
+        target: data.targetId,
         weight: data.weight ?? 0.5,
-        type: data.connection_type ?? 'semantic',
+        type: data.connectionType ?? 'semantic',
       };
 
-      // Add edge with growth animation
       edgeManager.addEdge(newEdge, nodePositions);
 
-      // Cyan flash + pulse both endpoints
       if (srcPos && tgtPos) {
         effects.createConnectionFlash(srcPos, tgtPos, new THREE.Color(0x00d4ff));
       }
-      if (data.source_id && nodeMeshMap.has(data.source_id)) {
-        effects.addPulse(data.source_id, 1.0, new THREE.Color(0x00d4ff), 0.02);
+      if (data.sourceId && nodeMeshMap.has(data.sourceId)) {
+        effects.addPulse(data.sourceId, 1.0, new THREE.Color(0x00d4ff), 0.02);
       }
-      if (data.target_id && nodeMeshMap.has(data.target_id)) {
-        effects.addPulse(data.target_id, 1.0, new THREE.Color(0x00d4ff), 0.02);
+      if (data.targetId && nodeMeshMap.has(data.targetId)) {
+        effects.addPulse(data.targetId, 1.0, new THREE.Color(0x00d4ff), 0.02);
       }
 
       onMutation({ type: 'edgeAdded', edge: newEdge });
@@ -202,11 +198,11 @@ export function mapEventToEffects(event: VestigeEvent, ctx: GraphMutationContext
     }
 
     case 'MemoryPromoted': {
-      const data = event.data as { id?: string; new_retention?: number };
+      const data = event.data as { id?: string; newRetention?: number };
       const promoId = data?.id;
       if (!promoId) break;
 
-      const newRetention = data.new_retention ?? 0.95;
+      const newRetention = data.newRetention ?? 0.95;
 
       if (nodeMeshMap.has(promoId)) {
         // Grow the node
@@ -226,11 +222,11 @@ export function mapEventToEffects(event: VestigeEvent, ctx: GraphMutationContext
     }
 
     case 'MemoryDemoted': {
-      const data = event.data as { id?: string; new_retention?: number };
+      const data = event.data as { id?: string; newRetention?: number };
       const demoteId = data?.id;
       if (!demoteId) break;
 
-      const newRetention = data.new_retention ?? 0.3;
+      const newRetention = data.newRetention ?? 0.3;
 
       if (nodeMeshMap.has(demoteId)) {
         // Shrink the node
@@ -274,7 +270,7 @@ export function mapEventToEffects(event: VestigeEvent, ctx: GraphMutationContext
     }
 
     case 'DreamProgress': {
-      const memoryId = (event.data as { memory_id?: string })?.memory_id;
+      const memoryId = (event.data as { memoryId?: string })?.memoryId;
       if (memoryId && nodeMeshMap.has(memoryId)) {
         effects.addPulse(memoryId, 1.5, new THREE.Color(0xc084fc), 0.01);
       }
@@ -303,11 +299,11 @@ export function mapEventToEffects(event: VestigeEvent, ctx: GraphMutationContext
     }
 
     case 'ActivationSpread': {
-      const spreadData = event.data as { source_id?: string; target_ids?: string[] };
-      if (spreadData.source_id && spreadData.target_ids) {
-        const srcPos = nodePositions.get(spreadData.source_id);
+      const spreadData = event.data as { sourceId?: string; activatedIds?: string[] };
+      if (spreadData.sourceId && spreadData.activatedIds) {
+        const srcPos = nodePositions.get(spreadData.sourceId);
         if (srcPos) {
-          for (const targetId of spreadData.target_ids) {
+          for (const targetId of spreadData.activatedIds) {
             const tgtPos = nodePositions.get(targetId);
             if (tgtPos) {
               effects.createConnectionFlash(srcPos, tgtPos, new THREE.Color(0x14e8c6));

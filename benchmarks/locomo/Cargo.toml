@@ -1,0 +1,19 @@
+[package]
+name = "vestige-locomo-bench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "LoCoMo benchmark harness for Vestige — measures long-term conversational memory quality"
+
+[[bin]]
+name = "locomo-bench"
+path = "src/main.rs"
+
+[dependencies]
+vestige-core = { path = "../../crates/vestige-core", features = ["embeddings", "vector-search", "preprocessing"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = "3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

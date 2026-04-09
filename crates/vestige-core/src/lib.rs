@@ -100,6 +100,10 @@ pub mod advanced;
 /// Codebase memory - Vestige's killer differentiator for AI code understanding
 pub mod codebase;
 
+#[cfg(feature = "preprocessing")]
+#[cfg_attr(docsrs, doc(cfg(feature = "preprocessing")))]
+pub mod preprocessing;
+
 /// Neuroscience-inspired memory mechanisms
 ///
 /// Implements cutting-edge neuroscience findings including:

@@ -76,7 +76,7 @@ export class EdgeManager {
     geo.setAttribute('position', attr);
 
     const t = this.theme;
-    const baseOp = Math.min(t.edgeBaseOpacity + edge.weight * 0.4, 0.6);
+    const baseOp = Math.min(t.edgeBaseOpacity + edge.weight * 0.35, 0.85);
     const mat = new THREE.LineBasicMaterial({
       color: t.edgeColor,
       transparent: true,

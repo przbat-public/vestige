@@ -13,7 +13,7 @@ use include_dir::{include_dir, Dir};
 /// The build output goes to apps/dashboard/build/
 static DASHBOARD_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../apps/dashboard/build");
 
-/// Serve the SvelteKit dashboard index
+/// Serve the React dashboard index
 pub async fn serve_dashboard_spa() -> impl IntoResponse {
     match DASHBOARD_DIR.get_file("index.html") {
         Some(file) => Html(
@@ -25,7 +25,7 @@ pub async fn serve_dashboard_spa() -> impl IntoResponse {
     }
 }
 
-/// Serve static assets from the embedded SvelteKit build
+/// Serve static assets from the embedded React/Vite build
 pub async fn serve_dashboard_asset(Path(path): Path<String>) -> Response {
     // Try exact path
     if let Some(file) = DASHBOARD_DIR.get_file(&path) {

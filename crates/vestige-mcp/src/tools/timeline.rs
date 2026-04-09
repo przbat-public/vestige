@@ -204,6 +204,7 @@ mod tests {
             tags: vec!["timeline-test".to_string()],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         })
         .unwrap();
     }

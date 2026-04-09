@@ -243,7 +243,9 @@ pub async fn execute(
             feedback: None,
             applied_count: 0,
         };
-        let _ = storage.save_insight(&record);
+        if let Err(e) = storage.save_insight(&record) {
+            tracing::warn!(error = %e, "Failed to persist reflection insight");
+        }
     }
 
     Ok(serde_json::json!({

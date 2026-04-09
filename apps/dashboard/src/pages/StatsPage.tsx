@@ -1,17 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { StatCard } from '@/components/ui/stat-card';
-import { ProgressBar } from '@/components/ui/progress-bar';
+import { Alert } from '@/components/ui/alert';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
+import { ProgressBar } from '@/components/ui/progress-bar';
+import { StatCard } from '@/components/ui/stat-card';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
-import { retentionColor, NODE_TYPE_COLORS } from '@/types';
+import { NODE_TYPE_COLORS, retentionColor } from '@/types';
 
 export function StatsPage() {
   const { t } = useTranslation();
-  const { data: stats } = useQuery({ queryKey: queryKeys.stats, queryFn: api.stats });
-  const { data: health } = useQuery({ queryKey: queryKeys.health, queryFn: api.health });
+  const { data: stats, isError: statsError } = useQuery({ queryKey: queryKeys.stats, queryFn: api.stats });
+  const { data: health, isError: healthError } = useQuery({ queryKey: queryKeys.health, queryFn: api.health });
   const { data: distribution } = useQuery({
     queryKey: queryKeys.retentionDistribution,
     queryFn: api.retentionDistribution,
@@ -24,6 +25,7 @@ export function StatsPage() {
     empty: '#6b7280',
   };
 
+  if (statsError && healthError) return <Alert variant="destructive" className="m-4">{t('common.fetchError')}</Alert>;
   if (!stats && !health) return <LoadingSpinner label={t('common.loading')} className="h-full" />;
 
   return (
@@ -33,7 +35,10 @@ export function StatsPage() {
       {health && (
         <Card>
           <div className="flex items-center gap-3">
-            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: healthColor[health.status] || '#6b7280' }} />
+            <span
+              className="w-3 h-3 rounded-full"
+              style={{ backgroundColor: healthColor[health.status] || '#6b7280' }}
+            />
             <span className="text-sm font-medium text-foreground capitalize">{health.status}</span>
             <span className="text-xs text-muted-foreground">v{health.version}</span>
           </div>
@@ -90,7 +95,10 @@ export function StatsPage() {
             <div className="space-y-1">
               {distribution.endangered.slice(0, 5).map((m) => (
                 <div key={m.id} className="text-xs text-muted-foreground truncate">
-                  {m.content.slice(0, 60)} — <span style={{ color: retentionColor(m.retentionStrength) }}>{(m.retentionStrength * 100).toFixed(0)}%</span>
+                  {m.content.slice(0, 60)} —{' '}
+                  <span style={{ color: retentionColor(m.retentionStrength) }}>
+                    {(m.retentionStrength * 100).toFixed(0)}%
+                  </span>
                 </div>
               ))}
             </div>
@@ -107,7 +115,10 @@ export function StatsPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
               {Object.entries(distribution.byType).map(([type, count]) => (
                 <div key={type} className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: NODE_TYPE_COLORS[type] || '#8B95A5' }} />
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: NODE_TYPE_COLORS[type] || '#8B95A5' }}
+                  />
                   <span className="text-muted-foreground">{t(`nodeTypes.${type}`, { defaultValue: type })}</span>
                   <span className="text-foreground font-medium tabular-nums ml-auto">{count}</span>
                 </div>

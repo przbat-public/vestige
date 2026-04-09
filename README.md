@@ -28,6 +28,24 @@ Built on 130 years of memory research — FSRS-6 spaced repetition, prediction e
 
 ---
 
+## What's New in v3.2.0 "Content Intelligence"
+
+### Content Intelligence Pipeline (new in v3.2)
+Every memory ingested through `smart_ingest` is now automatically enriched:
+- **Entity extraction** — detects URLs, emails, file paths, monetary values, proper nouns → auto-tags (`entity:john-smith`)
+- **Coreference rewriting** — "He said X" → "John said X" (makes memories self-contained for better search recall)
+- **Temporal anchoring** — "by next Friday" resolves to absolute `valid_until` dates; "starting Monday" → `valid_from`
+- **Relation extraction** — "John manages Auth Team" → knowledge graph edge (feeds spreading activation from day one)
+- **Provenance tracking** — every memory records session ID, agent, derivation chain, and preprocessing artifacts
+
+All local heuristic/regex — zero model downloads, sub-millisecond latency (98µs per memory).
+
+### Compound Query Decomposition
+Queries like "auth security; infrastructure costs" or "Who worked on FSRS? And what about dream consolidation?" are automatically split, searched independently, and merged. **+43% MRR improvement** on compound queries.
+
+### Provenance in Search Results
+Use `detail_level: "full"` to see the full provenance trail — which agent created the memory, what entities were extracted, what temporal anchors were found, and what relations were extracted.
+
 ## What's New in v3.1.0 "Metacognitive Expansion"
 
 ### Metacognitive Tools (new in v3.1)

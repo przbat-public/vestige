@@ -144,7 +144,7 @@ export class EdgeParticleSystem {
       const fi = Math.min(t * 5, 1);
       const fo = Math.min((1 - t) * 5, 1);
       const focusMul = p.edgeIdx < efa.length ? efa[p.edgeIdx] : 1.0;
-      aa[i] = fi * fo * 0.7 * focusMul;
+      aa[i] = fi * fo * 0.9 * focusMul;
     }
 
     this.posAttr.needsUpdate = true;

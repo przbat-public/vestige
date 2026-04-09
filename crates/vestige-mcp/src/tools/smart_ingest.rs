@@ -36,7 +36,7 @@ pub fn schema() -> Value {
         "properties": {
             "content": {
                 "type": "string",
-                "description": "The content to remember. Will be compared against existing memories. (Single mode)"
+                "description": "The content to remember. MUST be atomic: one fact, one decision, one event per call. Multi-topic content triggers compound_content_warning — split into batch items instead. (Single mode)"
             },
             "node_type": {
                 "type": "string",
@@ -56,6 +56,14 @@ pub fn schema() -> Value {
                 "type": "boolean",
                 "description": "Force creation of a new memory even if similar content exists",
                 "default": false
+            },
+            "session_id": {
+                "type": "string",
+                "description": "Session/conversation identifier for provenance tracking"
+            },
+            "agent": {
+                "type": "string",
+                "description": "Agent identifier (e.g. 'cursor', 'claude') for provenance tracking"
             },
             "items": {
                 "type": "array",
@@ -103,8 +111,14 @@ struct SmartIngestArgs {
     node_type: Option<String>,
     tags: Option<Vec<String>>,
     source: Option<String>,
+    #[serde(alias = "force_create")]
     force_create: Option<bool>,
     items: Option<Vec<BatchItem>>,
+    /// Session identifier for provenance tracking (e.g. conversation ID)
+    #[serde(alias = "session_id")]
+    session_id: Option<String>,
+    /// Agent identifier for provenance tracking (e.g. "cursor", "claude")
+    agent: Option<String>,
 }
 
 /// A single item in batch mode
@@ -116,6 +130,7 @@ struct BatchItem {
     #[serde(alias = "node_type")]
     node_type: Option<String>,
     source: Option<String>,
+    #[serde(alias = "force_create")]
     force_create: Option<bool>,
 }
 
@@ -147,6 +162,9 @@ pub async fn execute(
         return Err("Content too large (max 1MB)".to_string());
     }
 
+    // Detect compound content and generate advisory
+    let compound_warning = detect_compound_content(&content);
+
     // ====================================================================
     // COGNITIVE PRE-INGEST: importance scoring + intent detection + content analysis
     // ====================================================================
@@ -176,17 +194,50 @@ pub async fn execute(
         let _content_type = ContentType::detect(&content);
     }
 
+    // ====================================================================
+    // PREPROCESSING PIPELINE: coreference, entities, temporal, relations, provenance
+    // ====================================================================
+    #[cfg(feature = "preprocessing")]
+    let (content, pp_tags, pp_valid_from, pp_valid_until, pp_relations, pp_provenance) = {
+        let config = vestige_core::preprocessing::PreprocessingConfig {
+            session_id: args.session_id.clone(),
+            agent: args.agent.clone(),
+            existing_valid_from: None,
+            existing_valid_until: None,
+        };
+        let pp = vestige_core::preprocessing::preprocess(&content, &config);
+        (
+            pp.content,
+            pp.auto_tags,
+            pp.valid_from,
+            pp.valid_until,
+            pp.relations,
+            Some(pp.provenance.to_json()),
+        )
+    };
+    #[cfg(not(feature = "preprocessing"))]
+    let (pp_tags, pp_valid_from, pp_valid_until, pp_provenance): (Vec<String>, Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, Option<serde_json::Value>) =
+        (Vec::new(), None, None, None);
+    #[cfg(not(feature = "preprocessing"))]
+    let pp_relations: Vec<()> = Vec::new();
+
+    // Merge auto-tags from preprocessing with user-provided tags
+    tags.extend(pp_tags);
+
     let input = IngestInput {
         content: content.clone(),
         node_type: args.node_type.unwrap_or_else(|| "fact".to_string()),
         source: args.source,
         sentiment_score: 0.0,
-        // Store importance composite as sentiment_magnitude for FSRS encoding boost
         sentiment_magnitude: importance_composite,
         tags,
-        valid_from: None,
-        valid_until: None,
+        valid_from: pp_valid_from,
+        valid_until: pp_valid_until,
+        provenance: pp_provenance,
     };
+
+    // Store relations for post-ingest graph edge creation
+    let _pp_relations = pp_relations;
 
     // ====================================================================
     // INGEST (storage lock)
@@ -194,16 +245,25 @@ pub async fn execute(
 
     // Check if force_create is enabled
     if args.force_create.unwrap_or(false) {
+        // Quick duplicate check (non-blocking advisory only)
+        #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+        let nearest_sim: Option<f64> = storage
+            .semantic_search_raw(&input.content, 1)
+            .ok()
+            .and_then(|results| results.into_iter().next())
+            .map(|(_, score)| score as f64);
+        #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
+        let nearest_sim: Option<f64> = None;
+
         let node = storage.ingest(input).map_err(|e| e.to_string())?;
         let node_id = node.id.clone();
         let node_content = node.content.clone();
         let node_type = node.node_type.clone();
         let has_embedding = node.has_embedding.unwrap_or(false);
 
-        // Post-ingest cognitive side effects
         run_post_ingest(cognitive, &node_id, &node_content, &node_type, importance_composite);
 
-        return Ok(serde_json::json!({
+        let mut response = serde_json::json!({
             "success": true,
             "decision": "create",
             "nodeId": node_id,
@@ -212,7 +272,19 @@ pub async fn execute(
             "predictionError": 1.0,
             "importanceScore": importance_composite,
             "reason": "Forced creation - skipped similarity check"
-        }));
+        });
+        if let Some(warning) = &compound_warning {
+            response["compound_content_warning"] = serde_json::json!(warning);
+        }
+        if let Some(sim) = nearest_sim {
+            if sim > 0.9 {
+                response["near_duplicate_warning"] = serde_json::json!(format!(
+                    "Content is {:.0}% similar to an existing memory. This was created because force_create=true, but consider using memory(action='edit') instead.",
+                    sim * 100.0
+                ));
+            }
+        }
+        return Ok(response);
     }
 
     // Use smart ingest with prediction error gating
@@ -238,7 +310,11 @@ pub async fn execute(
             importance_composite, &neighbor_ids,
         );
 
-        Ok(serde_json::json!({
+        // Create activation-network edges from extracted relations
+        #[cfg(feature = "preprocessing")]
+        create_relation_edges(cognitive, storage, &node_id, &_pp_relations);
+
+        let mut response = serde_json::json!({
             "success": true,
             "decision": result.decision,
             "nodeId": node_id,
@@ -259,7 +335,19 @@ pub async fn execute(
                 "add_context" => "Added new content as context to existing memory",
                 _ => "Memory processed successfully"
             }
-        }))
+        });
+        if let Some(warning) = &compound_warning {
+            response["compound_content_warning"] = serde_json::json!(warning);
+        }
+        if let Some(sim) = result.similarity {
+            if sim > 0.9 && result.decision == "create" {
+                response["near_duplicate_warning"] = serde_json::json!(format!(
+                    "Content is {:.0}% similar to an existing memory. Consider using memory(action='edit') to update the existing memory instead of creating a near-duplicate.",
+                    sim * 100.0
+                ));
+            }
+        }
+        Ok(response)
     }
 
     #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
@@ -271,7 +359,7 @@ pub async fn execute(
 
         run_post_ingest(cognitive, &node_id, &node_content, &node_type, importance_composite);
 
-        Ok(serde_json::json!({
+        let mut response = serde_json::json!({
             "success": true,
             "decision": "create",
             "nodeId": node_id,
@@ -280,7 +368,11 @@ pub async fn execute(
             "predictionError": 1.0,
             "importanceScore": importance_composite,
             "reason": "Embeddings not available - used regular ingest"
-        }))
+        });
+        if let Some(warning) = &compound_warning {
+            response["compound_content_warning"] = serde_json::json!(warning);
+        }
+        Ok(response)
     }
 }
 
@@ -359,15 +451,31 @@ async fn execute_batch(
             let _content_type = ContentType::detect(&item.content);
         }
 
+        // ============================================================
+        // PREPROCESSING PIPELINE (per batch item)
+        // ============================================================
+        #[cfg(feature = "preprocessing")]
+        let (item_content, batch_pp_tags, batch_pp_from, batch_pp_until, _batch_pp_rels, batch_pp_prov) = {
+            let config = vestige_core::preprocessing::PreprocessingConfig::default();
+            let pp = vestige_core::preprocessing::preprocess(&item.content, &config);
+            (pp.content, pp.auto_tags, pp.valid_from, pp.valid_until, pp.relations, Some(pp.provenance.to_json()))
+        };
+        #[cfg(not(feature = "preprocessing"))]
+        let (item_content, batch_pp_tags, batch_pp_from, batch_pp_until, batch_pp_prov) =
+            (item.content.clone(), Vec::<String>::new(), None, None, None);
+
+        tags.extend(batch_pp_tags);
+
         let input = IngestInput {
-            content: item.content.clone(),
+            content: item_content,
             node_type: item.node_type.unwrap_or_else(|| "fact".to_string()),
             source: item.source,
             sentiment_score: 0.0,
             sentiment_magnitude: importance_composite,
             tags,
-            valid_from: None,
-            valid_until: None,
+            valid_from: batch_pp_from,
+            valid_until: batch_pp_until,
+            provenance: batch_pp_prov,
         };
 
         // ================================================================
@@ -491,6 +599,83 @@ async fn execute_batch(
     }))
 }
 
+/// Detects content that likely contains multiple distinct topics and should be split
+/// into atomic memories. Returns a warning message if compound content is detected.
+fn detect_compound_content(content: &str) -> Option<String> {
+    let len = content.len();
+    if len < 300 {
+        return None;
+    }
+
+    let mut signals: Vec<&str> = Vec::new();
+
+    let lines: Vec<&str> = content.lines().collect();
+    let paragraph_count = content.split("\n\n").filter(|p| p.trim().len() > 30).count();
+    if paragraph_count >= 3 {
+        signals.push("multiple paragraphs covering different topics");
+    }
+
+    let speaker_pattern_count = lines.iter()
+        .filter(|l| {
+            let trimmed = l.trim();
+            // "Speaker: text" or "Speaker Name: text"
+            if let Some(colon_pos) = trimmed.find(':') {
+                let before_colon = &trimmed[..colon_pos];
+                colon_pos < 40
+                    && !before_colon.is_empty()
+                    && before_colon.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '-' || c == '_')
+                    && trimmed.len() > colon_pos + 5
+            } else {
+                false
+            }
+        })
+        .count();
+    if speaker_pattern_count >= 3 {
+        signals.push("conversation transcript (multiple 'Speaker: text' lines)");
+    }
+
+    let bullet_count = lines.iter()
+        .filter(|l| {
+            let t = l.trim();
+            t.starts_with("- ") || t.starts_with("* ") || t.starts_with("• ")
+                || (t.len() > 3 && t.chars().next().map_or(false, |c| c.is_ascii_digit())
+                    && (t.contains(". ") || t.contains(") ")))
+        })
+        .count();
+    if bullet_count >= 4 {
+        signals.push("bulleted list with multiple distinct items");
+    }
+
+    let topic_shift_indicators = [
+        "also,", "additionally,", "on another note", "separately,",
+        "moving on", "another thing", "by the way", "btw,",
+        "oh and", "also worth noting", "furthermore,",
+        "in other news", "on a different topic",
+    ];
+    let topic_shifts = lines.iter()
+        .filter(|l| {
+            let lower = l.to_lowercase();
+            topic_shift_indicators.iter().any(|ind| lower.contains(ind))
+        })
+        .count();
+    if topic_shifts >= 2 {
+        signals.push("topic-shift phrases detected");
+    }
+
+    if signals.is_empty() {
+        return None;
+    }
+
+    let reason = signals.join("; ");
+    Some(format!(
+        "⚠️ COMPOUND CONTENT DETECTED: This memory contains {}. \
+         For better search recall, split into separate atomic memories using batch mode. \
+         Each memory should contain ONE fact, decision, or event. \
+         Example: instead of one memory with 5 bullet points, use `items` array with 5 separate entries.",
+        reason
+    ))
+}
+
 /// Cognitive post-ingest side effects: synaptic tagging, novelty update, hippocampal indexing.
 ///
 /// Uses try_lock() for non-blocking access. If cognitive is locked, side effects are skipped.
@@ -525,13 +710,15 @@ fn run_post_ingest_with_neighbors(
 
         cog.importance_signals.learn_content(content);
 
-        let _ = cog.hippocampal_index.index_memory(
+        if let Err(e) = cog.hippocampal_index.index_memory(
             node_id,
             content,
             node_type,
             Utc::now(),
             None,
-        );
+        ) {
+            tracing::warn!(error = %e, node_id = %node_id, "Failed to index memory in hippocampal index");
+        }
 
         cog.cross_project.record_project_memory(node_id, "default", None);
 
@@ -545,6 +732,42 @@ fn run_post_ingest_with_neighbors(
                 vestige_core::neuroscience::spreading_activation::LinkType::Semantic,
                 0.5,
             );
+        }
+    }
+}
+
+/// Create activation-network edges from extracted relation triples.
+///
+/// For each relation (subject → predicate → object), creates a directed edge
+/// from the memory node to any existing memories that contain the subject or object
+/// entity. This builds the knowledge graph incrementally at ingest time
+/// rather than waiting for dream consolidation.
+#[cfg(feature = "preprocessing")]
+fn create_relation_edges(
+    cognitive: &Arc<Mutex<CognitiveEngine>>,
+    storage: &Arc<Storage>,
+    node_id: &str,
+    relations: &[vestige_core::preprocessing::relations::ExtractedRelation],
+) {
+    if relations.is_empty() {
+        return;
+    }
+
+    if let Ok(mut cog) = cognitive.try_lock() {
+        for relation in relations {
+            // Search for memories containing the object entity
+            if let Ok(matches) = storage.keyword_search(&relation.object, 3, 0.0) {
+                for matched in matches {
+                    if matched.id != node_id {
+                        cog.activation_network.add_edge(
+                            node_id.to_string(),
+                            matched.id.clone(),
+                            vestige_core::neuroscience::spreading_activation::LinkType::Causal,
+                            0.6,
+                        );
+                    }
+                }
+            }
         }
     }
 }
@@ -1001,5 +1224,86 @@ mod tests {
         let result = execute(&storage, &test_cognitive(), Some(args)).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("content"));
+    }
+
+    #[test]
+    fn test_detect_compound_short_content_returns_none() {
+        assert!(detect_compound_content("Short text").is_none());
+        assert!(detect_compound_content("This is under 300 chars").is_none());
+    }
+
+    #[test]
+    fn test_detect_compound_multi_paragraph() {
+        let content = "First paragraph about topic A: we discovered that the search engine \
+                        has a fundamental issue with how it handles compound queries containing semicolons.\n\n\
+                        Second paragraph about topic B: the deployment pipeline needs to be reconfigured \
+                        because the staging environment is running out of disk space on the worker nodes.\n\n\
+                        Third paragraph about topic C: John mentioned in the standup that he prefers \
+                        using dark mode and wants us to add theme support to the internal dashboard tool.";
+        assert!(content.len() >= 300, "Test content must be >=300 chars, got {}", content.len());
+        let result = detect_compound_content(content);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("COMPOUND CONTENT DETECTED"));
+    }
+
+    #[test]
+    fn test_detect_compound_speaker_pattern() {
+        let content = "Alice: I think we should deploy on Friday because the staging tests passed and the team is ready.\n\
+                        Bob: That works for me, but let's make sure to run the full integration test suite first before we proceed.\n\
+                        Alice: Sure, I'll set up the CI pipeline today and configure the deployment scripts for the new environment.\n\
+                        Carol: Can we also add a staging verification step before production? Last time we had issues with config.";
+        assert!(content.len() >= 300, "Test content must be >=300 chars, got {}", content.len());
+        let result = detect_compound_content(content);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("conversation transcript"));
+    }
+
+    #[test]
+    fn test_detect_compound_bullet_list() {
+        let content = "Session summary with multiple learnings from today's work session:\n\
+                        - Fixed the authentication bug in login flow where tokens were not refreshed properly\n\
+                        - Decided to migrate from MySQL to PostgreSQL for better JSON support and NOTIFY features\n\
+                        - John prefers dark mode in all editors and wants the dashboard to support theme switching\n\
+                        - Deployment deadline moved to next Friday because of the infrastructure migration blocking us\n\
+                        - Added rate limiting to the API gateway to prevent abuse from unauthenticated clients";
+        assert!(content.len() >= 300, "Test content must be >=300 chars, got {}", content.len());
+        let result = detect_compound_content(content);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("bulleted list"));
+    }
+
+    #[test]
+    fn test_detect_compound_single_fact_no_warning() {
+        let content = "The hybrid_search function in vestige-core uses triple scoring: BM25 for lexical match, \
+                        semantic embeddings for meaning match, and Reciprocal Rank Fusion to combine them. \
+                        The default weights are 0.4 for BM25 and 0.6 for semantic. This is configured in \
+                        the search module at crates/vestige-core/src/search/hybrid.rs.";
+        assert!(detect_compound_content(content).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_compound_warning_in_response() {
+        let (storage, _dir) = test_storage().await;
+        let compound = "Alice: We discussed the deployment plan for the new microservice architecture and decided on Friday.\n\
+                         Bob: Let's do it Friday, but I want to make sure all the integration tests pass before we push to production.\n\
+                         Carol: I agree with that plan and I'll prepare the rollback scripts just in case something goes wrong.\n\
+                         Dave: Make sure the staging environment passes all health checks first and monitoring is configured properly.";
+        let result = execute(
+            &storage, &test_cognitive(),
+            Some(serde_json::json!({ "content": compound })),
+        ).await;
+        let value = result.unwrap();
+        assert!(value["compound_content_warning"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_no_compound_warning_for_atomic() {
+        let (storage, _dir) = test_storage().await;
+        let result = execute(
+            &storage, &test_cognitive(),
+            Some(serde_json::json!({ "content": "Single atomic fact about Rust memory safety." })),
+        ).await;
+        let value = result.unwrap();
+        assert!(value.get("compound_content_warning").is_none() || value["compound_content_warning"].is_null());
     }
 }

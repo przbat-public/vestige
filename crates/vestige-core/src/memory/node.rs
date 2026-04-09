@@ -179,6 +179,11 @@ pub struct KnowledgeNode {
     /// Which model generated the embedding
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_model: Option<String>,
+
+    // ========== Provenance (v3.1.0 Content Intelligence) ==========
+    /// Structured provenance metadata: session, agent, derivation chain, preprocessing artifacts
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<serde_json::Value>,
 }
 
 impl Default for KnowledgeNode {
@@ -213,6 +218,7 @@ impl Default for KnowledgeNode {
             temporal_level: None,
             has_embedding: None,
             embedding_model: None,
+            provenance: None,
         }
     }
 }
@@ -338,6 +344,9 @@ pub struct IngestInput {
     /// When this knowledge stops being valid
     #[serde(skip_serializing_if = "Option::is_none")]
     pub valid_until: Option<DateTime<Utc>>,
+    /// Structured provenance metadata (JSON): session_id, agent, derived_from, etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<serde_json::Value>,
 }
 
 impl Default for IngestInput {
@@ -351,6 +360,7 @@ impl Default for IngestInput {
             tags: vec![],
             valid_from: None,
             valid_until: None,
+            provenance: None,
         }
     }
 }

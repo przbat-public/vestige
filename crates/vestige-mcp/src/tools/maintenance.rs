@@ -471,8 +471,11 @@ pub async fn execute_export(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GcArgs {
+    #[serde(alias = "min_retention")]
     min_retention: Option<f64>,
+    #[serde(alias = "max_age_days")]
     max_age_days: Option<u64>,
+    #[serde(alias = "dry_run")]
     dry_run: Option<bool>,
 }
 
@@ -592,6 +595,188 @@ pub async fn execute_gc(
 }
 
 // ============================================================================
+// SPLIT_MEMORIES: find compound memories for agent-assisted splitting
+// ============================================================================
+
+pub fn split_memories_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "min_length": {
+                "type": "integer",
+                "description": "Minimum content length to consider (default: 300). Shorter memories are always atomic.",
+                "default": 300,
+                "minimum": 100
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max number of compound memories to return (default: 20)",
+                "default": 20,
+                "minimum": 1,
+                "maximum": 100
+            },
+            "dry_run": {
+                "type": "boolean",
+                "description": "If true (default), only report compound memories without deleting. If false, delete compound memories after reporting (you must re-ingest as atomic items).",
+                "default": true
+            }
+        }
+    })
+}
+
+#[derive(Deserialize)]
+struct SplitMemoriesArgs {
+    min_length: Option<usize>,
+    limit: Option<usize>,
+    dry_run: Option<bool>,
+}
+
+pub async fn execute_split_memories(
+    storage: &Arc<Storage>,
+    args: Option<Value>,
+) -> Result<Value, String> {
+    let args: SplitMemoriesArgs = match args {
+        Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
+        None => SplitMemoriesArgs { min_length: None, limit: None, dry_run: None },
+    };
+
+    let min_length = args.min_length.unwrap_or(300);
+    let limit = args.limit.unwrap_or(20);
+    let dry_run = args.dry_run.unwrap_or(true);
+
+    let all_nodes = storage.get_all_nodes(500, 0).map_err(|e| e.to_string())?;
+
+    let mut compound_memories: Vec<Value> = Vec::new();
+
+    for node in &all_nodes {
+        if node.content.len() < min_length {
+            continue;
+        }
+        if let Some(reason) = detect_compound_content_reason(&node.content) {
+            compound_memories.push(serde_json::json!({
+                "id": node.id,
+                "content": if node.content.len() > 500 {
+                    format!("{}...", &node.content[..node.content.char_indices().take_while(|(i, _)| *i < 500).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(500)])
+                } else {
+                    node.content.clone()
+                },
+                "content_length": node.content.len(),
+                "node_type": node.node_type,
+                "created_at": node.created_at.to_rfc3339(),
+                "reason": reason,
+                "action": "Split this memory into separate atomic memories using smart_ingest batch mode, then delete the original."
+            }));
+
+            if compound_memories.len() >= limit {
+                break;
+            }
+        }
+    }
+
+    let mut deleted_ids: Vec<String> = Vec::new();
+    if !dry_run {
+        for mem in &compound_memories {
+            if let Some(id) = mem["id"].as_str() {
+                if storage.delete_node(id).is_ok() {
+                    deleted_ids.push(id.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "total_scanned": all_nodes.len(),
+        "compound_found": compound_memories.len(),
+        "dry_run": dry_run,
+        "deleted": deleted_ids.len(),
+        "deleted_ids": deleted_ids,
+        "memories": compound_memories,
+        "instruction": if compound_memories.is_empty() {
+            "All memories are atomic. No splitting needed.".to_string()
+        } else if dry_run {
+            format!(
+                "Found {} compound memories. To fix: for each memory above, read the full content with memory(action='get'), \
+                 split into atomic facts, then smart_ingest as batch items, and finally memory(action='delete') the original. \
+                 Or re-run with dry_run=false to auto-delete originals.",
+                compound_memories.len()
+            )
+        } else {
+            format!(
+                "Deleted {} compound memories. Now re-ingest each as atomic items using smart_ingest batch mode. \
+                 Each original memory's content is shown above — split each into separate facts/decisions/events.",
+                deleted_ids.len()
+            )
+        }
+    }))
+}
+
+fn detect_compound_content_reason(content: &str) -> Option<String> {
+    let len = content.len();
+    if len < 300 {
+        return None;
+    }
+
+    let mut signals: Vec<&str> = Vec::new();
+
+    let lines: Vec<&str> = content.lines().collect();
+    let paragraph_count = content.split("\n\n").filter(|p| p.trim().len() > 30).count();
+    if paragraph_count >= 3 {
+        signals.push("multiple paragraphs");
+    }
+
+    let speaker_count = lines.iter()
+        .filter(|l| {
+            let trimmed = l.trim();
+            if let Some(colon_pos) = trimmed.find(':') {
+                let before = &trimmed[..colon_pos];
+                colon_pos < 40
+                    && !before.is_empty()
+                    && before.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '-' || c == '_')
+                    && trimmed.len() > colon_pos + 5
+            } else {
+                false
+            }
+        })
+        .count();
+    if speaker_count >= 3 {
+        signals.push("conversation transcript");
+    }
+
+    let bullet_count = lines.iter()
+        .filter(|l| {
+            let t = l.trim();
+            t.starts_with("- ") || t.starts_with("* ") || t.starts_with("• ")
+                || (t.len() > 3 && t.chars().next().is_some_and(|c| c.is_ascii_digit())
+                    && (t.contains(". ") || t.contains(") ")))
+        })
+        .count();
+    if bullet_count >= 4 {
+        signals.push("multi-item list");
+    }
+
+    let topic_indicators = [
+        "also,", "additionally,", "on another note", "separately,",
+        "moving on", "another thing", "by the way", "btw,",
+        "oh and", "also worth noting", "furthermore,",
+    ];
+    let topic_shifts = lines.iter()
+        .filter(|l| {
+            let lower = l.to_lowercase();
+            topic_indicators.iter().any(|ind| lower.contains(ind))
+        })
+        .count();
+    if topic_shifts >= 2 {
+        signals.push("topic-shift phrases");
+    }
+
+    if signals.is_empty() {
+        return None;
+    }
+
+    Some(signals.join(", "))
+}
+
+// ============================================================================
 // TESTS
 // ============================================================================
 
@@ -643,6 +828,7 @@ mod tests {
                 tags: vec![],
                 valid_from: None,
                 valid_until: None,
+                provenance: None,
             }).unwrap();
         }
         let result = execute_system_status(&storage, &test_cognitive(), None).await;
@@ -692,6 +878,7 @@ mod tests {
                     tags: vec![],
                     valid_from: None,
                     valid_until: None,
+                    provenance: None,
                 }).unwrap();
             }
         }
@@ -702,5 +889,76 @@ mod tests {
         // No dream ever → savesSinceLastDream == totalMemories
         assert_eq!(triggers["savesSinceLastDream"], 3);
         assert!(triggers["lastDreamTimestamp"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_split_memories_empty_db() {
+        let (storage, _dir) = test_storage().await;
+        let result = execute_split_memories(&storage, None).await;
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(value["total_scanned"], 0);
+        assert_eq!(value["compound_found"], 0);
+        assert_eq!(value["dry_run"], true);
+    }
+
+    #[tokio::test]
+    async fn test_split_memories_finds_compound() {
+        let (storage, _dir) = test_storage().await;
+        let compound = "Alice: We discussed the deployment plan for the new microservice and decided on Friday release.\n\
+                         Bob: Let's do it Friday but make sure all the integration and unit tests pass first before deploy.\n\
+                         Carol: I agree with that plan and I will prepare the rollback scripts for safety in case of failures.\n\
+                         Dave: Make sure the staging environment passes all health checks and monitoring is configured properly.";
+        storage.ingest(vestige_core::IngestInput {
+            content: compound.to_string(),
+            node_type: "event".to_string(),
+            source: None,
+            sentiment_score: 0.0,
+            sentiment_magnitude: 0.0,
+            tags: vec![],
+            valid_from: None,
+            valid_until: None,
+            provenance: None,
+        }).unwrap();
+        storage.ingest(vestige_core::IngestInput {
+            content: "Single atomic fact about Rust.".to_string(),
+            node_type: "fact".to_string(),
+            source: None,
+            sentiment_score: 0.0,
+            sentiment_magnitude: 0.0,
+            tags: vec![],
+            valid_from: None,
+            valid_until: None,
+            provenance: None,
+        }).unwrap();
+
+        let result = execute_split_memories(&storage, None).await;
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert_eq!(value["total_scanned"], 2);
+        assert_eq!(value["compound_found"], 1);
+        assert_eq!(value["dry_run"], true);
+        assert_eq!(value["deleted"], 0);
+        let memories = value["memories"].as_array().unwrap();
+        assert_eq!(memories.len(), 1);
+        assert!(memories[0]["reason"].as_str().unwrap().contains("conversation transcript"));
+    }
+
+    #[test]
+    fn test_detect_compound_reason_short_returns_none() {
+        assert!(detect_compound_content_reason("Short memory").is_none());
+    }
+
+    #[test]
+    fn test_detect_compound_reason_multi_bullet() {
+        let content = "Session summary with many items from today's productive work session:\n\
+                        - Fixed the authentication bug in login flow where the tokens expired too quickly\n\
+                        - Decided to migrate from MySQL to PostgreSQL for better performance and JSON support\n\
+                        - John prefers dark mode in all editors and wants dashboard themes to be configurable\n\
+                        - Deployment deadline moved to next Friday because of the infrastructure migration delay\n\
+                        - Added rate limiting to the API gateway to prevent abuse from unauthenticated external clients";
+        let result = detect_compound_content_reason(content);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("multi-item list"));
     }
 }

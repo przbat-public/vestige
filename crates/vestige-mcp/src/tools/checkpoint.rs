@@ -59,6 +59,7 @@ struct CheckpointArgs {
 struct CheckpointItem {
     content: String,
     tags: Option<Vec<String>>,
+    #[serde(alias = "node_type")]
     node_type: Option<String>,
     source: Option<String>,
 }
@@ -106,6 +107,7 @@ pub async fn execute(
             tags: item.tags.unwrap_or_default(),
             valid_from: None,
             valid_until: None,
+            provenance: None,
         };
 
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
