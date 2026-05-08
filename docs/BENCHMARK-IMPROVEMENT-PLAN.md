@@ -1,7 +1,26 @@
 # Vestige LoCoMo benchmark improvement plan
 
-> Goal: get Vestige's LoCoMo LLM Judge score from 41.00% (v3.2.0 baseline)
+> Goal: get Vestige's LoCoMo LLM Judge score from 41.00% (Apr 2026 baseline)
 > to a defensible 70%+ without overfitting to the benchmark.
+
+## Status (May 2026)
+
+| | Apr 2026 baseline | After Tier 1 + 2 (this PR) | Δ |
+|---|---|---|---|
+| Recall@5 (full N=1540) | 65.84% | **79.68%** | +13.84 pp |
+| Recall@10 | 80.39% | **86.30%** | +5.91 pp |
+| MRR | 0.4727 | **0.6889** | +0.2162 |
+| LLM Judge Overall (full N=1540) | 41.00% | **54.81%** | +13.81 pp |
+| LLM Judge — single_hop | 22.22% | **32.62%** | +10.40 pp |
+| LLM Judge — temporal | 33.33% | **55.76%** | +22.43 pp |
+| LLM Judge — multi_hop | 0.00% | **26.04%** | +26.04 pp |
+| LLM Judge — open_domain | 52.73% | **65.16%** | +12.43 pp |
+
+**Caveats** (do not skip these):
+
+- The "Apr 2026 baseline" 41.00% is **not reproducible today** with the same code on the same data. Re-running the old `evaluate.py` against the old `retrieval_results.json` on the same seed=42 sample now yields ~21%, not 41%. `gpt-4o-mini` with `temperature=0` is not a stable contract. The clean apples-to-apples on the same 100-question sample, both arms run today, is **+28 pp** (21% → 49%); the +13.81 pp on full N is conservative because the baseline drifted up too.
+- Multi-hop n=96 is the smallest category and the new score 26.04% is still the worst. This is where Tier 4 (typed memory) is expected to help most.
+- Competitor numbers in the README (Mem0 66.88%, Zep 75.14%, Memobase 75.78%, SmartSearch 93.5%) come from each system's own harness with its own judge prompt. Treat them as rough order-of-magnitude until we run them through a shared harness.
 
 ## Diagnosis
 

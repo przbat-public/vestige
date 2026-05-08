@@ -4,16 +4,28 @@ Measures Vestige's long-term conversational memory against the [LoCoMo benchmark
 
 10 conversations, ~300 turns each across ~27 sessions, 1,540 QA pairs in 4 categories: single-hop, temporal, multi-hop, open-domain.
 
-## Competitor scores (LLM Judge Overall)
+## LLM Judge — full N=1540 (May 2026 run, this repo)
+
+| System                | Overall  | single_hop | temporal | multi_hop | open_domain |
+|-----------------------|----------|------------|----------|-----------|-------------|
+| **Vestige (current)** | **54.81%** | 32.62%   | 55.76%   | 26.04%    | 65.16%      |
+| Vestige (Apr 2026)\*  | 41.00%   | 22.22%     | 33.33%   | 0.00%     | 52.73%      |
+
+\*Apr 2026 figure was committed to this repo in the snapshot before the reranker + score-adaptive context were wired into the harness. It does not reproduce on the current `gpt-4o-mini` snapshot — re-running the same code on the same seed=42 sample today yields ~21%, i.e. apples-to-apples gain on identical questions is **+28 pp**, of which **+13.81 pp** survives the move to full N=1 540.
+
+### Competitor reference (different harnesses, treat as rough)
 
 | System     | Score  |
 |------------|--------|
+| SmartSearch (paper) | 93.5% |
 | Memobase   | 75.78% |
 | Zep        | 75.14% |
 | Mem0-Graph | 68.44% |
 | Mem0       | 66.88% |
 | LangMem    | 58.10% |
 | OpenAI     | 52.90% |
+
+These numbers come from the respective papers/blogs (different judge prompts, different context budgets, sometimes different LoCoMo subsets). Direct head-to-head requires running each system through the exact same harness — see `docs/BENCHMARK-IMPROVEMENT-PLAN.md`.
 
 ## Quick start
 
@@ -129,3 +141,4 @@ benchmarks/locomo/
 - **Independent storage per conversation**: Each conversation gets its own database, preventing cross-conversation leakage.
 - **Reranker honesty**: The Stage 2 reranker model is only loaded once and shared across all conversations; the model itself is the same Jina v2 used in production via `tools/search_unified`. Disable it via `LOCOMO_USE_RERANKER=0` to measure how much it contributes vs raw hybrid retrieval.
 - **Anti-self-deception**: Each `locomo_scores.json` records the full pipeline config (`pipeline.*`, `top_k_contexts`, `total_char_budget`, `judge_model`, `sample_size`, `sample_seed`). Always compare runs with the same config; otherwise the delta is methodology, not improvement.
+- **Determinism warning**: `gpt-4o-mini` with `temperature=0` is **not** bitwise reproducible. Re-running the old code + old retrieval on seed=42 today yields ~21% rather than the historical 41% — same code, same data. When you publish a number, either (a) record the exact `gpt-4o-mini-YYYY-MM-DD` snapshot, (b) re-baseline before claiming a delta, or (c) hold the model fixed across all arms of the comparison and report A/B deltas, not absolutes.
