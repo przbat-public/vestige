@@ -28,7 +28,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 use vestige_core::memory::IngestInput;
+use vestige_core::search::{Reranker, RerankerConfig};
 use vestige_core::storage::Storage;
+
+// Env knobs (override defaults without rebuilding):
+//   LOCOMO_USE_RERANKER   = "1" (default) | "0"   — Stage 2 Jina v2 cross-encoder
+//   LOCOMO_OVERFETCH      = 50  (default)         — initial hybrid_search candidates
+//   LOCOMO_TOPK           = 10  (default)         — final results after rerank
+const DEFAULT_OVERFETCH: i32 = 50;
+const DEFAULT_TOPK: usize = 10;
 
 // ============================================================================
 // LoCoMo dataset types
@@ -83,9 +91,19 @@ struct BenchmarkOutput {
     skipped_adversarial: usize,
     ingestion_time_secs: f64,
     search_time_secs: f64,
+    rerank_time_secs: f64,
+    pipeline: PipelineConfig,
     retrieval_metrics: RetrievalMetrics,
     per_category: HashMap<String, RetrievalMetrics>,
     results: Vec<QuestionResult>,
+}
+
+#[derive(Serialize, Clone)]
+struct PipelineConfig {
+    overfetch: i32,
+    topk: usize,
+    use_reranker: bool,
+    reranker_model: Option<String>,
 }
 
 #[derive(Serialize, Default, Clone)]
@@ -264,10 +282,50 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("benchmarks/locomo/retrieval_results.json"));
 
+    let use_reranker = std::env::var("LOCOMO_USE_RERANKER")
+        .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+        .unwrap_or(true);
+    let overfetch: i32 = std::env::var("LOCOMO_OVERFETCH")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_OVERFETCH);
+    let topk: usize = std::env::var("LOCOMO_TOPK")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_TOPK);
+
     eprintln!("=== Vestige LoCoMo Benchmark ===");
-    eprintln!("Dataset: {}", dataset_path.display());
-    eprintln!("Output:  {}", output_path.display());
+    eprintln!("Dataset:    {}", dataset_path.display());
+    eprintln!("Output:     {}", output_path.display());
+    eprintln!(
+        "Pipeline:   hybrid_search(top={}) {} top-{}",
+        overfetch,
+        if use_reranker { "→ Jina v2 rerank →" } else { "→ truncate →" },
+        topk
+    );
     eprintln!();
+
+    // Initialize reranker once for the entire benchmark. Jina Reranker v2 Base
+    // Multilingual is ~1.1GB; first run downloads, subsequent runs hit the cache.
+    let mut reranker: Option<Reranker> = if use_reranker {
+        let mut rr = Reranker::new(RerankerConfig {
+            candidate_count: overfetch as usize,
+            result_count: topk,
+            min_score: None,
+        });
+        eprintln!("Loading Jina Reranker v2 Base Multilingual (cached if previously downloaded)...");
+        let init_start = Instant::now();
+        rr.init_cross_encoder();
+        eprintln!(
+            "Reranker ready in {:.1}s (cross_encoder={})",
+            init_start.elapsed().as_secs_f64(),
+            rr.has_cross_encoder()
+        );
+        Some(rr)
+    } else {
+        eprintln!("Reranker disabled (LOCOMO_USE_RERANKER=0) — measuring raw hybrid_search.");
+        None
+    };
 
     // Load dataset
     let data_str = std::fs::read_to_string(&dataset_path).expect("Failed to read dataset");
@@ -278,6 +336,7 @@ fn main() {
     let mut all_results: Vec<QuestionResult> = Vec::new();
     let mut total_ingest_time = 0.0_f64;
     let mut total_search_time = 0.0_f64;
+    let mut total_rerank_time = 0.0_f64;
     let mut skipped_adversarial = 0_usize;
 
     for (conv_idx, sample) in samples.iter().enumerate() {
@@ -358,28 +417,71 @@ fn main() {
         skipped_adversarial += adversarial_count;
 
         for qa in &non_adversarial {
-            let results = storage.hybrid_search(&qa.question, 10, 0.4, 0.6);
+            // Stage 1: hybrid_search with overfetch (BM25 + semantic via RRF)
+            let initial = storage.hybrid_search(&qa.question, overfetch, 0.4, 0.6);
 
             let (retrieved_contexts, retrieved_scores, retrieved_dia_id_sets): (
                 Vec<String>,
                 Vec<f32>,
                 Vec<Vec<String>>,
-            ) = match results {
-                Ok(res) => {
-                    let contexts: Vec<String> =
-                        res.iter().map(|r| r.node.content.clone()).collect();
-                    let scores: Vec<f32> = res.iter().map(|r| r.combined_score).collect();
-                    let dia_sets: Vec<Vec<String>> = res
+            ) = match initial {
+                Ok(res) if !res.is_empty() => {
+                    // Stage 2: optional cross-encoder rerank (Jina Reranker v2)
+                    let rerank_start = Instant::now();
+                    let final_order: Vec<(String, String, f32)> = if let Some(rr) = reranker.as_mut() {
+                        // Build candidates as (id, content, original_score)
+                        let candidates: Vec<((String, f32), String)> = res
+                            .iter()
+                            .map(|r| {
+                                ((r.node.id.clone(), r.combined_score), r.node.content.clone())
+                            })
+                            .collect();
+                        match rr.rerank(&qa.question, candidates, Some(topk)) {
+                            Ok(reranked) => {
+                                let nodes: HashMap<String, &vestige_core::memory::SearchResult> = res
+                                    .iter()
+                                    .map(|r| (r.node.id.clone(), r))
+                                    .collect();
+                                reranked
+                                    .into_iter()
+                                    .filter_map(|rr_item| {
+                                        let (id, _orig) = rr_item.item;
+                                        nodes.get(&id).map(|r| {
+                                            (id.clone(), r.node.content.clone(), rr_item.score)
+                                        })
+                                    })
+                                    .collect()
+                            }
+                            Err(e) => {
+                                eprintln!("    WARN: rerank failed ({}); falling back to hybrid order", e);
+                                res.iter()
+                                    .take(topk)
+                                    .map(|r| (r.node.id.clone(), r.node.content.clone(), r.combined_score))
+                                    .collect()
+                            }
+                        }
+                    } else {
+                        res.iter()
+                            .take(topk)
+                            .map(|r| (r.node.id.clone(), r.node.content.clone(), r.combined_score))
+                            .collect()
+                    };
+                    total_rerank_time += rerank_start.elapsed().as_secs_f64();
+
+                    let contexts: Vec<String> = final_order.iter().map(|(_, c, _)| c.clone()).collect();
+                    let scores: Vec<f32> = final_order.iter().map(|(_, _, s)| *s).collect();
+                    let dia_sets: Vec<Vec<String>> = final_order
                         .iter()
-                        .map(|r| {
+                        .map(|(id, _, _)| {
                             memory_id_to_dia_ids
-                                .get(&r.node.id)
+                                .get(id)
                                 .cloned()
                                 .unwrap_or_default()
                         })
                         .collect();
                     (contexts, scores, dia_sets)
                 }
+                Ok(_) => (vec![], vec![], vec![]),
                 Err(e) => {
                     eprintln!("    WARN: search failed: {}", e);
                     (vec![], vec![], vec![])
@@ -465,14 +567,25 @@ fn main() {
 
     eprintln!("╠══════════════════════════════════════════════════════╣");
     eprintln!(
-        "║  Ingest: {:.1}s  Search: {:.1}s  Total: {:.1}s          ║",
+        "║  Ingest: {:.1}s  Search: {:.1}s  Rerank: {:.1}s  Total: {:.1}s",
         total_ingest_time,
         total_search_time,
-        total_ingest_time + total_search_time
+        total_rerank_time,
+        total_ingest_time + total_search_time + total_rerank_time
     );
     eprintln!("╚══════════════════════════════════════════════════════╝");
 
     // --- WRITE OUTPUT ---
+    let pipeline_config = PipelineConfig {
+        overfetch,
+        topk,
+        use_reranker,
+        reranker_model: if use_reranker {
+            Some("jina-reranker-v2-base-multilingual".to_string())
+        } else {
+            None
+        },
+    };
     let output = BenchmarkOutput {
         vestige_version: "3.2.0".to_string(),
         dataset: "locomo10".to_string(),
@@ -481,6 +594,8 @@ fn main() {
         skipped_adversarial,
         ingestion_time_secs: total_ingest_time,
         search_time_secs: total_search_time,
+        rerank_time_secs: total_rerank_time,
+        pipeline: pipeline_config,
         retrieval_metrics: overall,
         per_category,
         results: all_results,

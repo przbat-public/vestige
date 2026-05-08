@@ -56,32 +56,58 @@ Cost estimate: ~$3-5 for 1,540 questions (GPT-4o-mini for answers + GPT-4o for j
 
 ## Configuration
 
-Environment variables for `evaluate.py`:
+### Retrieval harness (`vestige-locomo-bench`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCOMO_USE_RERANKER` | `1` | Set to `0` to disable Stage 2 cross-encoder rerank (ablation) |
+| `LOCOMO_OVERFETCH` | `50` | Initial hybrid_search candidates before rerank |
+| `LOCOMO_TOPK` | `10` | Final top-K returned to evaluator |
+
+### LLM judge (`evaluate.py`)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LOCOMO_ANSWER_MODEL` | `gpt-4o-mini` | Model for generating answers from context |
-| `LOCOMO_JUDGE_MODEL` | `gpt-4o` | Model for judging correctness |
-| `LOCOMO_MAX_WORKERS` | `8` | Parallel API calls |
+| `LOCOMO_JUDGE_MODEL` | `gpt-4o` | Model for judging correctness (matches Mem0/Zep/Memobase) |
+| `LOCOMO_TOP_K_CONTEXTS` | `10` | Number of retrieved contexts to pass to the answerer |
+| `LOCOMO_TOTAL_CHAR_BUDGET` | `12000` | Total characters across all contexts (≈3 000 tokens) |
+| `LOCOMO_MIN_PER_CONTEXT_CHARS` | `300` | Minimum slice per kept context (drop below this) |
+| `LOCOMO_CONTEXT_MAX_CHARS` | _(unset)_ | Hard per-context cap. Set to e.g. `800` to reproduce old runs |
+| `LOCOMO_MAX_WORKERS` | `1` | Parallel API calls |
+| `LOCOMO_THROTTLE_SECS` | `1.0` | Sleep between requests when MAX_WORKERS=1 |
+| `LOCOMO_SAMPLE` | `0` | Subsample N questions (deterministic with `LOCOMO_SEED`) |
+| `LOCOMO_SEED` | `42` | RNG seed for sampling |
 
 ## How it works
 
 ### Phase 1 (Rust)
 
 For each of 10 conversations:
-1. Parse sessions from `locomo10.json`
-2. Create a temporary Vestige Storage (SQLite + embeddings + HNSW index)
-3. Ingest each session as a memory with content preprocessing
-4. For each QA pair: run `hybrid_search`, check if evidence `dia_id`s appear in top-K results
-5. Compute Recall@K and MRR
+1. Parse sessions from `locomo10.json`.
+2. Create a temporary Vestige Storage (SQLite + embeddings + HNSW index).
+3. Ingest each session as a memory with content preprocessing.
+4. For each QA pair, run **two-stage retrieval**:
+   - **Stage 1** — `hybrid_search` (BM25 + semantic via RRF) with `LOCOMO_OVERFETCH` candidates
+   - **Stage 2** — Jina Reranker v2 Base Multilingual cross-encoder, returning the top `LOCOMO_TOPK`
+5. Compute Recall@5/10 and MRR over the reranked top-K, plus per-category breakdown.
+
+The reranker is loaded once at startup (~1.1 GB, cached after first run).
+Set `LOCOMO_USE_RERANKER=0` to measure raw hybrid_search as a baseline.
 
 ### Phase 2 (Python)
 
 For each QA pair:
-1. Take top-5 retrieved contexts from Phase 1
-2. Ask GPT-4o-mini to answer the question given those contexts
-3. Ask GPT-4o to judge: does the answer match ground truth? (binary: correct/incorrect)
-4. Aggregate into per-category and overall LLM Judge Scores
+1. Take top-`LOCOMO_TOP_K_CONTEXTS` retrieved contexts from Phase 1 with their reranker scores.
+2. **Score-adaptive truncation**: distribute `LOCOMO_TOTAL_CHAR_BUDGET` across contexts using
+   per-rank weights blended with the relevance scores. Boundaries are sentence-aware so we don't
+   slice mid-thought. This addresses the "compilation bottleneck" identified in the SmartSearch
+   paper (arXiv 2603.15599) — high retrieval recall is wasted when truncation eats the gold span.
+3. Detect list-style questions ("what are…", "list…", "name all…") and add an aggregation hint
+   to the answerer prompt — LoCoMo open-domain has many multi-item answers.
+4. Ask `LOCOMO_ANSWER_MODEL` (default gpt-4o-mini) to answer the question given those contexts.
+5. Ask `LOCOMO_JUDGE_MODEL` (default gpt-4o) to judge: does the answer match ground truth? (binary).
+6. Aggregate into per-category and overall LLM Judge Scores.
 
 ## File structure
 
@@ -97,7 +123,9 @@ benchmarks/locomo/
 
 ## Methodology notes
 
-- **Session-level chunking**: Each conversation session is ingested as one memory, matching the standard approach used by Mem0, Zep, and Memobase benchmarks.
+- **Session-level chunking**: Each conversation session is ingested as one memory, matching the standard approach used by Mem0, Zep, and Memobase benchmarks. Evaluating turn-level chunking is on the roadmap (see `docs/BENCHMARK-IMPROVEMENT-PLAN.md`).
 - **Evidence matching**: LoCoMo QAs include `evidence` fields referencing specific dialog IDs. We check if the session containing those IDs appears in top-K search results.
 - **No adversarial questions**: Category 5 (adversarial) is skipped, consistent with published benchmarks.
 - **Independent storage per conversation**: Each conversation gets its own database, preventing cross-conversation leakage.
+- **Reranker honesty**: The Stage 2 reranker model is only loaded once and shared across all conversations; the model itself is the same Jina v2 used in production via `tools/search_unified`. Disable it via `LOCOMO_USE_RERANKER=0` to measure how much it contributes vs raw hybrid retrieval.
+- **Anti-self-deception**: Each `locomo_scores.json` records the full pipeline config (`pipeline.*`, `top_k_contexts`, `total_char_budget`, `judge_model`, `sample_size`, `sample_seed`). Always compare runs with the same config; otherwise the delta is methodology, not improvement.
