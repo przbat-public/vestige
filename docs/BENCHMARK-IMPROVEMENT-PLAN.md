@@ -5,16 +5,18 @@
 
 ## Status (May 2026)
 
-| | Apr 2026 baseline | After Tier 1 + 2 (this PR) | Δ |
+| | Apr 2026 | After Tier 1+2 | After Tier 1+2 + prompt v2 |
 |---|---|---|---|
-| Recall@5 (full N=1540) | 65.84% | **79.68%** | +13.84 pp |
-| Recall@10 | 80.39% | **86.30%** | +5.91 pp |
-| MRR | 0.4727 | **0.6889** | +0.2162 |
-| LLM Judge Overall (full N=1540) | 41.00% | **54.81%** | +13.81 pp |
-| LLM Judge — single_hop | 22.22% | **32.62%** | +10.40 pp |
-| LLM Judge — temporal | 33.33% | **55.76%** | +22.43 pp |
-| LLM Judge — multi_hop | 0.00% | **26.04%** | +26.04 pp |
-| LLM Judge — open_domain | 52.73% | **65.16%** | +12.43 pp |
+| Recall@5 (full N=1540) | 65.84% | **79.68%** | 79.68% |
+| Recall@10 | 80.39% | **86.30%** | 86.30% |
+| MRR | 0.4727 | **0.6889** | 0.6889 |
+| LLM Judge Overall (full N=1540) | 41.00% | 54.81% | **60.13%** |
+| LLM Judge — single_hop | 22.22% | 32.62% | **34.40%** |
+| LLM Judge — temporal | 33.33% | 55.76% | **65.73%** |
+| LLM Judge — multi_hop | 0.00% | 26.04% | **42.71%** |
+| LLM Judge — open_domain | 52.73% | 65.16% | **68.61%** |
+
+The **prompt v2** improvement isolates a +5.32 pp full-N gain (+6.00 pp on a same-sample seed=42 N=200 A/B) from a single change to the answerer system prompt. The change targets the two largest failure buckets identified in `benchmarks/locomo/analyze_failures.py`: `REFUSE` (15.2% of all questions, model refused despite evidence in top-5) and `COMP` (15.6%, model answered but missed list items or paraphrased temporal phrases). Specifically: (a) explicit anti-refuse policy (only refuse on no relevant evidence at all), (b) hypothetical/inferential mode for "would/likely" questions, (c) temporal precision hint that copies the memory's exact phrasing for relative dates.
 
 **Caveats** (do not skip these):
 

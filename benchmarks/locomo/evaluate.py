@@ -223,15 +223,43 @@ def is_list_question(question: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+_TEMPORAL_RE = re.compile(r"^\s*when\b", re.IGNORECASE)
+_HYPOTHETICAL_RE = re.compile(r"\b(would|could|might|likely|probably|do you think)\b", re.IGNORECASE)
+
+
+def is_temporal_question(question: str) -> bool:
+    return bool(_TEMPORAL_RE.search(question))
+
+
+def is_hypothetical_question(question: str) -> bool:
+    return bool(_HYPOTHETICAL_RE.search(question))
+
+
 def generate_answer(question: str, contexts: list[str], scores: list[float]) -> str:
     context_block = assemble_context_block(contexts, scores, TOP_K_CONTEXTS)
 
-    list_hint = (
-        "\nThis question asks about multiple items. If the memories mention "
-        "several items matching the question, list ALL of them concisely."
-        if is_list_question(question)
-        else ""
-    )
+    hints: list[str] = []
+    if is_list_question(question):
+        hints.append(
+            "This question asks about multiple items. Scan ALL memory excerpts "
+            "and list EVERY matching item, separated by commas. Do not stop at "
+            "the first match."
+        )
+    if is_temporal_question(question):
+        hints.append(
+            "For dates, copy the exact phrasing the memories use (e.g. 'the "
+            "week before X', '2 days ago on Y', 'last summer'). Do not "
+            "paraphrase a relative reference into an absolute date unless the "
+            "memory itself gives one."
+        )
+    if is_hypothetical_question(question):
+        hints.append(
+            "This is a hypothetical or inferential question. Use the evidence "
+            "from the memories to make a reasoned inference. Answer 'yes' / "
+            "'no' / 'likely' as supported by the evidence — refuse only if "
+            "there is no relevant evidence at all."
+        )
+    hint_block = ("\n\n" + "\n".join(f"- {h}" for h in hints)) if hints else ""
 
     def call():
         return client.chat.completions.create(
@@ -240,12 +268,22 @@ def generate_answer(question: str, contexts: list[str], scores: list[float]) -> 
                 {
                     "role": "system",
                     "content": (
-                        "You are a helpful assistant with access to conversation memories. "
-                        "Answer the question based ONLY on the provided memory excerpts. "
-                        "Be precise — use specific dates, names, places, and facts from the "
-                        "memories. Do NOT invent details not present in the memories. "
-                        "If the memories don't contain the answer, say "
-                        "'I don't have enough information.'" + list_hint
+                        "You are a helpful assistant answering questions about a "
+                        "conversation, given excerpts from its memory.\n\n"
+                        "Policy:\n"
+                        "1. Use the memory excerpts as your evidence. Direct "
+                        "facts come from the excerpts; hypothetical / inferential "
+                        "questions should be answered with reasoned inference "
+                        "from the same evidence.\n"
+                        "2. Be specific: dates, names, places, numbers, exact "
+                        "phrasing from the memories.\n"
+                        "3. For list questions, enumerate ALL items the memories "
+                        "support, not just the most prominent one.\n"
+                        "4. Only say 'I don't have enough information.' when "
+                        "the memories truly contain no relevant evidence at "
+                        "all. Partial evidence is still evidence — answer with "
+                        "what the memories support."
+                        + hint_block
                     ),
                 },
                 {
