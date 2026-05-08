@@ -8,7 +8,7 @@ import { type GraphMutation, type GraphMutationContext, mapEventToEffects } from
 import { ForceSimulation } from '@/graph/force-sim';
 import { NodeManager } from '@/graph/nodes';
 import { ParticleSystem } from '@/graph/particles';
-import { applyTheme, createScene, disposeScene, resizeScene, type SceneContext } from '@/graph/scene';
+import { applyAutoRotate, applyTheme, createScene, disposeScene, resizeScene, type SceneContext } from '@/graph/scene';
 import { createNebulaBackground, updateNebula } from '@/graph/shaders/nebula.frag';
 import { createPostProcessing, type PostProcessingStack, updatePostProcessing } from '@/graph/shaders/post-processing';
 import { isDarkMode } from '@/graph/theme';
@@ -20,6 +20,18 @@ interface Props {
   centerId: string;
   events?: VestigeEvent[];
   isDreaming?: boolean;
+  /**
+   * When true, suppresses non-essential motion to honor `prefers-reduced-motion`:
+   * disables auto-rotate, ambient particle drift, and dampens dream-mode
+   * shaders to a static appearance. Hover/click feedback and structural updates
+   * (force sim, node placement) still run — they are user-triggered or essential.
+   */
+  reducedMotion?: boolean;
+  /**
+   * Node colour palette. `'type'` colours by node-type (default), `'tag'`
+   * colours by primary tag — useful for visually separating semantic clusters.
+   */
+  colorMode?: 'type' | 'tag';
   nodeOpacities?: Map<string, number>;
   onSelect?: (nodeId: string) => void;
   onGraphMutation?: (mutation: GraphMutation) => void;
@@ -57,14 +69,16 @@ export function Graph3D({
   centerId: _centerId,
   events = [],
   isDreaming = false,
+  reducedMotion = false,
+  colorMode = 'type',
   nodeOpacities,
   onSelect,
   onGraphMutation,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<SceneState | null>(null);
-  const propsRef = useRef({ edges, events, isDreaming, nodeOpacities, onSelect, onGraphMutation });
-  propsRef.current = { edges, events, isDreaming, nodeOpacities, onSelect, onGraphMutation };
+  const propsRef = useRef({ edges, events, isDreaming, reducedMotion, colorMode, nodeOpacities, onSelect, onGraphMutation });
+  propsRef.current = { edges, events, isDreaming, reducedMotion, colorMode, nodeOpacities, onSelect, onGraphMutation };
   const dataRef = useRef({ nodes, edges });
   dataRef.current = { nodes, edges };
 
@@ -201,10 +215,13 @@ export function Graph3D({
     }
 
     let frameCount = 0;
+    let lastTime = performance.now() * 0.001;
     function animate() {
       if (state.paused) return;
       state.animationId = requestAnimationFrame(animate);
       const time = performance.now() * 0.001;
+      const deltaSeconds = time - lastTime;
+      lastTime = time;
 
       frameCount++;
       if (frameCount % 60 === 0) checkThemeChange();
@@ -215,8 +232,13 @@ export function Graph3D({
       state.nodeManager.updatePositions();
       state.edgeManager.updatePositions(state.nodeManager.positions, state.edgeParticles);
       state.edgeManager.animateEdges(state.nodeManager.positions);
-      state.edgeParticles.animate();
-      state.particles.animate(time);
+      // Edge flow particles & ambient particle field are decorative — suppress
+      // them under prefers-reduced-motion. Force sim and node updates still run
+      // so structural changes (new memory, deletion) remain visible.
+      if (!propsRef.current.reducedMotion) {
+        state.edgeParticles.animate();
+        state.particles.animate(time);
+      }
 
       const hovered = state.nodeManager.hoveredNode;
       if (hovered !== state.lastHoveredNode) {
@@ -242,11 +264,27 @@ export function Graph3D({
         }
       }
 
-      state.nodeManager.animate(time, state.nodeById, state.ctx.camera, propsRef.current.nodeOpacities);
+      const opacities = propsRef.current.nodeOpacities;
+      state.nodeManager.animate(time, state.nodeById, state.ctx.camera, opacities);
+      if (opacities && opacities.size > 0) {
+        state.edgeManager.applyTemporalOpacities(opacities);
+        for (const entry of state.edgeManager.entries) {
+          const srcOp = opacities.get(entry.source) ?? 1;
+          const tgtOp = opacities.get(entry.target) ?? 1;
+          state.edgeParticles.setEdgeTemporalAlpha(entry.index, Math.min(srcOp, tgtOp));
+        }
+      } else {
+        state.edgeParticles.clearTemporalAlpha();
+      }
 
       state.dreamMode.setActive(propsRef.current.isDreaming ?? false);
       if (state.lastDarkMode) {
-        state.dreamMode.update(state.ctx.scene, state.ctx.bloomPass, state.ctx.controls, state.ctx.lights, time);
+        state.dreamMode.update(state.ctx.scene, state.ctx.bloomPass, state.ctx, state.ctx.lights, time);
+      }
+      // DreamMode mutates ctx.autoRotateSpeed during transitions; clamp it to
+      // zero AFTER its update to fully respect prefers-reduced-motion.
+      if (propsRef.current.reducedMotion) {
+        state.ctx.autoRotateSpeed = 0;
       }
 
       const cw = container?.clientWidth ?? 800;
@@ -264,6 +302,11 @@ export function Graph3D({
 
       processEvents();
       state.effects.update(state.nodeManager.meshMap, state.ctx.camera, state.nodeManager.positions);
+
+      // Manual auto-rotate (TrackballControls has no built-in autoRotate).
+      // Apply BEFORE controls.update() so user input takes precedence over
+      // the rotation drift in the same frame.
+      applyAutoRotate(state.ctx, deltaSeconds);
 
       state.ctx.controls.update();
       state.ctx.composer.render();
@@ -330,7 +373,27 @@ export function Graph3D({
     s.nodeById = buildNodeById(nodes);
     s.processedEventCount = 0;
     s.lastHoveredNode = null;
+
+    // Re-apply colour mode after rebuild — createNodes() defaults to 'type'
+    // because that's the constructor state, but the user may have switched
+    // to 'tag' mode before this rebuild (e.g. on tag filter change).
+    if (propsRef.current.colorMode && propsRef.current.colorMode !== 'type') {
+      freshNodeManager.setColorMode(
+        propsRef.current.colorMode,
+        s.nodeById,
+        isDarkMode(),
+      );
+    }
   }, [nodes, edges]);
+
+  // Switch palette without rebuilding the scene when only colorMode changes.
+  // Cheaper than a full rebuild — just iterates existing meshes and updates
+  // material colours.
+  useEffect(() => {
+    const s = stateRef.current;
+    if (!s) return;
+    s.nodeManager.setColorMode(colorMode, s.nodeById, isDarkMode());
+  }, [colorMode]);
 
   return <div ref={containerRef} className="w-full h-full" />;
 }

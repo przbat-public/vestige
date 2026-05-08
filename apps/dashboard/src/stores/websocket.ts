@@ -9,6 +9,14 @@ interface WebSocketStore {
   events: IdentifiedEvent[];
   memoryCount: number;
   avgRetention: number;
+  /**
+   * Whether a dream cycle is currently running. Toggled by `DreamStarted`
+   * (true) and `DreamCompleted` (false) WebSocket events. Consumed by
+   * `Graph3D` to drive the dream visual mode (bloom/fog/aurora). This is
+   * single source of truth so dreams triggered from any client (this UI,
+   * MCP tool, CLI) reflect on every connected dashboard.
+   */
+  isDreaming: boolean;
   clearEvents: () => void;
 }
 
@@ -17,6 +25,7 @@ export const useWebSocket = create<WebSocketStore>((set) => ({
   events: [],
   memoryCount: 0,
   avgRetention: 0,
+  isDreaming: false,
   clearEvents: () => set({ events: [] }),
 }));
 
@@ -37,6 +46,42 @@ function scheduleReconnect() {
   reconnectTimer = setTimeout(connect, delay);
 }
 
+/**
+ * Process a raw WebSocket message payload and update the store.
+ * Exported for unit testing — covers Heartbeat, dream lifecycle, and event
+ * append behavior without needing a real WebSocket connection.
+ *
+ * Returns true when the message was successfully handled, false on parse error.
+ */
+export function processWebSocketMessage(rawData: string): boolean {
+  try {
+    const parsed: VestigeEvent = JSON.parse(rawData);
+    if (parsed.type === 'Heartbeat') {
+      useWebSocket.setState({
+        memoryCount: (parsed.data?.memoryCount as number) ?? 0,
+        avgRetention: (parsed.data?.avgRetention as number) ?? 0,
+      });
+      return true;
+    }
+    // Track dream lifecycle so the 3D graph can switch into dream visual mode.
+    // Mutating isDreaming here (rather than deriving it in components) keeps
+    // it consistent across every connected dashboard.
+    if (parsed.type === 'DreamStarted') {
+      useWebSocket.setState({ isDreaming: true });
+    } else if (parsed.type === 'DreamCompleted') {
+      useWebSocket.setState({ isDreaming: false });
+    }
+    const identified: IdentifiedEvent = { ...parsed, _id: ++_eventIdCounter };
+    useWebSocket.setState((s) => ({
+      events: [identified, ...s.events].slice(0, MAX_EVENTS),
+    }));
+    return true;
+  } catch {
+    console.warn('[vestige] Malformed WebSocket message:', rawData);
+    return false;
+  }
+}
+
 function connect() {
   if (ws?.readyState === WebSocket.OPEN) return;
 
@@ -48,22 +93,7 @@ function connect() {
   };
 
   ws.onmessage = (event) => {
-    try {
-      const parsed: VestigeEvent = JSON.parse(event.data);
-      if (parsed.type === 'Heartbeat') {
-        useWebSocket.setState({
-          memoryCount: (parsed.data?.memoryCount as number) ?? 0,
-          avgRetention: (parsed.data?.avgRetention as number) ?? 0,
-        });
-        return;
-      }
-      const identified: IdentifiedEvent = { ...parsed, _id: ++_eventIdCounter };
-      useWebSocket.setState((s) => ({
-        events: [identified, ...s.events].slice(0, MAX_EVENTS),
-      }));
-    } catch {
-      console.warn('[vestige] Malformed WebSocket message:', event.data);
-    }
+    processWebSocketMessage(event.data);
   };
 
   ws.onclose = () => {

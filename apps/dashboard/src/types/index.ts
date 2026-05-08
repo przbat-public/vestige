@@ -33,6 +33,48 @@ export interface MemoryListResponse {
   memories: Memory[];
 }
 
+export interface MemoryChangelogEntry {
+  fromState: string;
+  toState: string;
+  reasonType: string;
+  reasonData?: string | null;
+  timestamp: string;
+}
+
+export interface MemoryChangelog {
+  memoryId: string;
+  memoryContent: string;
+  totalTransitions: number;
+  transitions: MemoryChangelogEntry[];
+}
+
+/** FSRS-6 rating values. 1=Again (forgot), 2=Hard, 3=Good, 4=Easy. */
+export type FsrsRating = 1 | 2 | 3 | 4;
+
+export interface ReviewResult {
+  id: string;
+  rating: 'again' | 'hard' | 'good' | 'easy';
+  previousRetention: number;
+  newRetention: number;
+  previousStability: number;
+  newStability: number;
+  difficulty: number;
+  reps: number;
+  lapses: number;
+  nextReviewAt: string | null;
+}
+
+/** A memory in the review queue — slimmer than `Memory` but compatible. */
+export interface ReviewItem extends Memory {
+  difficulty: number;
+  stability: number;
+}
+
+export interface ReviewQueueResponse {
+  total: number;
+  memories: ReviewItem[];
+}
+
 export interface SystemStats {
   totalMemories: number;
   dueForReview: number;

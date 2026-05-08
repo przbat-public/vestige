@@ -238,8 +238,28 @@
 }
 .animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
 
+/*
+ * Reduced-motion compliance (WCAG 2.3.3 + 2.2.x guidance).
+ *
+ * Hard-disable our custom looping decorations (ambient-orb, pulse-glow,
+ * nav-active border sweep). Then collapse every animation and transition to
+ * effectively-instant on the page so Tailwind's animate-* utilities and any
+ * inline `transition-*` rules also respect the user's OS preference.
+ *
+ * scroll-behavior:auto stops smooth-scroll jumps from triggering vestibular
+ * symptoms when navigating via anchor links.
+ *
+ * Three.js scene motion (auto-rotate, particles) is handled separately in JS
+ * via `useReducedMotion` because Three.js drives its own animation loop.
+ */
 @media (prefers-reduced-motion: reduce) {
   .ambient-orb, .animate-pulse-glow, .nav-active-border::before {
     animation: none !important;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -108,7 +108,31 @@ pub async fn start_http_transport(
             ServiceBuilder::new()
                 .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
                 .layer(ConcurrencyLimitLayer::new(CONCURRENCY_LIMIT))
-                .layer(CorsLayer::permissive()),
+                .layer(
+                    {
+                        let mut origins = vec![
+                            format!("http://127.0.0.1:{}", port),
+                            format!("http://localhost:{}", port),
+                        ];
+                        if let Ok(extra) = std::env::var("VESTIGE_CORS_ORIGINS") {
+                            origins.extend(extra.split(',').map(|s| s.trim().to_string()));
+                        }
+                        let bind = std::env::var("VESTIGE_HTTP_BIND").unwrap_or_default();
+                        if bind == "0.0.0.0" || bind == "::" {
+                            tracing::info!(bind_addr = %bind, "VESTIGE_HTTP_BIND is non-localhost — set VESTIGE_CORS_ORIGINS for browser access from remote hosts");
+                        }
+                        CorsLayer::new()
+                            .allow_origin(
+                                origins
+                                    .into_iter()
+                                    .filter(|s| !s.is_empty())
+                                    .filter_map(|s| s.parse().ok())
+                                    .collect::<Vec<_>>(),
+                            )
+                            .allow_methods([axum::http::Method::POST, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
+                            .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
+                    }
+                ),
         )
         .with_state(state);
 

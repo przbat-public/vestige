@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert } from '@/components/ui/alert';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
@@ -17,7 +17,7 @@ type DayOption = (typeof DAY_OPTIONS)[number];
 export function TimelinePage() {
   const { t, i18n } = useTranslation();
   const [days, setDays] = useState<DayOption>(7);
-  const { data, isLoading: loading, isError } = useQuery({
+  const { data, isLoading: loading, isError, error, refetch } = useQuery({
     queryKey: queryKeys.timeline(days, 500),
     queryFn: () => api.timeline(days, 500),
   });
@@ -38,7 +38,7 @@ export function TimelinePage() {
       </div>
 
       {isError ? (
-        <Alert variant="destructive">{t('common.fetchError')}</Alert>
+        <QueryErrorPanel error={error} onRetry={refetch} />
       ) : loading ? (
         <LoadingSpinner label={t('common.loading')} />
       ) : timeline.length === 0 ? (

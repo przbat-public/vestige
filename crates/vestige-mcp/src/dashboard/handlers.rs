@@ -218,6 +218,276 @@ pub async fn demote_memory(
     })))
 }
 
+/// Body for `PATCH /api/memories/{id}` — both fields optional.
+/// Either or both can be supplied. Empty body returns 400.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMemoryBody {
+    pub content: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+/// Edit a memory's content and/or tags.
+///
+/// Mirrors the MCP `memory(action="edit")` flow but is exposed via REST so the
+/// dashboard can give users an inline editor. Updating content also schedules
+/// embedding regeneration server-side (see `Storage::update_node_content`).
+pub async fn update_memory(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateMemoryBody>,
+) -> Result<Json<Value>, StatusCode> {
+    if body.content.is_none() && body.tags.is_none() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    if let Some(ref new_content) = body.content {
+        let trimmed = new_content.trim();
+        if trimmed.is_empty() {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        state.storage
+            .update_node_content(&id, trimmed)
+            .map_err(log_err("update_node_content"))?;
+    }
+
+    if let Some(ref new_tags) = body.tags {
+        state.storage
+            .update_node_tags(&id, new_tags)
+            .map_err(log_err("update_node_tags"))?;
+    }
+
+    let node = state.storage
+        .get_node(&id)
+        .map_err(log_err("get_node after update"))?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let preview: String = node.content.chars().take(80).collect();
+    let field = match (body.content.is_some(), body.tags.is_some()) {
+        (true, true) => "content+tags",
+        (true, false) => "content",
+        (false, true) => "tags",
+        _ => "unknown",
+    };
+    state.emit(VestigeEvent::MemoryUpdated {
+        id: node.id.clone(),
+        content_preview: preview,
+        field: field.to_string(),
+        timestamp: chrono::Utc::now(),
+    });
+
+    Ok(Json(serde_json::json!({
+        "id": node.id,
+        "content": node.content,
+        "nodeType": node.node_type,
+        "tags": node.tags,
+        "retentionStrength": node.retention_strength,
+        "storageStrength": node.storage_strength,
+        "retrievalStrength": node.retrieval_strength,
+        "createdAt": node.created_at.to_rfc3339(),
+        "updatedAt": node.updated_at.to_rfc3339(),
+        "lastAccessedAt": node.last_accessed.to_rfc3339(),
+        "reviewCount": node.reps,
+    })))
+}
+
+// =============================================================================
+// MAINTENANCE WRAPPERS
+//
+// These thin REST shims forward to the existing MCP tool functions so the
+// dashboard does not duplicate logic. Each accepts the same JSON args as the
+// MCP tool and returns its JSON response verbatim.
+// =============================================================================
+
+fn maintenance_err(tool: &'static str) -> impl Fn(String) -> StatusCode {
+    move |e| {
+        tracing::error!(tool = tool, error = %e, "maintenance handler failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+/// `POST /api/maintenance/regenerate-embeddings` — backfill or rebuild embeddings.
+pub async fn maintenance_regenerate_embeddings(
+    State(state): State<AppState>,
+    body: Option<Json<Value>>,
+) -> Result<Json<Value>, StatusCode> {
+    let args = body.map(|Json(v)| v);
+    crate::tools::maintenance::execute_regenerate_embeddings(&state.storage, args)
+        .await
+        .map(Json)
+        .map_err(maintenance_err("regenerate_embeddings"))
+}
+
+/// `POST /api/maintenance/find-duplicates` — return clusters of near-duplicate memories.
+pub async fn maintenance_find_duplicates(
+    State(state): State<AppState>,
+    body: Option<Json<Value>>,
+) -> Result<Json<Value>, StatusCode> {
+    let args = body.map(|Json(v)| v);
+    crate::tools::dedup::execute(&state.storage, args)
+        .await
+        .map(Json)
+        .map_err(maintenance_err("find_duplicates"))
+}
+
+/// `POST /api/maintenance/gc` — list (or delete, with dry_run=false) low-retention memories.
+pub async fn maintenance_gc(
+    State(state): State<AppState>,
+    body: Option<Json<Value>>,
+) -> Result<Json<Value>, StatusCode> {
+    let args = body.map(|Json(v)| v);
+    crate::tools::maintenance::execute_gc(&state.storage, args)
+        .await
+        .map(Json)
+        .map_err(maintenance_err("gc"))
+}
+
+/// `POST /api/maintenance/backup` — write a SQLite snapshot to ~/.vestige/backups.
+pub async fn maintenance_backup(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, StatusCode> {
+    crate::tools::maintenance::execute_backup(&state.storage, None)
+        .await
+        .map(Json)
+        .map_err(maintenance_err("backup"))
+}
+
+/// Body for `POST /api/memories/{id}/review` — FSRS-6 rating.
+/// 1=Again, 2=Hard, 3=Good, 4=Easy. Defaults to 3 if omitted.
+#[derive(Debug, Deserialize)]
+pub struct ReviewBody {
+    pub rating: Option<i32>,
+}
+
+/// Apply an FSRS-6 review rating to a memory.
+///
+/// This is the missing piece that lets the dashboard expose Anki/Logseq-style
+/// spaced repetition directly. Backend updates `stability`, `difficulty`,
+/// `next_review`, increments `reps`/`lapses`, and bumps `retrieval_strength`.
+pub async fn review_memory(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<ReviewBody>,
+) -> Result<Json<Value>, StatusCode> {
+    let rating_value = body.rating.unwrap_or(3);
+    let rating = vestige_core::Rating::from_i32(rating_value)
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+    let before = state.storage
+        .get_node(&id)
+        .map_err(log_err("get_node before review"))?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let node = state.storage
+        .mark_reviewed(&id, rating)
+        .map_err(log_err("mark_reviewed"))?;
+
+    let rating_name = match rating {
+        vestige_core::Rating::Again => "again",
+        vestige_core::Rating::Hard => "hard",
+        vestige_core::Rating::Good => "good",
+        vestige_core::Rating::Easy => "easy",
+    };
+
+    Ok(Json(serde_json::json!({
+        "id": node.id,
+        "rating": rating_name,
+        "previousRetention": before.retention_strength,
+        "newRetention": node.retention_strength,
+        "previousStability": before.stability,
+        "newStability": node.stability,
+        "difficulty": node.difficulty,
+        "reps": node.reps,
+        "lapses": node.lapses,
+        "nextReviewAt": node.next_review.map(|d| d.to_rfc3339()),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReviewQueueParams {
+    pub limit: Option<i32>,
+}
+
+/// Get the queue of memories due for review (FSRS-6 `next_review <= now`).
+///
+/// Sorted ascending by `next_review` so the most overdue memories come first.
+/// Limit is clamped to `[1, 200]` to keep the response bounded; the dashboard
+/// pages through if there are more.
+pub async fn get_review_queue(
+    State(state): State<AppState>,
+    Query(params): Query<ReviewQueueParams>,
+) -> Result<Json<Value>, StatusCode> {
+    let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    let nodes = state.storage
+        .get_review_queue(limit)
+        .map_err(log_err("get_review_queue"))?;
+
+    let formatted: Vec<Value> = nodes
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "id": n.id,
+                "content": n.content,
+                "nodeType": n.node_type,
+                "tags": n.tags,
+                "retentionStrength": n.retention_strength,
+                "storageStrength": n.storage_strength,
+                "retrievalStrength": n.retrieval_strength,
+                "createdAt": n.created_at.to_rfc3339(),
+                "updatedAt": n.updated_at.to_rfc3339(),
+                "lastAccessedAt": n.last_accessed.to_rfc3339(),
+                "nextReviewAt": n.next_review.map(|d| d.to_rfc3339()),
+                "reviewCount": n.reps,
+                "difficulty": n.difficulty,
+                "stability": n.stability,
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "total": formatted.len(),
+        "memories": formatted,
+    })))
+}
+
+/// Get the per-memory changelog (state transitions audit trail).
+///
+/// Mirrors the MCP `memory_changelog` tool with `memory_id` set, but trimmed
+/// to the data the dashboard actually renders (transitions list).
+pub async fn get_memory_changelog(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    let node = state.storage
+        .get_node(&id)
+        .map_err(log_err("get_node for changelog"))?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let transitions = state.storage
+        .get_state_transitions(&id, 100)
+        .map_err(log_err("get_state_transitions"))?;
+
+    let formatted: Vec<Value> = transitions
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "fromState": t.from_state,
+                "toState": t.to_state,
+                "reasonType": t.reason_type,
+                "reasonData": t.reason_data,
+                "timestamp": t.timestamp.to_rfc3339(),
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "memoryId": id,
+        "memoryContent": node.content,
+        "totalTransitions": formatted.len(),
+        "transitions": formatted,
+    })))
+}
+
 /// Get system stats
 pub async fn get_stats(
     State(state): State<AppState>,
@@ -547,11 +817,31 @@ pub struct ExploreRequest {
     pub limit: Option<usize>,
 }
 
+type ExploreError = (StatusCode, Json<Value>);
+
+fn explore_error(status: StatusCode, code: &str, message: &str) -> ExploreError {
+    (
+        status,
+        Json(serde_json::json!({ "error": { "code": code, "message": message } })),
+    )
+}
+
+fn explore_storage_err(context: &'static str) -> impl Fn(vestige_core::StorageError) -> ExploreError {
+    move |e| {
+        tracing::error!(error = %e, context = context, "Dashboard handler error");
+        explore_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage_error",
+            "Internal storage error",
+        )
+    }
+}
+
 /// Explore connections between memories
 pub async fn explore_connections(
     State(state): State<AppState>,
     Json(req): Json<ExploreRequest>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<Value>, ExploreError> {
     let action = req.action.as_deref().unwrap_or("associations");
     let limit = req.limit.unwrap_or(10).clamp(1, 50);
 
@@ -561,14 +851,20 @@ pub async fn explore_connections(
             let source_node = state
                 .storage
                 .get_node(&req.from_id)
-                .map_err(log_err("explore associations"))?
-                .ok_or(StatusCode::NOT_FOUND)?;
+                .map_err(explore_storage_err("explore associations"))?
+                .ok_or_else(|| {
+                    explore_error(
+                        StatusCode::NOT_FOUND,
+                        "from_not_found",
+                        "Source memory does not exist",
+                    )
+                })?;
 
             // Use hybrid search with source content to find associated memories
             let results = state
                 .storage
                 .hybrid_search(&source_node.content, limit as i32, 0.3, 0.7)
-                .map_err(log_err("storage operation"))?;
+                .map_err(explore_storage_err("storage operation"))?;
 
             let formatted: Vec<Value> = results
                 .iter()
@@ -591,12 +887,18 @@ pub async fn explore_connections(
             })))
         }
         "chains" | "bridges" => {
-            let to_id = req.to_id.as_deref().ok_or(StatusCode::BAD_REQUEST)?;
+            let to_id = req.to_id.as_deref().ok_or_else(|| {
+                explore_error(
+                    StatusCode::BAD_REQUEST,
+                    "to_id_required",
+                    "Field `to_id` is required for chains and bridges modes",
+                )
+            })?;
 
             let (nodes, edges) = state
                 .storage
                 .get_memory_subgraph(&req.from_id, 2, limit)
-                .map_err(log_err("storage operation"))?;
+                .map_err(explore_storage_err("storage operation"))?;
 
             let nodes_json: Vec<Value> = nodes
                 .iter()
@@ -630,7 +932,11 @@ pub async fn explore_connections(
                 "edges": edges_json,
             })))
         }
-        _ => Err(StatusCode::BAD_REQUEST),
+        _ => Err(explore_error(
+            StatusCode::BAD_REQUEST,
+            "unknown_action",
+            "Unknown action — expected one of: associations, chains, bridges",
+        )),
     }
 }
 

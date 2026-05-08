@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import type { SceneContext } from '@/graph/scene';
 import { getGraphTheme } from '@/graph/theme';
 
 export interface DreamConfig {
@@ -62,7 +62,7 @@ export class DreamMode {
   update(
     scene: THREE.Scene,
     bloomPass: UnrealBloomPass,
-    controls: OrbitControls,
+    ctx: SceneContext,
     lights: { point1: THREE.PointLight; point2: THREE.PointLight },
     _time: number,
   ) {
@@ -84,7 +84,7 @@ export class DreamMode {
 
     // Apply
     bloomPass.strength = this.current.bloomStrength;
-    controls.autoRotateSpeed = this.current.rotateSpeed;
+    ctx.autoRotateSpeed = this.current.rotateSpeed;
 
     // Fog: reuse FogExp2 instance and Color objects instead of allocating new ones
     this._fogColor.copy(this._normalFog).lerp(this._dreamFog, t);

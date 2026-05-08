@@ -769,6 +769,28 @@ impl Storage {
         Ok(results)
     }
 
+    /// Update the tags of an existing node.
+    ///
+    /// Tags are stored as a JSON array in the `tags` column of `knowledge_nodes`.
+    /// We normalize first (trim, dedup, drop empties) so callers do not need to
+    /// pre-clean. The node's `updated_at` is bumped so dashboards can detect the
+    /// change. Embeddings are not regenerated — tags are not part of the
+    /// embedding text in this storage layer.
+    pub fn update_node_tags(&self, id: &str, new_tags: &[String]) -> Result<()> {
+        let normalized = normalize_tags(new_tags);
+        let tags_json = serde_json::to_string(&normalized)
+            .map_err(|e| StorageError::Init(format!("Failed to serialize tags: {}", e)))?;
+        let now = Utc::now();
+
+        let writer = self.writer.lock()
+            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+        writer.execute(
+            "UPDATE knowledge_nodes SET tags = ?1, updated_at = ?2 WHERE id = ?3",
+            params![tags_json, now.to_rfc3339(), id],
+        )?;
+        Ok(())
+    }
+
     /// Update the content of an existing node
     pub fn update_node_content(&self, id: &str, new_content: &str) -> Result<()> {
         let now = Utc::now();
@@ -802,6 +824,15 @@ impl Storage {
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     fn generate_embedding_for_node(&self, node_id: &str, content: &str) -> Result<()> {
         if !self.embedding_service.is_ready() {
+            // Silent skip is dangerous — ingest then thinks everything succeeded but
+            // the memory has no embedding and won't participate in semantic search.
+            // Surface the skip so callers can detect and run regenerate_embeddings later.
+            tracing::warn!(
+                node_id = %node_id,
+                "Skipping embedding generation: embedding service not ready. \
+                 Run 'regenerate_embeddings' MCP tool after the model is loaded \
+                 to backfill missing embeddings."
+            );
             return Ok(());
         }
 
@@ -2828,6 +2859,10 @@ impl Storage {
                 return Ok(0);
             }
 
+        // Backfill batch size. 1000 covers most personal databases in a single
+        // consolidation cycle. For larger databases, run consolidation multiple
+        // times or use the dedicated `regenerate_embeddings` MCP tool which has
+        // no per-call cap.
         let nodes: Vec<(String, String)> = {
             let reader = self.reader.lock()
                 .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
@@ -2835,7 +2870,7 @@ impl Storage {
                 .prepare(
                     "SELECT id, content FROM knowledge_nodes
                      WHERE has_embedding = 0 OR has_embedding IS NULL
-                     LIMIT 100",
+                     LIMIT 1000",
                 )?
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
                 .filter_map(|r| r.ok())

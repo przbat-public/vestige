@@ -27,10 +27,10 @@ pub fn schema() -> Value {
             },
             "token_budget": {
                 "type": "integer",
-                "description": "Max tokens for response (default: 1000). Server truncates content to fit budget.",
+                "description": "Max tokens for response (default: 1000). Server truncates content to fit budget. With 1M context models, budgets up to 100K are practical.",
                 "default": 1000,
                 "minimum": 100,
-                "maximum": 10000
+                "maximum": 100000
             },
             "context": {
                 "type": "object",
@@ -105,7 +105,11 @@ pub async fn execute(
         None => SessionContextArgs::default(),
     };
 
-    let token_budget = args.token_budget.unwrap_or(1000).clamp(100, 10000) as usize;
+    let max_budget: i32 = std::env::var("VESTIGE_MAX_TOKEN_BUDGET")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100000);
+    let token_budget = args.token_budget.unwrap_or(1000).clamp(100, max_budget) as usize;
     let budget_chars = token_budget * 4;
     let include_status = args.include_status.unwrap_or(true);
     let include_intentions = args.include_intentions.unwrap_or(true);
@@ -132,7 +136,8 @@ pub async fn execute(
                 continue;
             }
             let summary = first_sentence(&r.node.content);
-            let line = format!("- {}", summary);
+            let date_str = r.node.updated_at.format("%b %d, %Y").to_string();
+            let line = format!("- ({}) {}", date_str, summary);
             let line_len = line.len() + 1; // +1 for newline
 
             if char_count + line_len > budget_chars {
@@ -513,7 +518,7 @@ mod tests {
         let s = schema();
         let tb = &s["properties"]["token_budget"];
         assert_eq!(tb["minimum"], 100);
-        assert_eq!(tb["maximum"], 10000);
+        assert_eq!(tb["maximum"], 100000);
         assert_eq!(tb["default"], 1000);
     }
 

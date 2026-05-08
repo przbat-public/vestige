@@ -35,7 +35,8 @@ pub async fn execute(
         .as_ref()
         .and_then(|a| a.get("memory_count"))
         .and_then(|v| v.as_u64())
-        .unwrap_or(50) as usize;
+        .unwrap_or(50)
+        .min(500) as usize;
 
     // v1.9.0: Waking SWR tagging — preferential replay of tagged memories (70/30 split)
     let tagged_nodes = storage.get_waking_tagged_memories(memory_count as i32)

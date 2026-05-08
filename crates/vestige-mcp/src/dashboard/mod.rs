@@ -11,7 +11,7 @@ pub mod state;
 pub mod static_files;
 pub mod websocket;
 
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -126,8 +126,23 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
         .route("/api/memories", get(handlers::list_memories))
         .route("/api/memories/{id}", get(handlers::get_memory))
         .route("/api/memories/{id}", delete(handlers::delete_memory))
+        .route("/api/memories/{id}", patch(handlers::update_memory))
         .route("/api/memories/{id}/promote", post(handlers::promote_memory))
         .route("/api/memories/{id}/demote", post(handlers::demote_memory))
+        .route("/api/memories/{id}/changelog", get(handlers::get_memory_changelog))
+        .route("/api/memories/{id}/review", post(handlers::review_memory))
+        .route("/api/review/queue", get(handlers::get_review_queue))
+        // Maintenance — thin REST wrappers around MCP tools, used by Settings UI
+        .route(
+            "/api/maintenance/regenerate-embeddings",
+            post(handlers::maintenance_regenerate_embeddings),
+        )
+        .route(
+            "/api/maintenance/find-duplicates",
+            post(handlers::maintenance_find_duplicates),
+        )
+        .route("/api/maintenance/gc", post(handlers::maintenance_gc))
+        .route("/api/maintenance/backup", post(handlers::maintenance_backup))
         // Search
         .route("/api/search", get(handlers::search_memories))
         // Stats & health

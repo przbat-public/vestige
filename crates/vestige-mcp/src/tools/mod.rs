@@ -42,6 +42,9 @@ pub mod reflect;
 pub mod temporal;
 pub mod confidence;
 
+// v3.2.1: Deep Reference (cognitive reasoning engine)
+pub mod cross_reference;
+
 // Internal tools — not advertised in MCP tools/list but actively dispatched
 // for backwards-compatible operations in server.rs.
 #[allow(dead_code)]

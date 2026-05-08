@@ -243,6 +243,16 @@ export class EdgeManager {
     }
   }
 
+  applyTemporalOpacities(nodeOpacities: Map<string, number>) {
+    for (const e of this.entries) {
+      if (e.dissolving) continue;
+      const srcOp = nodeOpacities.get(e.source) ?? 1;
+      const tgtOp = nodeOpacities.get(e.target) ?? 1;
+      const edgeOp = Math.min(srcOp, tgtOp);
+      e.targetOpacity = edgeOp > 0 ? e.baseOpacity * edgeOp : 0;
+    }
+  }
+
   applyTheme() {
     this.theme = getGraphTheme();
   }

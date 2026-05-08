@@ -136,3 +136,4 @@ apps/dashboard/node_modules/
 # External repos (forks, submodules)
 # =============================================================================
 fastembed-rs/
+.mcp.json

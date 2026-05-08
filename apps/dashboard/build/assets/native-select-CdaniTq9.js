@@ -1,1 +1,0 @@
-import{r as t,j as s,c as a}from"./index-Dz5IaoeM.js";const n=t.forwardRef(({className:e,...r},o)=>s.jsx("select",{ref:o,className:a("px-2 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition",e),...r}));n.displayName="NativeSelect";export{n as N};

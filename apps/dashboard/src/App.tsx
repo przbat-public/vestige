@@ -5,6 +5,8 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner';
 
 const GraphPage = lazy(() => import('@/pages/GraphPage').then((m) => ({ default: m.GraphPage })));
 const MemoriesPage = lazy(() => import('@/pages/MemoriesPage').then((m) => ({ default: m.MemoriesPage })));
+const ReviewPage = lazy(() => import('@/pages/ReviewPage').then((m) => ({ default: m.ReviewPage })));
+const BriefingPage = lazy(() => import('@/pages/BriefingPage').then((m) => ({ default: m.BriefingPage })));
 const TimelinePage = lazy(() => import('@/pages/TimelinePage').then((m) => ({ default: m.TimelinePage })));
 const FeedPage = lazy(() => import('@/pages/FeedPage').then((m) => ({ default: m.FeedPage })));
 const ExplorePage = lazy(() => import('@/pages/ExplorePage').then((m) => ({ default: m.ExplorePage })));
@@ -30,6 +32,8 @@ export default function App() {
           <Route index element={<Navigate to="graph" replace />} />
           <Route path="graph" element={<GraphPage />} />
           <Route path="memories" element={<MemoriesPage />} />
+          <Route path="review" element={<ReviewPage />} />
+          <Route path="briefing" element={<BriefingPage />} />
           <Route path="timeline" element={<TimelinePage />} />
           <Route path="feed" element={<FeedPage />} />
           <Route path="explore" element={<ExplorePage />} />

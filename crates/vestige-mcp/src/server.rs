@@ -159,7 +159,7 @@ impl McpServer {
 
     /// Handle tools/list request
     async fn handle_tools_list(&self) -> Result<serde_json::Value, JsonRpcError> {
-        // v3.1: 24 tools. Deprecated tools still work via redirects in handle_tools_call.
+        // v3.2.1: 25 tools (+deep_reference). Deprecated tools still work via redirects in handle_tools_call.
         let tools = vec![
             // ================================================================
             // UNIFIED TOOLS (v1.1+)
@@ -238,6 +238,11 @@ impl McpServer {
                 description: Some("Find compound/multi-topic memories that should be split into atomic pieces. Returns memories with splitting suggestions. Use dry_run=false to auto-delete compounds after reading them. Then re-ingest each as separate atomic items via smart_ingest batch mode.".to_string()),
                 input_schema: tools::maintenance::split_memories_schema(),
             },
+            ToolDescription {
+                name: "regenerate_embeddings".to_string(),
+                description: Some("Backfill or rebuild memory embeddings without the per-call cap that consolidate has. Use force=false (default) to fill missing embeddings (has_embedding=0/NULL); force=true to rebuild all. Optional node_ids to scope to specific memories. Use after upgrading the embedding model, after a long stretch where the model was unavailable at ingest time, or to recover from silent-skip situations.".to_string()),
+                input_schema: tools::maintenance::regenerate_embeddings_schema(),
+            },
             // ================================================================
             // AUTO-SAVE & DEDUP TOOLS (v1.3+)
             // ================================================================
@@ -315,6 +320,14 @@ impl McpServer {
                 name: "confidence".to_string(),
                 description: Some("Confidence scoring for opinions and beliefs. Actions: 'score' (evaluate a single memory), 'audit' (find poorly-calibrated memories), 'calibrate' (compare opinions vs facts retention).".to_string()),
                 input_schema: tools::confidence::schema(),
+            },
+            // ================================================================
+            // COGNITIVE REASONING (v3.2.1+)
+            // ================================================================
+            ToolDescription {
+                name: "deep_reference".to_string(),
+                description: Some("Cognitive reasoning engine across memories. Combines hybrid search, FSRS-6 trust scoring, intent classification, temporal supersession, contradiction analysis, dream insight integration, and structured synthesis. Use for factual questions, fact-checking, timelines, root-cause analysis, comparisons, and topic synthesis. 'cross_reference' is a backward-compatible alias.".to_string()),
+                input_schema: tools::cross_reference::schema(),
             },
         ];
 
@@ -637,6 +650,7 @@ impl McpServer {
             "export" => tools::maintenance::execute_export(&self.storage, request.arguments).await,
             "gc" => tools::maintenance::execute_gc(&self.storage, request.arguments).await,
             "split_memories" => tools::maintenance::execute_split_memories(&self.storage, request.arguments).await,
+            "regenerate_embeddings" => tools::maintenance::execute_regenerate_embeddings(&self.storage, request.arguments).await,
 
             // ================================================================
             // AUTO-SAVE & DEDUP TOOLS (v1.3+)
@@ -675,6 +689,11 @@ impl McpServer {
             "reflect" => tools::reflect::execute(&self.storage, &self.cognitive, request.arguments).await,
             "temporal" => tools::temporal::execute(&self.storage, request.arguments).await,
             "confidence" => tools::confidence::execute(&self.storage, request.arguments).await,
+
+            // ================================================================
+            // COGNITIVE REASONING (v3.2.1+)
+            // ================================================================
+            "deep_reference" | "cross_reference" => tools::cross_reference::execute(&self.storage, &self.cognitive, request.arguments).await,
 
             name => {
                 return Err(JsonRpcError::method_not_found_with_message(&format!(
@@ -1220,8 +1239,8 @@ mod tests {
         let result = response.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
 
-        // v3.2: 25 tools (4 unified + 1 core + 2 temporal + 6 maintenance + 2 auto-save + 3 cognitive + 1 restore + 1 session_context + 2 autonomic + 3 metacognitive)
-        assert_eq!(tools.len(), 25, "Expected exactly 25 tools in v3.2+");
+        // v3.2.1: 26 tools (4 unified + 1 core + 2 temporal + 6 maintenance + 2 auto-save + 3 cognitive + 1 restore + 1 session_context + 2 autonomic + 3 metacognitive + 1 deep_reference)
+        assert_eq!(tools.len(), 26, "Expected exactly 26 tools in v3.2.1+");
 
         let tool_names: Vec<&str> = tools
             .iter()

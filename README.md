@@ -12,7 +12,7 @@
 
 Built on 130 years of memory research — FSRS-6 spaced repetition, prediction error gating, synaptic tagging, spreading activation, memory dreaming — all running in a single Rust binary with a 3D neural visualization dashboard. 100% local. Zero cloud.
 
-[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-24-mcp-tools) | [Docs](docs/)
+[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-26-mcp-tools) | [Docs](docs/)
 
 </div>
 
@@ -248,7 +248,7 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 
 ---
 
-## 🛠 24 MCP Tools
+## 🛠 26 MCP Tools
 
 ### Context Packets
 | Tool | What It Does |
@@ -342,7 +342,7 @@ At the start of every session:
 | **Locales** | English, Polish (extensible) |
 | **Themes** | Light + Dark (oklch design tokens, `prefers-color-scheme` aware) |
 | **Transport** | MCP stdio (JSON-RPC 2.0) + WebSocket |
-| **MCP tools** | 24 (core memory, cognitive, metacognitive, autonomic, maintenance) |
+| **MCP tools** | 26 (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference) |
 | **Cognitive modules** | 29 stateful + metacognition + Bayesian confidence + epistemic separation |
 | **First run** | Downloads embedding + reranker models (~1.3GB), then fully offline |
 | **Platforms** | macOS (ARM/Intel), Linux (x86_64), Windows |

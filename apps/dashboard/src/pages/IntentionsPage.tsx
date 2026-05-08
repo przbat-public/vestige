@@ -5,7 +5,6 @@ import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 import { SectionErrorBoundary } from '@/components/SectionErrorBoundary';
-import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,6 +12,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { NativeSelect } from '@/components/ui/native-select';
+import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
@@ -59,7 +59,13 @@ export function IntentionsPage() {
     [t],
   );
 
-  const { data: intentionsData, isLoading: loading, isError } = useQuery({
+  const {
+    data: intentionsData,
+    isLoading: loading,
+    isError,
+    error: intentionsError,
+    refetch: refetchIntentions,
+  } = useQuery({
     queryKey: queryKeys.intentions(status),
     queryFn: () => api.intentions(status),
   });
@@ -177,7 +183,7 @@ export function IntentionsPage() {
       )}
 
       {isError ? (
-        <Alert variant="destructive">{t('common.fetchError')}</Alert>
+        <QueryErrorPanel error={intentionsError} onRetry={refetchIntentions} />
       ) : loading ? (
         <LoadingSpinner label={t('common.loading')} />
       ) : intentions.length === 0 ? (

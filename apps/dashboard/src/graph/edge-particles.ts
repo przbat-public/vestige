@@ -14,6 +14,7 @@ export class EdgeParticleSystem {
   private particles: FlowParticle[] = [];
   private maxCount: number;
   private edgeFocusAlpha: Float32Array;
+  private edgeTemporalAlpha: Float32Array;
 
   curveData = new Float32Array(0);
   edgeCount = 0;
@@ -21,6 +22,7 @@ export class EdgeParticleSystem {
   constructor(parent: THREE.Group, maxCount = 800) {
     this.maxCount = maxCount;
     this.edgeFocusAlpha = new Float32Array(0);
+    this.edgeTemporalAlpha = new Float32Array(0);
 
     const pos = new Float32Array(maxCount * 3);
     const alpha = new Float32Array(maxCount);
@@ -73,6 +75,7 @@ export class EdgeParticleSystem {
     this.edgeCount = edgeCount;
     this.curveData = new Float32Array(edgeCount * 9);
     this.edgeFocusAlpha = new Float32Array(edgeCount).fill(1.0);
+    this.edgeTemporalAlpha = new Float32Array(edgeCount).fill(1.0);
     this.particles = [];
 
     for (let i = 0; i < edgeCount; i++) {
@@ -96,6 +99,16 @@ export class EdgeParticleSystem {
 
   clearFocus() {
     this.edgeFocusAlpha.fill(1.0);
+  }
+
+  setEdgeTemporalAlpha(edgeIdx: number, alpha: number) {
+    if (edgeIdx < this.edgeTemporalAlpha.length) {
+      this.edgeTemporalAlpha[edgeIdx] = alpha;
+    }
+  }
+
+  clearTemporalAlpha() {
+    this.edgeTemporalAlpha.fill(1.0);
   }
 
   setCurve(
@@ -144,7 +157,8 @@ export class EdgeParticleSystem {
       const fi = Math.min(t * 5, 1);
       const fo = Math.min((1 - t) * 5, 1);
       const focusMul = p.edgeIdx < efa.length ? efa[p.edgeIdx] : 1.0;
-      aa[i] = fi * fo * 0.9 * focusMul;
+      const tempMul = p.edgeIdx < this.edgeTemporalAlpha.length ? this.edgeTemporalAlpha[p.edgeIdx] : 1.0;
+      aa[i] = fi * fo * 0.9 * focusMul * tempMul;
     }
 
     this.posAttr.needsUpdate = true;

@@ -7,34 +7,30 @@ export interface TemporalState {
 }
 
 /**
- * Filter nodes and edges by a temporal cutoff date.
- * Nodes are visible if createdAt <= cutoffDate.
- * Edges are visible if both endpoints are visible.
+ * Compute per-node opacities based on a temporal cutoff date.
+ * All nodes/edges are kept — only opacities change. This prevents
+ * force-simulation rebuilds that cause graph jitter during playback.
+ *
+ * Nodes created after cutoffDate get opacity 0 (invisible).
+ * Nodes near the cutoff get a 1-day fade-in ramp.
+ * Edges where either endpoint is invisible also get opacity 0.
  */
 export function filterByDate(nodes: GraphNode[], edges: GraphEdge[], cutoffDate: Date): TemporalState {
   const cutoff = cutoffDate.getTime();
-  const visibleNodeIds = new Set<string>();
   const nodeOpacities = new Map<string, number>();
 
-  const visibleNodes = nodes.filter((node) => {
+  for (const node of nodes) {
     const created = new Date(node.createdAt).getTime();
-    if (created <= cutoff) {
-      visibleNodeIds.add(node.id);
-
-      // Nodes created near the cutoff date get a fade-in opacity
+    if (created > cutoff) {
+      nodeOpacities.set(node.id, 0);
+    } else {
       const age = cutoff - created;
-      const fadeWindow = 24 * 60 * 60 * 1000; // 1 day fade window
-      const opacity = age < fadeWindow ? 0.3 + 0.7 * (age / fadeWindow) : 1.0;
-      nodeOpacities.set(node.id, opacity);
-
-      return true;
+      const fadeWindow = 24 * 60 * 60 * 1000;
+      nodeOpacities.set(node.id, age < fadeWindow ? 0.3 + 0.7 * (age / fadeWindow) : 1.0);
     }
-    return false;
-  });
+  }
 
-  const visibleEdges = edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
-
-  return { visibleNodes, visibleEdges, nodeOpacities };
+  return { visibleNodes: nodes, visibleEdges: edges, nodeOpacities };
 }
 
 /**

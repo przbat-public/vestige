@@ -17,6 +17,7 @@ export const queryKeys = {
   retentionDistribution: ['retentionDistribution'] as const,
   memories: (params?: Record<string, string>) => ['memories', params] as const,
   memory: (id: string) => ['memory', id] as const,
+  memoryChangelog: (id: string) => ['memory', id, 'changelog'] as const,
   graph: (params?: { query?: string; max_nodes?: number; depth?: number }) => ['graph', params] as const,
   search: (q: string, limit: number) => ['search', q, limit] as const,
   timeline: (days: number, limit: number) => ['timeline', days, limit] as const,

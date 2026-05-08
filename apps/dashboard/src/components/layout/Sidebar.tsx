@@ -7,6 +7,8 @@ import { ThemeToggle } from './ThemeToggle';
 const NAV_ITEMS = [
   { to: 'graph', labelKey: 'nav.graph' },
   { to: 'memories', labelKey: 'nav.memories' },
+  { to: 'review', labelKey: 'nav.review' },
+  { to: 'briefing', labelKey: 'nav.briefing' },
   { to: 'timeline', labelKey: 'nav.timeline' },
   { to: 'feed', labelKey: 'nav.feed' },
   { to: 'explore', labelKey: 'nav.explore' },

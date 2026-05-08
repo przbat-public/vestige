@@ -72,9 +72,15 @@ pub fn schema() -> Value {
             },
             "token_budget": {
                 "type": "integer",
-                "description": "Max tokens for response. Server truncates content to fit budget. Use memory(action='get') for full content of specific IDs.",
+                "description": "Max tokens for response. Server truncates content to fit budget. Use memory(action='get') for full content of specific IDs. With 1M context models, budgets up to 100K are practical.",
                 "minimum": 100,
-                "maximum": 10000
+                "maximum": 100000
+            },
+            "retrieval_mode": {
+                "type": "string",
+                "description": "precise: top results only (fast, token-efficient, skips activation/competition). balanced: full cognitive pipeline (default). exhaustive: maximum recall with 5x overfetch, deep graph traversal, no competition suppression.",
+                "enum": ["precise", "balanced", "exhaustive"],
+                "default": "balanced"
             }
         },
         "required": ["query"]
@@ -96,6 +102,8 @@ struct SearchArgs {
     context_topics: Option<Vec<String>>,
     #[serde(alias = "token_budget")]
     token_budget: Option<i32>,
+    #[serde(alias = "retrieval_mode")]
+    retrieval_mode: Option<String>,
 }
 
 /// Execute unified search with 7-stage cognitive pipeline.
@@ -158,15 +166,33 @@ pub async fn execute(
     let min_retention = args.min_retention.unwrap_or(0.0).clamp(0.0, 1.0);
     let min_similarity = args.min_similarity.unwrap_or(0.5).clamp(0.0, 1.0);
 
+    // Validate retrieval_mode
+    let retrieval_mode = match args.retrieval_mode.as_deref() {
+        Some("precise") => "precise",
+        Some("exhaustive") => "exhaustive",
+        Some("balanced") | None => "balanced",
+        Some(invalid) => {
+            return Err(format!(
+                "Invalid retrieval_mode '{}'. Must be 'precise', 'balanced', or 'exhaustive'.",
+                invalid
+            ));
+        }
+    };
+
     // Favor semantic search — research shows 0.3/0.7 outperforms equal weights
     let keyword_weight = 0.3_f32;
     let semantic_weight = 0.7_f32;
 
     // ====================================================================
-    // STAGE 1: Hybrid search with 3x over-fetch for reranking pool
+    // STAGE 1: Hybrid search with Nx over-fetch for reranking pool
     //          + compound query decomposition for multi-part queries
     // ====================================================================
-    let overfetch_limit = (limit * 3).min(100);
+    let overfetch_multiplier = match retrieval_mode {
+        "precise" => 1,
+        "exhaustive" => 5,
+        _ => 3,
+    };
+    let overfetch_limit = (limit * overfetch_multiplier).min(100);
 
     // Check for compound queries and decompose if needed
     #[cfg(feature = "vector-search")]
@@ -422,9 +448,11 @@ pub async fn execute(
 
     // ====================================================================
     // STAGE 5B: Retrieval competition (Anderson et al. 1994)
+    // Skipped in precise mode (no need) and exhaustive mode (want all results)
     // ====================================================================
     let mut suppressed_count = 0_usize;
-    if filtered_results.len() > 1
+    if retrieval_mode == "balanced"
+        && filtered_results.len() > 1
         && let Ok(mut cog) = cognitive.try_lock()
     {
         let candidates: Vec<CompetitionCandidate> = filtered_results
@@ -605,34 +633,42 @@ pub async fn execute(
     // Run spreading activation from the top result and use the activation
     // values to boost results that are reachable in the graph.
     // This creates a triple signal: keyword + semantic + graph.
+    // Skipped in precise mode. Deeper (5 results) in exhaustive mode.
     // ====================================================================
-    let associations: Vec<Value> = if let Ok(mut cog) = cognitive.try_lock() {
-        if let Some(first) = filtered_results.first() {
-            let activated = cog.activation_network.activate(&first.node.id, 1.0);
-            let activation_map: std::collections::HashMap<&str, f64> = activated
-                .iter()
-                .map(|a| (a.memory_id.as_str(), a.activation))
-                .collect();
+    let activation_take = match retrieval_mode {
+        "precise" => 0,
+        "exhaustive" => 5,
+        _ => 3,
+    };
+    let associations: Vec<Value> = if activation_take > 0 {
+        if let Ok(mut cog) = cognitive.try_lock() {
+            if let Some(first) = filtered_results.first() {
+                let activated = cog.activation_network.activate(&first.node.id, 1.0);
+                let activation_map: std::collections::HashMap<&str, f64> = activated
+                    .iter()
+                    .map(|a| (a.memory_id.as_str(), a.activation))
+                    .collect();
 
-            // Boost remaining results by their activation proximity to the top result
-            for result in filtered_results.iter_mut().skip(1) {
-                if let Some(&act) = activation_map.get(result.node.id.as_str()) {
-                    // Activation boost: up to +20% for strongly connected memories
-                    result.combined_score *= 1.0 + (act as f32 * 0.20).min(0.20);
+                for result in filtered_results.iter_mut().skip(1) {
+                    if let Some(&act) = activation_map.get(result.node.id.as_str()) {
+                        result.combined_score *= 1.0 + (act as f32 * 0.20).min(0.20);
+                    }
                 }
-            }
 
-            activated
-                .iter()
-                .take(3)
-                .map(|a| {
-                    serde_json::json!({
-                        "memoryId": a.memory_id,
-                        "activation": a.activation,
-                        "distance": a.distance,
+                activated
+                    .iter()
+                    .take(activation_take)
+                    .map(|a| {
+                        serde_json::json!({
+                            "memoryId": a.memory_id,
+                            "activation": a.activation,
+                            "distance": a.distance,
+                        })
                     })
-                })
-                .collect()
+                    .collect()
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         }
@@ -712,7 +748,11 @@ pub async fn execute(
     let mut budget_expandable: Vec<String> = Vec::new();
     let mut budget_tokens_used: Option<usize> = None;
     if let Some(budget) = args.token_budget {
-        let budget = budget.clamp(100, 10000) as usize;
+        let max_budget: i32 = std::env::var("VESTIGE_MAX_TOKEN_BUDGET")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(100000);
+        let budget = budget.clamp(100, max_budget) as usize;
         let budget_chars = budget * 4;
 
         let total_size: usize = formatted.iter()
@@ -755,11 +795,15 @@ pub async fn execute(
     let mut response = serde_json::json!({
         "query": args.query,
         "method": "hybrid+cognitive",
+        "retrievalMode": retrieval_mode,
         "detailLevel": detail_level,
         "total": formatted.len(),
         "results": formatted,
     });
 
+    if formatted.is_empty() {
+        response["hint"] = serde_json::json!("No memories found. Use smart_ingest to add memories, or try a broader query.");
+    }
     // Include associations if any were found
     if !associations.is_empty() {
         response["associations"] = serde_json::json!(associations);
@@ -865,7 +909,7 @@ fn format_search_result(r: &vestige_core::SearchResult, detail_level: &str) -> V
             "memorySystem": r.node.memory_system().to_string(),
             "provenance": r.node.provenance,
         }),
-        // "summary" (default)
+        // "summary" (default) — includes dates so AI never has to guess when a memory is from
         _ => serde_json::json!({
             "id": r.node.id,
             "content": r.node.content,
@@ -875,6 +919,8 @@ fn format_search_result(r: &vestige_core::SearchResult, detail_level: &str) -> V
             "nodeType": r.node.node_type,
             "tags": r.node.tags,
             "retentionStrength": r.node.retention_strength,
+            "createdAt": r.node.created_at.to_rfc3339(),
+            "updatedAt": r.node.updated_at.to_rfc3339(),
             "epistemicStatus": r.node.epistemic_status().to_string(),
             "memorySystem": r.node.memory_system().to_string(),
         }),
@@ -1480,10 +1526,10 @@ mod tests {
         let results = value["results"].as_array().unwrap();
         if !results.is_empty() {
             let first = &results[0];
-            // Summary should have content but not timestamps
+            // Summary should have content and timestamps (added in v3.2.1)
             assert!(first["content"].is_string());
             assert!(first["id"].is_string());
-            assert!(first.get("createdAt").is_none() || first["createdAt"].is_null());
+            assert!(first["createdAt"].is_string());
         }
     }
 
@@ -1582,6 +1628,6 @@ mod tests {
         let tb = &schema_value["properties"]["token_budget"];
         assert!(tb.is_object());
         assert_eq!(tb["minimum"], 100);
-        assert_eq!(tb["maximum"], 10000);
+        assert_eq!(tb["maximum"], 100000);
     }
 }

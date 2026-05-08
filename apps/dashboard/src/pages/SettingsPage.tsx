@@ -3,11 +3,13 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DreamResultPanel } from '@/components/DreamResultPanel';
 import { GovernancePanel } from '@/components/GovernancePanel';
+import { MaintenancePanel } from '@/components/MaintenancePanel';
 import { PipelineVisualizer } from '@/components/PipelineVisualizer';
 import { SectionErrorBoundary } from '@/components/SectionErrorBoundary';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useMemoryMutations } from '@/hooks/useMemoryMutations';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { toast } from '@/stores/toast';
@@ -28,6 +30,20 @@ export function SettingsPage() {
   const [consolResult, setConsolResult] = useState<ConsolidationResult | null>(null);
   const [reflectResult, setReflectResult] = useState<ReflectResult | null>(null);
   const [confidenceResult, setConfidenceResult] = useState<ConfidenceResult | null>(null);
+
+  // Mutations for Doubt Mode actions on the confidence-audit list.
+  // Locally hide rows after action so the UI feels responsive.
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const { promote: doubtPromote, demote: doubtDemote } = useMemoryMutations({
+    onPromote: () => qc.invalidateQueries({ queryKey: queryKeys.stats }),
+    onDemote: () => qc.invalidateQueries({ queryKey: queryKeys.stats }),
+  });
+  const hideRow = (id: string) =>
+    setHiddenIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
 
   const dreamMutation = useMutation({
     mutationFn: api.dream,
@@ -234,26 +250,68 @@ export function SettingsPage() {
             </div>
             {confidenceResult?.results && confidenceResult.results.length > 0 && (
               <Card className="space-y-2 text-xs">
-                {confidenceResult.results.slice(0, 5).map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex justify-between items-start border-b border-border pb-2 last:border-0"
-                  >
-                    <span className="text-muted-foreground flex-1 line-clamp-1 mr-2">{item.content}</span>
-                    <div className="flex gap-2 flex-shrink-0">
-                      <span
-                        className={`tabular-nums ${item.confidence > 0.7 ? 'text-emerald-500' : item.confidence > 0.4 ? 'text-amber-500' : 'text-red-500'}`}
-                      >
-                        {(item.confidence * 100).toFixed(0)}%
-                      </span>
-                      <span className="text-muted-foreground">{item.classification}</span>
+                <p className="text-muted-foreground">{t('settings.doubtModeHint')}</p>
+                {confidenceResult.results
+                  .filter((item) => !hiddenIds.has(item.id))
+                  .slice(0, 5)
+                  .map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 border-b border-border pb-2 last:border-0"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-muted-foreground line-clamp-2 break-words">
+                          {item.content}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <span
+                            className={`tabular-nums text-[11px] ${item.confidence > 0.7 ? 'text-emerald-500' : item.confidence > 0.4 ? 'text-amber-500' : 'text-red-500'}`}
+                          >
+                            {(item.confidence * 100).toFixed(0)}%
+                          </span>
+                          <span className="text-muted-foreground text-[11px]">
+                            {item.classification}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex gap-1 flex-shrink-0 self-end sm:self-start">
+                        <Button
+                          variant="success"
+                          size="sm"
+                          className="text-[11px] py-1"
+                          onClick={() => {
+                            doubtPromote.mutate(item.id);
+                            hideRow(item.id);
+                          }}
+                          disabled={doubtPromote.isPending}
+                          aria-label={t('settings.doubtModeVerify')}
+                        >
+                          ✓ {t('settings.doubtModeVerify')}
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          className="text-[11px] py-1"
+                          onClick={() => {
+                            doubtDemote.mutate(item.id);
+                            hideRow(item.id);
+                          }}
+                          disabled={doubtDemote.isPending}
+                          aria-label={t('settings.doubtModeDemote')}
+                        >
+                          ↓ {t('settings.doubtModeDemote')}
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </Card>
             )}
           </CardContent>
         </Card>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary fallbackTitle="Maintenance">
+        <MaintenancePanel />
       </SectionErrorBoundary>
 
       <Card>

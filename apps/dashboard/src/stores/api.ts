@@ -3,16 +3,20 @@ import type {
   ConsolidationResult,
   DreamResult,
   ExploreResponse,
+  FsrsRating,
   GraphResponse,
   HealthCheck,
   ImportanceScore,
   IntentionItem,
   IntentionPriority,
   Memory,
+  MemoryChangelog,
   MemoryListResponse,
   PredictResponse,
   ReflectResult,
   RetentionDistribution,
+  ReviewQueueResponse,
+  ReviewResult,
   SearchResult,
   SystemStats,
   TimelineResponse,
@@ -25,8 +29,13 @@ export class ApiError extends Error {
   constructor(
     public path: string,
     public status: number,
+    public code?: string,
+    detail?: string,
   ) {
-    super(`${path} failed (${status})`);
+    // Prefer the server-provided detail (e.g. "Field `to_id` is required …")
+    // over the bare "POST /explore failed (400)" string. The detail is what
+    // QueryErrorPanel surfaces when the user clicks "Show technical details".
+    super(detail ?? `${path} failed (${status})`);
     this.name = 'ApiError';
   }
 }
@@ -37,7 +46,18 @@ async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!res.ok) {
-    throw new ApiError(path, res.status);
+    let code: string | undefined;
+    let detail: string | undefined;
+    if (res.headers.get('content-type')?.includes('application/json')) {
+      try {
+        const body = (await res.json()) as { error?: { code?: string; message?: string } };
+        code = body.error?.code;
+        detail = body.error?.message;
+      } catch {
+        // body wasn't valid JSON; fall through with undefined fields
+      }
+    }
+    throw new ApiError(path, res.status, code, detail);
   }
   if (res.status === 204 || res.headers.get('content-length') === '0') {
     return undefined as T;
@@ -55,6 +75,72 @@ export const api = {
     delete: (id: string) => fetcher<{ deleted: boolean }>(`/memories/${id}`, { method: 'DELETE' }),
     promote: (id: string) => fetcher<Memory>(`/memories/${id}/promote`, { method: 'POST' }),
     demote: (id: string) => fetcher<Memory>(`/memories/${id}/demote`, { method: 'POST' }),
+    update: (id: string, body: { content?: string; tags?: string[] }) =>
+      fetcher<Memory>(`/memories/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    changelog: (id: string) => fetcher<MemoryChangelog>(`/memories/${id}/changelog`),
+    review: (id: string, rating: FsrsRating) =>
+      fetcher<ReviewResult>(`/memories/${id}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ rating }),
+      }),
+  },
+  review: {
+    queue: (limit = 50) =>
+      fetcher<ReviewQueueResponse>(`/review/queue?limit=${limit}`),
+  },
+  maintenance: {
+    regenerateEmbeddings: (body?: { force?: boolean; node_ids?: string[] }) =>
+      fetcher<{
+        successful: number;
+        failed: number;
+        skipped: number;
+        errors: string[];
+        durationMs: number;
+      }>('/maintenance/regenerate-embeddings', {
+        method: 'POST',
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    findDuplicates: (body?: { similarity_threshold?: number; limit?: number; tags?: string[] }) =>
+      fetcher<{
+        clusters: Array<{
+          clusterId: number;
+          size: number;
+          members: Array<{
+            id: string;
+            contentPreview: string;
+            similarityToAnchor: string;
+            retention: number;
+            createdAt: string;
+            tags: string[];
+          }>;
+          suggestedAction: string;
+        }>;
+        totalMemories: number;
+        totalWithEmbeddings: number;
+        totalClusters: number;
+        threshold: number;
+        warning?: string;
+      }>('/maintenance/find-duplicates', {
+        method: 'POST',
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    gc: (body?: { min_retention?: number; max_age_days?: number; dry_run?: boolean }) =>
+      fetcher<{
+        dryRun: boolean;
+        candidateCount: number;
+        deleted?: number;
+        sample?: Array<{ id: string; retention: number; ageDays: number; contentPreview: string }>;
+      }>('/maintenance/gc', {
+        method: 'POST',
+        body: JSON.stringify(body ?? { dry_run: true }),
+      }),
+    backup: () =>
+      fetcher<{ path: string; sizeBytes: number; timestamp: string }>('/maintenance/backup', {
+        method: 'POST',
+      }),
   },
   search: (q: string, limit = 20) => fetcher<SearchResult>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   stats: () => fetcher<SystemStats>('/stats'),

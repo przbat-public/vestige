@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Alert } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { StatCard } from '@/components/ui/stat-card';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
@@ -11,8 +11,18 @@ import { NODE_TYPE_COLORS, retentionColor } from '@/types';
 
 export function StatsPage() {
   const { t } = useTranslation();
-  const { data: stats, isError: statsError } = useQuery({ queryKey: queryKeys.stats, queryFn: api.stats });
-  const { data: health, isError: healthError } = useQuery({ queryKey: queryKeys.health, queryFn: api.health });
+  const {
+    data: stats,
+    isError: statsError,
+    error: statsErrorObj,
+    refetch: refetchStats,
+  } = useQuery({ queryKey: queryKeys.stats, queryFn: api.stats });
+  const {
+    data: health,
+    isError: healthError,
+    error: healthErrorObj,
+    refetch: refetchHealth,
+  } = useQuery({ queryKey: queryKeys.health, queryFn: api.health });
   const { data: distribution } = useQuery({
     queryKey: queryKeys.retentionDistribution,
     queryFn: api.retentionDistribution,
@@ -25,7 +35,18 @@ export function StatsPage() {
     empty: '#6b7280',
   };
 
-  if (statsError && healthError) return <Alert variant="destructive" className="m-4">{t('common.fetchError')}</Alert>;
+  if (statsError && healthError) {
+    return (
+      <QueryErrorPanel
+        className="m-4"
+        error={statsErrorObj ?? healthErrorObj}
+        onRetry={() => {
+          refetchStats();
+          refetchHealth();
+        }}
+      />
+    );
+  }
   if (!stats && !health) return <LoadingSpinner label={t('common.loading')} className="h-full" />;
 
   return (

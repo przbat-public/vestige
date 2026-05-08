@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
 import { ImportanceScorer } from '@/components/ImportanceScorer';
-import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
+import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SearchInput } from '@/components/ui/search-input';
 import { api } from '@/stores/api';
 import type { ExploreResult, Memory } from '@/types';
@@ -31,20 +31,32 @@ export function ExplorePage() {
   const [targetMemory, setTargetMemory] = useState<Memory | null>(null);
   const [results, setResults] = useState<ExploreResult[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<unknown>(null);
+
+  // Stash the last user-triggered action so the QueryErrorPanel retry button
+  // can replay it. Stored in a ref (not state) so re-renders don't try to
+  // depend on it — only the handler closure needs it at retry time.
+  const lastActionRef = useRef<(() => Promise<void>) | null>(null);
 
   const explore = useCallback(
     async (source: Memory, target?: Memory, m?: ExploreMode) => {
+      const activeMode = m ?? mode;
+      // chains and bridges need both endpoints — bail out cleanly so the page
+      // shows the "pick a target" hint instead of firing a guaranteed-400 request.
+      if ((activeMode === 'chains' || activeMode === 'bridges') && !target) {
+        setResults([]);
+        setError(null);
+        return;
+      }
       setLoading(true);
-      setError('');
+      setError(null);
       try {
-        const activeMode = m ?? mode;
-        const toId = (activeMode === 'chains' || activeMode === 'bridges') && target ? target.id : undefined;
+        const toId = target?.id;
         const res = await api.explore(source.id, activeMode, toId);
         setResults(res.results);
       } catch (e) {
         setResults([]);
-        setError(e instanceof Error ? e.message : t('explore.errorExploration'));
+        setError(e instanceof Error ? e : new Error(t('explore.errorExploration')));
       } finally {
         setLoading(false);
       }
@@ -54,60 +66,85 @@ export function ExplorePage() {
 
   const findSource = async () => {
     if (!searchQuery.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const res = await api.search(searchQuery, 1);
-      if (res.results.length > 0) {
-        setSourceMemory(res.results[0]);
-        await explore(res.results[0]);
-      } else {
-        setError(t('common.noResults'));
+    const action = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.search(searchQuery, 1);
+        if (res.results.length > 0) {
+          setSourceMemory(res.results[0]);
+          await explore(res.results[0]);
+        } else {
+          setError(new Error(t('common.noResults')));
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e : new Error(t('explore.errorSearch')));
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('explore.errorSearch'));
-    } finally {
-      setLoading(false);
-    }
+    };
+    lastActionRef.current = action;
+    await action();
   };
 
   const findTarget = async () => {
     if (!targetQuery.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const res = await api.search(targetQuery, 1);
-      if (res.results.length > 0) {
-        setTargetMemory(res.results[0]);
-        if (sourceMemory) await explore(sourceMemory, res.results[0]);
+    const action = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.search(targetQuery, 1);
+        if (res.results.length > 0) {
+          setTargetMemory(res.results[0]);
+          if (sourceMemory) await explore(sourceMemory, res.results[0]);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e : new Error(t('explore.errorSearch')));
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('explore.errorSearch'));
-    } finally {
-      setLoading(false);
-    }
+    };
+    lastActionRef.current = action;
+    await action();
+  };
+
+  const onRetry = () => {
+    const action = lastActionRef.current;
+    if (action) void action();
   };
 
   const switchMode = (m: ExploreMode) => {
     setMode(m);
-    if (sourceMemory) void explore(sourceMemory, targetMemory ?? undefined, m);
+    setError(null);
+    if (!sourceMemory) return;
+    // Switching to chains/bridges without a target would just dump a 400 on the
+    // user. Clear stale results and let the UI prompt for the target instead.
+    if ((m === 'chains' || m === 'bridges') && !targetMemory) {
+      setResults([]);
+      return;
+    }
+    void explore(sourceMemory, targetMemory ?? undefined, m);
   };
 
   useEffect(() => {
     const fromId = searchParams.get('from');
     if (!fromId) return;
     let cancelled = false;
-    (async () => {
+    const loadFromDeepLink = async () => {
       try {
         const mem = await api.memories.get(fromId);
         if (cancelled) return;
         setSourceMemory(mem);
         setSearchQuery(mem.content.slice(0, 60));
         await explore(mem);
-      } catch {
-        if (!cancelled) setError(t('explore.errorLoadMemory', { id: fromId.slice(0, 8) }));
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : t('explore.errorLoadMemory', { id: fromId.slice(0, 8) });
+        setError(new Error(msg));
       }
-    })();
+    };
+    lastActionRef.current = loadFromDeepLink;
+    void loadFromDeepLink();
     return () => {
       cancelled = true;
     };
@@ -117,7 +154,7 @@ export function ExplorePage() {
     <div className="p-4 space-y-6 overflow-y-auto h-full w-full">
       <h1 className="text-xl text-foreground font-semibold">{t('explore.title')}</h1>
 
-      {error && <Alert variant="destructive">{error}</Alert>}
+      {error !== null && <QueryErrorPanel error={error} onRetry={onRetry} />}
 
       <div className="grid grid-cols-3 gap-2">
         {(Object.keys(MODE_KEYS) as ExploreMode[]).map((m) => (
@@ -198,6 +235,8 @@ export function ExplorePage() {
       {sourceMemory &&
         (loading ? (
           <LoadingSpinner label={t('common.loading')} />
+        ) : (mode === 'chains' || mode === 'bridges') && !targetMemory ? (
+          <EmptyState icon="→" title={t('explore.targetRequiredTitle')} description={t('explore.targetRequiredHint')} />
         ) : results.length > 0 ? (
           <div className="space-y-4">
             <h2 className="text-sm text-foreground font-semibold">

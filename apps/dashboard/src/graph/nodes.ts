@@ -1,7 +1,48 @@
 import * as THREE from 'three';
 import type { GraphNode } from '@/types';
 import { NODE_TYPE_COLORS } from '@/types';
-import { getGraphTheme, type GraphThemeConfig } from '@/graph/theme';
+import { getGraphTheme, isDarkMode, type GraphThemeConfig } from '@/graph/theme';
+
+/** How to colour graph nodes: by node-type palette, or by primary tag (for cluster discovery). */
+export type NodeColorMode = 'type' | 'tag';
+
+/**
+ * Deterministic HSL colour from an arbitrary string (tag, etc.).
+ *
+ * djb2 hash → hue [0..360], fixed saturation/lightness so all tag colours sit
+ * in the same visual range and do not clash with node-type colours when the
+ * user toggles modes. Lightness tracks dark/light theme so the dots do not
+ * disappear on bright backgrounds.
+ */
+function hashString(s: string): number {
+  let hash = 5381;
+  for (let i = 0; i < s.length; i++) hash = ((hash << 5) + hash) ^ s.charCodeAt(i);
+  return hash >>> 0;
+}
+
+function colorForTag(tag: string, isDark: boolean): string {
+  const hue = hashString(tag) % 360;
+  const sat = 65;
+  const light = isDark ? 60 : 50;
+  return `hsl(${hue}, ${sat}%, ${light}%)`;
+}
+
+/** Untagged memories get a neutral grey so they stay legible without forming a fake cluster. */
+const UNTAGGED_COLOR = '#8B95A5';
+
+/**
+ * Resolve the colour for a node given the active mode. In `tag` mode we use
+ * the FIRST tag (matching the dream/consolidation engine's "primary tag" rule
+ * in `consolidation/phases.rs:588`), so visual clusters line up with how the
+ * backend already groups memories.
+ */
+export function getNodeColor(node: GraphNode, mode: NodeColorMode, isDark: boolean): string {
+  if (mode === 'tag') {
+    const primary = node.tags?.[0];
+    return primary ? colorForTag(primary, isDark) : UNTAGGED_COLOR;
+  }
+  return NODE_TYPE_COLORS[node.type] || UNTAGGED_COLOR;
+}
 
 function easeOutElastic(t: number): number {
   if (t === 0 || t === 1) return t;
@@ -61,10 +102,39 @@ export class NodeManager {
   private growingNodes: GrowingNode[] = [];
 
   private animatingIdSet = new Set<string>();
+  private colorMode: NodeColorMode = 'type';
 
   constructor() {
     this.group = new THREE.Group();
     this.theme = getGraphTheme();
+  }
+
+  /**
+   * Switch the colour palette of all existing nodes.
+   *
+   * Updates `material.color`, `material.emissive`, glow sprite tint, and
+   * mesh userData so subsequent focus/dimming logic still has correct
+   * baseline colours to interpolate from. Does not rebuild geometry.
+   */
+  setColorMode(mode: NodeColorMode, nodeById: Map<string, GraphNode>, isDark: boolean): void {
+    if (this.colorMode === mode) return;
+    this.colorMode = mode;
+    for (const [id, mesh] of this.meshMap) {
+      const node = nodeById.get(id);
+      if (!node) continue;
+      const colorHex = getNodeColor(node, mode, isDark);
+      const color = new THREE.Color(colorHex);
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      material.color.copy(color);
+      material.emissive.copy(color);
+      const glow = this.glowMap.get(id);
+      if (glow) (glow.material as THREE.SpriteMaterial).color.copy(color);
+    }
+  }
+
+  /** Read-only accessor used by tests and dev tooling. */
+  getColorMode(): NodeColorMode {
+    return this.colorMode;
   }
 
   createNodes(nodes: GraphNode[]): Map<string, THREE.Vector3> {
@@ -92,7 +162,9 @@ export class NodeManager {
 
   private createNodeMeshes(node: GraphNode, pos: THREE.Vector3, initialScale: number) {
     const size = 0.5 + node.retention * 2;
-    const color = NODE_TYPE_COLORS[node.type] || '#8B95A5';
+    // Pull from getNodeColor (handles both modes) so scene rebuilds and
+    // newly-added nodes pick up the active palette without a separate code path.
+    const color = getNodeColor(node, this.colorMode, isDarkMode());
     const t = this.theme;
 
     const geometry = new THREE.SphereGeometry(size, 24, 24);

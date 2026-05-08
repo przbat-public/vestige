@@ -137,23 +137,28 @@ All local heuristic/regex, zero model downloads, sub-millisecond latency.
 ```json
 { "query": "search query", "limit": 10, "min_retention": 0.0,
   "min_similarity": 0.5, "detail_level": "summary",
-  "context_topics": ["rust", "debugging"], "token_budget": 3000 }
+  "context_topics": ["rust", "debugging"], "token_budget": 3000,
+  "retrieval_mode": "balanced" }
 ```
 Every search strengthens the memories it finds (Testing Effect).
+
+**Retrieval modes:** `precise` (top results only, fast, skips activation/competition), `balanced` (full 7-stage cognitive pipeline, default), `exhaustive` (maximum recall with 5x overfetch, deep graph traversal, no competition suppression).
 
 **Compound query decomposition:** Queries containing semicolons, question chains, or conjunctions are automatically split into sub-queries, searched independently, and merged (union, max-score dedup). Improves MRR by +43% on multi-topic queries.
 
 **Provenance in results:** Use `detail_level: "full"` to include provenance metadata (session, agent, entities, relations, temporal anchors) in search results.
 
-### memory — Read, Edit, Delete, Promote, Demote
+### memory — Read, Edit, Delete, Promote, Demote, Batch Get
 ```json
 { "action": "get", "id": "uuid" }
+{ "action": "get_batch", "ids": ["uuid-1", "uuid-2", "uuid-3"] }
 { "action": "edit", "id": "uuid", "content": "updated text" }
 { "action": "delete", "id": "uuid" }
 { "action": "promote", "id": "uuid", "reason": "was helpful" }
 { "action": "demote", "id": "uuid", "reason": "was wrong" }
 { "action": "state", "id": "uuid" }
 ```
+`get_batch` retrieves up to 20 memories in one call (saves round-trips for expandable IDs from search).
 Promote/demote adjusts ranking, does NOT delete. Demoted memories rank lower; alternatives surface instead.
 
 ### codebase — Code Patterns & Architectural Decisions
@@ -227,6 +232,13 @@ Returns multi-dimensional scores: encoding, retrieval, temporal, evidence.
 { "context": { "codebase": "vestige", "current_file": "src/main.rs",
   "current_topics": ["error handling", "rust"] } }
 ```
+
+### deep_reference — Cognitive Reasoning Engine
+```json
+{ "query": "Why did we choose PostgreSQL over MySQL?", "depth": 20 }
+```
+Full reasoning across memories: FSRS-6 trust scoring, intent classification (FactCheck/Timeline/RootCause/Comparison/Synthesis), temporal supersession, contradiction detection, dream insight integration. Returns: recommended answer, evidence, contradictions, superseded memories, evolution timeline.
+`cross_reference` is a backward-compatible alias.
 
 ### importance_score — Should I Save This?
 ```json
@@ -313,8 +325,8 @@ restore: { "path": "/path/to/backup.json" }
 
 ## Development
 
-- **Crate:** `vestige-mcp` v3.2.0, Rust 2024 edition, MSRV 1.91
-- **Tools:** 25 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance)
+- **Crate:** `vestige-mcp` v3.2.1, Rust 2024 edition, MSRV 1.91
+- **Tools:** 26 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference)
 - **Tests:** 1,080+ (unit + E2E + cognitive + journey + extreme) + 18 cognitive journey + 10 scientific validation
 - **Build:** `cargo build --release -p vestige-mcp` (features: `embeddings` + `vector-search` + `preprocessing`)
 - **Build (no embeddings):** `cargo build --release -p vestige-mcp --no-default-features`
