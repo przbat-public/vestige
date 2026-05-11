@@ -152,6 +152,7 @@ async fn execute_remember_pattern(
         valid_from: None,
         valid_until: None,
         provenance: None,
+        ..Default::default()
     };
 
     let node = storage.ingest(input).map_err(|e| e.to_string())?;
@@ -248,6 +249,7 @@ async fn execute_remember_decision(
         valid_from: None,
         valid_until: None,
         provenance: None,
+        ..Default::default()
     };
 
     let node = storage.ingest(input).map_err(|e| e.to_string())?;

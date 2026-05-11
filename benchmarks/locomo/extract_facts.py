@@ -62,34 +62,65 @@ MAX_WORKERS = int(os.environ.get("EXTRACT_WORKERS", "8"))
 MAX_RETRIES = 6
 THROTTLE_SECS = float(os.environ.get("EXTRACT_THROTTLE", "0"))
 # Cap facts per session so a chatty session doesn't blow up the token budget.
-MAX_FACTS_PER_SESSION = int(os.environ.get("EXTRACT_MAX_FACTS", "20"))
+MAX_FACTS_PER_SESSION = int(os.environ.get("EXTRACT_MAX_FACTS", "30"))
 
 client = OpenAI()
 
 SYSTEM_PROMPT = """You extract ATOMIC FACTS from a dialogue session.
 
 For each fact in the session, output:
-- kind: one of "semantic" | "episodic" | "procedural"
+- kind: one of "semantic" | "episodic" | "procedural" | "aggregate"
     * semantic = a stable attribute or property of a person/place/thing.
-      Examples: "Caroline lives in Berlin", "Melanie is a teacher", "John has a dog named Max".
+      Examples: "Caroline lives in Berlin", "Melanie is a teacher",
+      "Caroline is single", "John has a dog named Max".
     * episodic = a specific event tied to a date/time.
-      Examples: "Caroline attended the LGBTQ group on 8 May 2023", "Melanie ran a 5K on her birthday".
+      Examples: "Caroline attended the LGBTQ group on 8 May 2023",
+      "Melanie ran a 5K on her birthday".
     * procedural = a habit, frequency, or recurring pattern.
-      Examples: "Caroline goes to therapy every Tuesday", "Melanie usually runs in the morning".
+      Examples: "Caroline goes to therapy every Tuesday",
+      "Melanie usually runs in the morning".
+    * aggregate = a multi-item LIST that captures a complete enumeration of
+      something the subject does, owns, likes, or has experienced. Use when
+      the dialogue mentions THREE or more related items of the same shape.
+      Examples:
+        "Melanie's hobbies are: pottery, camping, painting, swimming."
+        "Caroline has participated in: mentoring program, school speech."
+        "Melanie's family activities include: hiking, museums, camping, swimming."
+      Aggregate facts solve list questions like "What activities does X do?"
+      that fragmented per-item facts cannot answer with the right shape.
+      Output the items as a comma-separated list inside one sentence.
 
-- subject: the entity the fact is about (a single proper noun: "Caroline", "Melanie", "Max", "Berlin"). Required.
+- subject: the entity the fact is about (a single proper noun: "Caroline",
+  "Melanie", "Max", "Berlin"). Required.
 
-- content: SELF-CONTAINED, one sentence, no pronouns ("he", "she", "they", "it"), no demonstratives ("this", "that") that depend on out-of-fact context. The reader must be able to interpret the fact in isolation.
+- content: SELF-CONTAINED, one sentence, no pronouns ("he", "she", "they",
+  "it"), no demonstratives ("this", "that") that depend on out-of-fact
+  context. The reader must be able to interpret the fact in isolation.
 
-- source_turns: array of dia_id strings (e.g. "D1:2", "D1:5") that this fact was derived from. ONE OR MORE. Required.
+- source_turns: array of dia_id strings (e.g. "D1:2", "D1:5") that this
+  fact was derived from. ONE OR MORE. Required.
 
 Coverage rules:
-- Extract every fact a future reader might want to know, including casual ones (hobbies, opinions, preferences, family relations, recent events). Do NOT skip "small talk" — LoCoMo asks about exactly that.
-- Use the session timestamp as the absolute reference for relative phrases. "Yesterday" in a session dated 8 May 2023 means 7 May 2023.
-- Quote exact dates, names, places, numbers from the dialogue. Do not invent or paraphrase.
-- One fact = one statement. If you find yourself writing "and" or "also" in `content`, split into two facts.
+- Extract every fact a future reader might want to know, including casual
+  ones (hobbies, opinions, preferences, family relations, recent events).
+  Do NOT skip "small talk" — LoCoMo asks about exactly that.
+- Be EXPLICIT about stable attributes. If the dialogue implies "Caroline is
+  single" because she says "I'm not seeing anyone right now", extract the
+  semantic fact "Caroline is single" — do not require the reader to infer.
+- For every multi-item topic mentioned (hobbies, places visited, activities
+  with family, books read, foods liked, etc.), also emit ONE aggregate fact
+  listing all items together. Per-item facts are still useful for direct
+  lookups; the aggregate is what list questions need.
+- Use the session timestamp as the absolute reference for relative phrases.
+  "Yesterday" in a session dated 8 May 2023 means 7 May 2023.
+- Quote exact dates, names, places, numbers from the dialogue. Do not invent
+  or paraphrase. The aggregate exception: aggregates may collect items
+  mentioned across multiple turns — list source_turns for all of them.
+- One semantic / episodic / procedural fact = one statement. If you find
+  yourself writing "and" or "also" in those, split. Aggregates are the
+  ONLY kind allowed to enumerate.
 - Skip greetings, conversational fillers, questions with no factual content.
-- Output 5–20 facts per session. If a session has fewer, output fewer. If a session has dozens, prioritize the most concrete and verifiable.
+- Output 8–25 facts per session, including aggregates where applicable.
 
 Output STRICT JSON in the schema given. No prose, no comments.
 """
@@ -181,7 +212,7 @@ def extract_facts_for_session(
         if not isinstance(f, dict):
             continue
         kind = f.get("kind", "").strip().lower()
-        if kind not in {"semantic", "episodic", "procedural"}:
+        if kind not in {"semantic", "episodic", "procedural", "aggregate"}:
             continue
         subject = (f.get("subject") or "").strip()
         content = (f.get("content") or "").strip()

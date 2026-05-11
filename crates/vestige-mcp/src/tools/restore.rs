@@ -117,6 +117,7 @@ pub async fn execute(
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         };
 
         match storage.ingest(input) {

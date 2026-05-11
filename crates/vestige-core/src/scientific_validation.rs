@@ -267,6 +267,7 @@ mod tests {
             emotional_valence: None, flashbulb: None,
             temporal_level: None, has_embedding: None, embedding_model: None,
             provenance: None,
+            ..Default::default()
         }).collect();
 
         let result = engine.run(&memories, &mut emotional, &importance, &mut synaptic);
@@ -302,6 +303,7 @@ mod tests {
             emotional_valence: None, flashbulb: None,
             temporal_level: None, has_embedding: None, embedding_model: None,
             provenance: None,
+            ..Default::default()
         }).collect();
 
         let result = engine.run(&memories, &mut emotional, &importance, &mut synaptic);
@@ -434,6 +436,7 @@ mod tests {
             emotional_valence: None, flashbulb: None,
             temporal_level: None, has_embedding: None, embedding_model: None,
             provenance: None,
+            ..Default::default()
         }).collect();
 
         let mut counts = Vec::new();

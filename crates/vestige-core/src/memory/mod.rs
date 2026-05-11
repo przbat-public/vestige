@@ -12,7 +12,7 @@ mod strength;
 mod temporal;
 
 pub use confidence::ConfidenceEstimate;
-pub use node::{IngestInput, KnowledgeNode, NodeType, RecallInput, SearchMode};
+pub use node::{IngestInput, KnowledgeNode, MemoryKind, NodeType, RecallInput, SearchMode};
 pub use strength::{DualStrength, StrengthDecay};
 pub use temporal::{TemporalRange, TemporalValidity};
 

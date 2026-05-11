@@ -54,6 +54,11 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "v3.1.0 Content Intelligence: provenance tracking for memory lineage",
         up: MIGRATION_V10_UP,
     },
+    Migration {
+        version: 11,
+        description: "v3.3.0 Tier 4: typed memory (kind, subject, predicate, object, episodic_at, procedural_frequency)",
+        up: MIGRATION_V11_UP,
+    },
 ];
 
 /// A database migration
@@ -627,6 +632,48 @@ const MIGRATION_V10_UP: &str = r#"
 ALTER TABLE knowledge_nodes ADD COLUMN provenance TEXT DEFAULT '{}';
 
 UPDATE schema_version SET version = 10, applied_at = datetime('now');
+"#;
+
+/// V11: Tier 4 — typed memory. Adds the memory_kind column plus typed
+/// metadata (subject, predicate, object, episodic_at, procedural_frequency).
+/// All existing rows backfill to memory_kind = 'raw' so behaviour is
+/// unchanged unless an extractor sets a more specific kind.
+const MIGRATION_V11_UP: &str = r#"
+-- ============================================================================
+-- TYPED MEMORY (Tier 4 — ENGRAM-style)
+-- ============================================================================
+
+-- One of: raw | semantic | episodic | procedural | aggregate.
+-- Existing rows default to 'raw'; extractors set a more specific kind
+-- at ingest time.
+ALTER TABLE knowledge_nodes ADD COLUMN memory_kind TEXT NOT NULL DEFAULT 'raw';
+
+-- Subject the fact is about — a proper noun like "Caroline" or "Berlin".
+-- NULL for raw kinds, populated for semantic/episodic/procedural/aggregate.
+ALTER TABLE knowledge_nodes ADD COLUMN subject TEXT;
+
+-- Predicate/object pair for semantic facts (subject-predicate-object triples).
+-- "Caroline lives_in Berlin" => subject=Caroline, predicate=lives_in, object=Berlin.
+-- Optional even for semantic kinds; the canonical content lives in `content`.
+ALTER TABLE knowledge_nodes ADD COLUMN predicate TEXT;
+ALTER TABLE knowledge_nodes ADD COLUMN object TEXT;
+
+-- Absolute event timestamp for episodic memories. Distinct from created_at
+-- (when we recorded it) and valid_from (when it became valid in the
+-- bi-temporal model) — episodic_at is when the *event itself* happened.
+ALTER TABLE knowledge_nodes ADD COLUMN episodic_at TEXT;
+
+-- Free-form frequency descriptor for procedural memories ("weekly",
+-- "every Tuesday", "monthly on the 1st").
+ALTER TABLE knowledge_nodes ADD COLUMN procedural_frequency TEXT;
+
+-- Per-kind retrieval needs a fast filter. Single-column indexes are cheap;
+-- the search layer will compose them with FTS5 matches.
+CREATE INDEX IF NOT EXISTS idx_nodes_memory_kind ON knowledge_nodes(memory_kind);
+CREATE INDEX IF NOT EXISTS idx_nodes_subject ON knowledge_nodes(subject) WHERE subject IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_nodes_episodic_at ON knowledge_nodes(episodic_at) WHERE episodic_at IS NOT NULL;
+
+UPDATE schema_version SET version = 11, applied_at = datetime('now');
 "#;
 
 /// Get current schema version from database

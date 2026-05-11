@@ -487,6 +487,7 @@ fn run_restore(backup_path: PathBuf) -> anyhow::Result<()> {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         };
 
         match storage.ingest(input) {
@@ -904,6 +905,7 @@ fn run_ingest(
         valid_from: None,
         valid_until: None,
         provenance: None,
+        ..Default::default()
     };
 
     let storage = Storage::new(None)?;

@@ -660,6 +660,7 @@ fn main() {
                         let node_type = match fact.kind.as_str() {
                             "episodic" => "event",
                             "procedural" => "pattern",
+                            "aggregate" => "concept",
                             _ => "fact",
                         }
                         .to_string();

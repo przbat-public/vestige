@@ -32,6 +32,7 @@ fn make_ingest_input(
         valid_from,
         valid_until,
         provenance: None,
+        ..Default::default()
     }
 }
 

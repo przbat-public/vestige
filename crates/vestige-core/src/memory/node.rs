@@ -80,6 +80,76 @@ impl std::fmt::Display for NodeType {
 }
 
 // ============================================================================
+// MEMORY KIND (Tier 4 — ENGRAM-style typed memory)
+// ============================================================================
+
+/// Memory kind classifies *how* the content is shaped and retrieved.
+///
+/// Orthogonal to [`NodeType`]: a NodeType says what the content is *about*
+/// (a fact, a procedure, an event), while a MemoryKind says how the content
+/// was *recorded* — was it raw input, or was it distilled by an extractor
+/// into an atomic, self-contained statement?
+///
+/// Per-kind retrieval (route temporal questions to `Episodic`, attribute
+/// questions to `Semantic`, etc.) is opt-in and lives in the search layer;
+/// this enum just carries the metadata so the search layer can filter on
+/// it without reparsing content.
+///
+/// LoCoMo PoC results (full N=1540): replacing raw chunks with extracted
+/// facts alone loses −6.88 pp. Augmenting raw chunks with extracted facts
+/// side-by-side wins +3.96 pp. See `docs/TIER4-TYPED-MEMORY-DESIGN.md`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryKind {
+    /// Raw input — dialogue, chunks, anything not classified by an
+    /// extractor. Default for back-compat: existing memories migrate here.
+    #[default]
+    Raw,
+    /// A stable attribute or relationship ("Caroline lives in Berlin").
+    /// Carries `subject`, `predicate`, `object`.
+    Semantic,
+    /// A specific event tied to a date/time ("Caroline attended X on Y").
+    /// Carries `subject` and `episodic_at`.
+    Episodic,
+    /// A habit, frequency, or recurring pattern ("X goes to Y every Tuesday").
+    /// Carries `subject` and `procedural_frequency`.
+    Procedural,
+    /// A multi-item enumeration captured as one statement. Solves
+    /// list-style questions ("What activities does X do?"). Carries
+    /// `subject` only; items live in `content`.
+    Aggregate,
+}
+
+impl MemoryKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MemoryKind::Raw => "raw",
+            MemoryKind::Semantic => "semantic",
+            MemoryKind::Episodic => "episodic",
+            MemoryKind::Procedural => "procedural",
+            MemoryKind::Aggregate => "aggregate",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "semantic" => MemoryKind::Semantic,
+            "episodic" => MemoryKind::Episodic,
+            "procedural" => MemoryKind::Procedural,
+            "aggregate" => MemoryKind::Aggregate,
+            _ => MemoryKind::Raw,
+        }
+    }
+}
+
+impl std::fmt::Display for MemoryKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+// ============================================================================
 // KNOWLEDGE NODE
 // ============================================================================
 
@@ -184,6 +254,32 @@ pub struct KnowledgeNode {
     /// Structured provenance metadata: session, agent, derivation chain, preprocessing artifacts
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provenance: Option<serde_json::Value>,
+
+    // ========== Typed Memory (v3.3.0 Tier 4 — ENGRAM-style) ==========
+    /// Memory kind classifies *how* the content is shaped and retrieved.
+    /// Defaults to `Raw` for back-compat; extractors set this to a more
+    /// specific kind when they distill content into atomic facts.
+    #[serde(default)]
+    pub memory_kind: MemoryKind,
+    /// Subject the fact is about (proper noun like "Caroline"). Only set
+    /// for non-Raw kinds, used by subject-aware retrieval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    /// Predicate for semantic facts ("lives in", "has", "is"). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+    /// Object for semantic facts ("Berlin", "a dog named Max"). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object: Option<String>,
+    /// Absolute timestamp for `Episodic` memories. Anchors "when did X happen"
+    /// queries even when the content uses relative phrasing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episodic_at: Option<DateTime<Utc>>,
+    /// Frequency descriptor for `Procedural` memories ("weekly",
+    /// "every Tuesday", "monthly"). Free-form string for now; later
+    /// versions may parse into a structured Frequency enum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedural_frequency: Option<String>,
 }
 
 impl Default for KnowledgeNode {
@@ -219,6 +315,12 @@ impl Default for KnowledgeNode {
             has_embedding: None,
             embedding_model: None,
             provenance: None,
+            memory_kind: MemoryKind::Raw,
+            subject: None,
+            predicate: None,
+            object: None,
+            episodic_at: None,
+            procedural_frequency: None,
         }
     }
 }
@@ -347,6 +449,26 @@ pub struct IngestInput {
     /// Structured provenance metadata (JSON): session_id, agent, derived_from, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<serde_json::Value>,
+
+    // ========== Typed Memory (Tier 4) ==========
+    /// Memory kind. Defaults to `Raw`; extractors set a specific kind.
+    #[serde(default)]
+    pub memory_kind: MemoryKind,
+    /// Subject for non-Raw kinds (proper noun like "Caroline"). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    /// Predicate for semantic facts ("lives in"). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+    /// Object for semantic facts ("Berlin"). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object: Option<String>,
+    /// Absolute event timestamp for episodic memories.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episodic_at: Option<DateTime<Utc>>,
+    /// Frequency descriptor for procedural memories ("weekly", "every Tuesday").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedural_frequency: Option<String>,
 }
 
 impl Default for IngestInput {
@@ -361,6 +483,12 @@ impl Default for IngestInput {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            memory_kind: MemoryKind::Raw,
+            subject: None,
+            predicate: None,
+            object: None,
+            episodic_at: None,
+            procedural_frequency: None,
         }
     }
 }
@@ -430,6 +558,45 @@ mod tests {
         ] {
             assert_eq!(NodeType::parse_name(node_type.as_str()), node_type);
         }
+    }
+
+    #[test]
+    fn test_memory_kind_roundtrip() {
+        for kind in [
+            MemoryKind::Raw,
+            MemoryKind::Semantic,
+            MemoryKind::Episodic,
+            MemoryKind::Procedural,
+            MemoryKind::Aggregate,
+        ] {
+            assert_eq!(MemoryKind::parse(kind.as_str()), kind);
+        }
+        // Unknown / malformed strings fall back to Raw for back-compat.
+        assert_eq!(MemoryKind::parse(""), MemoryKind::Raw);
+        assert_eq!(MemoryKind::parse("garbage"), MemoryKind::Raw);
+        assert_eq!(MemoryKind::parse("SEMANTIC"), MemoryKind::Semantic);
+    }
+
+    #[test]
+    fn test_memory_kind_default_is_raw() {
+        let node = KnowledgeNode::default();
+        assert_eq!(node.memory_kind, MemoryKind::Raw);
+        assert!(node.subject.is_none());
+        assert!(node.episodic_at.is_none());
+        assert!(node.procedural_frequency.is_none());
+
+        let input = IngestInput::default();
+        assert_eq!(input.memory_kind, MemoryKind::Raw);
+        assert!(input.subject.is_none());
+    }
+
+    #[test]
+    fn test_memory_kind_serde() {
+        use serde_json;
+        let json = serde_json::to_string(&MemoryKind::Episodic).unwrap();
+        assert_eq!(json, "\"episodic\"");
+        let parsed: MemoryKind = serde_json::from_str("\"semantic\"").unwrap();
+        assert_eq!(parsed, MemoryKind::Semantic);
     }
 
     #[test]

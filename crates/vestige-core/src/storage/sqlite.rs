@@ -424,14 +424,16 @@ impl Storage {
                     storage_strength, retrieval_strength, retention_strength,
                     sentiment_score, sentiment_magnitude, next_review, scheduled_days,
                     source, tags, valid_from, valid_until, has_embedding, embedding_model,
-                    provenance
+                    provenance,
+                    memory_kind, subject, predicate, object, episodic_at, procedural_frequency
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6,
                     ?7, ?8, ?9, ?10, ?11,
                     ?12, ?13, ?14,
                     ?15, ?16, ?17, ?18,
                     ?19, ?20, ?21, ?22, ?23, ?24,
-                    ?25
+                    ?25,
+                    ?26, ?27, ?28, ?29, ?30, ?31
                 )",
                 params![
                     id,
@@ -459,6 +461,14 @@ impl Storage {
                     0,
                     Option::<String>::None,
                     provenance_json,
+                    // Tier 4 typed memory fields. IngestInput passes through
+                    // optional typed metadata; missing values default to Raw.
+                    input.memory_kind.as_str(),
+                    input.subject.as_deref(),
+                    input.predicate.as_deref(),
+                    input.object.as_deref(),
+                    input.episodic_at.map(|t| t.to_rfc3339()),
+                    input.procedural_frequency.as_deref(),
                 ],
             )?;
         }
@@ -996,6 +1006,31 @@ impl Storage {
             // v3.1.0 provenance
             provenance: row.get::<_, Option<String>>("provenance").ok().flatten()
                 .and_then(|s| serde_json::from_str(&s).ok()),
+            // v3.3.0 Tier 4 typed memory. Columns may be absent on databases
+            // that haven't run migration v11 yet, so default to Raw silently
+            // rather than failing the whole row.
+            memory_kind: row
+                .get::<_, Option<String>>("memory_kind")
+                .ok()
+                .flatten()
+                .map(|s| crate::memory::MemoryKind::parse(&s))
+                .unwrap_or_default(),
+            subject: row.get::<_, Option<String>>("subject").ok().flatten(),
+            predicate: row.get::<_, Option<String>>("predicate").ok().flatten(),
+            object: row.get::<_, Option<String>>("object").ok().flatten(),
+            episodic_at: row
+                .get::<_, Option<String>>("episodic_at")
+                .ok()
+                .flatten()
+                .and_then(|s| {
+                    DateTime::parse_from_rfc3339(&s)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .ok()
+                }),
+            procedural_frequency: row
+                .get::<_, Option<String>>("procedural_frequency")
+                .ok()
+                .flatten(),
         })
     }
 
@@ -4159,6 +4194,77 @@ mod tests {
         let retrieved = storage.get_node(&node.id).unwrap();
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().content, "Test memory content");
+    }
+
+    #[test]
+    fn test_tier4_typed_memory_roundtrip() {
+        use crate::memory::MemoryKind;
+
+        let storage = create_test_storage();
+        let event_time = chrono::Utc::now();
+
+        // Default ingest keeps memory_kind = Raw.
+        let raw = storage
+            .ingest(IngestInput {
+                content: "Raw chunk".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(raw.memory_kind, MemoryKind::Raw);
+        assert!(raw.subject.is_none());
+
+        // Typed ingest preserves kind + subject + episodic_at through the
+        // SQLite roundtrip (validates migration v11 wired columns end-to-end).
+        let episodic = storage
+            .ingest(IngestInput {
+                content: "Caroline attended the LGBTQ group on 7 May 2023.".to_string(),
+                node_type: "event".to_string(),
+                memory_kind: MemoryKind::Episodic,
+                subject: Some("Caroline".to_string()),
+                episodic_at: Some(event_time),
+                ..Default::default()
+            })
+            .unwrap();
+        let fetched = storage.get_node(&episodic.id).unwrap().unwrap();
+        assert_eq!(fetched.memory_kind, MemoryKind::Episodic);
+        assert_eq!(fetched.subject.as_deref(), Some("Caroline"));
+        assert_eq!(
+            fetched.episodic_at.map(|t| t.timestamp()),
+            Some(event_time.timestamp())
+        );
+
+        // Semantic triple (subject, predicate, object) also roundtrips.
+        let semantic = storage
+            .ingest(IngestInput {
+                content: "Caroline lives in Berlin.".to_string(),
+                memory_kind: MemoryKind::Semantic,
+                subject: Some("Caroline".to_string()),
+                predicate: Some("lives_in".to_string()),
+                object: Some("Berlin".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        let fetched = storage.get_node(&semantic.id).unwrap().unwrap();
+        assert_eq!(fetched.memory_kind, MemoryKind::Semantic);
+        assert_eq!(fetched.predicate.as_deref(), Some("lives_in"));
+        assert_eq!(fetched.object.as_deref(), Some("Berlin"));
+
+        // Procedural with frequency descriptor.
+        let proc = storage
+            .ingest(IngestInput {
+                content: "Caroline goes to therapy every Tuesday.".to_string(),
+                memory_kind: MemoryKind::Procedural,
+                subject: Some("Caroline".to_string()),
+                procedural_frequency: Some("every Tuesday".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        let fetched = storage.get_node(&proc.id).unwrap().unwrap();
+        assert_eq!(fetched.memory_kind, MemoryKind::Procedural);
+        assert_eq!(
+            fetched.procedural_frequency.as_deref(),
+            Some("every Tuesday")
+        );
     }
 
     #[test]

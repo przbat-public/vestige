@@ -842,6 +842,7 @@ mod tests {
             has_embedding: None,
             embedding_model: None,
             provenance: None,
+            ..Default::default()
         }
     }
 

@@ -234,6 +234,7 @@ pub async fn execute(
         valid_from: pp_valid_from,
         valid_until: pp_valid_until,
         provenance: pp_provenance,
+        ..Default::default()
     };
 
     // Store relations for post-ingest graph edge creation
@@ -476,6 +477,7 @@ async fn execute_batch(
             valid_from: batch_pp_from,
             valid_until: batch_pp_until,
             provenance: batch_pp_prov,
+            ..Default::default()
         };
 
         // ================================================================
