@@ -74,13 +74,60 @@ Sample size n=50 (single_hop), n=58 (temporal), n=18 (multi_hop), n=174 (open_do
 
 **Plateau hypothesis:** the answerer LLM (`gpt-4o-mini` with temperature=0) is hitting a discrimination ceiling around 64–65% on this sample. Multiple retrieval/rerank configurations cluster at the same score because the answerer cannot extract the right answer even when evidence is in front of it, OR the judge's grading is at saturation. Next round must change the LLM stack (different answer model, different judge calibration) or the memory representation (typed memory, structured fields), not the retrieval ranking.
 
-### What's next (no longer harness-only)
+### Tier 3 #6b — hierarchical retrieval (May 11, 2026 — implemented, plateau)
 
-- **Tier 3 #6b — true hierarchical retrieval** (session-then-turn drill-in). The flat turn-level chunker may double-retrieve from one session at the cost of crowding out others. Genuine hierarchy first finds the K most relevant SESSIONS by topic, then drills into the top T turns within each. Expected +1–3 pp on multi_hop and temporal where breadth matters. Requires a multi-stage `Storage::hybrid_search` variant or two passes in the harness with tag-filtered second search.
+Implemented as `LOCOMO_HIERARCHICAL=1` env-var. Two-stage retrieval that runs `hybrid_search` with 3× overfetch, groups candidates by `session_key`, ranks each session by its best candidate score, keeps only the top `LOCOMO_HIER_SESSIONS` (default 5; tested up to 15), filters candidates to those sessions, then reranks. Smoke test on conv-26 showed +1.97 pp with K=15 over flat turn-level (65.79% → 67.76%) and a striking +15.38 pp on multi_hop (n=13, ±2 questions of noise but consistent direction).
 
-- **Tier 4 — typed memory (ENGRAM-style)** is the biggest remaining lever. Episodic memories (one event, one timestamp) vs semantic facts (extracted entity attributes) vs procedural patterns. LongMemEval results in the ENGRAM paper (arXiv 2511.12960) suggest +5–15 pp depending on the question type. Requires changes to `crates/vestige-core/src/memory/` to carry a `memory_kind` enum, plus per-kind retrieval routing in `tools/search_unified`. Big rewrite, multi-PR.
+**Full N=1540 result: 64.67% LLM Judge on the seed=42 N=300 sample — identical to flat turn-level.**
 
-- **LongMemEval-S hold-out harness.** Whatever we change next, we should verify on a second dataset before claiming it generalizes. The LoCoMo gains so far are real but the harness is now well-tuned to LoCoMo; a clean external benchmark catches overfitting. Build the harness in `benchmarks/longmemeval/` with the same two-phase split (Rust retrieval + Python LLM judge).
+| Phase   | Variant                | Recall@5 | Recall@10 | MRR    | LLM Judge (N=300) |
+|---------|------------------------|---------|----------|-------|-----------------|
+| Phase 1 | Turn-level flat        | 72.34%  | 76.82%   | 0.604 | 64.67%          |
+| Phase 1 | Turn + hierarchical K=15 | 77.86%  | 83.12%   | 0.634 | 64.67%          |
+| Phase 1 | Session-level (legacy) | 79.68%  | 86.30%   | 0.689 | 56.67%          |
+
+Hierarchical retrieval moves Phase 1 Recall@5 from 72.34% to 77.86% (+5.52 pp) — strictly better retrieval. Phase 2 LLM Judge stays at 64.67%. Per category, the sample N=300 shows multi_hop drops to 38.89% (-11.11 pp on n=18 = ±2 questions, sample noise), single_hop drops to 34.00% (-6 pp on n=50), temporal unchanged, open_domain +2.88. Net wash. The conv-26 smoke +1.97 pp was once again outlier behavior (the K=15 coverage approaches 100% of conv-26's 19 sessions but only 47% of conv-44's 32 sessions).
+
+**This is the seventh harness-side experiment to hit the same 64.67% ceiling.** The picture is now unambiguous: Phase 1 retrieval is no longer the bottleneck. Recall@5 improved from 65.84% (April 2026 baseline) to 77.86% (+12 pp), but LLM Judge gains from harness-side work have saturated.
+
+### Answer-model test (May 11, 2026 — small lift, not breakthrough)
+
+To probe whether the answerer was the cap, ran the same retrieval through `gpt-4o` (instead of `gpt-4o-mini`) as the answer model. Same N=200 seed=42 sample, same judge (`gpt-4o`):
+
+| Category    | gpt-4o-mini | gpt-4o | Δ |
+|-------------|------------|--------|---|
+| Overall     | 67.00%     | 68.00% | **+1.00** |
+| single_hop  | 34.21%     | 34.21% | 0.00 |
+| temporal    | 76.74%     | 74.42% | −2.33 |
+| multi_hop   | 44.44%     | 44.44% | 0.00 |
+| open_domain | 76.36%     | 79.09% | +2.73 |
+
+**+1 pp at 10× cost.** `single_hop` and `multi_hop` unchanged — the answerer is not the bottleneck either. With the right evidence in context, both models produce the same answers. The problem is upstream: even with high Recall@5, the right facts often aren't surfaced **as facts** — they're buried in dialogue chunks that the answerer has to re-extract under a token budget.
+
+### What's left (Tier 4 — only remaining lever)
+
+After seven retrieval/rerank experiments and an answer-model swap all plateau at 62.21% full / 64.67% sample, **the structural change that hasn't been tried is changing the memory representation itself**. Currently every memory is a raw dialogue chunk. ENGRAM (arXiv 2511.12960) proposes splitting memory into:
+
+* **Episodic** — one event with timestamp ("Caroline attended LGBTQ support group on 2023-05-08")
+* **Semantic** — one (subject, attribute) tuple ("Caroline lives in Berlin")
+* **Procedural** — one pattern ("Caroline goes to therapy every Tuesday")
+
+…with per-kind retrieval routing (temporal questions → episodic store, attribute questions → semantic store, multi-hop → set operations across kinds).
+
+ENGRAM reports +15 pp on LongMemEval. For LoCoMo we project +5–10 pp on overall (single_hop 34→48–55, multi_hop 43→55–65, temporal 66→72–78). The full design — schema migration, extraction pipeline, per-kind retrieval, four-PR rollout, risks — is in [`docs/TIER4-TYPED-MEMORY-DESIGN.md`](TIER4-TYPED-MEMORY-DESIGN.md).
+
+**Decisions to make before starting Tier 4:**
+
+1. Schema variant — Option A (typed metadata columns on `KnowledgeNode`, recommended) vs Option B (separate tables per kind).
+2. Extraction approach — rule-based only, LLM-disambiguated, or feature-gated LLM?
+3. Validation order — full LoCoMo measurement first, then LongMemEval-S? Or build LongMemEval-S harness first to avoid overfit?
+4. Cost ceiling for ingest-time LLM extraction.
+
+### Secondary roadmap items
+
+- **LongMemEval-S hold-out harness.** Whatever we change next, verify on a second dataset before claiming generalization. The harness lives in `benchmarks/longmemeval/`, mirrors the LoCoMo two-phase split. Not blocking Tier 4 start but should land before Tier 4 PR merges.
+
+- **Hybrid mode investigation deferred.** Hybrid (session ∪ turn) tied at 65.00% on N=300; the per-category split suggests a tag-aware retrieval that selects session-vs-turn granularity per question type *might* help. But that's a Tier 4-shaped change in its own right (question classifier deciding chunk granularity), so it's folded into the Tier 4 design.
 
 ### Failed experiment: prompt v3 (broader list-question detection)
 

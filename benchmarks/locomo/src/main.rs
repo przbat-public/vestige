@@ -43,8 +43,17 @@ use vestige_core::storage::Storage;
 //                                       (reranker picks granularity per query)
 //   LOCOMO_MAX_CONVERSATIONS = unset (default = all 10) | N
 //                            — limit to first N conversations (smoke/sample runs)
+//   LOCOMO_HIERARCHICAL   = "0" (default) | "1"
+//                            — two-stage retrieval: hybrid_search 3× overfetch,
+//                              group candidates by session, keep only those from
+//                              the top-K most-relevant sessions, then rerank.
+//                              Targets multi_hop / temporal (concentrates breadth
+//                              within the conversations that matter, not across
+//                              irrelevant ones).
+//   LOCOMO_HIER_SESSIONS  = 5 (default) — how many sessions to drill into
 const DEFAULT_OVERFETCH: i32 = 50;
 const DEFAULT_TOPK: usize = 10;
+const DEFAULT_HIER_SESSIONS: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChunkLevel {
@@ -142,6 +151,14 @@ struct PipelineConfig {
     use_reranker: bool,
     reranker_model: Option<String>,
     chunk_level: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hierarchical: Option<HierarchicalConfig>,
+}
+
+#[derive(Serialize, Clone)]
+struct HierarchicalConfig {
+    keep_sessions: usize,
+    stage1_overfetch: i32,
 }
 
 #[derive(Serialize, Default, Clone)]
@@ -299,6 +316,52 @@ fn evaluate_retrieval(
 }
 
 // ============================================================================
+// Hierarchical filter: group candidates by session_key, keep only those from
+// the top-N sessions (ranked by their best candidate score within the pool).
+// ============================================================================
+
+fn extract_session_key(tags: &[String]) -> Option<&str> {
+    tags.iter()
+        .find_map(|t| t.strip_prefix("session:"))
+}
+
+fn filter_to_top_sessions(
+    res: Vec<vestige_core::memory::SearchResult>,
+    keep_sessions: usize,
+) -> Vec<vestige_core::memory::SearchResult> {
+    if keep_sessions == 0 || res.is_empty() {
+        return res;
+    }
+    // Aggregate per-session score = max combined_score across the session's
+    // candidates. Sessions without a session tag get an empty key and are
+    // grouped together; that's fine, they're rare edge cases.
+    let mut best_per_session: HashMap<String, f32> = HashMap::new();
+    for r in &res {
+        let key = extract_session_key(&r.node.tags).unwrap_or("").to_string();
+        let e = best_per_session.entry(key).or_insert(f32::NEG_INFINITY);
+        if r.combined_score > *e {
+            *e = r.combined_score;
+        }
+    }
+    if best_per_session.len() <= keep_sessions {
+        return res;
+    }
+    let mut ranked: Vec<(String, f32)> = best_per_session.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let kept: std::collections::HashSet<String> = ranked
+        .into_iter()
+        .take(keep_sessions)
+        .map(|(k, _)| k)
+        .collect();
+    res.into_iter()
+        .filter(|r| {
+            let k = extract_session_key(&r.node.tags).unwrap_or("");
+            kept.contains(k)
+        })
+        .collect()
+}
+
+// ============================================================================
 // Main benchmark runner
 // ============================================================================
 
@@ -344,17 +407,33 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_TOPK);
     let chunk_level = ChunkLevel::from_env();
+    let hierarchical = std::env::var("LOCOMO_HIERARCHICAL")
+        .map(|v| v == "1" || v.to_ascii_lowercase() == "true")
+        .unwrap_or(false);
+    let hier_sessions: usize = std::env::var("LOCOMO_HIER_SESSIONS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_HIER_SESSIONS);
 
     eprintln!("=== Vestige LoCoMo Benchmark ===");
     eprintln!("Dataset:    {}", dataset_path.display());
     eprintln!("Output:     {}", output_path.display());
     eprintln!("Chunking:   {}", chunk_level.name());
-    eprintln!(
-        "Pipeline:   hybrid_search(top={}) {} top-{}",
-        overfetch,
-        if use_reranker { "→ Jina v2 rerank →" } else { "→ truncate →" },
-        topk
-    );
+    if hierarchical {
+        eprintln!(
+            "Pipeline:   hybrid_search(top={}) → group-by-session → top-{} sessions → filter → Jina v2 rerank → top-{}",
+            overfetch * 3,
+            hier_sessions,
+            topk
+        );
+    } else {
+        eprintln!(
+            "Pipeline:   hybrid_search(top={}) {} top-{}",
+            overfetch,
+            if use_reranker { "→ Jina v2 rerank →" } else { "→ truncate →" },
+            topk
+        );
+    }
     eprintln!();
 
     // Initialize reranker once for the entire benchmark. Jina Reranker v2 Base
@@ -538,8 +617,24 @@ fn main() {
         skipped_adversarial += adversarial_count;
 
         for qa in &non_adversarial {
-            // Stage 1: hybrid_search with overfetch (BM25 + semantic via RRF)
-            let initial = storage.hybrid_search(&qa.question, overfetch, 0.4, 0.6);
+            // Stage 1: hybrid_search. Hierarchical mode over-fetches 3× so we
+            // have enough candidates per session to make a group-by-session
+            // pre-filter meaningful.
+            let stage1_overfetch = if hierarchical {
+                overfetch.saturating_mul(3)
+            } else {
+                overfetch
+            };
+            let initial = storage.hybrid_search(&qa.question, stage1_overfetch, 0.4, 0.6);
+
+            // Hierarchical pre-filter: group by session, keep candidates only
+            // from the top-K sessions (by max candidate score within session).
+            // Concentrates rerank budget on the most relevant conversations.
+            let initial = if hierarchical {
+                initial.map(|res| filter_to_top_sessions(res, hier_sessions))
+            } else {
+                initial
+            };
 
             let (retrieved_contexts, retrieved_scores, retrieved_dia_id_sets): (
                 Vec<String>,
@@ -707,6 +802,14 @@ fn main() {
             None
         },
         chunk_level: chunk_level.name().to_string(),
+        hierarchical: if hierarchical {
+            Some(HierarchicalConfig {
+                keep_sessions: hier_sessions,
+                stage1_overfetch: overfetch.saturating_mul(3),
+            })
+        } else {
+            None
+        },
     };
     let output = BenchmarkOutput {
         vestige_version: "3.2.0".to_string(),

@@ -79,6 +79,8 @@ Cost estimate: ~$3-5 for 1,540 questions (GPT-4o-mini for answers + GPT-4o for j
 | `LOCOMO_TOPK` | `10` | Final top-K returned to evaluator |
 | `LOCOMO_CHUNK_LEVEL` | `session` | `session` (one memory = one session, 10–30 turns), `turn` (one memory = one utterance, **recommended for benchmarking**, +2 pp over session full N), or `hybrid` (both — mixed result, neutral overall, kept as ablation toggle). |
 | `LOCOMO_MAX_CONVERSATIONS` | (unset) | Limit to first N conversations for smoke/sample runs |
+| `LOCOMO_HIERARCHICAL` | `0` | Two-stage retrieval. Stage 1 over-fetches 3×, groups candidates by `session_key`, keeps only top-K most-relevant sessions, then reranks. Lifts Phase 1 Recall@5 by +5.52 pp but Phase 2 LLM Judge stays flat at the plateau — kept for ablation, off by default. |
+| `LOCOMO_HIER_SESSIONS` | `5` | How many sessions to keep in hierarchical mode. K=15 worked best on conv-26 smoke; on full N the LLM Judge plateaus regardless. |
 
 ### LLM judge (`evaluate.py`) — main knobs
 
