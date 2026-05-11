@@ -138,3 +138,4 @@ apps/dashboard/node_modules/
 fastembed-rs/
 .mcp.json
 .venv-locomo/
+benchmarks/locomo/__pycache__/

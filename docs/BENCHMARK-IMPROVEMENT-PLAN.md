@@ -18,6 +18,22 @@
 
 The **prompt v2** improvement isolates a +5.32 pp full-N gain (+6.00 pp on a same-sample seed=42 N=200 A/B) from a single change to the answerer system prompt. The change targets the two largest failure buckets identified in `benchmarks/locomo/analyze_failures.py`: `REFUSE` (15.2% of all questions, model refused despite evidence in top-5) and `COMP` (15.6%, model answered but missed list items or paraphrased temporal phrases). Specifically: (a) explicit anti-refuse policy (only refuse on no relevant evidence at all), (b) hypothetical/inferential mode for "would/likely" questions, (c) temporal precision hint that copies the memory's exact phrasing for relative dates.
 
+### Failed experiment: prompt v3 (broader list-question detection)
+
+v3 broadened `LIST_QUESTION_RE` from "what are X" to also catch "what books has X read", "what activities does Y do", "where has Z been" and added a plural-noun-tail fallback. Coverage on the 1 540-question set went from 166 hits (10.8%) to 426 hits (27.7%). On the seed=42 N=200 A/B:
+
+| | v2 | v3 | Δ |
+|---|---|---|---|
+| Overall | 57.50% | 56.00% | **−1.50 pp** |
+| single_hop | 28.95% | 23.68% | −5.27 pp |
+| temporal | 74.42% | 72.09% | −2.33 pp |
+| multi_hop | 44.44% | 44.44% | 0 |
+| open_domain | 61.82% | 61.82% | 0 |
+
+The plural-noun-tail catches adjunct plurals like "What does Melanie do with her family on hikes?" — the question asks for one activity, but the hint pushes the answerer to enumerate everything it sees. The cure is worse than the disease. **v3 reverted.** Result saved as `benchmarks/locomo/locomo_scores_promptv3_sample200.json` for the record.
+
+Lesson: regex-based list detection is structurally fragile when the plural noun can be in adjunct position. The next attempt should ask `gpt-4o-mini` itself ("is this a list question — Y/N") in a tiny zero-shot pre-classifier rather than expanding the regex further. Or skip the hint entirely and rely on the answerer's policy section.
+
 **Caveats** (do not skip these):
 
 - The "Apr 2026 baseline" 41.00% is **not reproducible today** with the same code on the same data. Re-running the old `evaluate.py` against the old `retrieval_results.json` on the same seed=42 sample now yields ~21%, not 41%. `gpt-4o-mini` with `temperature=0` is not a stable contract. The clean apples-to-apples on the same 100-question sample, both arms run today, is **+28 pp** (21% → 49%); the +13.81 pp on full N is conservative because the baseline drifted up too.
