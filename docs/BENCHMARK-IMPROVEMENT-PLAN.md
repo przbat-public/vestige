@@ -5,18 +5,46 @@
 
 ## Status (May 2026)
 
-| | Apr 2026 | After Tier 1+2 | After Tier 1+2 + prompt v2 |
-|---|---|---|---|
-| Recall@5 (full N=1540) | 65.84% | **79.68%** | 79.68% |
-| Recall@10 | 80.39% | **86.30%** | 86.30% |
-| MRR | 0.4727 | **0.6889** | 0.6889 |
-| LLM Judge Overall (full N=1540) | 41.00% | 54.81% | **60.13%** |
-| LLM Judge — single_hop | 22.22% | 32.62% | **34.40%** |
-| LLM Judge — temporal | 33.33% | 55.76% | **65.73%** |
-| LLM Judge — multi_hop | 0.00% | 26.04% | **42.71%** |
-| LLM Judge — open_domain | 52.73% | 65.16% | **68.61%** |
+| | Apr 2026 | Tier 1+2 | + prompt v2 | + turn-level chunking |
+|---|---|---|---|---|
+| Recall@5 (full N=1540) | 65.84% | **79.68%** | 79.68% | 72.34% |
+| Recall@10 | 80.39% | **86.30%** | 86.30% | 76.82% |
+| MRR | 0.4727 | **0.6889** | 0.6889 | 0.6042 |
+| LLM Judge Overall (full N=1540) | 41.00% | 54.81% | 60.13% | **62.21%** |
+| LLM Judge — single_hop | 22.22% | 32.62% | 34.40% | **40.07%** |
+| LLM Judge — temporal | 33.33% | 55.76% | 65.73% | **67.60%** |
+| LLM Judge — multi_hop | 0.00% | 26.04% | 42.71% | **44.79%** |
+| LLM Judge — open_domain | 52.73% | 65.16% | 68.61% | **69.56%** |
 
 The **prompt v2** improvement isolates a +5.32 pp full-N gain (+6.00 pp on a same-sample seed=42 N=200 A/B) from a single change to the answerer system prompt. The change targets the two largest failure buckets identified in `benchmarks/locomo/analyze_failures.py`: `REFUSE` (15.2% of all questions, model refused despite evidence in top-5) and `COMP` (15.6%, model answered but missed list items or paraphrased temporal phrases). Specifically: (a) explicit anti-refuse policy (only refuse on no relevant evidence at all), (b) hypothetical/inferential mode for "would/likely" questions, (c) temporal precision hint that copies the memory's exact phrasing for relative dates.
+
+### Tier 3: turn-level chunking (May 11, 2026)
+
+**Net result: +2.08 pp full-N (60.13% → 62.21%). All four categories improved.** The smoke test on conv-26 alone showed +11.84 pp (53.95% → 65.79%), so the full-dataset gain is conservative — most of the conv-26 lift came from its unusually bad session-level single_hop baseline (12.50%), which average conversations don't share.
+
+Implementation: `LOCOMO_CHUNK_LEVEL=turn` ingests each conversational turn as a separate memory (419–689 turns/conv vs 19–32 sessions). Each chunk carries timestamp + speaker + utterance, tagged with `turn:<dia_id>` for evidence matching. Reranker now sees 20 individual turns and picks the 10 most relevant, instead of 20 dense session blocks where the relevant turn sits next to 19 unrelated ones.
+
+A/B vs session-level prompt v2 (same N=1540, same answerer/judge, same prompts):
+
+| | Session | Turn | Δ |
+|---|---|---|---|
+| **Overall** | **60.13%** | **62.21%** | **+2.08 pp** |
+| single_hop | 34.40% | 40.07% | **+5.67 pp** |
+| temporal | 65.73% | 67.60% | +1.87 pp |
+| multi_hop | 42.71% | 44.79% | +2.08 pp |
+| open_domain | 68.61% | 69.56% | +0.95 pp |
+| Recall@5 | 79.68% | 72.34% | −7.34 pp |
+| Recall@10 | 86.30% | 76.82% | −9.48 pp |
+| MRR | 0.6889 | 0.6042 | −0.0847 |
+| Search wall-time | 4 383 s | 534 s | **8× faster** |
+
+The retrieval-vs-judge inversion (Recall down, Judge up) is the compilation bottleneck in action: when each chunk is 1 turn instead of 20, the answerer model gets exactly the evidence it needs, not the evidence buried in a session-sized haystack. The metric "is any evidence dia_id in top-10" punishes turn-level (one match per slot vs many) — but the metric we care about (can the answerer compile the right answer) rewards it.
+
+Multi_hop +2.08 pp was the surprise. The hypothesis was that splitting sessions would hurt multi-hop questions because they need to connect facts across turns. It didn't — apparently the reranker pulls 10 relevant turns from across 3–5 sessions, giving the answerer more breadth, not less.
+
+Cost: +1 100 s of Phase 1 wall-time (the index is ~20× larger) but each query is 5× faster because cross-encoder reranks 20 short turns instead of 20 long sessions. Net Phase 1 time roughly equal. No core changes — pure harness modification.
+
+Result file: `benchmarks/locomo/locomo_scores_turn_full.json`. Smoke A/B on conv-26: `/tmp/locomo_{session,turn}_smoke_scores.json`.
 
 ### Failed experiment: prompt v3 (broader list-question detection)
 
@@ -106,13 +134,13 @@ recovers 70%+ of evidence that naive top-K loses. Done in this PR.
 
 ### Tier 3 — finer chunking (research)
 
-| # | Change | Where | Expected uplift | Cost |
-|---|---|---|---|---|
-| 6 | Turn-level chunking with hierarchical retrieval (session → turn) | `benchmarks/locomo/src/main.rs`, `crates/vestige-core/src/storage/sqlite.rs` | +5–15 abs. on single_hop/temporal | medium |
-| 7 | Time-aware re-ranking for `temporal` category | `crates/vestige-core/src/search/temporal.rs` | +3–8 abs. on temporal | medium |
+| # | Change | Where | Expected uplift | Cost | Status |
+|---|---|---|---|---|---|
+| 6 | Turn-level chunking — one memory per turn (no hierarchy yet) | `benchmarks/locomo/src/main.rs` | +5–15 abs. on single_hop | medium | ✅ done, +2.08 pp full (+5.67 pp single_hop) |
+| 6b | Hierarchical retrieval (session → turn within session) | same files | +1–3 pp on multi_hop/temporal | medium | pending |
+| 7 | Time-aware re-ranking for `temporal` category | `crates/vestige-core/src/search/temporal.rs` | +3–8 abs. on temporal | medium | pending |
 
-Not in this PR. Requires schema for turn-id parents and a multi-stage retrieval
-that first finds the session, then the turn within it.
+Tier 3 #6 done in a follow-up commit: `LOCOMO_CHUNK_LEVEL=turn` ingests each turn as a separate memory. No core changes, harness only. Tier 3 #6b (true hierarchy — find session first, then drill into its turns) is the next step; current implementation is "flat turn-level" and may double-retrieve turns from the same session at the cost of crowding out other sessions. Hybrid (`session ∪ turn`) was sketched but not run yet because flat turn-level already net positive.
 
 ### Tier 4 — typed memory (ENGRAM-style)
 

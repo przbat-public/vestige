@@ -6,13 +6,14 @@ Measures Vestige's long-term conversational memory against the [LoCoMo benchmark
 
 ## LLM Judge — full N=1540 (May 2026 run, this repo)
 
-| System                          | Overall  | single_hop | temporal | multi_hop | open_domain |
-|---------------------------------|----------|------------|----------|-----------|-------------|
-| **Vestige (current, prompt v2)**| **60.13%** | 34.40%   | 65.73%   | 42.71%    | 68.61%      |
-| Vestige (Tier 1+2 only)         | 54.81%   | 32.62%     | 55.76%   | 26.04%    | 65.16%      |
-| Vestige (Apr 2026)\*            | 41.00%   | 22.22%     | 33.33%   | 0.00%     | 52.73%      |
+| System                                | Overall  | single_hop | temporal | multi_hop | open_domain |
+|---------------------------------------|----------|------------|----------|-----------|-------------|
+| **Vestige (current, turn-level)**     | **62.21%** | 40.07%   | 67.60%   | 44.79%    | 69.56%      |
+| Vestige (session-level, prompt v2)    | 60.13%   | 34.40%     | 65.73%   | 42.71%    | 68.61%      |
+| Vestige (session-level, Tier 1+2 only)| 54.81%   | 32.62%     | 55.76%   | 26.04%    | 65.16%      |
+| Vestige (Apr 2026)\*                  | 41.00%   | 22.22%     | 33.33%   | 0.00%     | 52.73%      |
 
-\*Apr 2026 figure was committed to this repo in the snapshot before the reranker + score-adaptive context were wired into the harness. It does not reproduce on the current `gpt-4o-mini` snapshot — re-running the same code on the same seed=42 sample today yields ~21%, i.e. apples-to-apples gain on identical questions is **+28 pp**, of which **+13.81 pp** survives the move to full N=1 540.
+\*Apr 2026 figure was committed to this repo in the snapshot before the reranker + score-adaptive context were wired into the harness. It does not reproduce on the current `gpt-4o-mini` snapshot — re-running the same code on the same seed=42 sample today yields ~21%, i.e. apples-to-apples gain on identical questions is **+41 pp on the small sample**, of which **+21.21 pp** survives the move to full N=1 540 (41.00% → 62.21%).
 
 ### Competitor reference (different harnesses, treat as rough)
 
@@ -76,6 +77,8 @@ Cost estimate: ~$3-5 for 1,540 questions (GPT-4o-mini for answers + GPT-4o for j
 | `LOCOMO_USE_RERANKER` | `1` | Set to `0` to disable Stage 2 cross-encoder rerank (ablation) |
 | `LOCOMO_OVERFETCH` | `50` | Initial hybrid_search candidates before rerank |
 | `LOCOMO_TOPK` | `10` | Final top-K returned to evaluator |
+| `LOCOMO_CHUNK_LEVEL` | `session` | `session` (one memory = one session, 10–30 turns) or `turn` (one memory = one utterance). Turn-level loses retrieval Recall@5 (-7 pp) but gains LLM Judge Overall (+2 pp full N, +12 pp on conv-26 alone) because it sidesteps the "compilation bottleneck" — each retrieved chunk is now exactly one fact, not buried in a session-sized haystack. |
+| `LOCOMO_MAX_CONVERSATIONS` | (unset) | Limit to first N conversations for smoke/sample runs |
 
 ### LLM judge (`evaluate.py`)
 

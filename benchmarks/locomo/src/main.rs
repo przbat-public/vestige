@@ -35,8 +35,40 @@ use vestige_core::storage::Storage;
 //   LOCOMO_USE_RERANKER   = "1" (default) | "0"   — Stage 2 Jina v2 cross-encoder
 //   LOCOMO_OVERFETCH      = 50  (default)         — initial hybrid_search candidates
 //   LOCOMO_TOPK           = 10  (default)         — final results after rerank
+//   LOCOMO_CHUNK_LEVEL    = "session" (default) | "turn"
+//                            — session: one memory per session (10-30 turns)
+//                              turn:    one memory per turn (finer-grained,
+//                                       targets single_hop / temporal categories)
+//   LOCOMO_MAX_CONVERSATIONS = unset (default = all 10) | N
+//                            — limit to first N conversations (smoke/sample runs)
 const DEFAULT_OVERFETCH: i32 = 50;
 const DEFAULT_TOPK: usize = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChunkLevel {
+    Session,
+    Turn,
+}
+
+impl ChunkLevel {
+    fn from_env() -> Self {
+        match std::env::var("LOCOMO_CHUNK_LEVEL")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "turn" => ChunkLevel::Turn,
+            _ => ChunkLevel::Session,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            ChunkLevel::Session => "session",
+            ChunkLevel::Turn => "turn",
+        }
+    }
+}
 
 // ============================================================================
 // LoCoMo dataset types
@@ -104,6 +136,7 @@ struct PipelineConfig {
     topk: usize,
     use_reranker: bool,
     reranker_model: Option<String>,
+    chunk_level: String,
 }
 
 #[derive(Serialize, Default, Clone)]
@@ -195,6 +228,18 @@ fn session_to_content(session: &SessionChunk) -> String {
 
 fn session_dia_ids(session: &SessionChunk) -> Vec<String> {
     session.turns.iter().map(|t| t.dia_id.clone()).collect()
+}
+
+/// Turn-level content: timestamp + this single utterance. Kept compact so the
+/// cross-encoder reranker can score it cleanly. Context width is recovered at
+/// search time by retrieving multiple adjacent turns (the reranker decides).
+fn turn_to_content(session: &SessionChunk, turn: &Turn) -> String {
+    let mut content = String::new();
+    if !session.timestamp.is_empty() {
+        content.push_str(&format!("[{}]\n", session.timestamp));
+    }
+    content.push_str(&format!("{}: {}\n", turn.speaker, turn.text));
+    content
 }
 
 fn category_name(cat: u32) -> &'static str {
@@ -293,10 +338,12 @@ fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_TOPK);
+    let chunk_level = ChunkLevel::from_env();
 
     eprintln!("=== Vestige LoCoMo Benchmark ===");
     eprintln!("Dataset:    {}", dataset_path.display());
     eprintln!("Output:     {}", output_path.display());
+    eprintln!("Chunking:   {}", chunk_level.name());
     eprintln!(
         "Pipeline:   hybrid_search(top={}) {} top-{}",
         overfetch,
@@ -329,7 +376,21 @@ fn main() {
 
     // Load dataset
     let data_str = std::fs::read_to_string(&dataset_path).expect("Failed to read dataset");
-    let samples: Vec<LoCoMoSample> = serde_json::from_str(&data_str).expect("Failed to parse JSON");
+    let mut samples: Vec<LoCoMoSample> =
+        serde_json::from_str(&data_str).expect("Failed to parse JSON");
+
+    if let Some(max) = std::env::var("LOCOMO_MAX_CONVERSATIONS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        && max < samples.len()
+    {
+        eprintln!(
+            "LOCOMO_MAX_CONVERSATIONS={} — truncating from {} conversations",
+            max,
+            samples.len()
+        );
+        samples.truncate(max);
+    }
 
     eprintln!("Loaded {} conversations", samples.len());
 
@@ -371,38 +432,88 @@ fn main() {
 
         // --- INGEST PHASE ---
         let ingest_start = Instant::now();
+        let mut ingested_units: usize = 0;
         for session in &sessions {
-            let content = session_to_content(session);
-            if content.trim().is_empty() {
-                continue;
-            }
+            match chunk_level {
+                ChunkLevel::Session => {
+                    let content = session_to_content(session);
+                    if content.trim().is_empty() {
+                        continue;
+                    }
 
-            let dia_ids = session_dia_ids(session);
-            let tags: Vec<String> = vec![
-                format!("session:{}", session.session_key),
-                format!("conversation:{}", sample_id),
-            ];
+                    let dia_ids = session_dia_ids(session);
+                    let tags: Vec<String> = vec![
+                        format!("session:{}", session.session_key),
+                        format!("conversation:{}", sample_id),
+                    ];
 
-            let input = IngestInput {
-                content,
-                node_type: "event".to_string(),
-                source: Some(format!("locomo/{}/{}", sample_id, session.session_key)),
-                tags,
-                ..Default::default()
-            };
+                    let input = IngestInput {
+                        content,
+                        node_type: "event".to_string(),
+                        source: Some(format!("locomo/{}/{}", sample_id, session.session_key)),
+                        tags,
+                        ..Default::default()
+                    };
 
-            match storage.ingest(input) {
-                Ok(node) => {
-                    memory_id_to_dia_ids.insert(node.id.clone(), dia_ids);
+                    match storage.ingest(input) {
+                        Ok(node) => {
+                            memory_id_to_dia_ids.insert(node.id.clone(), dia_ids);
+                            ingested_units += 1;
+                        }
+                        Err(e) => {
+                            eprintln!("    WARN: ingest failed for {}: {}", session.session_key, e);
+                        }
+                    }
                 }
-                Err(e) => {
-                    eprintln!("    WARN: ingest failed for {}: {}", session.session_key, e);
+                ChunkLevel::Turn => {
+                    for turn in &session.turns {
+                        if turn.text.trim().is_empty() {
+                            continue;
+                        }
+                        let content = turn_to_content(session, turn);
+                        let tags: Vec<String> = vec![
+                            format!("session:{}", session.session_key),
+                            format!("conversation:{}", sample_id),
+                            format!("turn:{}", turn.dia_id),
+                            format!("speaker:{}", turn.speaker),
+                        ];
+
+                        let input = IngestInput {
+                            content,
+                            node_type: "event".to_string(),
+                            source: Some(format!(
+                                "locomo/{}/{}/{}",
+                                sample_id, session.session_key, turn.dia_id
+                            )),
+                            tags,
+                            ..Default::default()
+                        };
+
+                        match storage.ingest(input) {
+                            Ok(node) => {
+                                memory_id_to_dia_ids
+                                    .insert(node.id.clone(), vec![turn.dia_id.clone()]);
+                                ingested_units += 1;
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "    WARN: ingest failed for {} turn {}: {}",
+                                    session.session_key, turn.dia_id, e
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
         let ingest_elapsed = ingest_start.elapsed().as_secs_f64();
         total_ingest_time += ingest_elapsed;
-        eprintln!("    Ingested {} sessions in {:.1}s", sessions.len(), ingest_elapsed);
+        eprintln!(
+            "    Ingested {} {}s in {:.1}s",
+            ingested_units,
+            chunk_level.name(),
+            ingest_elapsed
+        );
 
         // --- SEARCH PHASE ---
         let search_start = Instant::now();
@@ -585,6 +696,7 @@ fn main() {
         } else {
             None
         },
+        chunk_level: chunk_level.name().to_string(),
     };
     let output = BenchmarkOutput {
         vestige_version: "3.2.0".to_string(),
