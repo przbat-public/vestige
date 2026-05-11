@@ -35,12 +35,24 @@ use vestige_core::storage::Storage;
 //   LOCOMO_USE_RERANKER   = "1" (default) | "0"   — Stage 2 Jina v2 cross-encoder
 //   LOCOMO_OVERFETCH      = 50  (default)         — initial hybrid_search candidates
 //   LOCOMO_TOPK           = 10  (default)         — final results after rerank
-//   LOCOMO_CHUNK_LEVEL    = "session" (default) | "turn" | "hybrid"
-//                            — session: one memory per session (10-30 turns)
-//                              turn:    one memory per turn (finer-grained,
-//                                       targets single_hop / temporal categories)
-//                              hybrid:  both — session memory AND per-turn memories
-//                                       (reranker picks granularity per query)
+//   LOCOMO_CHUNK_LEVEL    = "session" (default) | "turn" | "hybrid" | "extracted"
+//                                          | "turn_extracted"
+//                            — session:        one memory per session (10-30 turns)
+//                              turn:           one memory per turn (finer-grained,
+//                                              targets single_hop / temporal categories)
+//                              hybrid:         both — session memory AND per-turn memories
+//                                              (reranker picks granularity per query)
+//                              extracted:      ENGRAM-style typed facts — reads a
+//                                              sidecar JSON (see EXTRACTED_PATH) of
+//                                              pre-extracted atomic facts (kind ∈
+//                                              {semantic, episodic, procedural}).
+//                                              Each fact becomes one memory tagged
+//                                              with its kind and subject. Tier 4 PoC.
+//                              turn_extracted: turn-level memories PLUS extracted facts,
+//                                              ingested side by side. Reranker chooses
+//                                              fact-vs-turn granularity per query.
+//   LOCOMO_EXTRACTED_PATH = "benchmarks/locomo/data/locomo10_extracted.json"
+//                            — sidecar produced by extract_facts.py
 //   LOCOMO_MAX_CONVERSATIONS = unset (default = all 10) | N
 //                            — limit to first N conversations (smoke/sample runs)
 //   LOCOMO_HIERARCHICAL   = "0" (default) | "1"
@@ -60,6 +72,8 @@ enum ChunkLevel {
     Session,
     Turn,
     Hybrid,
+    Extracted,
+    TurnExtracted,
 }
 
 impl ChunkLevel {
@@ -71,6 +85,8 @@ impl ChunkLevel {
         {
             "turn" => ChunkLevel::Turn,
             "hybrid" => ChunkLevel::Hybrid,
+            "extracted" => ChunkLevel::Extracted,
+            "turn_extracted" | "turnextracted" => ChunkLevel::TurnExtracted,
             _ => ChunkLevel::Session,
         }
     }
@@ -80,8 +96,74 @@ impl ChunkLevel {
             ChunkLevel::Session => "session",
             ChunkLevel::Turn => "turn",
             ChunkLevel::Hybrid => "hybrid",
+            ChunkLevel::Extracted => "extracted",
+            ChunkLevel::TurnExtracted => "turn_extracted",
         }
     }
+
+    fn ingests_turns(self) -> bool {
+        matches!(self, ChunkLevel::Turn | ChunkLevel::Hybrid | ChunkLevel::TurnExtracted)
+    }
+
+    fn ingests_sessions(self) -> bool {
+        matches!(self, ChunkLevel::Session | ChunkLevel::Hybrid)
+    }
+
+    fn ingests_extracted(self) -> bool {
+        matches!(self, ChunkLevel::Extracted | ChunkLevel::TurnExtracted)
+    }
+}
+
+// ============================================================================
+// Extracted-facts sidecar (Tier 4 PoC)
+// ============================================================================
+
+#[derive(Deserialize, Debug, Clone)]
+struct ExtractedFact {
+    kind: String,
+    subject: String,
+    content: String,
+    source_turns: Vec<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct ExtractedSession {
+    #[serde(default)]
+    timestamp: String,
+    facts: Vec<ExtractedFact>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ExtractedSidecar {
+    #[allow(dead_code)]
+    #[serde(default)]
+    vestige_extraction_version: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    model: String,
+    conversations: HashMap<String, HashMap<String, ExtractedSession>>,
+}
+
+fn load_extracted_sidecar() -> Option<ExtractedSidecar> {
+    let path = std::env::var("LOCOMO_EXTRACTED_PATH")
+        .unwrap_or_else(|_| "benchmarks/locomo/data/locomo10_extracted.json".to_string());
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|e| eprintln!("ERROR: cannot read extracted sidecar {}: {}", path, e))
+        .ok()?;
+    serde_json::from_str(&raw)
+        .map_err(|e| eprintln!("ERROR: cannot parse extracted sidecar: {}", e))
+        .ok()
+}
+
+/// Format a single extracted fact for ingestion. The kind prefix gives the
+/// reranker a strong signal; the timestamp anchors episodic facts in time.
+fn fact_to_content(session_ts: &str, fact: &ExtractedFact) -> String {
+    let mut s = String::new();
+    if !session_ts.is_empty() {
+        s.push_str(&format!("[{}]\n", session_ts));
+    }
+    s.push_str(&format!("[{}] {}\n", fact.kind, fact.content));
+    s
 }
 
 // ============================================================================
@@ -415,6 +497,23 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_HIER_SESSIONS);
 
+    // Load the extracted-facts sidecar up front if we'll need it.
+    let extracted = if chunk_level.ingests_extracted() {
+        match load_extracted_sidecar() {
+            Some(s) => Some(s),
+            None => {
+                eprintln!(
+                    "ERROR: LOCOMO_CHUNK_LEVEL={} requires the sidecar produced by\n\
+                     `python benchmarks/locomo/extract_facts.py`. Aborting.",
+                    chunk_level.name()
+                );
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     eprintln!("=== Vestige LoCoMo Benchmark ===");
     eprintln!("Dataset:    {}", dataset_path.display());
     eprintln!("Output:     {}", output_path.display());
@@ -517,9 +616,87 @@ fn main() {
         // --- INGEST PHASE ---
         let ingest_start = Instant::now();
         let mut ingested_units: usize = 0;
+        let mut ingested_facts: usize = 0;
+        let mut ingested_turns: usize = 0;
+        let mut ingested_sessions_count: usize = 0;
+
+        if chunk_level.ingests_extracted() {
+            // Extracted mode: pull facts from sidecar, ingest each as one
+            // memory. Sessions in `sessions` are only used for the session_key
+            // ordering — actual content comes from the sidecar.
+            let sidecar = extracted.as_ref().unwrap();
+            let conv_facts = sidecar.conversations.get(&sample_id);
+            if conv_facts.is_none() {
+                eprintln!(
+                    "    WARN: no extracted facts for {} in sidecar, skipping ingest",
+                    sample_id
+                );
+            }
+            if let Some(conv_facts) = conv_facts {
+                for session in &sessions {
+                    let session_facts = match conv_facts.get(&session.session_key) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    for (idx, fact) in session_facts.facts.iter().enumerate() {
+                        if fact.content.trim().is_empty() {
+                            continue;
+                        }
+                        let content = fact_to_content(&session_facts.timestamp, fact);
+                        let mut tags: Vec<String> = vec![
+                            format!("session:{}", session.session_key),
+                            format!("conversation:{}", sample_id),
+                            format!("kind:{}", fact.kind),
+                            format!("subject:{}", fact.subject),
+                            "chunk:extracted".to_string(),
+                        ];
+                        // Tag every source turn so the hierarchical session
+                        // filter and any turn-based queries still work.
+                        for sid in &fact.source_turns {
+                            tags.push(format!("turn:{}", sid));
+                        }
+
+                        // Map fact kind to vestige-core node_type.
+                        let node_type = match fact.kind.as_str() {
+                            "episodic" => "event",
+                            "procedural" => "pattern",
+                            _ => "fact",
+                        }
+                        .to_string();
+
+                        let input = IngestInput {
+                            content,
+                            node_type,
+                            source: Some(format!(
+                                "locomo/{}/{}/fact-{}",
+                                sample_id, session.session_key, idx
+                            )),
+                            tags,
+                            ..Default::default()
+                        };
+
+                        match storage.ingest(input) {
+                            Ok(node) => {
+                                memory_id_to_dia_ids
+                                    .insert(node.id.clone(), fact.source_turns.clone());
+                                ingested_units += 1;
+                                ingested_facts += 1;
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "    WARN: ingest failed for {} fact {}: {}",
+                                    session.session_key, idx, e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         for session in &sessions {
-            let do_session = matches!(chunk_level, ChunkLevel::Session | ChunkLevel::Hybrid);
-            let do_turn = matches!(chunk_level, ChunkLevel::Turn | ChunkLevel::Hybrid);
+            let do_session = chunk_level.ingests_sessions();
+            let do_turn = chunk_level.ingests_turns();
 
             if do_session {
                 let content = session_to_content(session);
@@ -543,6 +720,7 @@ fn main() {
                         Ok(node) => {
                             memory_id_to_dia_ids.insert(node.id.clone(), dia_ids);
                             ingested_units += 1;
+                            ingested_sessions_count += 1;
                         }
                         Err(e) => {
                             eprintln!(
@@ -584,6 +762,7 @@ fn main() {
                             memory_id_to_dia_ids
                                 .insert(node.id.clone(), vec![turn.dia_id.clone()]);
                             ingested_units += 1;
+                            ingested_turns += 1;
                         }
                         Err(e) => {
                             eprintln!(
@@ -598,9 +777,12 @@ fn main() {
         let ingest_elapsed = ingest_start.elapsed().as_secs_f64();
         total_ingest_time += ingest_elapsed;
         eprintln!(
-            "    Ingested {} memories ({}) in {:.1}s",
+            "    Ingested {} memories ({}: turns={} sessions={} facts={}) in {:.1}s",
             ingested_units,
             chunk_level.name(),
+            ingested_turns,
+            ingested_sessions_count,
+            ingested_facts,
             ingest_elapsed
         );
 

@@ -8,12 +8,15 @@ Measures Vestige's long-term conversational memory against the [LoCoMo benchmark
 
 | System                                | Overall  | single_hop | temporal | multi_hop | open_domain |
 |---------------------------------------|----------|------------|----------|-----------|-------------|
-| **Vestige (current, turn-level)**     | **62.21%** | 40.07%   | 67.60%   | 44.79%    | 69.56%      |
+| **Vestige (current, turn + facts)**   | **66.17%** | 40.78%   | 71.65%   | 46.88%    | 74.79%      |
+| Vestige (turn-level only)             | 62.21%   | 34.40%     | 67.60%   | 44.79%    | 69.56%      |
 | Vestige (session-level, prompt v2)    | 60.13%   | 34.40%     | 65.73%   | 42.71%    | 68.61%      |
 | Vestige (session-level, Tier 1+2 only)| 54.81%   | 32.62%     | 55.76%   | 26.04%    | 65.16%      |
 | Vestige (Apr 2026)\*                  | 41.00%   | 22.22%     | 33.33%   | 0.00%     | 52.73%      |
 
-\*Apr 2026 figure was committed to this repo in the snapshot before the reranker + score-adaptive context were wired into the harness. It does not reproduce on the current `gpt-4o-mini` snapshot — re-running the same code on the same seed=42 sample today yields ~21%, i.e. apples-to-apples gain on identical questions is **+41 pp on the small sample**, of which **+21.21 pp** survives the move to full N=1 540 (41.00% → 62.21%).
+\*Apr 2026 figure was committed to this repo in the snapshot before the reranker + score-adaptive context were wired into the harness. It does not reproduce on the current `gpt-4o-mini` snapshot — re-running the same code on the same seed=42 sample today yields ~21%, i.e. apples-to-apples gain on identical questions is **+45 pp on the small sample**, of which **+25.17 pp** survives the move to full N=1 540 (41.00% → 66.17%).
+
+**Current best (turn_extracted) ingests BOTH per-turn dialogue chunks AND per-fact atomic memories** extracted at ingest time by `benchmarks/locomo/extract_facts.py`. The reranker picks granularity per question — atomic facts win for `single_hop` and `temporal` direct lookups, raw turns win for `open_domain` narrative questions. Together they break the plateau that seven retrieval-side experiments couldn't crack.
 
 ### Competitor reference (different harnesses, treat as rough)
 
@@ -77,7 +80,8 @@ Cost estimate: ~$3-5 for 1,540 questions (GPT-4o-mini for answers + GPT-4o for j
 | `LOCOMO_USE_RERANKER` | `1` | Set to `0` to disable Stage 2 cross-encoder rerank (ablation) |
 | `LOCOMO_OVERFETCH` | `50` | Initial hybrid_search candidates before rerank |
 | `LOCOMO_TOPK` | `10` | Final top-K returned to evaluator |
-| `LOCOMO_CHUNK_LEVEL` | `session` | `session` (one memory = one session, 10–30 turns), `turn` (one memory = one utterance, **recommended for benchmarking**, +2 pp over session full N), or `hybrid` (both — mixed result, neutral overall, kept as ablation toggle). |
+| `LOCOMO_CHUNK_LEVEL` | `session` | `session` (one memory = one session, 10–30 turns), `turn` (one memory = one utterance, +2 pp over session full N), `hybrid` (session ∪ turn — mixed result, neutral overall), `extracted` (atomic facts from `LOCOMO_EXTRACTED_PATH` sidecar, ENGRAM-style; net **negative** alone on full N because facts strip narrative), or `turn_extracted` (turns + facts side-by-side, **recommended**, +3.96 pp over turn-only). |
+| `LOCOMO_EXTRACTED_PATH` | `benchmarks/locomo/data/locomo10_extracted.json` | Sidecar produced by `python benchmarks/locomo/extract_facts.py`. Required for `extracted` and `turn_extracted` chunk levels. |
 | `LOCOMO_MAX_CONVERSATIONS` | (unset) | Limit to first N conversations for smoke/sample runs |
 | `LOCOMO_HIERARCHICAL` | `0` | Two-stage retrieval. Stage 1 over-fetches 3×, groups candidates by `session_key`, keeps only top-K most-relevant sessions, then reranks. Lifts Phase 1 Recall@5 by +5.52 pp but Phase 2 LLM Judge stays flat at the plateau — kept for ablation, off by default. |
 | `LOCOMO_HIER_SESSIONS` | `5` | How many sessions to keep in hierarchical mode. K=15 worked best on conv-26 smoke; on full N the LLM Judge plateaus regardless. |

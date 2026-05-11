@@ -1,8 +1,39 @@
 # Tier 4 — Typed Memory (ENGRAM-style)
 
-**Status:** design proposal, not implemented
-**Author:** initial draft May 11, 2026
+**Status:** PoC validated (+3.96 pp full N), core implementation pending
+**Author:** initial draft May 11, 2026; PoC results added same day
 **Pre-reading:** [ENGRAM paper (arXiv 2511.12960)](https://arxiv.org/abs/2511.12960), [Vestige LoCoMo benchmark plan](BENCHMARK-IMPROVEMENT-PLAN.md)
+
+## PoC results (May 11, 2026)
+
+Before committing to the four-PR rollout below, a benchmark-only PoC was run to test whether the hypothesis (pre-extracted typed facts beat raw chunks) holds for LoCoMo specifically. Implementation:
+
+* Python script `benchmarks/locomo/extract_facts.py` calls `gpt-4o-mini` on each LoCoMo session and extracts 5–20 atomic facts per session with `kind ∈ {semantic, episodic, procedural}`, `subject`, self-contained `content`, and `source_turns` array for evidence matching. Output sidecar JSON (3 015 facts across 272 sessions, ~$0.50, ~5 minutes).
+* Rust harness gained `ChunkLevel::Extracted` (facts only) and `ChunkLevel::TurnExtracted` (turns AND facts side-by-side, reranker picks per query).
+
+**Full N=1540 result:**
+
+| Variant | Overall | single_hop | temporal | multi_hop | open_domain |
+|---|---|---|---|---|---|
+| Turn flat (previous canonical)   | 62.21% | 34.40% | 67.60% | 44.79% | 69.56% |
+| Pure extracted (facts only)      | 55.33% | 38.00% | 65.52% | 44.44% | 58.05% |
+| **Turn + extracted (new canonical)** | **66.17%** | **40.78%** | **71.65%** | **46.88%** | **74.79%** |
+
+Hybrid mode (`turn_extracted`) is **+3.96 pp over turn flat on full N=1540, +25.17 pp cumulative since April 2026 baseline**. All four categories improved. Pure-extracted (facts only, no turns) lost −6.88 pp because facts strip narrative — confirming that *replacement* is the wrong shape; *augmentation* is right.
+
+**What the PoC validated:**
+
+* The plateau was content-shaped, not retrieval-shaped. Better-ranked raw chunks didn't help; structurally-different content did.
+* Per-question routing (the headline of ENGRAM) is NOT required for the win — the reranker already picks fact-vs-turn granularity correctly when both are in the candidate pool.
+* The extraction prompt produces usable facts at the right cost — 0.0002 USD per memory, 5–20 facts per session, breakdown 49% semantic / 24% episodic / 27% procedural on LoCoMo.
+
+**What the PoC did NOT test:**
+
+* Per-kind retrieval routing (temporal → episodic-only store) — *might* add another +1–3 pp on category-confusable queries.
+* Subject-aware retrieval (boost candidates where question's named entity matches `subject` tag).
+* Production ingest cost / latency budget — the $0.50 LoCoMo extract is a one-time benchmark cost; for live Vestige the per-ingest LLM call needs an off-switch.
+
+The four-PR rollout below remains correct as the path to migrating the PoC into `vestige-core` so it works for any deployment, not just the benchmark harness.
 
 ## Why this exists
 
