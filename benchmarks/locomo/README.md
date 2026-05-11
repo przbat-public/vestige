@@ -106,6 +106,8 @@ Cost estimate: ~$3-5 for 1,540 questions (GPT-4o-mini for answers + GPT-4o for j
 | `LOCOMO_ENTITY_BLEND` | `0.3` | — | Blend ratio for entity overlap if enabled |
 | `LOCOMO_TIME_RERANK` | `0` | failed −1.00 pp | Post-retrieval re-rank boosting contexts whose `[timestamp]` header matches a month/year in the question. Backfires on turn-level because all turns from one session share the session timestamp — boosting collapses the top-10 to one session and hurts multi-hop / temporal. |
 | `LOCOMO_TIME_BLEND` | `0.25` | — | Blend ratio for time overlap if enabled |
+| `LOCOMO_KIND_ROUTING` | `0` | failed +0.33 pp (noise) at boost=0.20, regressions at other settings | Per-kind retrieval routing — classifies the question into {semantic, episodic, procedural} and boosts candidates whose `[kind]` prefix matches. Tested with kind-only and kind+subject combined signals; both within ±2 pp of the `turn_extracted` baseline, but the Jina v2 reranker already picks granularity correctly from the candidate pool. Post-retrieval heuristic boosts cannot beat the cross-encoder. |
+| `LOCOMO_KIND_BOOST` | `0.20` | — | Boost magnitude when enabled |
 
 ### LLM judge (`evaluate.py`)
 

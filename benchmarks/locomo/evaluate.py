@@ -110,6 +110,108 @@ def extract_entities(question: str) -> list[str]:
     return out
 
 
+# Kind-aware reranking (Tier 4 PoC follow-up). When the question clearly
+# matches one of {semantic, episodic, procedural}, boost candidates whose
+# content carries the matching [kind] prefix (added by extract_facts.py).
+# Auto-skips for ambiguous / mixed questions so open_domain and multi_hop
+# don't lose breadth. Set LOCOMO_KIND_ROUTING=1 to enable.
+KIND_ROUTING = os.environ.get("LOCOMO_KIND_ROUTING", "0") == "1"
+KIND_ROUTING_BOOST = float(os.environ.get("LOCOMO_KIND_BOOST", "0.20"))
+
+# When-questions → episodic; date references → episodic.
+_KIND_EPISODIC_RE = re.compile(
+    r"\b(when|what date|on what day|how long ago|since when)\b",
+    re.IGNORECASE,
+)
+# Habit / frequency markers → procedural.
+_KIND_PROCEDURAL_RE = re.compile(
+    r"\b(how often|every|usually|typically|always|never|sometimes|"
+    r"each (day|week|month|year)|on (mondays?|tuesdays?|wednesdays?|"
+    r"thursdays?|fridays?|saturdays?|sundays?))\b",
+    re.IGNORECASE,
+)
+# Attribute lookup ("what is X's Y", "where does X live") → semantic.
+_KIND_SEMANTIC_RE = re.compile(
+    r"^(what (is|are|does|do) |where (is|are|does|do) |who (is|are) |"
+    r"how (old|tall|much) )",
+    re.IGNORECASE,
+)
+
+
+def classify_question_kind(question: str) -> str | None:
+    """Return the dominant memory kind for a question, or None if mixed.
+
+    Order matters — episodic markers (`when`) win over semantic (`what`)
+    because "When was X born?" is asking about an event, not the attribute
+    `birthdate`.
+    """
+    if _KIND_EPISODIC_RE.search(question):
+        return "episodic"
+    if _KIND_PROCEDURAL_RE.search(question):
+        return "procedural"
+    if _KIND_SEMANTIC_RE.match(question.strip()):
+        return "semantic"
+    return None
+
+
+def kind_routing_rerank(
+    question: str,
+    contexts: list[str],
+    scores: list[float],
+) -> tuple[list[str], list[float]]:
+    """Boost contexts whose `[kind]` prefix matches the question's classified
+    kind, AND whose body mentions a proper noun from the question.
+
+    Two signals stacked:
+      * kind match (semantic / episodic / procedural classifier on question)
+      * subject match (any of the question's capitalized non-stopword tokens
+        appears in the candidate as a whole word)
+
+    No-op for ambiguous questions and when no candidate carries any matching
+    signal. Either signal alone gives a half boost; both together full boost.
+    """
+    if not KIND_ROUTING or not contexts:
+        return contexts, scores
+    target = classify_question_kind(question)
+    entities = extract_entities(question)
+    if target is None and not entities:
+        return contexts, scores
+
+    marker = f"[{target}]" if target else None
+    boosts = []
+    for ctx in contexts:
+        kind_hit = bool(marker) and marker in ctx
+        subj_hit = False
+        if entities:
+            for e in entities:
+                if re.search(rf"\b{re.escape(e)}\b", ctx):
+                    subj_hit = True
+                    break
+        if kind_hit and subj_hit:
+            boosts.append(KIND_ROUTING_BOOST)
+        elif kind_hit or subj_hit:
+            boosts.append(KIND_ROUTING_BOOST * 0.5)
+        else:
+            boosts.append(0.0)
+
+    if all(b == 0.0 for b in boosts):
+        return contexts, scores
+
+    if scores:
+        top_s = max(scores)
+        normalized = [max(0.0, s / top_s) if top_s > 0 else 0.0 for s in scores]
+    else:
+        normalized = [1.0] * len(contexts)
+        scores = [1.0] * len(contexts)
+
+    boosted = [n + b for n, b in zip(normalized, boosts)]
+    indexed = list(enumerate(zip(boosted, contexts, scores)))
+    indexed.sort(key=lambda x: (-x[1][0], x[0]))
+    new_contexts = [t[1][1] for t in indexed]
+    new_scores = [t[1][2] for t in indexed]
+    return new_contexts, new_scores
+
+
 # Time-aware reranking — boosts contexts whose [timestamp] header overlaps
 # with explicit month/year tokens in the question. Auto-skips when the
 # question has no temporal signal, so it's safe to leave on. Set
@@ -503,6 +605,8 @@ def process_question(item: dict) -> dict:
     contexts = item.get("retrieved_contexts", [])
     scores = item.get("retrieved_scores", []) or [1.0] * len(contexts)
 
+    if KIND_ROUTING:
+        contexts, scores = kind_routing_rerank(item["question"], contexts, scores)
     if TIME_RERANK:
         contexts, scores = time_overlap_rerank(item["question"], contexts, scores)
     if ENTITY_RERANK:

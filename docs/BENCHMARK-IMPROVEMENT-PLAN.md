@@ -135,6 +135,23 @@ The seven preceding harness experiments all clustered at 64.67% on the N=300 sam
 
 `open_domain` gains +6.18 pp surprisingly — facts AND turns together let the answerer enumerate items (from facts) while quoting nuance (from turns) when needed.
 
+### Failed follow-up: per-kind retrieval routing (May 11, 2026)
+
+After the +3.96 pp `turn_extracted` win, the obvious next step was the ENGRAM headline feature — per-question kind routing. Implementation in `evaluate.py`: classify the question via regex (`When …` → episodic, `How often …` → procedural, `What is/where does …` → semantic) and boost candidates whose `[kind]` prefix matches. Coverage 32.1% of questions on the N=300 sample.
+
+Same N=300 seed=42 A/B vs `turn_extracted` baseline (68.00%):
+
+| Variant | Overall | single_hop | temporal | multi_hop | open_domain |
+|---|---|---|---|---|---|
+| Turn + extracted (baseline)         | 68.00% | 36.00% | 77.59% | 38.89% | 77.01% |
+| + kind routing, boost=0.20          | 68.33% | 38.00% | 74.14% | 44.44% | 77.59% |
+| + kind routing, boost=0.10          | 67.00% | 36.00% | 74.14% | 44.44% | 75.86% |
+| + kind + subject combined, boost=0.15 | 65.67% | 34.00% | 72.41% | 38.89% | 75.29% |
+
+Three settings, three outcomes within ±2.33 pp of baseline. boost=0.20 nets +0.33 (within noise). The Jina v2 cross-encoder already picks fact-vs-turn granularity correctly from the candidate pool — adding a heuristic boost on top shuffles ranks without adding new signal. **Same lesson as the May 11 morning experiments** (entity-rerank, time-rerank): post-retrieval heuristic boosts cannot beat a competent cross-encoder.
+
+Three independent post-retrieval re-ranking experiments now all confirmed: the Jina v2 reranker is the ceiling for heuristic rank adjustments. Further gains require either (a) Phase 1-side filtering with `Storage::hybrid_search(kind=...)`, (b) a much stronger reranker, or (c) different content (which is what `turn_extracted` did).
+
 ### What's left (full Tier 4 in core)
 
 After seven retrieval/rerank experiments and an answer-model swap all plateau at 62.21% full / 64.67% sample, **the structural change that hasn't been tried is changing the memory representation itself**. Currently every memory is a raw dialogue chunk. ENGRAM (arXiv 2511.12960) proposes splitting memory into:
