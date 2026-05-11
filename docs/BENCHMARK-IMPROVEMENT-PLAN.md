@@ -44,7 +44,43 @@ Multi_hop +2.08 pp was the surprise. The hypothesis was that splitting sessions 
 
 Cost: +1 100 s of Phase 1 wall-time (the index is ~20× larger) but each query is 5× faster because cross-encoder reranks 20 short turns instead of 20 long sessions. Net Phase 1 time roughly equal. No core changes — pure harness modification.
 
-Result file: `benchmarks/locomo/locomo_scores_turn_full.json`. Smoke A/B on conv-26: `/tmp/locomo_{session,turn}_smoke_scores.json`.
+Result file: `benchmarks/locomo/locomo_scores.json` (canonical). Historical session-level: `benchmarks/locomo/locomo_scores_session_v2.json`. Smoke A/B on conv-26: `/tmp/locomo_{session,turn}_smoke_scores.json`.
+
+### Plateau session (May 11, 2026 — four negative experiments)
+
+After turn-level got us to 62.21%, four more harness-only experiments were attempted on a same-sample N=300 seed=42 A/B. All four failed or didn't move the needle. **Phase 2 has hit a plateau at 64.67% on this sample (62.21% on full N).** Per category numbers on the N=300 sample:
+
+| Variant                       | Overall | single_hop | temporal | multi_hop | open_domain |
+|-------------------------------|---------|------------|----------|-----------|-------------|
+| Session-level (prompt v2)     | 56.67%  | 24.00%     | 67.24%   | 50.00%    | 63.22%      |
+| **Turn-level (canonical)**    | **64.67%** | **40.00%** | **74.14%** | **50.00%** | **70.11%** |
+| Hybrid (session ∪ turn)       | 65.00%  | 42.00%     | 68.97%   | 44.44%    | 72.41%      |
+| Turn + entity-overlap rerank  | 63.67%  | 40.00%     | 74.14%   | 38.89%    | 69.54%      |
+| Turn + time-aware rerank      | 63.67%  | 40.00%     | 68.97%   | 38.89%    | 71.26%      |
+| Turn OVERFETCH=40, TOPK=10    | 64.67%  | 34.00%     | 70.69%   | 38.89%    | 74.14%      |
+| Turn OVERFETCH=40, TOPK=20    | 64.67%  | 36.00%     | 72.41%   | 44.44%    | 72.41%      |
+
+Sample size n=50 (single_hop), n=58 (temporal), n=18 (multi_hop), n=174 (open_domain) — multi_hop ±11 pp = ±2 questions = within noise.
+
+**Findings:**
+
+1. **Hybrid (session ∪ turn) ties turn-level** at 65.00% vs 64.67% (Δ+0.33 pp, noise floor). Wins single_hop (+2 pp), open_domain (+2.3 pp). Loses temporal (-5.17 pp) and multi_hop (-5.56 pp). Net wash — kept as `LOCOMO_CHUNK_LEVEL=hybrid` env-var, not promoted to default. The mechanism: with mixed session + turn candidates, the reranker sometimes picks the fat session chunk for a temporal question, then `assemble_context_block` truncates it more aggressively, the answerer sees mixed granularity and underperforms.
+
+2. **Entity-overlap rerank is net negative (-1.00 pp).** Implementation: post-Phase-1 re-sort blending 0.7 × normalized Jina score + 0.3 × proper-noun substring match. The Jina cross-encoder already handles entity semantics; the heuristic boost just shuffles ranks without adding signal. Multi_hop hit hardest (-11 pp, n=18 = ±2 questions of noise): entity-rerank pulls only chunks mentioning the question's entity, but multi_hop wants breadth across speakers/sessions. Code kept as `LOCOMO_ENTITY_RERANK=1`, off by default, documented as failed.
+
+3. **Time-aware rerank is also net negative (-1.00 pp), and SURPRISINGLY hurts temporal (-5.17 pp).** Implementation: when the question contains a month name or year, boost contexts whose `[timestamp]` header matches. The trap: in turn-level chunking, ALL turns from one session share the same timestamp (session header). A question mentioning "May 2023" boosts every turn from sessions in May 2023, collapsing the top-10 to a single session worth of turns — multi-hop and temporal questions then lose access to evidence in adjacent sessions. Code kept as `LOCOMO_TIME_RERANK=1`, off by default.
+
+4. **OVERFETCH=40 + TOPK=20 improves retrieval but not LLM Judge.** Phase 1 Recall@5 jumps from 72.34% to 76.88% (+4.54 pp) — Jina has 2× more candidates to rerank. Phase 2 stays at 64.67% on the same N=300 sample regardless of whether we pass 10 or 20 contexts to the answerer. With 20 contexts the per-chunk char budget halves (600 vs 1200 chars), and the answerer's compilation pass dilutes. With 10 contexts the better top-10 doesn't yield better answers either. Diagnosis: the bottleneck is no longer in retrieval recall.
+
+**Plateau hypothesis:** the answerer LLM (`gpt-4o-mini` with temperature=0) is hitting a discrimination ceiling around 64–65% on this sample. Multiple retrieval/rerank configurations cluster at the same score because the answerer cannot extract the right answer even when evidence is in front of it, OR the judge's grading is at saturation. Next round must change the LLM stack (different answer model, different judge calibration) or the memory representation (typed memory, structured fields), not the retrieval ranking.
+
+### What's next (no longer harness-only)
+
+- **Tier 3 #6b — true hierarchical retrieval** (session-then-turn drill-in). The flat turn-level chunker may double-retrieve from one session at the cost of crowding out others. Genuine hierarchy first finds the K most relevant SESSIONS by topic, then drills into the top T turns within each. Expected +1–3 pp on multi_hop and temporal where breadth matters. Requires a multi-stage `Storage::hybrid_search` variant or two passes in the harness with tag-filtered second search.
+
+- **Tier 4 — typed memory (ENGRAM-style)** is the biggest remaining lever. Episodic memories (one event, one timestamp) vs semantic facts (extracted entity attributes) vs procedural patterns. LongMemEval results in the ENGRAM paper (arXiv 2511.12960) suggest +5–15 pp depending on the question type. Requires changes to `crates/vestige-core/src/memory/` to carry a `memory_kind` enum, plus per-kind retrieval routing in `tools/search_unified`. Big rewrite, multi-PR.
+
+- **LongMemEval-S hold-out harness.** Whatever we change next, we should verify on a second dataset before claiming it generalizes. The LoCoMo gains so far are real but the harness is now well-tuned to LoCoMo; a clean external benchmark catches overfitting. Build the harness in `benchmarks/longmemeval/` with the same two-phase split (Rust retrieval + Python LLM judge).
 
 ### Failed experiment: prompt v3 (broader list-question detection)
 

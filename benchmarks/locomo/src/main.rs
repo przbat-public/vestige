@@ -35,10 +35,12 @@ use vestige_core::storage::Storage;
 //   LOCOMO_USE_RERANKER   = "1" (default) | "0"   — Stage 2 Jina v2 cross-encoder
 //   LOCOMO_OVERFETCH      = 50  (default)         — initial hybrid_search candidates
 //   LOCOMO_TOPK           = 10  (default)         — final results after rerank
-//   LOCOMO_CHUNK_LEVEL    = "session" (default) | "turn"
+//   LOCOMO_CHUNK_LEVEL    = "session" (default) | "turn" | "hybrid"
 //                            — session: one memory per session (10-30 turns)
 //                              turn:    one memory per turn (finer-grained,
 //                                       targets single_hop / temporal categories)
+//                              hybrid:  both — session memory AND per-turn memories
+//                                       (reranker picks granularity per query)
 //   LOCOMO_MAX_CONVERSATIONS = unset (default = all 10) | N
 //                            — limit to first N conversations (smoke/sample runs)
 const DEFAULT_OVERFETCH: i32 = 50;
@@ -48,6 +50,7 @@ const DEFAULT_TOPK: usize = 10;
 enum ChunkLevel {
     Session,
     Turn,
+    Hybrid,
 }
 
 impl ChunkLevel {
@@ -58,6 +61,7 @@ impl ChunkLevel {
             .as_str()
         {
             "turn" => ChunkLevel::Turn,
+            "hybrid" => ChunkLevel::Hybrid,
             _ => ChunkLevel::Session,
         }
     }
@@ -66,6 +70,7 @@ impl ChunkLevel {
         match self {
             ChunkLevel::Session => "session",
             ChunkLevel::Turn => "turn",
+            ChunkLevel::Hybrid => "hybrid",
         }
     }
 }
@@ -434,17 +439,17 @@ fn main() {
         let ingest_start = Instant::now();
         let mut ingested_units: usize = 0;
         for session in &sessions {
-            match chunk_level {
-                ChunkLevel::Session => {
-                    let content = session_to_content(session);
-                    if content.trim().is_empty() {
-                        continue;
-                    }
+            let do_session = matches!(chunk_level, ChunkLevel::Session | ChunkLevel::Hybrid);
+            let do_turn = matches!(chunk_level, ChunkLevel::Turn | ChunkLevel::Hybrid);
 
+            if do_session {
+                let content = session_to_content(session);
+                if !content.trim().is_empty() {
                     let dia_ids = session_dia_ids(session);
                     let tags: Vec<String> = vec![
                         format!("session:{}", session.session_key),
                         format!("conversation:{}", sample_id),
+                        "chunk:session".to_string(),
                     ];
 
                     let input = IngestInput {
@@ -461,46 +466,51 @@ fn main() {
                             ingested_units += 1;
                         }
                         Err(e) => {
-                            eprintln!("    WARN: ingest failed for {}: {}", session.session_key, e);
+                            eprintln!(
+                                "    WARN: ingest failed for {}: {}",
+                                session.session_key, e
+                            );
                         }
                     }
                 }
-                ChunkLevel::Turn => {
-                    for turn in &session.turns {
-                        if turn.text.trim().is_empty() {
-                            continue;
+            }
+
+            if do_turn {
+                for turn in &session.turns {
+                    if turn.text.trim().is_empty() {
+                        continue;
+                    }
+                    let content = turn_to_content(session, turn);
+                    let tags: Vec<String> = vec![
+                        format!("session:{}", session.session_key),
+                        format!("conversation:{}", sample_id),
+                        format!("turn:{}", turn.dia_id),
+                        format!("speaker:{}", turn.speaker),
+                        "chunk:turn".to_string(),
+                    ];
+
+                    let input = IngestInput {
+                        content,
+                        node_type: "event".to_string(),
+                        source: Some(format!(
+                            "locomo/{}/{}/{}",
+                            sample_id, session.session_key, turn.dia_id
+                        )),
+                        tags,
+                        ..Default::default()
+                    };
+
+                    match storage.ingest(input) {
+                        Ok(node) => {
+                            memory_id_to_dia_ids
+                                .insert(node.id.clone(), vec![turn.dia_id.clone()]);
+                            ingested_units += 1;
                         }
-                        let content = turn_to_content(session, turn);
-                        let tags: Vec<String> = vec![
-                            format!("session:{}", session.session_key),
-                            format!("conversation:{}", sample_id),
-                            format!("turn:{}", turn.dia_id),
-                            format!("speaker:{}", turn.speaker),
-                        ];
-
-                        let input = IngestInput {
-                            content,
-                            node_type: "event".to_string(),
-                            source: Some(format!(
-                                "locomo/{}/{}/{}",
-                                sample_id, session.session_key, turn.dia_id
-                            )),
-                            tags,
-                            ..Default::default()
-                        };
-
-                        match storage.ingest(input) {
-                            Ok(node) => {
-                                memory_id_to_dia_ids
-                                    .insert(node.id.clone(), vec![turn.dia_id.clone()]);
-                                ingested_units += 1;
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "    WARN: ingest failed for {} turn {}: {}",
-                                    session.session_key, turn.dia_id, e
-                                );
-                            }
+                        Err(e) => {
+                            eprintln!(
+                                "    WARN: ingest failed for {} turn {}: {}",
+                                session.session_key, turn.dia_id, e
+                            );
                         }
                     }
                 }
@@ -509,7 +519,7 @@ fn main() {
         let ingest_elapsed = ingest_start.elapsed().as_secs_f64();
         total_ingest_time += ingest_elapsed;
         eprintln!(
-            "    Ingested {} {}s in {:.1}s",
+            "    Ingested {} memories ({}) in {:.1}s",
             ingested_units,
             chunk_level.name(),
             ingest_elapsed

@@ -77,8 +77,29 @@ Cost estimate: ~$3-5 for 1,540 questions (GPT-4o-mini for answers + GPT-4o for j
 | `LOCOMO_USE_RERANKER` | `1` | Set to `0` to disable Stage 2 cross-encoder rerank (ablation) |
 | `LOCOMO_OVERFETCH` | `50` | Initial hybrid_search candidates before rerank |
 | `LOCOMO_TOPK` | `10` | Final top-K returned to evaluator |
-| `LOCOMO_CHUNK_LEVEL` | `session` | `session` (one memory = one session, 10–30 turns) or `turn` (one memory = one utterance). Turn-level loses retrieval Recall@5 (-7 pp) but gains LLM Judge Overall (+2 pp full N, +12 pp on conv-26 alone) because it sidesteps the "compilation bottleneck" — each retrieved chunk is now exactly one fact, not buried in a session-sized haystack. |
+| `LOCOMO_CHUNK_LEVEL` | `session` | `session` (one memory = one session, 10–30 turns), `turn` (one memory = one utterance, **recommended for benchmarking**, +2 pp over session full N), or `hybrid` (both — mixed result, neutral overall, kept as ablation toggle). |
 | `LOCOMO_MAX_CONVERSATIONS` | (unset) | Limit to first N conversations for smoke/sample runs |
+
+### LLM judge (`evaluate.py`) — main knobs
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCOMO_ANSWER_MODEL` | `gpt-4o-mini` | Answer generation model |
+| `LOCOMO_JUDGE_MODEL` | `gpt-4o` | Judge model (Mem0/Zep also use this) |
+| `LOCOMO_TOP_K_CONTEXTS` | `10` | How many of Phase 1's retrieved contexts to feed the answerer |
+| `LOCOMO_TOTAL_CHAR_BUDGET` | `12000` | Total character budget split across contexts |
+| `LOCOMO_SAMPLE` / `LOCOMO_SEED` | `0` / `42` | Random subset of questions for A/B (0 = full N=1540) |
+| `LOCOMO_THROTTLE_SECS` | `1.0` | Sleep between LLM calls (set to `0` if rate limit permits) |
+| `LOCOMO_MAX_WORKERS` | `1` | Parallel question workers (set to `4` with throttle=0 for speed) |
+
+### LLM judge (`evaluate.py`) — experimental knobs (off by default, kept for ablation)
+
+| Variable | Default | Status | Description |
+|----------|---------|--------|-------------|
+| `LOCOMO_ENTITY_RERANK` | `0` | failed −1.00 pp | Post-retrieval re-rank blending Jina score with proper-noun substring overlap from the question. Jina already handles entities; the heuristic just shuffles ranks. |
+| `LOCOMO_ENTITY_BLEND` | `0.3` | — | Blend ratio for entity overlap if enabled |
+| `LOCOMO_TIME_RERANK` | `0` | failed −1.00 pp | Post-retrieval re-rank boosting contexts whose `[timestamp]` header matches a month/year in the question. Backfires on turn-level because all turns from one session share the session timestamp — boosting collapses the top-10 to one session and hurts multi-hop / temporal. |
+| `LOCOMO_TIME_BLEND` | `0.25` | — | Blend ratio for time overlap if enabled |
 
 ### LLM judge (`evaluate.py`)
 

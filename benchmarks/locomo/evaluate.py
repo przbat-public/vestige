@@ -77,6 +77,160 @@ LIST_QUESTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Entity-overlap reranking — boosts contexts containing more of the question's
+# proper nouns. Targets the COMP bucket where rerank already finds relevant
+# chunks but ranks one with a "topic match but no entity match" above one with
+# both. Set LOCOMO_ENTITY_RERANK=1 to enable.
+ENTITY_RERANK = os.environ.get("LOCOMO_ENTITY_RERANK", "0") == "1"
+ENTITY_RERANK_BLEND = float(os.environ.get("LOCOMO_ENTITY_BLEND", "0.3"))
+# Capitalized tokens that are clearly NOT proper nouns. Anything else
+# capitalized in a question becomes a candidate entity.
+_ENTITY_STOPWORDS = {
+    "I", "You", "He", "She", "It", "We", "They",
+    "What", "When", "Where", "Why", "How", "Who", "Which",
+    "Did", "Does", "Do", "Is", "Are", "Was", "Were",
+    "Has", "Have", "Had", "Will", "Would", "Could", "Should",
+    "Can", "May", "Might", "The", "A", "An",
+}
+_PROPER_NOUN_RE = re.compile(r"\b[A-Z][a-zA-Z]{1,}\b")
+
+
+def extract_entities(question: str) -> list[str]:
+    """Pull proper-noun-like tokens (capitalized, length >= 2) from a question.
+    Excludes a small stopword list of capitalized non-entities (sentence
+    starters, modal verbs). Returns each token at most once.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for tok in _PROPER_NOUN_RE.findall(question):
+        if tok in _ENTITY_STOPWORDS or tok in seen:
+            continue
+        seen.add(tok)
+        out.append(tok)
+    return out
+
+
+# Time-aware reranking — boosts contexts whose [timestamp] header overlaps
+# with explicit month/year tokens in the question. Auto-skips when the
+# question has no temporal signal, so it's safe to leave on. Set
+# LOCOMO_TIME_RERANK=1 to enable.
+TIME_RERANK = os.environ.get("LOCOMO_TIME_RERANK", "0") == "1"
+TIME_RERANK_BLEND = float(os.environ.get("LOCOMO_TIME_BLEND", "0.25"))
+
+_MONTH_RE = re.compile(
+    r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|"
+    r"Aug(?:ust)?|Sept?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b",
+    re.IGNORECASE,
+)
+_YEAR_RE = re.compile(r"\b(19[89]\d|20[0-3]\d)\b")
+
+
+def extract_time_signals(text: str) -> tuple[set[str], set[str]]:
+    """Return (month_prefixes, years) found in text. Month is lowercased
+    3-letter prefix so 'January' and 'Jan' map to the same key.
+    """
+    months = {m.lower()[:3] for m in _MONTH_RE.findall(text)}
+    years = set(_YEAR_RE.findall(text))
+    return months, years
+
+
+def time_overlap_rerank(
+    question: str,
+    contexts: list[str],
+    scores: list[float],
+) -> tuple[list[str], list[float]]:
+    """Re-sort by blended (rerank_score, time_overlap). Activates ONLY when the
+    question contains an explicit month or year; otherwise returns unchanged.
+    """
+    if not TIME_RERANK or not contexts:
+        return contexts, scores
+    q_months, q_years = extract_time_signals(question)
+    if not q_months and not q_years:
+        return contexts, scores
+
+    counts: list[int] = []
+    for ctx in contexts:
+        c_months, c_years = extract_time_signals(ctx)
+        overlap = 0
+        if q_months and (q_months & c_months):
+            overlap += 1
+        if q_years and (q_years & c_years):
+            overlap += 1
+        counts.append(overlap)
+
+    max_count = max(counts) if counts else 0
+    if max_count == 0:
+        return contexts, scores
+
+    if scores:
+        top_s = max(scores)
+        normalized = [max(0.0, s / top_s) if top_s > 0 else 0.0 for s in scores]
+    else:
+        normalized = [1.0] * len(contexts)
+        scores = [1.0] * len(contexts)
+
+    blend = TIME_RERANK_BLEND
+    blended = [
+        (1.0 - blend) * n + blend * (c / max_count)
+        for n, c in zip(normalized, counts)
+    ]
+    indexed = list(enumerate(zip(blended, contexts, scores)))
+    indexed.sort(key=lambda x: (-x[1][0], x[0]))
+    new_contexts = [t[1][1] for t in indexed]
+    new_scores = [t[1][2] for t in indexed]
+    return new_contexts, new_scores
+
+
+def entity_overlap_rerank(
+    question: str,
+    contexts: list[str],
+    scores: list[float],
+) -> tuple[list[str], list[float]]:
+    """Re-sort (context, score) by blended (rerank_score, entity_overlap).
+
+    blend = (1 - ENTITY_RERANK_BLEND) * normalized_rerank + ENTITY_RERANK_BLEND * (entity_matches / max_matches)
+
+    If no entities in the question or no context contains any of them, the
+    original order is preserved (returns inputs unchanged).
+    """
+    if not ENTITY_RERANK or not contexts:
+        return contexts, scores
+    entities = extract_entities(question)
+    if not entities:
+        return contexts, scores
+
+    counts: list[int] = []
+    for ctx in contexts:
+        c = 0
+        for e in entities:
+            if re.search(rf"\b{re.escape(e)}\b", ctx):
+                c += 1
+        counts.append(c)
+
+    max_count = max(counts) if counts else 0
+    if max_count == 0:
+        return contexts, scores
+
+    if scores:
+        top_s = max(scores)
+        normalized = [max(0.0, s / top_s) if top_s > 0 else 0.0 for s in scores]
+    else:
+        normalized = [1.0] * len(contexts)
+        scores = [1.0] * len(contexts)
+
+    blend = ENTITY_RERANK_BLEND
+    blended = [
+        (1.0 - blend) * n + blend * (c / max_count)
+        for n, c in zip(normalized, counts)
+    ]
+    # Stable sort: keep original tie-breaks (descending by blended, then by
+    # original index)
+    indexed = list(enumerate(zip(blended, contexts, scores)))
+    indexed.sort(key=lambda x: (-x[1][0], x[0]))
+    new_contexts = [t[1][1] for t in indexed]
+    new_scores = [t[1][2] for t in indexed]
+    return new_contexts, new_scores
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -348,6 +502,11 @@ def judge_answer(question: str, ground_truth: str, predicted: str) -> tuple[floa
 def process_question(item: dict) -> dict:
     contexts = item.get("retrieved_contexts", [])
     scores = item.get("retrieved_scores", []) or [1.0] * len(contexts)
+
+    if TIME_RERANK:
+        contexts, scores = time_overlap_rerank(item["question"], contexts, scores)
+    if ENTITY_RERANK:
+        contexts, scores = entity_overlap_rerank(item["question"], contexts, scores)
 
     predicted = generate_answer(item["question"], contexts, scores)
     score, judgment = judge_answer(item["question"], item["ground_truth"], predicted)
