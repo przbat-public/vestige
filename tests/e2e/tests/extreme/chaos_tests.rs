@@ -13,14 +13,12 @@
 //! Based on Chaos Engineering principles (Netflix, 2011)
 
 use chrono::{Duration, Utc};
+use vestige_core::neuroscience::hippocampal_index::{HippocampalIndex, IndexQuery};
 use vestige_core::neuroscience::spreading_activation::{
     ActivationConfig, ActivationNetwork, LinkType,
 };
 use vestige_core::neuroscience::synaptic_tagging::{
     CaptureWindow, ImportanceEvent, SynapticTaggingConfig, SynapticTaggingSystem,
-};
-use vestige_core::neuroscience::hippocampal_index::{
-    HippocampalIndex, IndexQuery,
 };
 
 // ============================================================================
@@ -68,11 +66,7 @@ fn test_chaos_random_operation_sequence() {
 
         // Interleave reinforcement
         if i >= 7 {
-            network2.reinforce_edge(
-                &format!("node_{}", i - 7),
-                &format!("node_{}", i % 50),
-                0.1,
-            );
+            network2.reinforce_edge(&format!("node_{}", i - 7), &format!("node_{}", i % 50), 0.1);
         }
     }
 
@@ -109,7 +103,7 @@ fn test_chaos_add_remove_cycles() {
         );
     }
 
-    let initial_node_count = network.node_count();
+    let _initial_node_count = network.node_count();
     let initial_edge_count = network.edge_count();
 
     // Rapid add/reinforce cycles (simulating chaos)
@@ -135,7 +129,10 @@ fn test_chaos_add_remove_cycles() {
 
         // Verify system still works
         let results = network.activate(&format!("stable_{}", cycle % 20), 1.0);
-        assert!(!results.is_empty(), "System should remain functional during chaos");
+        assert!(
+            !results.is_empty(),
+            "System should remain functional during chaos"
+        );
     }
 
     // Final activation should still work
@@ -229,7 +226,12 @@ fn test_chaos_continuous_growth_under_load() {
     let mut network = ActivationNetwork::new();
 
     // Initial seed
-    network.add_edge("root".to_string(), "child_0".to_string(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        "root".to_string(),
+        "child_0".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     // Continuously grow while querying
     for iteration in 0..500 {
@@ -270,10 +272,7 @@ fn test_chaos_continuous_growth_under_load() {
     );
 
     let final_results = network.activate("root", 1.0);
-    assert!(
-        !final_results.is_empty(),
-        "Final activation should succeed"
-    );
+    assert!(!final_results.is_empty(), "Final activation should succeed");
 }
 
 // ============================================================================
@@ -286,8 +285,8 @@ fn test_chaos_continuous_growth_under_load() {
 #[test]
 fn test_chaos_deep_chain_handling() {
     let config = ActivationConfig {
-        decay_factor: 0.95,  // High to allow deep traversal
-        max_hops: 100,       // Allow deep exploration
+        decay_factor: 0.95,   // High to allow deep traversal
+        max_hops: 100,        // Allow deep exploration
         min_threshold: 0.001, // Low threshold
         allow_cycles: false,
     };
@@ -299,7 +298,7 @@ fn test_chaos_deep_chain_handling() {
             format!("deep_{}", i),
             format!("deep_{}", i + 1),
             LinkType::Semantic,
-            0.99,  // Very strong links
+            0.99, // Very strong links
         );
     }
 
@@ -389,21 +388,21 @@ fn test_chaos_high_fanout_handling() {
 /// Validates that the capture window handles edge cases correctly.
 #[test]
 fn test_chaos_capture_window_edge_cases() {
-    let window = CaptureWindow::new(9.0, 2.0);  // 9 hours back, 2 forward
+    let window = CaptureWindow::new(9.0, 2.0); // 9 hours back, 2 forward
     let event_time = Utc::now();
 
     // Test exact boundary conditions
     let test_cases = vec![
         // (hours offset, expected in window)
-        (0.0, true),           // Exactly at event
-        (8.99, true),          // Just inside back window
-        (9.0, true),           // At back boundary
-        (9.01, false),         // Just outside back window
-        (-1.99, true),         // Just inside forward window
-        (-2.0, true),          // At forward boundary
-        (-2.01, false),        // Just outside forward window
-        (100.0, false),        // Way outside
-        (-100.0, false),       // Way outside forward
+        (0.0, true),     // Exactly at event
+        (8.99, true),    // Just inside back window
+        (9.0, true),     // At back boundary
+        (9.01, false),   // Just outside back window
+        (-1.99, true),   // Just inside forward window
+        (-2.0, true),    // At forward boundary
+        (-2.01, false),  // Just outside forward window
+        (100.0, false),  // Way outside
+        (-100.0, false), // Way outside forward
     ];
 
     for (hours_offset, expected) in test_cases {
@@ -441,7 +440,7 @@ fn test_chaos_ancient_memories() {
     let mut stc = SynapticTaggingSystem::with_config(config);
 
     // Tag memories at various ages
-    stc.tag_memory("very_old");    // Will be tagged "now" for testing
+    stc.tag_memory("very_old"); // Will be tagged "now" for testing
     stc.tag_memory("old");
     stc.tag_memory("recent");
 
@@ -472,11 +471,17 @@ fn test_chaos_isolated_subsystem_failures() {
 
     // Query non-existent node should return empty, not crash
     let results = network.activate("nonexistent", 1.0);
-    assert!(results.is_empty(), "Non-existent node should return empty results");
+    assert!(
+        results.is_empty(),
+        "Non-existent node should return empty results"
+    );
 
     // System should still work after "failed" query
     let valid_results = network.activate("a", 1.0);
-    assert!(!valid_results.is_empty(), "System should work after handling missing node");
+    assert!(
+        !valid_results.is_empty(),
+        "System should work after handling missing node"
+    );
 
     // Test 2: STC with edge case inputs
     let mut stc = SynapticTaggingSystem::new();

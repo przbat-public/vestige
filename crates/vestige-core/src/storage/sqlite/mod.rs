@@ -78,20 +78,20 @@ pub use records::{
     IntentionRecord, MemoryStateRecord, StateTransitionRecord,
 };
 
+use crate::fsrs::FSRSScheduler;
+use crate::memory::{ConsolidationResult, KnowledgeNode};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 #[cfg(feature = "embeddings")]
 use lru::LruCache;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 #[cfg(feature = "embeddings")]
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use crate::fsrs::FSRSScheduler;
-use crate::memory::{ConsolidationResult, KnowledgeNode};
 
 #[cfg(feature = "embeddings")]
-use crate::embeddings::{matryoshka_truncate, Embedding, EmbeddingService, EMBEDDING_DIMENSIONS};
+use crate::embeddings::{EMBEDDING_DIMENSIONS, Embedding, EmbeddingService, matryoshka_truncate};
 
 #[cfg(feature = "vector-search")]
 use crate::search::VectorIndex;
@@ -153,10 +153,7 @@ pub(super) fn normalize_tags(tags: &[String]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::with_capacity(tags.len());
     for tag in tags {
-        let normalized = tag
-            .trim()
-            .to_lowercase()
-            .replace([' ', '_'], "-");
+        let normalized = tag.trim().to_lowercase().replace([' ', '_'], "-");
         if !normalized.is_empty() && seen.insert(normalized.clone()) {
             result.push(normalized);
         }
@@ -321,11 +318,12 @@ impl Storage {
     ///   (Matryoshka can't *extend* dimensions). Runs once, updates DB in-place.
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     fn load_embeddings_into_index(&self) -> Result<()> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
 
-        let mut stmt = reader
-            .prepare("SELECT node_id, embedding FROM node_embeddings")?;
+        let mut stmt = reader.prepare("SELECT node_id, embedding FROM node_embeddings")?;
 
         let embeddings: Vec<(String, Vec<u8>)> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -366,14 +364,18 @@ impl Storage {
             eprintln!(
                 "[vestige] Dimension migration: re-embedding {} memories ({} → {} dims)…",
                 count,
-                embeddings.first()
+                embeddings
+                    .first()
                     .and_then(|(_, b)| Embedding::from_bytes(b))
                     .map(|e| e.dimensions)
                     .unwrap_or(0),
                 EMBEDDING_DIMENSIONS,
             );
             self.migrate_embeddings(&needs_reembed)?;
-            eprintln!("[vestige] Dimension migration complete ({} memories re-embedded)", count);
+            eprintln!(
+                "[vestige] Dimension migration complete ({} memories re-embedded)",
+                count
+            );
         }
 
         Ok(())
@@ -401,16 +403,19 @@ impl Storage {
         drop(reader);
 
         let texts: Vec<&str> = rows.iter().map(|(_, c)| c.as_str()).collect();
-        let new_embeddings = self.embedding_service.embed_batch(&texts)
+        let new_embeddings = self
+            .embedding_service
+            .embed_batch(&texts)
             .map_err(|e| StorageError::Init(format!("Re-embedding failed: {}", e)))?;
 
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute_batch("BEGIN IMMEDIATE")?;
 
-        let mut update_stmt = writer.prepare_cached(
-            "UPDATE node_embeddings SET embedding = ?1 WHERE node_id = ?2"
-        )?;
+        let mut update_stmt = writer
+            .prepare_cached("UPDATE node_embeddings SET embedding = ?1 WHERE node_id = ?2")?;
 
         let mut index = self
             .vector_index
@@ -441,7 +446,8 @@ impl Storage {
         if let Ok(guard) = self.reader_secondary.try_lock() {
             return Ok(guard);
         }
-        self.reader.lock()
+        self.reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))
     }
 
@@ -469,7 +475,9 @@ impl Storage {
         let now = Utc::now();
 
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute(
                 "INSERT OR REPLACE INTO node_embeddings (node_id, embedding, dimensions, model, created_at)
@@ -501,7 +509,10 @@ impl Storage {
     }
 
     /// Parse RFC3339 timestamp
-    pub(super) fn parse_timestamp(value: &str, field_name: &str) -> rusqlite::Result<DateTime<Utc>> {
+    pub(super) fn parse_timestamp(
+        value: &str,
+        field_name: &str,
+    ) -> rusqlite::Result<DateTime<Utc>> {
         DateTime::parse_from_rfc3339(value)
             .map(|dt| dt.with_timezone(&Utc))
             .map_err(|e| {
@@ -586,11 +597,17 @@ impl Storage {
             times_useful: row.get("times_useful").ok(),
             emotional_valence: row.get("emotional_valence").ok(),
             flashbulb: row.get::<_, Option<bool>>("flashbulb").ok().flatten(),
-            temporal_level: row.get::<_, Option<String>>("temporal_level").ok().flatten(),
+            temporal_level: row
+                .get::<_, Option<String>>("temporal_level")
+                .ok()
+                .flatten(),
             // v3.1.0 provenance
-            provenance: row.get::<_, Option<String>>("provenance").ok().flatten()
+            provenance: row
+                .get::<_, Option<String>>("provenance")
+                .ok()
+                .flatten()
                 .and_then(|s| serde_json::from_str(&s).ok()),
-            // v3.3.0 Tier 4 typed memory. Columns may be absent on databases
+            // v3.3.0 typed memory. Columns may be absent on databases
             // that haven't run migration v11 yet, so default to Raw silently
             // rather than failing the whole row.
             memory_kind: row
@@ -625,7 +642,9 @@ impl Storage {
     /// call it directly. Keeping it adjacent to the writer makes the
     /// lock-discipline obvious at a glance.
     pub(super) fn log_access(&self, node_id: &str, access_type: &str) -> Result<()> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "INSERT INTO memory_access_log (node_id, access_type, accessed_at)
@@ -642,7 +661,6 @@ impl Storage {
 // Record structs (one per SQLite table) and their `pub(super)` row mappers
 // moved to `records.rs`. Per-domain CRUD methods live in dedicated modules.
 // ============================================================================
-
 
 // All per-domain CRUD methods now live in their respective sub-modules.
 // Quick reference for "where does this method live?":
@@ -717,7 +735,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tier4_typed_memory_roundtrip() {
+    fn test_typed_memory_roundtrip() {
         use crate::memory::MemoryKind;
 
         let storage = create_test_storage();
@@ -884,11 +902,13 @@ mod tests {
         let before = Utc::now() - Duration::seconds(10);
 
         for i in 0..5 {
-            storage.ingest(IngestInput {
-                content: format!("Count test memory {}", i),
-                node_type: "fact".to_string(),
-                ..Default::default()
-            }).unwrap();
+            storage
+                .ingest(IngestInput {
+                    content: format!("Count test memory {}", i),
+                    node_type: "fact".to_string(),
+                    ..Default::default()
+                })
+                .unwrap();
         }
 
         let count = storage.count_memories_since(before).unwrap();

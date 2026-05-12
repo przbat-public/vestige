@@ -143,7 +143,9 @@ impl Reranker {
 
         match TextRerank::try_new(options) {
             Ok(model) => {
-                eprintln!("[vestige] Cross-encoder reranker loaded (Jina Reranker v2 Base Multilingual, 278M params)");
+                eprintln!(
+                    "[vestige] Cross-encoder reranker loaded (Jina Reranker v2 Base Multilingual, 278M params)"
+                );
                 self.cross_encoder = Some(model);
             }
             Err(e) => {

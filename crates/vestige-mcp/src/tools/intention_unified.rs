@@ -266,25 +266,34 @@ async fn execute_set(
             nlp_parsed = true;
             // Extract trigger info from parsed intention
             let (t_type, t_data) = match &parsed.trigger {
-                ProspectiveTrigger::TimeBased { .. } => {
-                    ("time".to_string(), serde_json::json!({"type": "time"}).to_string())
-                }
+                ProspectiveTrigger::TimeBased { .. } => (
+                    "time".to_string(),
+                    serde_json::json!({"type": "time"}).to_string(),
+                ),
                 ProspectiveTrigger::DurationBased { after, .. } => {
                     let mins = after.num_minutes();
-                    ("time".to_string(), serde_json::json!({"type": "time", "in_minutes": mins}).to_string())
+                    (
+                        "time".to_string(),
+                        serde_json::json!({"type": "time", "in_minutes": mins}).to_string(),
+                    )
                 }
-                ProspectiveTrigger::EventBased { condition, .. } => {
-                    ("event".to_string(), serde_json::json!({"type": "event", "condition": condition}).to_string())
-                }
-                ProspectiveTrigger::ContextBased { context_match } => {
-                    ("context".to_string(), serde_json::json!({"type": "context", "topic": format!("{:?}", context_match)}).to_string())
-                }
-                ProspectiveTrigger::Recurring { .. } => {
-                    ("recurring".to_string(), serde_json::json!({"type": "recurring"}).to_string())
-                }
-                _ => {
-                    ("event".to_string(), serde_json::json!({"type": "event"}).to_string())
-                }
+                ProspectiveTrigger::EventBased { condition, .. } => (
+                    "event".to_string(),
+                    serde_json::json!({"type": "event", "condition": condition}).to_string(),
+                ),
+                ProspectiveTrigger::ContextBased { context_match } => (
+                    "context".to_string(),
+                    serde_json::json!({"type": "context", "topic": format!("{:?}", context_match)})
+                        .to_string(),
+                ),
+                ProspectiveTrigger::Recurring { .. } => (
+                    "recurring".to_string(),
+                    serde_json::json!({"type": "recurring"}).to_string(),
+                ),
+                _ => (
+                    "event".to_string(),
+                    serde_json::json!({"type": "event"}).to_string(),
+                ),
             };
             nlp_trigger_type = Some(t_type);
             nlp_trigger_data = Some(t_data);
@@ -385,7 +394,15 @@ async fn execute_set(
         source_data: None,
     };
 
-    storage.save_intention(&record).map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let record_owned = record.clone();
+    tokio::task::spawn_blocking(move || {
+        storage_clone
+            .save_intention(&record_owned)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("save_intention task panicked: {}", e))??;
 
     Ok(serde_json::json!({
         "success": true,
@@ -427,9 +444,16 @@ async fn execute_check(
         let _ = cog.prospective_memory.update_context(prospective_ctx);
     }
 
-
-    // Get active intentions
-    let intentions = storage.get_active_intentions().map_err(|e| e.to_string())?;
+    // Get active intentions on the blocking pool — covering index on
+    // status + priority but still real SQL.
+    let storage_clone = storage.clone();
+    let intentions = tokio::task::spawn_blocking(move || {
+        storage_clone
+            .get_active_intentions()
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("get_active_intentions task panicked: {}", e))??;
 
     let mut triggered = Vec::new();
     let mut pending = Vec::new();
@@ -522,21 +546,25 @@ async fn execute_update(
     storage: &Arc<Storage>,
     args: &UnifiedIntentionArgs,
 ) -> Result<Value, String> {
-    let intention_id = args
-        .id
-        .as_ref()
-        .ok_or("Missing 'id' for update action")?;
+    let intention_id = args.id.as_ref().ok_or("Missing 'id' for update action")?;
 
     let status = args
         .status
         .as_ref()
         .ok_or("Missing 'status' for update action")?;
 
+    let storage_update = storage.clone();
+    let intention_id_owned = intention_id.clone();
+
     match status.as_str() {
         "complete" => {
-            let updated = storage
-                .update_intention_status(intention_id, "fulfilled")
-                .map_err(|e| e.to_string())?;
+            let updated = tokio::task::spawn_blocking(move || {
+                storage_update
+                    .update_intention_status(&intention_id_owned, "fulfilled")
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| format!("update_intention_status task panicked: {}", e))??;
 
             if updated {
                 Ok(serde_json::json!({
@@ -554,9 +582,15 @@ async fn execute_update(
             let minutes = args.snooze_minutes.unwrap_or(30);
             let snooze_until = Utc::now() + Duration::minutes(minutes);
 
-            let updated = storage
-                .snooze_intention(intention_id, snooze_until)
-                .map_err(|e| e.to_string())?;
+            let storage_snooze = storage.clone();
+            let intention_id_owned = intention_id.clone();
+            let updated = tokio::task::spawn_blocking(move || {
+                storage_snooze
+                    .snooze_intention(&intention_id_owned, snooze_until)
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| format!("snooze_intention task panicked: {}", e))??;
 
             if updated {
                 Ok(serde_json::json!({
@@ -572,9 +606,15 @@ async fn execute_update(
             }
         }
         "cancel" => {
-            let updated = storage
-                .update_intention_status(intention_id, "cancelled")
-                .map_err(|e| e.to_string())?;
+            let storage_cancel = storage.clone();
+            let intention_id_owned = intention_id.clone();
+            let updated = tokio::task::spawn_blocking(move || {
+                storage_cancel
+                    .update_intention_status(&intention_id_owned, "cancelled")
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| format!("update_intention_status task panicked: {}", e))??;
 
             if updated {
                 Ok(serde_json::json!({
@@ -602,33 +642,43 @@ async fn execute_list(
 ) -> Result<Value, String> {
     let filter_status = args.filter_status.as_deref().unwrap_or("active");
 
-    let intentions = if filter_status == "all" {
-        // Get all by combining different statuses
-        let mut all = storage.get_active_intentions().map_err(|e| e.to_string())?;
-        all.extend(
-            storage
-                .get_intentions_by_status("fulfilled")
-                .map_err(|e| e.to_string())?,
-        );
-        all.extend(
-            storage
-                .get_intentions_by_status("cancelled")
-                .map_err(|e| e.to_string())?,
-        );
-        all.extend(
-            storage
-                .get_intentions_by_status("snoozed")
-                .map_err(|e| e.to_string())?,
-        );
-        all
-    } else if filter_status == "active" {
-        // Use get_active_intentions for proper priority ordering
-        storage.get_active_intentions().map_err(|e| e.to_string())?
-    } else {
-        storage
-            .get_intentions_by_status(filter_status)
-            .map_err(|e| e.to_string())?
-    };
+    let storage_clone = storage.clone();
+    let filter_status_owned = filter_status.to_string();
+    let intentions = tokio::task::spawn_blocking(
+        move || -> Result<Vec<vestige_core::IntentionRecord>, String> {
+            if filter_status_owned == "all" {
+                let mut all = storage_clone
+                    .get_active_intentions()
+                    .map_err(|e| e.to_string())?;
+                all.extend(
+                    storage_clone
+                        .get_intentions_by_status("fulfilled")
+                        .map_err(|e| e.to_string())?,
+                );
+                all.extend(
+                    storage_clone
+                        .get_intentions_by_status("cancelled")
+                        .map_err(|e| e.to_string())?,
+                );
+                all.extend(
+                    storage_clone
+                        .get_intentions_by_status("snoozed")
+                        .map_err(|e| e.to_string())?,
+                );
+                Ok(all)
+            } else if filter_status_owned == "active" {
+                storage_clone
+                    .get_active_intentions()
+                    .map_err(|e| e.to_string())
+            } else {
+                storage_clone
+                    .get_intentions_by_status(&filter_status_owned)
+                    .map_err(|e| e.to_string())
+            }
+        },
+    )
+    .await
+    .map_err(|e| format!("list intentions task panicked: {}", e))??;
 
     let limit = args.limit.unwrap_or(20) as usize;
     let now = Utc::now();
@@ -691,7 +741,9 @@ mod tests {
             "action": "set",
             "description": description
         });
-        let result = execute(storage, &test_cognitive(), Some(args)).await.unwrap();
+        let result = execute(storage, &test_cognitive(), Some(args))
+            .await
+            .unwrap();
         result["intentionId"].as_str().unwrap().to_string()
     }
 
@@ -743,10 +795,12 @@ mod tests {
         assert_eq!(value["success"], true);
         assert_eq!(value["action"], "set");
         assert!(value["intentionId"].is_string());
-        assert!(value["message"]
-            .as_str()
-            .unwrap()
-            .contains("Intention created"));
+        assert!(
+            value["message"]
+                .as_str()
+                .unwrap()
+                .contains("Intention created")
+        );
     }
 
     #[tokio::test]
@@ -883,7 +937,9 @@ mod tests {
                 "codebase": "payments"
             }
         });
-        execute(&storage, &test_cognitive(), Some(set_args)).await.unwrap();
+        execute(&storage, &test_cognitive(), Some(set_args))
+            .await
+            .unwrap();
 
         // Check with matching context
         let check_args = serde_json::json!({
@@ -914,7 +970,9 @@ mod tests {
                 "at": past_time
             }
         });
-        execute(&storage, &test_cognitive(), Some(set_args)).await.unwrap();
+        execute(&storage, &test_cognitive(), Some(set_args))
+            .await
+            .unwrap();
 
         let check_args = serde_json::json!({ "action": "check" });
         let result = execute(&storage, &test_cognitive(), Some(check_args)).await;
@@ -1113,7 +1171,9 @@ mod tests {
             "id": intention_id,
             "status": "complete"
         });
-        execute(&storage, &test_cognitive(), Some(complete_args)).await.unwrap();
+        execute(&storage, &test_cognitive(), Some(complete_args))
+            .await
+            .unwrap();
 
         // Create another active one
         create_test_intention(&storage, "Active task").await;
@@ -1123,7 +1183,9 @@ mod tests {
             "action": "list",
             "filter_status": "fulfilled"
         });
-        let result = execute(&storage, &test_cognitive(), Some(list_args)).await.unwrap();
+        let result = execute(&storage, &test_cognitive(), Some(list_args))
+            .await
+            .unwrap();
         assert_eq!(result["total"], 1);
         assert_eq!(result["status"], "fulfilled");
     }
@@ -1159,14 +1221,18 @@ mod tests {
             "id": intention_id,
             "status": "complete"
         });
-        execute(&storage, &test_cognitive(), Some(complete_args)).await.unwrap();
+        execute(&storage, &test_cognitive(), Some(complete_args))
+            .await
+            .unwrap();
 
         // List all
         let list_args = serde_json::json!({
             "action": "list",
             "filter_status": "all"
         });
-        let result = execute(&storage, &test_cognitive(), Some(list_args)).await.unwrap();
+        let result = execute(&storage, &test_cognitive(), Some(list_args))
+            .await
+            .unwrap();
         assert_eq!(result["total"], 2);
     }
 
@@ -1183,7 +1249,9 @@ mod tests {
 
         // 2. Verify it appears in list
         let list_args = serde_json::json!({ "action": "list" });
-        let list_result = execute(&storage, &test_cognitive(), Some(list_args)).await.unwrap();
+        let list_result = execute(&storage, &test_cognitive(), Some(list_args))
+            .await
+            .unwrap();
         assert_eq!(list_result["total"], 1);
 
         // 3. Snooze it
@@ -1207,7 +1275,9 @@ mod tests {
 
         // 5. Verify it's no longer active
         let final_list_args = serde_json::json!({ "action": "list" });
-        let final_list = execute(&storage, &test_cognitive(), Some(final_list_args)).await.unwrap();
+        let final_list = execute(&storage, &test_cognitive(), Some(final_list_args))
+            .await
+            .unwrap();
         assert_eq!(final_list["total"], 0);
 
         // 6. Verify it's in fulfilled list
@@ -1215,7 +1285,9 @@ mod tests {
             "action": "list",
             "filter_status": "fulfilled"
         });
-        let fulfilled_list = execute(&storage, &test_cognitive(), Some(fulfilled_args)).await.unwrap();
+        let fulfilled_list = execute(&storage, &test_cognitive(), Some(fulfilled_args))
+            .await
+            .unwrap();
         assert_eq!(fulfilled_list["total"], 1);
     }
 
@@ -1229,25 +1301,33 @@ mod tests {
             "description": "Low priority task",
             "priority": "low"
         });
-        execute(&storage, &test_cognitive(), Some(args_low)).await.unwrap();
+        execute(&storage, &test_cognitive(), Some(args_low))
+            .await
+            .unwrap();
 
         let args_critical = serde_json::json!({
             "action": "set",
             "description": "Critical task",
             "priority": "critical"
         });
-        execute(&storage, &test_cognitive(), Some(args_critical)).await.unwrap();
+        execute(&storage, &test_cognitive(), Some(args_critical))
+            .await
+            .unwrap();
 
         let args_normal = serde_json::json!({
             "action": "set",
             "description": "Normal task",
             "priority": "normal"
         });
-        execute(&storage, &test_cognitive(), Some(args_normal)).await.unwrap();
+        execute(&storage, &test_cognitive(), Some(args_normal))
+            .await
+            .unwrap();
 
         // List and verify ordering (critical should be first due to priority DESC ordering)
         let list_args = serde_json::json!({ "action": "list" });
-        let list_result = execute(&storage, &test_cognitive(), Some(list_args)).await.unwrap();
+        let list_result = execute(&storage, &test_cognitive(), Some(list_args))
+            .await
+            .unwrap();
         let intentions = list_result["intentions"].as_array().unwrap();
 
         assert!(intentions.len() >= 3);
@@ -1265,10 +1345,12 @@ mod tests {
         let schema_value = schema();
         assert_eq!(schema_value["type"], "object");
         assert!(schema_value["properties"]["action"].is_object());
-        assert!(schema_value["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("action")));
+        assert!(
+            schema_value["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("action"))
+        );
     }
 
     #[test]

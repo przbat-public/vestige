@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use super::super::events::VestigeEvent;
 use super::super::state::AppState;
-use super::log_err;
+use super::{log_err, log_join_err};
 
 #[derive(Debug, Deserialize)]
 pub struct MemoryListParams {
@@ -33,10 +33,16 @@ pub async fn list_memories(
     let offset = params.offset.unwrap_or(0).max(0);
 
     if let Some(query) = params.q.as_ref().filter(|q| !q.trim().is_empty()) {
-        // Use hybrid search
-        let results = state.storage
-            .hybrid_search(query, limit, 0.3, 0.7)
-            .map_err(log_err("storage operation"))?;
+        // Hybrid search re-embeds the query (~150–500ms on cold cache) and
+        // touches BM25 + HNSW indices. Run it on the blocking pool so other
+        // dashboard requests don't queue up on the reactor thread.
+        let storage = state.storage.clone();
+        let q = query.clone();
+        let results =
+            tokio::task::spawn_blocking(move || storage.hybrid_search(&q, limit, 0.3, 0.7))
+                .await
+                .map_err(log_join_err("hybrid_search task panicked"))?
+                .map_err(log_err("storage operation"))?;
 
         let formatted: Vec<Value> = results
             .into_iter()
@@ -71,9 +77,13 @@ pub async fn list_memories(
         })));
     }
 
-    // No search query — list all memories
-    let mut nodes = state.storage
-        .get_all_nodes(limit, offset)
+    // No search query — list all memories. `get_all_nodes` scans the full
+    // node table up to `limit`; per-row JSON deserialization makes it block
+    // longer than the 10ms reactor budget on large bases.
+    let storage = state.storage.clone();
+    let mut nodes = tokio::task::spawn_blocking(move || storage.get_all_nodes(limit, offset))
+        .await
+        .map_err(log_join_err("get_all_nodes task panicked"))?
         .map_err(log_err("storage operation"))?;
 
     // Apply filters
@@ -117,7 +127,8 @@ pub async fn get_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
-    let node = state.storage
+    let node = state
+        .storage
         .get_node(&id)
         .map_err(log_err("get memory"))?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -148,7 +159,8 @@ pub async fn delete_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
-    let deleted = state.storage
+    let deleted = state
+        .storage
         .delete_node(&id)
         .map_err(log_err("storage operation"))?;
 
@@ -168,7 +180,8 @@ pub async fn promote_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
-    let node = state.storage
+    let node = state
+        .storage
         .promote_memory(&id)
         .map_err(log_err("storage operation"))?;
 
@@ -190,7 +203,8 @@ pub async fn demote_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
-    let node = state.storage
+    let node = state
+        .storage
         .demote_memory(&id)
         .map_err(log_err("storage operation"))?;
 
@@ -235,18 +249,26 @@ pub async fn update_memory(
         if trimmed.is_empty() {
             return Err(StatusCode::BAD_REQUEST);
         }
-        state.storage
-            .update_node_content(&id, trimmed)
+        // update_node_content regenerates the embedding (~150–500ms), so
+        // dispatch it to the blocking pool to keep the reactor free.
+        let storage = state.storage.clone();
+        let id_owned = id.clone();
+        let trimmed_owned = trimmed.to_string();
+        tokio::task::spawn_blocking(move || storage.update_node_content(&id_owned, &trimmed_owned))
+            .await
+            .map_err(log_join_err("update_node_content task panicked"))?
             .map_err(log_err("update_node_content"))?;
     }
 
     if let Some(ref new_tags) = body.tags {
-        state.storage
+        state
+            .storage
             .update_node_tags(&id, new_tags)
             .map_err(log_err("update_node_tags"))?;
     }
 
-    let node = state.storage
+    let node = state
+        .storage
         .get_node(&id)
         .map_err(log_err("get_node after update"))?
         .ok_or(StatusCode::NOT_FOUND)?;

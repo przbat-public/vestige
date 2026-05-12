@@ -193,7 +193,11 @@ impl SpeculativeRetriever {
 
         // Deduplicate and sort by confidence
         predictions = self.deduplicate_predictions(predictions);
-        predictions.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        predictions.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         predictions.truncate(MAX_PREDICTIONS);
 
         // Filter by minimum confidence
@@ -266,11 +270,12 @@ impl SpeculativeRetriever {
 
         // Update file-memory associations
         if let Some(file) = file_context
-            && let Ok(mut map) = self.file_memory_map.write() {
-                map.entry(file.to_string())
-                    .or_insert_with(Vec::new)
-                    .push(memory_id.to_string());
-            }
+            && let Ok(mut map) = self.file_memory_map.write()
+        {
+            map.entry(file.to_string())
+                .or_insert_with(Vec::new)
+                .push(memory_id.to_string());
+        }
     }
 
     /// Get cached predictions

@@ -76,7 +76,12 @@ fn main() -> anyhow::Result<()> {
         match storage.ingest(input) {
             Ok(_node) => {
                 success_count += 1;
-                println!("[{}/{}] OK: {}", i + 1, total, truncate(&memory.content, 60));
+                println!(
+                    "[{}/{}] OK: {}",
+                    i + 1,
+                    total,
+                    truncate(&memory.content, 60)
+                );
             }
             Err(e) => {
                 println!("[{}/{}] FAIL: {}", i + 1, total, e);
@@ -88,9 +93,7 @@ fn main() -> anyhow::Result<()> {
         "\nRestore complete: {}/{} memories restored",
         success_count, total
     );
-    println!(
-        "Next: call the `regenerate_embeddings` MCP tool to rebuild semantic indices."
-    );
+    println!("Next: call the `regenerate_embeddings` MCP tool to rebuild semantic indices.");
 
     Ok(())
 }

@@ -34,7 +34,9 @@ fn t1_ebbinghaus_curve_monotonic_decay() {
         assert!(
             r <= prev_r,
             "Forgetting curve must be monotonically decreasing: R({})={} > R_prev={}",
-            t, r, prev_r
+            t,
+            r,
+            prev_r
         );
         prev_r = r;
     }
@@ -50,9 +52,21 @@ fn t1_ebbinghaus_curve_shape_matches_murre_2015() {
     let r_30d = decay.retrieval_at(30.0);
 
     assert!(r_1h > 0.90, "1h retention too low: {}", r_1h);
-    assert!(r_1d > 0.65 && r_1d < 0.98, "1d retention outside range: {}", r_1d);
-    assert!(r_7d > 0.30 && r_7d < 0.85, "7d retention outside range: {}", r_7d);
-    assert!(r_30d > 0.10 && r_30d < 0.60, "30d retention outside range: {}", r_30d);
+    assert!(
+        r_1d > 0.65 && r_1d < 0.98,
+        "1d retention outside range: {}",
+        r_1d
+    );
+    assert!(
+        r_7d > 0.30 && r_7d < 0.85,
+        "7d retention outside range: {}",
+        r_7d
+    );
+    assert!(
+        r_30d > 0.10 && r_30d < 0.60,
+        "30d retention outside range: {}",
+        r_30d
+    );
     assert!(r_1h > r_1d && r_1d > r_7d && r_7d > r_30d, "Non-monotonic");
 }
 
@@ -81,7 +95,8 @@ fn t1_fsrs6_power_law_vs_exponential_divergence() {
     assert!(
         fsrs > exponential,
         "FSRS-6 power law should predict higher retention at 30d than exponential: {} vs {}",
-        fsrs, exponential
+        fsrs,
+        exponential
     );
 }
 
@@ -125,7 +140,10 @@ fn t2_testing_effect_storage_accumulates() {
 
     for _ in 0..10 {
         ds.on_successful_recall();
-        assert!(ds.storage >= prev_storage, "Storage must never decrease on recall");
+        assert!(
+            ds.storage >= prev_storage,
+            "Storage must never decrease on recall"
+        );
         prev_storage = ds.storage;
     }
 }
@@ -142,7 +160,8 @@ fn t2_desirable_difficulty_effect() {
     assert!(
         hard.storage > easy.storage,
         "Lapse should increase storage more than success (desirable difficulty): {} vs {}",
-        hard.storage, easy.storage
+        hard.storage,
+        easy.storage
     );
 }
 
@@ -163,13 +182,22 @@ fn t3_spreading_activation_distance_decay() {
 
     let activated = net.activate("A", 1.0);
 
-    let a_b = activated.iter().find(|a| a.memory_id == "B").map(|a| a.activation).unwrap_or(0.0);
-    let a_c = activated.iter().find(|a| a.memory_id == "C").map(|a| a.activation).unwrap_or(0.0);
+    let a_b = activated
+        .iter()
+        .find(|a| a.memory_id == "B")
+        .map(|a| a.activation)
+        .unwrap_or(0.0);
+    let a_c = activated
+        .iter()
+        .find(|a| a.memory_id == "C")
+        .map(|a| a.activation)
+        .unwrap_or(0.0);
 
     assert!(
         a_b > a_c,
         "Activation must decay with distance (Collins & Loftus 1975): B={:.3}, C={:.3}",
-        a_b, a_c
+        a_b,
+        a_c
     );
 }
 
@@ -187,13 +215,22 @@ fn t3_fan_effect() {
     let low_result = low_fan.activate("A", 1.0);
     let high_result = high_fan.activate("A", 1.0);
 
-    let b_low = low_result.iter().find(|a| a.memory_id == "B").map(|a| a.activation).unwrap_or(0.0);
-    let n0_high = high_result.iter().find(|a| a.memory_id == "N0").map(|a| a.activation).unwrap_or(0.0);
+    let b_low = low_result
+        .iter()
+        .find(|a| a.memory_id == "B")
+        .map(|a| a.activation)
+        .unwrap_or(0.0);
+    let n0_high = high_result
+        .iter()
+        .find(|a| a.memory_id == "N0")
+        .map(|a| a.activation)
+        .unwrap_or(0.0);
 
     assert!(
         b_low >= n0_high,
         "Fan effect (Anderson 1983): low-fan node should receive >= activation: {:.3} vs {:.3}",
-        b_low, n0_high
+        b_low,
+        n0_high
     );
 }
 
@@ -211,7 +248,10 @@ fn t4_fsrs6_power_law_is_bounded() {
             let r = (1.0 + days / (FSRS_FACTOR * stability)).powf(-1.0 / FSRS_DECAY);
             assert!(
                 (0.0..=1.0).contains(&r),
-                "FSRS-6 R out of bounds: R({}, S={}) = {}", days, stability, r
+                "FSRS-6 R out of bounds: R({}, S={}) = {}",
+                days,
+                stability,
+                r
             );
         }
     }
@@ -225,7 +265,13 @@ fn t4_fsrs6_stability_ordering() {
     let mut prev_r = 0.0_f64;
     for &s in &stabilities {
         let r = (1.0 + days / (FSRS_FACTOR * s)).powf(-1.0 / FSRS_DECAY);
-        assert!(r >= prev_r, "Higher stability must yield higher R: S={} gives R={} < prev R={}", s, r, prev_r);
+        assert!(
+            r >= prev_r,
+            "Higher stability must yield higher R: S={} gives R={} < prev R={}",
+            s,
+            r,
+            prev_r
+        );
         prev_r = r;
     }
 }
@@ -239,10 +285,10 @@ fn t4_fsrs6_stability_ordering() {
 
 #[test]
 fn t5_consolidation_strengthens_memories() {
+    use chrono::Utc;
     use vestige_core::consolidation::phases::DreamEngine;
     use vestige_core::neuroscience::importance_signals::ImportanceSignals;
     use vestige_core::neuroscience::synaptic_tagging::SynapticTaggingSystem;
-    use chrono::Utc;
 
     let engine = DreamEngine::new();
     let mut emotional = EmotionalMemory::new();
@@ -250,36 +296,56 @@ fn t5_consolidation_strengthens_memories() {
     let mut synaptic = SynapticTaggingSystem::new();
 
     let now = Utc::now();
-    let memories: Vec<KnowledgeNode> = (0..10).map(|i| KnowledgeNode {
-        id: format!("t5-{}", i),
-        content: format!("Important concept about memory consolidation number {}", i),
-        node_type: "fact".to_string(),
-        created_at: now, updated_at: now, last_accessed: now,
-        stability: 5.0, difficulty: 5.0, reps: 2, lapses: 0,
-        storage_strength: 3.0, retrieval_strength: 0.8, retention_strength: 0.7,
-        sentiment_score: 0.0, sentiment_magnitude: 0.0,
-        next_review: None, source: None,
-        tags: vec!["neuroscience".to_string()],
-        valid_from: None, valid_until: None, utility_score: None,
-        times_retrieved: None, times_useful: None,
-        emotional_valence: None, flashbulb: None,
-        temporal_level: None, has_embedding: None, embedding_model: None,
-        provenance: None,
-        ..Default::default()
-    }).collect();
+    let memories: Vec<KnowledgeNode> = (0..10)
+        .map(|i| KnowledgeNode {
+            id: format!("t5-{}", i),
+            content: format!("Important concept about memory consolidation number {}", i),
+            node_type: "fact".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_accessed: now,
+            stability: 5.0,
+            difficulty: 5.0,
+            reps: 2,
+            lapses: 0,
+            storage_strength: 3.0,
+            retrieval_strength: 0.8,
+            retention_strength: 0.7,
+            sentiment_score: 0.0,
+            sentiment_magnitude: 0.0,
+            next_review: None,
+            source: None,
+            tags: vec!["neuroscience".to_string()],
+            valid_from: None,
+            valid_until: None,
+            utility_score: None,
+            times_retrieved: None,
+            times_useful: None,
+            emotional_valence: None,
+            flashbulb: None,
+            temporal_level: None,
+            has_embedding: None,
+            embedding_model: None,
+            provenance: None,
+            ..Default::default()
+        })
+        .collect();
 
     let result = engine.run(&memories, &mut emotional, &importance, &mut synaptic);
 
-    assert!(result.memories_strengthened > 0, "Sleep consolidation should strengthen memories (Stickgold & Walker 2013)");
+    assert!(
+        result.memories_strengthened > 0,
+        "Sleep consolidation should strengthen memories (Stickgold & Walker 2013)"
+    );
     assert_eq!(result.phases.len(), 4, "Must have all 4 sleep phases");
 }
 
 #[test]
 fn t5_dream_produces_four_phases_in_order() {
+    use chrono::Utc;
     use vestige_core::consolidation::phases::{DreamEngine, DreamPhase};
     use vestige_core::neuroscience::importance_signals::ImportanceSignals;
     use vestige_core::neuroscience::synaptic_tagging::SynapticTaggingSystem;
-    use chrono::Utc;
 
     let engine = DreamEngine::new();
     let mut emotional = EmotionalMemory::new();
@@ -287,26 +353,49 @@ fn t5_dream_produces_four_phases_in_order() {
     let mut synaptic = SynapticTaggingSystem::new();
 
     let now = Utc::now();
-    let memories: Vec<KnowledgeNode> = (0..8).map(|i| KnowledgeNode {
-        id: format!("t5b-{}", i),
-        content: format!("Dream phase order test memory {}", i),
-        node_type: "fact".to_string(),
-        created_at: now, updated_at: now, last_accessed: now,
-        stability: 5.0, difficulty: 5.0, reps: 1, lapses: 0,
-        storage_strength: 2.0, retrieval_strength: 0.7, retention_strength: 0.6,
-        sentiment_score: 0.0, sentiment_magnitude: 0.0,
-        next_review: None, source: None, tags: vec!["test".to_string()],
-        valid_from: None, valid_until: None, utility_score: None,
-        times_retrieved: None, times_useful: None,
-        emotional_valence: None, flashbulb: None,
-        temporal_level: None, has_embedding: None, embedding_model: None,
-        provenance: None,
-        ..Default::default()
-    }).collect();
+    let memories: Vec<KnowledgeNode> = (0..8)
+        .map(|i| KnowledgeNode {
+            id: format!("t5b-{}", i),
+            content: format!("Dream phase order test memory {}", i),
+            node_type: "fact".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_accessed: now,
+            stability: 5.0,
+            difficulty: 5.0,
+            reps: 1,
+            lapses: 0,
+            storage_strength: 2.0,
+            retrieval_strength: 0.7,
+            retention_strength: 0.6,
+            sentiment_score: 0.0,
+            sentiment_magnitude: 0.0,
+            next_review: None,
+            source: None,
+            tags: vec!["test".to_string()],
+            valid_from: None,
+            valid_until: None,
+            utility_score: None,
+            times_retrieved: None,
+            times_useful: None,
+            emotional_valence: None,
+            flashbulb: None,
+            temporal_level: None,
+            has_embedding: None,
+            embedding_model: None,
+            provenance: None,
+            ..Default::default()
+        })
+        .collect();
 
     let result = engine.run(&memories, &mut emotional, &importance, &mut synaptic);
 
-    let expected_order = [DreamPhase::Nrem1, DreamPhase::Nrem3, DreamPhase::Rem, DreamPhase::Integration];
+    let expected_order = [
+        DreamPhase::Nrem1,
+        DreamPhase::Nrem3,
+        DreamPhase::Rem,
+        DreamPhase::Integration,
+    ];
     for (i, phase) in result.phases.iter().enumerate() {
         assert_eq!(phase.phase, expected_order[i], "Phase {} out of order", i);
     }
@@ -327,7 +416,10 @@ fn t6_hebbian_edge_persists() {
     let assocs = net.get_associations("X");
     let has_y = assocs.iter().any(|a| a.memory_id == "Y");
 
-    assert!(has_y, "Hebbian: connection from X to Y should exist after co-activation");
+    assert!(
+        has_y,
+        "Hebbian: connection from X to Y should exist after co-activation"
+    );
 }
 
 #[test]
@@ -337,7 +429,9 @@ fn t6_hebbian_repeated_coactivation_strengthens() {
     let mut net = ActivationNetwork::new();
     net.add_edge("X".into(), "Y".into(), LinkType::Semantic, 0.3);
 
-    let initial = net.get_associations("X").iter()
+    let initial = net
+        .get_associations("X")
+        .iter()
         .find(|a| a.memory_id == "Y")
         .map(|a| a.association_strength)
         .unwrap_or(0.0);
@@ -345,7 +439,9 @@ fn t6_hebbian_repeated_coactivation_strengthens() {
     // Re-adding with higher strength simulates synaptic potentiation
     net.add_edge("X".into(), "Y".into(), LinkType::Semantic, 0.7);
 
-    let after = net.get_associations("X").iter()
+    let after = net
+        .get_associations("X")
+        .iter()
         .find(|a| a.memory_id == "Y")
         .map(|a| a.association_strength)
         .unwrap_or(0.0);
@@ -353,7 +449,8 @@ fn t6_hebbian_repeated_coactivation_strengthens() {
     assert!(
         after >= initial,
         "Hebbian: repeated co-activation should maintain or strengthen connection: {:.3} vs {:.3}",
-        after, initial
+        after,
+        initial
     );
 }
 
@@ -386,8 +483,14 @@ fn t7_emotional_valence_detected() {
     let negative = em.evaluate_content("Critical error crashed the entire production system!");
     let neutral = em.evaluate_content("The function returns a string value.");
 
-    assert!(positive.valence > neutral.valence, "Positive > neutral valence");
-    assert!(negative.valence < neutral.valence, "Negative < neutral valence");
+    assert!(
+        positive.valence > neutral.valence,
+        "Positive > neutral valence"
+    );
+    assert!(
+        negative.valence < neutral.valence,
+        "Negative < neutral valence"
+    );
 }
 
 #[test]
@@ -400,7 +503,8 @@ fn t7_mood_congruent_retrieval_boost() {
     assert!(
         boost_near >= boost_far,
         "Mood-congruent memory should get higher boost: near={:.3}, far={:.3}",
-        boost_near, boost_far
+        boost_near,
+        boost_far
     );
 }
 
@@ -413,29 +517,49 @@ fn t7_mood_congruent_retrieval_boost() {
 
 #[test]
 fn t9_consolidation_consistent_across_runs() {
+    use chrono::Utc;
     use vestige_core::consolidation::phases::DreamEngine;
     use vestige_core::neuroscience::importance_signals::ImportanceSignals;
     use vestige_core::neuroscience::synaptic_tagging::SynapticTaggingSystem;
-    use chrono::Utc;
 
     let now = Utc::now();
-    let memories: Vec<KnowledgeNode> = (0..15).map(|i| KnowledgeNode {
-        id: format!("t9-{}", i),
-        content: format!("Consolidation test memory about topic {} with some detail", i),
-        node_type: "fact".to_string(),
-        created_at: now, updated_at: now, last_accessed: now,
-        stability: 5.0, difficulty: 5.0, reps: 2, lapses: 0,
-        storage_strength: 3.0, retrieval_strength: 0.8, retention_strength: 0.7,
-        sentiment_score: 0.0, sentiment_magnitude: 0.0,
-        next_review: None, source: None,
-        tags: vec![format!("topic-{}", i % 3)],
-        valid_from: None, valid_until: None, utility_score: None,
-        times_retrieved: None, times_useful: None,
-        emotional_valence: None, flashbulb: None,
-        temporal_level: None, has_embedding: None, embedding_model: None,
-        provenance: None,
-        ..Default::default()
-    }).collect();
+    let memories: Vec<KnowledgeNode> = (0..15)
+        .map(|i| KnowledgeNode {
+            id: format!("t9-{}", i),
+            content: format!(
+                "Consolidation test memory about topic {} with some detail",
+                i
+            ),
+            node_type: "fact".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_accessed: now,
+            stability: 5.0,
+            difficulty: 5.0,
+            reps: 2,
+            lapses: 0,
+            storage_strength: 3.0,
+            retrieval_strength: 0.8,
+            retention_strength: 0.7,
+            sentiment_score: 0.0,
+            sentiment_magnitude: 0.0,
+            next_review: None,
+            source: None,
+            tags: vec![format!("topic-{}", i % 3)],
+            valid_from: None,
+            valid_until: None,
+            utility_score: None,
+            times_retrieved: None,
+            times_useful: None,
+            emotional_valence: None,
+            flashbulb: None,
+            temporal_level: None,
+            has_embedding: None,
+            embedding_model: None,
+            provenance: None,
+            ..Default::default()
+        })
+        .collect();
 
     let mut counts = Vec::new();
     for _ in 0..5 {
@@ -448,9 +572,18 @@ fn t9_consolidation_consistent_across_runs() {
     }
 
     let mean = counts.iter().sum::<usize>() as f64 / counts.len() as f64;
-    let variance = counts.iter().map(|&x| (x as f64 - mean).powi(2)).sum::<f64>() / counts.len() as f64;
+    let variance = counts
+        .iter()
+        .map(|&x| (x as f64 - mean).powi(2))
+        .sum::<f64>()
+        / counts.len() as f64;
 
-    assert!(variance < mean * mean, "Consolidation variance ({:.1}) should be bounded vs mean ({:.1})", variance, mean);
+    assert!(
+        variance < mean * mean,
+        "Consolidation variance ({:.1}) should be bounded vs mean ({:.1})",
+        variance,
+        mean
+    );
 }
 
 // ====================================================================
@@ -474,7 +607,10 @@ fn t10_retention_aurc_stability_ordering() {
         area
     };
 
-    assert!(aurc(2.0) < aurc(5.0) && aurc(5.0) < aurc(10.0), "AURC must increase with stability");
+    assert!(
+        aurc(2.0) < aurc(5.0) && aurc(5.0) < aurc(10.0),
+        "AURC must increase with stability"
+    );
 }
 
 #[test]
@@ -492,7 +628,10 @@ fn t10_emotional_memory_has_higher_aurc() {
         area
     };
 
-    assert!(aurc_for(0.8) > aurc_for(0.0), "Emotional memories should have higher AURC (McGaugh 2004)");
+    assert!(
+        aurc_for(0.8) > aurc_for(0.0),
+        "Emotional memories should have higher AURC (McGaugh 2004)"
+    );
 }
 
 // ================================================================
@@ -510,24 +649,31 @@ fn t10_emotional_memory_has_higher_aurc() {
 // ================================================================
 #[test]
 fn t8_proactive_interference_degrades_target_dominance() {
-    let total_activation = |results: &[vestige_core::neuroscience::spreading_activation::ActivatedMemory]| -> f64 {
-        results.iter().map(|m| m.activation).sum::<f64>()
-    };
-    let target_share = |results: &[vestige_core::neuroscience::spreading_activation::ActivatedMemory]| -> f64 {
-        let target = results.iter()
-            .find(|m| m.memory_id == "TARGET_A")
-            .map(|m| m.activation)
-            .unwrap_or(0.0);
-        let total = total_activation(results);
-        if total > 0.0 { target / total } else { 0.0 }
-    };
+    let total_activation =
+        |results: &[vestige_core::neuroscience::spreading_activation::ActivatedMemory]| -> f64 {
+            results.iter().map(|m| m.activation).sum::<f64>()
+        };
+    let target_share =
+        |results: &[vestige_core::neuroscience::spreading_activation::ActivatedMemory]| -> f64 {
+            let target = results
+                .iter()
+                .find(|m| m.memory_id == "TARGET_A")
+                .map(|m| m.activation)
+                .unwrap_or(0.0);
+            let total = total_activation(results);
+            if total > 0.0 { target / total } else { 0.0 }
+        };
 
     // Phase 1: single target — should dominate activation
     let mut net = ActivationNetwork::default();
     net.add_edge("CUE".into(), "TARGET_A".into(), LinkType::Semantic, 0.8);
     let baseline = net.activate("CUE", 1.0);
     let share_1 = target_share(&baseline);
-    assert!(share_1 > 0.9, "Single target should capture >90% of activation, got {:.0}%", share_1 * 100.0);
+    assert!(
+        share_1 > 0.9,
+        "Single target should capture >90% of activation, got {:.0}%",
+        share_1 * 100.0
+    );
 
     // Phase 2: three competitors — target's share should drop
     net.add_edge("CUE".into(), "COMP_1".into(), LinkType::Semantic, 0.7);
@@ -540,7 +686,8 @@ fn t8_proactive_interference_degrades_target_dominance() {
         share_3 < share_1,
         "Fan effect (Anderson 1983): target share with 3 competitors ({:.1}%) \
          should be less than baseline ({:.1}%)",
-        share_3 * 100.0, share_1 * 100.0
+        share_3 * 100.0,
+        share_1 * 100.0
     );
 
     // Phase 3: five competitors — further dilution (monotonic)
@@ -553,6 +700,7 @@ fn t8_proactive_interference_degrades_target_dominance() {
         share_5 < share_3,
         "Underwood (1957) monotonic PI: target share with 5 competitors ({:.1}%) \
          should be less than with 3 ({:.1}%)",
-        share_5 * 100.0, share_3 * 100.0
+        share_5 * 100.0,
+        share_3 * 100.0
     );
 }

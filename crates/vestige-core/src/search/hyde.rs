@@ -43,8 +43,10 @@ pub fn classify_intent(query: &str) -> QueryIntent {
     if lower.contains("how to") || lower.starts_with("how do") || lower.starts_with("steps") {
         return QueryIntent::HowTo;
     }
-    if lower.starts_with("what is") || lower.starts_with("what are")
-        || lower.starts_with("define") || lower.starts_with("explain")
+    if lower.starts_with("what is")
+        || lower.starts_with("what are")
+        || lower.starts_with("define")
+        || lower.starts_with("explain")
     {
         return QueryIntent::Definition;
     }
@@ -54,8 +56,11 @@ pub fn classify_intent(query: &str) -> QueryIntent {
     if lower.starts_with("when") || lower.contains("date") || lower.contains("timeline") {
         return QueryIntent::Temporal;
     }
-    if query.contains('(') || query.contains('{') || query.contains("fn ")
-        || query.contains("class ") || query.contains("::")
+    if query.contains('(')
+        || query.contains('{')
+        || query.contains("fn ")
+        || query.contains("class ")
+        || query.contains("::")
     {
         return QueryIntent::Technical;
     }
@@ -161,23 +166,38 @@ mod tests {
     #[test]
     fn test_classify_definition() {
         assert_eq!(classify_intent("What is FSRS?"), QueryIntent::Definition);
-        assert_eq!(classify_intent("explain spaced repetition"), QueryIntent::Definition);
+        assert_eq!(
+            classify_intent("explain spaced repetition"),
+            QueryIntent::Definition
+        );
     }
 
     #[test]
     fn test_classify_howto() {
-        assert_eq!(classify_intent("how to configure embeddings"), QueryIntent::HowTo);
-        assert_eq!(classify_intent("How do I search memories?"), QueryIntent::HowTo);
+        assert_eq!(
+            classify_intent("how to configure embeddings"),
+            QueryIntent::HowTo
+        );
+        assert_eq!(
+            classify_intent("How do I search memories?"),
+            QueryIntent::HowTo
+        );
     }
 
     #[test]
     fn test_classify_reasoning() {
-        assert_eq!(classify_intent("why does retention decay?"), QueryIntent::Reasoning);
+        assert_eq!(
+            classify_intent("why does retention decay?"),
+            QueryIntent::Reasoning
+        );
     }
 
     #[test]
     fn test_classify_temporal() {
-        assert_eq!(classify_intent("when did the last consolidation run"), QueryIntent::Temporal);
+        assert_eq!(
+            classify_intent("when did the last consolidation run"),
+            QueryIntent::Temporal
+        );
     }
 
     #[test]
@@ -188,7 +208,10 @@ mod tests {
 
     #[test]
     fn test_classify_lookup() {
-        assert_eq!(classify_intent("vestige memory system"), QueryIntent::Lookup);
+        assert_eq!(
+            classify_intent("vestige memory system"),
+            QueryIntent::Lookup
+        );
     }
 
     #[test]
@@ -200,10 +223,7 @@ mod tests {
 
     #[test]
     fn test_centroid_embedding() {
-        let embeddings = vec![
-            vec![1.0, 0.0, 0.0],
-            vec![0.0, 1.0, 0.0],
-        ];
+        let embeddings = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
         let centroid = centroid_embedding(&embeddings);
         assert_eq!(centroid.len(), 3);
         // Should be normalized

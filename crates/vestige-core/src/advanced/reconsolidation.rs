@@ -517,13 +517,14 @@ impl ReconsolidationManager {
         }
 
         if let Some(state) = self.labile_memories.get_mut(memory_id)
-            && state.is_within_window(self.labile_window) {
-                let success = state.add_modification(modification);
-                if success {
-                    self.stats.total_modifications += 1;
-                }
-                return success;
+            && state.is_within_window(self.labile_window)
+        {
+            let success = state.add_modification(modification);
+            if success {
+                self.stats.total_modifications += 1;
             }
+            return success;
+        }
         false
     }
 
@@ -690,13 +691,14 @@ impl ReconsolidationManager {
         if let Ok(history) = self.retrieval_history.read() {
             for record in history.iter() {
                 if record.memory_id == memory_id
-                    && let Some(context) = &record.context {
-                        for co_id in &context.co_retrieved {
-                            if co_id != memory_id {
-                                *co_retrieved.entry(co_id.clone()).or_insert(0) += 1;
-                            }
+                    && let Some(context) = &record.context
+                {
+                    for co_id in &context.co_retrieved {
+                        if co_id != memory_id {
+                            *co_retrieved.entry(co_id.clone()).or_insert(0) += 1;
                         }
                     }
+                }
             }
         }
 
@@ -921,7 +923,7 @@ mod tests {
 
     #[test]
     fn test_relationship_types() {
-        let relationships = vec![
+        let relationships = [
             RelationshipType::Supports,
             RelationshipType::Contradicts,
             RelationshipType::Elaborates,

@@ -630,9 +630,7 @@ mod tests {
         let related = tracker.get_related_files(Path::new("src/main.rs")).unwrap();
 
         assert!(!related.is_empty());
-        assert!(related
-            .iter()
-            .any(|r| r.path == PathBuf::from("src/lib.rs")));
+        assert!(related.iter().any(|r| r.path == Path::new("src/lib.rs")));
     }
 
     #[test]

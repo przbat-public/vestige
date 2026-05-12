@@ -14,7 +14,9 @@ use super::{ConnectionRecord, Result, Storage, StorageError};
 impl Storage {
     /// Save a memory connection
     pub fn save_connection(&self, connection: &ConnectionRecord) -> Result<()> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "INSERT OR REPLACE INTO memory_connections (
@@ -35,7 +37,9 @@ impl Storage {
 
     /// Get connections for a memory
     pub fn get_connections_for_memory(&self, memory_id: &str) -> Result<Vec<ConnectionRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT * FROM memory_connections WHERE source_id = ?1 OR target_id = ?1 ORDER BY strength DESC"
@@ -51,11 +55,11 @@ impl Storage {
 
     /// Get all connections (for building activation network)
     pub fn get_all_connections(&self) -> Result<Vec<ConnectionRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT * FROM memory_connections ORDER BY strength DESC"
-        )?;
+        let mut stmt = reader.prepare("SELECT * FROM memory_connections ORDER BY strength DESC")?;
 
         let rows = stmt.query_map([], Self::row_to_connection)?;
         let mut result = Vec::new();
@@ -66,9 +70,16 @@ impl Storage {
     }
 
     /// Strengthen a connection
-    pub fn strengthen_connection(&self, source_id: &str, target_id: &str, boost: f64) -> Result<bool> {
+    pub fn strengthen_connection(
+        &self,
+        source_id: &str,
+        target_id: &str,
+        boost: f64,
+    ) -> Result<bool> {
         let now = Utc::now().to_rfc3339();
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let rows = writer.execute(
             "UPDATE memory_connections SET
@@ -83,7 +94,9 @@ impl Storage {
 
     /// Apply decay to all connections
     pub fn apply_connection_decay(&self, decay_factor: f64) -> Result<i32> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let rows = writer.execute(
             "UPDATE memory_connections SET strength = strength * ?1",
@@ -94,7 +107,9 @@ impl Storage {
 
     /// Prune weak connections below threshold
     pub fn prune_weak_connections(&self, min_strength: f64) -> Result<i32> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let rows = writer.execute(
             "DELETE FROM memory_connections WHERE strength < ?1",

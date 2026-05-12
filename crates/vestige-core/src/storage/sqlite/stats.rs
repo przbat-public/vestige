@@ -22,11 +22,8 @@ impl Storage {
         let now = Utc::now().to_rfc3339();
         let reader = self.acquire_reader()?;
 
-        let total: i64 = reader.query_row(
-            "SELECT COUNT(*) FROM knowledge_nodes",
-            [],
-            |row| row.get(0),
-        )?;
+        let total: i64 =
+            reader.query_row("SELECT COUNT(*) FROM knowledge_nodes", [], |row| row.get(0))?;
 
         let due: i64 = reader.query_row(
             "SELECT COUNT(*) FROM knowledge_nodes WHERE next_review <= ?1",

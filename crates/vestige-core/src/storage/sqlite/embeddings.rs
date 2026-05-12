@@ -14,7 +14,7 @@
 //!   `regenerate_embeddings` MCP tool.
 
 #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
 #[cfg(all(feature = "embeddings", feature = "vector-search"))]
 use crate::memory::EmbeddingResult;
@@ -53,28 +53,29 @@ impl Storage {
     /// Get the embedding vector for a node
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     pub fn get_node_embedding(&self, node_id: &str) -> Result<Option<Vec<f32>>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT embedding FROM node_embeddings WHERE node_id = ?1"
-        )?;
+        let mut stmt =
+            reader.prepare("SELECT embedding FROM node_embeddings WHERE node_id = ?1")?;
 
         let embedding_bytes: Option<Vec<u8>> = stmt
             .query_row(params![node_id], |row| row.get(0))
             .optional()?;
 
-        Ok(embedding_bytes.and_then(|bytes| {
-            crate::embeddings::Embedding::from_bytes(&bytes).map(|e| e.vector)
-        }))
+        Ok(embedding_bytes
+            .and_then(|bytes| crate::embeddings::Embedding::from_bytes(&bytes).map(|e| e.vector)))
     }
 
     /// Get all embedding vectors for duplicate detection
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     pub fn get_all_embeddings(&self) -> Result<Vec<(String, Vec<f32>)>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader
-            .prepare("SELECT node_id, embedding FROM node_embeddings")?;
+        let mut stmt = reader.prepare("SELECT node_id, embedding FROM node_embeddings")?;
 
         let results: Vec<(String, Vec<f32>)> = stmt
             .query_map([], |row| {
@@ -84,8 +85,7 @@ impl Storage {
             })?
             .filter_map(|r| r.ok())
             .filter_map(|(id, bytes)| {
-                crate::embeddings::Embedding::from_bytes(&bytes)
-                    .map(|e| (id, e.vector))
+                crate::embeddings::Embedding::from_bytes(&bytes).map(|e| (id, e.vector))
             })
             .collect();
 
@@ -108,7 +108,9 @@ impl Storage {
         let mut result = EmbeddingResult::default();
 
         let nodes: Vec<(String, String)> = {
-            let reader = self.reader.lock()
+            let reader = self
+                .reader
+                .lock()
                 .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
             if let Some(ids) = node_ids {
                 let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -133,8 +135,7 @@ impl Storage {
                 }
                 result_nodes
             } else if force {
-                let mut stmt = reader
-                    .prepare("SELECT id, content FROM knowledge_nodes")?;
+                let mut stmt = reader.prepare("SELECT id, content FROM knowledge_nodes")?;
                 let rows = stmt.query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?;
@@ -154,7 +155,8 @@ impl Storage {
         for (id, content) in nodes {
             if !force {
                 let has_emb: i32 = self
-                    .reader.lock()
+                    .reader
+                    .lock()
                     .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?
                     .query_row(
                         "SELECT COALESCE(has_embedding, 0) FROM knowledge_nodes WHERE id = ?1",

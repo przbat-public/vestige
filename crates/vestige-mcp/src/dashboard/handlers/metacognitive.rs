@@ -21,7 +21,10 @@ pub async fn trigger_reflect(
     State(state): State<AppState>,
     Json(req): Json<ReflectRequest>,
 ) -> Result<Json<Value>, StatusCode> {
-    let cognitive = state.cognitive.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let cognitive = state
+        .cognitive
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let args = Some(serde_json::json!({
         "focus": req.focus,
         "depth": req.depth.unwrap_or_else(|| "standard".to_string()),

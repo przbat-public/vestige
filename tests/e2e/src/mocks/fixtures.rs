@@ -185,7 +185,13 @@ impl TestDataFactory {
 
     /// Create a batch of memories
     pub fn create_batch(storage: &mut Storage, count: usize) -> Vec<String> {
-        Self::create_batch_with_config(storage, BatchConfig { count, ..Default::default() })
+        Self::create_batch_with_config(
+            storage,
+            BatchConfig {
+                count,
+                ..Default::default()
+            },
+        )
     }
 
     /// Create a batch with custom configuration
@@ -214,9 +220,15 @@ impl TestDataFactory {
             let (valid_from, valid_until) = if config.with_temporal {
                 let now = Utc::now();
                 if i % 3 == 0 {
-                    (Some(now - Duration::days(30)), Some(now + Duration::days(30)))
+                    (
+                        Some(now - Duration::days(30)),
+                        Some(now + Duration::days(30)),
+                    )
                 } else if i % 3 == 1 {
-                    (Some(now - Duration::days(60)), Some(now - Duration::days(30)))
+                    (
+                        Some(now - Duration::days(60)),
+                        Some(now - Duration::days(30)),
+                    )
                 } else {
                     (None, None)
                 }
@@ -275,12 +287,7 @@ impl TestDataFactory {
         }
 
         // Emotional memory (decay should be affected by sentiment)
-        let emotional = Self::create_emotional_memory(
-            storage,
-            "Important life event",
-            0.9,
-            0.95,
-        );
+        let emotional = Self::create_emotional_memory(storage, "Important life event", 0.9, 0.95);
         if let Some(node) = emotional {
             metadata.insert("emotional".to_string(), node.id.clone());
             ids.push(node.id);
@@ -447,12 +454,8 @@ impl TestDataFactory {
         }
 
         // No bounds (always valid)
-        if let Some(node) = Self::create_temporal_memory(
-            storage,
-            "Always valid memory",
-            None,
-            None,
-        ) {
+        if let Some(node) = Self::create_temporal_memory(storage, "Always valid memory", None, None)
+        {
             metadata.insert("always_valid".to_string(), node.id.clone());
             ids.push(node.id);
         }
@@ -471,8 +474,15 @@ impl TestDataFactory {
     /// Get a random node type
     pub fn random_node_type(seed: usize) -> &'static str {
         const TYPES: [&str; 9] = [
-            "fact", "concept", "procedure", "event", "relationship",
-            "quote", "code", "question", "insight",
+            "fact",
+            "concept",
+            "procedure",
+            "event",
+            "relationship",
+            "quote",
+            "code",
+            "question",
+            "insight",
         ];
         TYPES[seed % TYPES.len()]
     }
@@ -480,10 +490,26 @@ impl TestDataFactory {
     /// Generate lorem ipsum-like content
     pub fn lorem_content(words: usize, seed: usize) -> String {
         const WORDS: [&str; 20] = [
-            "the", "memory", "learning", "knowledge", "algorithm",
-            "data", "system", "process", "function", "method",
-            "class", "object", "variable", "constant", "type",
-            "structure", "pattern", "design", "architecture", "code",
+            "the",
+            "memory",
+            "learning",
+            "knowledge",
+            "algorithm",
+            "data",
+            "system",
+            "process",
+            "function",
+            "method",
+            "class",
+            "object",
+            "variable",
+            "constant",
+            "type",
+            "structure",
+            "pattern",
+            "design",
+            "architecture",
+            "code",
         ];
 
         (0..words)
@@ -495,8 +521,16 @@ impl TestDataFactory {
     /// Generate tags
     pub fn generate_tags(count: usize, seed: usize) -> Vec<String> {
         const TAGS: [&str; 10] = [
-            "important", "review", "todo", "concept", "fact",
-            "code", "note", "idea", "question", "reference",
+            "important",
+            "review",
+            "todo",
+            "concept",
+            "fact",
+            "code",
+            "note",
+            "idea",
+            "question",
+            "reference",
         ];
 
         (0..count)

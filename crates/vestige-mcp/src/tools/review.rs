@@ -6,7 +6,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
 
-
 use vestige_core::{Rating, Storage};
 
 /// Input schema for mark_reviewed tool
@@ -37,10 +36,7 @@ struct ReviewArgs {
     rating: Option<i32>,
 }
 
-pub async fn execute(
-    storage: &Arc<Storage>,
-    args: Option<Value>,
-) -> Result<Value, String> {
+pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
     let args: ReviewArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => return Err("Missing arguments".to_string()),
@@ -54,15 +50,28 @@ pub async fn execute(
         return Err("Rating must be between 1 and 4".to_string());
     }
 
-    let rating = Rating::from_i32(rating_value)
-        .ok_or_else(|| "Invalid rating value".to_string())?;
+    let rating =
+        Rating::from_i32(rating_value).ok_or_else(|| "Invalid rating value".to_string())?;
 
-
-    // Get node before review for comparison
-    let before = storage.get_node(&args.id).map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Node not found: {}", args.id))?;
-
-    let node = storage.mark_reviewed(&args.id, rating).map_err(|e| e.to_string())?;
+    // Get node before review for comparison. Bundle the SELECT + UPDATE
+    // into a single blocking task so we hand the runtime back exactly once.
+    let storage_clone = storage.clone();
+    let id_clone = args.id.clone();
+    let pair = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let Some(before) = storage_clone
+            .get_node(&id_clone)
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(None);
+        };
+        let node = storage_clone
+            .mark_reviewed(&id_clone, rating)
+            .map_err(|e| e.to_string())?;
+        Ok(Some((before, node)))
+    })
+    .await
+    .map_err(|e| format!("review task panicked: {}", e))??;
+    let (before, node) = pair.ok_or_else(|| format!("Node not found: {}", args.id))?;
 
     let rating_name = match rating {
         Rating::Again => "Again",
@@ -97,8 +106,8 @@ pub async fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vestige_core::IngestInput;
     use tempfile::TempDir;
+    use vestige_core::IngestInput;
 
     /// Create a test storage instance with a temporary database
     async fn test_storage() -> (Arc<Storage>, TempDir) {
@@ -440,7 +449,12 @@ mod tests {
         let schema_value = schema();
         assert_eq!(schema_value["type"], "object");
         assert!(schema_value["properties"]["id"].is_object());
-        assert!(schema_value["required"].as_array().unwrap().contains(&serde_json::json!("id")));
+        assert!(
+            schema_value["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("id"))
+        );
     }
 
     #[test]

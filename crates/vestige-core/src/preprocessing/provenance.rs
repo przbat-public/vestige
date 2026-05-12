@@ -45,7 +45,9 @@ pub struct ProvenanceMetadata {
     pub relations_extracted: Vec<String>,
 }
 
-fn is_zero(v: &usize) -> bool { *v == 0 }
+fn is_zero(v: &usize) -> bool {
+    *v == 0
+}
 
 impl ProvenanceMetadata {
     /// Create a new provenance with just the ingestion timestamp.
@@ -96,24 +98,23 @@ mod tests {
 
     #[test]
     fn test_with_context() {
-        let p = ProvenanceMetadata::new()
-            .with_context(Some("sess-123".into()), Some("cursor".into()));
+        let p =
+            ProvenanceMetadata::new().with_context(Some("sess-123".into()), Some("cursor".into()));
         assert_eq!(p.session_id.as_deref(), Some("sess-123"));
         assert_eq!(p.agent.as_deref(), Some("cursor"));
     }
 
     #[test]
     fn test_with_derivation() {
-        let p = ProvenanceMetadata::new()
-            .with_derivation(vec!["parent-uuid".into()], "supersede");
+        let p = ProvenanceMetadata::new().with_derivation(vec!["parent-uuid".into()], "supersede");
         assert_eq!(p.derived_from, vec!["parent-uuid"]);
         assert_eq!(p.derivation_type.as_deref(), Some("supersede"));
     }
 
     #[test]
     fn test_json_roundtrip() {
-        let mut p = ProvenanceMetadata::new()
-            .with_context(Some("sess".into()), Some("agent".into()));
+        let mut p =
+            ProvenanceMetadata::new().with_context(Some("sess".into()), Some("agent".into()));
         p.coref_rewrites = 3;
         p.auto_entities = vec!["Alice".into(), "Vestige".into()];
         p.temporal_anchors_found = vec!["by next Friday".into()];
@@ -133,9 +134,18 @@ mod tests {
     fn test_empty_fields_not_serialized() {
         let p = ProvenanceMetadata::new();
         let json = serde_json::to_string(&p).unwrap();
-        assert!(!json.contains("session_id"), "Null fields should be skipped");
-        assert!(!json.contains("auto_entities"), "Empty arrays should be skipped");
-        assert!(!json.contains("coref_rewrites"), "Zero values should be skipped");
+        assert!(
+            !json.contains("session_id"),
+            "Null fields should be skipped"
+        );
+        assert!(
+            !json.contains("auto_entities"),
+            "Empty arrays should be skipped"
+        );
+        assert!(
+            !json.contains("coref_rewrites"),
+            "Zero values should be skipped"
+        );
     }
 
     #[test]

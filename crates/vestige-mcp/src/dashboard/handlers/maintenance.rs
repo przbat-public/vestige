@@ -54,9 +54,7 @@ pub async fn maintenance_gc(
 }
 
 /// `POST /api/maintenance/backup` — write a SQLite snapshot to ~/.vestige/backups.
-pub async fn maintenance_backup(
-    State(state): State<AppState>,
-) -> Result<Json<Value>, StatusCode> {
+pub async fn maintenance_backup(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
     crate::tools::maintenance::execute_backup(&state.storage, None)
         .await
         .map(Json)

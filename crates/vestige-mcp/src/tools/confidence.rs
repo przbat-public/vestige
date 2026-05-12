@@ -35,25 +35,31 @@ pub fn schema() -> Value {
     })
 }
 
-pub async fn execute(
-    storage: &Arc<Storage>,
-    args: Option<Value>,
-) -> Result<Value, String> {
+pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
     let args = args.ok_or("Arguments required")?;
-    let action = args.get("action")
+    let action = args
+        .get("action")
         .and_then(|v| v.as_str())
         .ok_or("action is required")?;
     let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(20) as i32;
 
     match action {
         "score" => {
-            let memory_id = args.get("memory_id")
+            let memory_id = args
+                .get("memory_id")
                 .and_then(|v| v.as_str())
                 .ok_or("memory_id required for 'score'")?;
 
-            let node = storage.get_node(memory_id)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("Memory not found: {memory_id}"))?;
+            let storage_clone = storage.clone();
+            let memory_id_owned = memory_id.to_string();
+            let node = tokio::task::spawn_blocking(move || {
+                storage_clone
+                    .get_node(&memory_id_owned)
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| format!("confidence score task panicked: {}", e))??
+            .ok_or_else(|| format!("Memory not found: {memory_id}"))?;
             let score = compute_confidence(&node);
 
             Ok(serde_json::json!({
@@ -65,48 +71,71 @@ pub async fn execute(
         }
 
         "audit" => {
-            let memories = storage.get_all_nodes(limit * 5, 0)
-                .map_err(|e| e.to_string())?;
+            let storage_clone = storage.clone();
+            let memories = tokio::task::spawn_blocking(move || {
+                storage_clone
+                    .get_all_nodes(limit * 5, 0)
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| format!("confidence audit task panicked: {}", e))??;
 
-            let mut scored: Vec<_> = memories.iter()
+            let mut scored: Vec<_> = memories
+                .iter()
                 .map(|m| {
                     let score = compute_confidence(m);
                     (m, score)
                 })
                 .collect();
 
-            let low_confidence: Vec<Value> = scored.iter()
+            let low_confidence: Vec<Value> = scored
+                .iter()
                 .filter(|(_, s)| s.overall < 0.4)
                 .take(limit as usize)
-                .map(|(m, s)| serde_json::json!({
-                    "id": m.id,
-                    "content": truncate(&m.content, 120),
-                    "confidence": s,
-                    "recommendation": confidence_recommendation(s),
-                }))
-                .collect();
-
-            let overconfident: Vec<Value> = scored.iter()
-                .filter(|(m, _)| {
-                    m.retrieval_strength > 0.8 && m.storage_strength < 0.3
+                .map(|(m, s)| {
+                    serde_json::json!({
+                        "id": m.id,
+                        "content": truncate(&m.content, 120),
+                        "confidence": s,
+                        "recommendation": confidence_recommendation(s),
+                    })
                 })
-                .take(limit as usize)
-                .map(|(m, s)| serde_json::json!({
-                    "id": m.id,
-                    "content": truncate(&m.content, 120),
-                    "confidence": s,
-                    "issue": "High retrieval but weak storage — illusory confidence",
-                }))
                 .collect();
 
-            scored.sort_by(|a, b| a.1.overall.partial_cmp(&b.1.overall)
-                .unwrap_or(std::cmp::Ordering::Equal));
+            let overconfident: Vec<Value> = scored
+                .iter()
+                .filter(|(m, _)| m.retrieval_strength > 0.8 && m.storage_strength < 0.3)
+                .take(limit as usize)
+                .map(|(m, s)| {
+                    serde_json::json!({
+                        "id": m.id,
+                        "content": truncate(&m.content, 120),
+                        "confidence": s,
+                        "issue": "High retrieval but weak storage — illusory confidence",
+                    })
+                })
+                .collect();
+
+            scored.sort_by(|a, b| {
+                a.1.overall
+                    .partial_cmp(&b.1.overall)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
             let distribution = ConfidenceDistribution {
                 very_low: scored.iter().filter(|(_, s)| s.overall < 0.2).count(),
-                low: scored.iter().filter(|(_, s)| s.overall >= 0.2 && s.overall < 0.4).count(),
-                medium: scored.iter().filter(|(_, s)| s.overall >= 0.4 && s.overall < 0.6).count(),
-                high: scored.iter().filter(|(_, s)| s.overall >= 0.6 && s.overall < 0.8).count(),
+                low: scored
+                    .iter()
+                    .filter(|(_, s)| s.overall >= 0.2 && s.overall < 0.4)
+                    .count(),
+                medium: scored
+                    .iter()
+                    .filter(|(_, s)| s.overall >= 0.4 && s.overall < 0.6)
+                    .count(),
+                high: scored
+                    .iter()
+                    .filter(|(_, s)| s.overall >= 0.6 && s.overall < 0.8)
+                    .count(),
                 very_high: scored.iter().filter(|(_, s)| s.overall >= 0.8).count(),
             };
 
@@ -129,34 +158,51 @@ pub async fn execute(
         }
 
         "calibrate" => {
-            let memories = storage.get_all_nodes(limit * 3, 0)
-                .map_err(|e| e.to_string())?;
+            let storage_clone = storage.clone();
+            let memories = tokio::task::spawn_blocking(move || {
+                storage_clone
+                    .get_all_nodes(limit * 3, 0)
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| format!("confidence calibrate task panicked: {}", e))??;
 
-            let opinions: Vec<_> = memories.iter()
-                .filter(|m| is_opinion(&m.content) || m.node_type == "decision" || m.node_type == "pattern")
+            let opinions: Vec<_> = memories
+                .iter()
+                .filter(|m| {
+                    is_opinion(&m.content) || m.node_type == "decision" || m.node_type == "pattern"
+                })
                 .collect();
 
-            let facts: Vec<_> = memories.iter()
+            let facts: Vec<_> = memories
+                .iter()
                 .filter(|m| !is_opinion(&m.content) && m.node_type == "fact")
                 .collect();
 
-            let opinion_avg_retention = if opinions.is_empty() { 0.0 } else {
+            let opinion_avg_retention = if opinions.is_empty() {
+                0.0
+            } else {
                 opinions.iter().map(|m| m.retention_strength).sum::<f64>() / opinions.len() as f64
             };
-            let fact_avg_retention = if facts.is_empty() { 0.0 } else {
+            let fact_avg_retention = if facts.is_empty() {
+                0.0
+            } else {
                 facts.iter().map(|m| m.retention_strength).sum::<f64>() / facts.len() as f64
             };
 
-            let opinions_needing_review: Vec<Value> = opinions.iter()
+            let opinions_needing_review: Vec<Value> = opinions
+                .iter()
                 .filter(|m| m.retention_strength < 0.4 && m.reps < 3)
                 .take(limit as usize)
-                .map(|m| serde_json::json!({
-                    "id": m.id,
-                    "content": truncate(&m.content, 150),
-                    "retention": format!("{:.2}", m.retention_strength),
-                    "reviews": m.reps,
-                    "type": m.node_type,
-                }))
+                .map(|m| {
+                    serde_json::json!({
+                        "id": m.id,
+                        "content": truncate(&m.content, 150),
+                        "retention": format!("{:.2}", m.retention_strength),
+                        "reviews": m.reps,
+                        "type": m.node_type,
+                    })
+                })
                 .collect();
 
             Ok(serde_json::json!({
@@ -171,7 +217,9 @@ pub async fn execute(
             }))
         }
 
-        _ => Err(format!("Unknown action: {action}. Use: score, audit, calibrate")),
+        _ => Err(format!(
+            "Unknown action: {action}. Use: score, audit, calibrate"
+        )),
     }
 }
 
@@ -208,13 +256,21 @@ fn compute_confidence(node: &vestige_core::KnowledgeNode) -> ConfidenceScore {
         if until <= now { 0.1 } else { 1.0 }
     } else {
         let age_days = (now - node.created_at).num_days() as f64;
-        if age_days > 365.0 { 0.6 } else if age_days > 90.0 { 0.8 } else { 1.0 }
+        if age_days > 365.0 {
+            0.6
+        } else if age_days > 90.0 {
+            0.8
+        } else {
+            1.0
+        }
     };
 
     let evidence = classify_evidence(&node.content, &node.node_type);
 
-    let overall = encoding * 0.3 + retrieval * 0.3 + temporal * 0.2 +
-        match evidence.as_str() {
+    let overall = encoding * 0.3
+        + retrieval * 0.3
+        + temporal * 0.2
+        + match evidence.as_str() {
             "verified_fact" => 0.2,
             "documented" => 0.15,
             "experience" => 0.1,
@@ -234,7 +290,11 @@ fn compute_confidence(node: &vestige_core::KnowledgeNode) -> ConfidenceScore {
 fn classify_evidence(content: &str, node_type: &str) -> String {
     let lower = content.to_lowercase();
     match node_type {
-        "fact" if lower.contains("verified") || lower.contains("confirmed") || lower.contains("tested") => {
+        "fact"
+            if lower.contains("verified")
+                || lower.contains("confirmed")
+                || lower.contains("tested") =>
+        {
             "verified_fact".to_string()
         }
         "fact" | "event" => "documented".to_string(),
@@ -247,9 +307,21 @@ fn classify_evidence(content: &str, node_type: &str) -> String {
 fn is_opinion(content: &str) -> bool {
     let lower = content.to_lowercase();
     let markers = [
-        "i think", "i believe", "probably", "might be", "could be",
-        "seems like", "in my opinion", "i prefer", "i feel", "arguably",
-        "maybe", "possibly", "i suspect", "likely", "unlikely",
+        "i think",
+        "i believe",
+        "probably",
+        "might be",
+        "could be",
+        "seems like",
+        "in my opinion",
+        "i prefer",
+        "i feel",
+        "arguably",
+        "maybe",
+        "possibly",
+        "i suspect",
+        "likely",
+        "unlikely",
     ];
     markers.iter().any(|m| lower.contains(m))
 }

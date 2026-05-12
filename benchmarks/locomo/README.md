@@ -11,7 +11,7 @@ Measures Vestige's long-term conversational memory against the [LoCoMo benchmark
 | **Vestige (current, turn + facts)**   | **66.17%** | 40.78%   | 71.65%   | 46.88%    | 74.79%      |
 | Vestige (turn-level only)             | 62.21%   | 34.40%     | 67.60%   | 44.79%    | 69.56%      |
 | Vestige (session-level, prompt v2)    | 60.13%   | 34.40%     | 65.73%   | 42.71%    | 68.61%      |
-| Vestige (session-level, Tier 1+2 only)| 54.81%   | 32.62%     | 55.76%   | 26.04%    | 65.16%      |
+| Vestige (session-level, harness only) | 54.81%   | 32.62%     | 55.76%   | 26.04%    | 65.16%      |
 | Vestige (Apr 2026)\*                  | 41.00%   | 22.22%     | 33.33%   | 0.00%     | 52.73%      |
 
 \*Apr 2026 figure was committed to this repo in the snapshot before the reranker + score-adaptive context were wired into the harness. It does not reproduce on the current `gpt-4o-mini` snapshot — re-running the same code on the same seed=42 sample today yields ~21%, i.e. apples-to-apples gain on identical questions is **+45 pp on the small sample**, of which **+25.17 pp** survives the move to full N=1 540 (41.00% → 66.17%).

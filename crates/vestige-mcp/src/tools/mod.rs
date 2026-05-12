@@ -36,13 +36,13 @@ pub mod restore;
 pub mod session_context;
 
 // v1.9: Autonomic tools
-pub mod health;
 pub mod graph;
+pub mod health;
 
 // v2.1: Metacognitive tools
+pub mod confidence;
 pub mod reflect;
 pub mod temporal;
-pub mod confidence;
 
 // v3.2.1: Deep Reference (cognitive reasoning engine)
 pub mod cross_reference;

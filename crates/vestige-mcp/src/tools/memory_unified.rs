@@ -119,11 +119,19 @@ pub async fn execute(
 
 /// Get full memory node with all metadata
 async fn execute_get(storage: &Arc<Storage>, id: &str) -> Result<Value, String> {
-    if let Err(e) = storage.record_memory_access(id) {
-        tracing::debug!(error = %e, memory_id = %id, "Failed to record memory access");
-    }
-
-    let node = storage.get_node(id).map_err(|e| e.to_string())?;
+    // record_memory_access + get_node are both blocking SQLite operations.
+    // Group them into a single task so we hand the runtime back exactly once.
+    let storage_clone = storage.clone();
+    let id_owned = id.to_string();
+    let node = tokio::task::spawn_blocking(move || {
+        if let Err(e) = storage_clone.record_memory_access(&id_owned) {
+            tracing::debug!(error = %e, memory_id = %id_owned, "Failed to record memory access");
+        }
+        storage_clone.get_node(&id_owned)
+    })
+    .await
+    .map_err(|e| format!("execute_get task panicked: {}", e))?
+    .map_err(|e| e.to_string())?;
 
     match node {
         Some(n) => Ok(serde_json::json!({
@@ -163,45 +171,53 @@ async fn execute_get(storage: &Arc<Storage>, id: &str) -> Result<Value, String> 
 
 /// Batch-retrieve multiple memory nodes by IDs
 async fn execute_get_batch(storage: &Arc<Storage>, ids: &[String]) -> Result<Value, String> {
-    let mut nodes = Vec::new();
-    let mut not_found = Vec::new();
-
-    for id in ids {
-        if let Err(e) = storage.record_memory_access(id) {
-            tracing::debug!(error = %e, memory_id = %id, "Failed to record memory access");
-        }
-        match storage.get_node(id) {
-            Ok(Some(n)) => {
-                nodes.push(serde_json::json!({
-                    "id": n.id,
-                    "content": n.content,
-                    "nodeType": n.node_type,
-                    "createdAt": n.created_at.to_rfc3339(),
-                    "updatedAt": n.updated_at.to_rfc3339(),
-                    "lastAccessed": n.last_accessed.to_rfc3339(),
-                    "stability": n.stability,
-                    "difficulty": n.difficulty,
-                    "reps": n.reps,
-                    "lapses": n.lapses,
-                    "storageStrength": n.storage_strength,
-                    "retrievalStrength": n.retrieval_strength,
-                    "retentionStrength": n.retention_strength,
-                    "sentimentScore": n.sentiment_score,
-                    "sentimentMagnitude": n.sentiment_magnitude,
-                    "nextReview": n.next_review.map(|d| d.to_rfc3339()),
-                    "source": n.source,
-                    "tags": n.tags,
-                    "hasEmbedding": n.has_embedding,
-                    "embeddingModel": n.embedding_model,
-                }));
+    // Many tiny SELECTs in a row — never on the reactor. One spawn_blocking
+    // hop runs the whole loop on the SQLite-blocking thread pool.
+    let storage_clone = storage.clone();
+    let ids_owned: Vec<String> = ids.to_vec();
+    let (nodes, not_found): (Vec<Value>, Vec<String>) = tokio::task::spawn_blocking(move || {
+        let mut nodes = Vec::new();
+        let mut not_found = Vec::new();
+        for id in &ids_owned {
+            if let Err(e) = storage_clone.record_memory_access(id) {
+                tracing::debug!(error = %e, memory_id = %id, "Failed to record memory access");
             }
-            Ok(None) => not_found.push(id.clone()),
-            Err(e) => {
-                tracing::warn!(memory_id = %id, "get_batch error: {}", e);
-                not_found.push(id.clone());
+            match storage_clone.get_node(id) {
+                Ok(Some(n)) => {
+                    nodes.push(serde_json::json!({
+                        "id": n.id,
+                        "content": n.content,
+                        "nodeType": n.node_type,
+                        "createdAt": n.created_at.to_rfc3339(),
+                        "updatedAt": n.updated_at.to_rfc3339(),
+                        "lastAccessed": n.last_accessed.to_rfc3339(),
+                        "stability": n.stability,
+                        "difficulty": n.difficulty,
+                        "reps": n.reps,
+                        "lapses": n.lapses,
+                        "storageStrength": n.storage_strength,
+                        "retrievalStrength": n.retrieval_strength,
+                        "retentionStrength": n.retention_strength,
+                        "sentimentScore": n.sentiment_score,
+                        "sentimentMagnitude": n.sentiment_magnitude,
+                        "nextReview": n.next_review.map(|d| d.to_rfc3339()),
+                        "source": n.source,
+                        "tags": n.tags,
+                        "hasEmbedding": n.has_embedding,
+                        "embeddingModel": n.embedding_model,
+                    }));
+                }
+                Ok(None) => not_found.push(id.clone()),
+                Err(e) => {
+                    tracing::warn!(memory_id = %id, "get_batch error: {}", e);
+                    not_found.push(id.clone());
+                }
             }
         }
-    }
+        (nodes, not_found)
+    })
+    .await
+    .map_err(|e| format!("execute_get_batch task panicked: {}", e))?;
 
     Ok(serde_json::json!({
         "action": "get_batch",
@@ -213,7 +229,12 @@ async fn execute_get_batch(storage: &Arc<Storage>, ids: &[String]) -> Result<Val
 
 /// Delete a memory and return success status
 async fn execute_delete(storage: &Arc<Storage>, id: &str) -> Result<Value, String> {
-    let deleted = storage.delete_node(id).map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let id_owned = id.to_string();
+    let deleted = tokio::task::spawn_blocking(move || storage_clone.delete_node(&id_owned))
+        .await
+        .map_err(|e| format!("delete_node task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
         "action": "delete",
@@ -225,10 +246,12 @@ async fn execute_delete(storage: &Arc<Storage>, id: &str) -> Result<Value, Strin
 
 /// Get accessibility state of a memory (Active/Dormant/Silent/Unavailable)
 async fn execute_state(storage: &Arc<Storage>, id: &str) -> Result<Value, String> {
-
     // Get the memory
-    let memory = storage
-        .get_node(id)
+    let storage_clone = storage.clone();
+    let id_owned = id.to_string();
+    let memory = tokio::task::spawn_blocking(move || storage_clone.get_node(&id_owned))
+        .await
+        .map_err(|e| format!("execute_state task panicked: {}", e))?
         .map_err(|e| format!("Error: {}", e))?
         .ok_or("Memory not found")?;
 
@@ -276,11 +299,25 @@ async fn execute_promote(
     id: &str,
     reason: Option<String>,
 ) -> Result<Value, String> {
-
-    let before = storage.get_node(id).map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Node not found: {}", id))?;
-
-    let node = storage.promote_memory(id).map_err(|e| e.to_string())?;
+    // get_node + promote_memory both write to SQLite. Bundle into one
+    // blocking task and propagate "not found" through the inner Option.
+    let storage_clone = storage.clone();
+    let id_owned = id.to_string();
+    let pair = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let Some(before) = storage_clone
+            .get_node(&id_owned)
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(None);
+        };
+        let node = storage_clone
+            .promote_memory(&id_owned)
+            .map_err(|e| e.to_string())?;
+        Ok(Some((before, node)))
+    })
+    .await
+    .map_err(|e| format!("execute_promote task panicked: {}", e))??;
+    let (before, node) = pair.ok_or_else(|| format!("Node not found: {}", id))?;
 
     // Cognitive feedback pipeline
     if let Ok(mut cog) = cognitive.try_lock() {
@@ -331,15 +368,30 @@ async fn execute_demote(
     id: &str,
     reason: Option<String>,
 ) -> Result<Value, String> {
-
-    let before = storage.get_node(id).map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Node not found: {}", id))?;
-
-    let node = storage.demote_memory(id).map_err(|e| e.to_string())?;
+    // Same pattern as `execute_promote` — group the SELECT + UPDATE into a
+    // single blocking task so we yield the runtime only once.
+    let storage_clone = storage.clone();
+    let id_owned = id.to_string();
+    let pair = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let Some(before) = storage_clone
+            .get_node(&id_owned)
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(None);
+        };
+        let node = storage_clone
+            .demote_memory(&id_owned)
+            .map_err(|e| e.to_string())?;
+        Ok(Some((before, node)))
+    })
+    .await
+    .map_err(|e| format!("execute_demote task panicked: {}", e))??;
+    let (before, node) = pair.ok_or_else(|| format!("Node not found: {}", id))?;
 
     // Cognitive feedback pipeline
     if let Ok(mut cog) = cognitive.try_lock() {
-        cog.reward_signal.record_outcome(id, OutcomeType::NotHelpful);
+        cog.reward_signal
+            .record_outcome(id, OutcomeType::NotHelpful);
         cog.importance_tracker.on_retrieved(id, false);
         if cog.reconsolidation.is_labile(id) {
             cog.reconsolidation.apply_modification(
@@ -435,22 +487,34 @@ mod tests {
         // Test Active state
         let accessibility = compute_accessibility(0.9, 0.8, 0.7);
         assert!(accessibility >= ACCESSIBILITY_ACTIVE);
-        assert!(matches!(state_from_accessibility(accessibility), MemoryState::Active));
+        assert!(matches!(
+            state_from_accessibility(accessibility),
+            MemoryState::Active
+        ));
 
         // Test Dormant state
         let accessibility = compute_accessibility(0.5, 0.5, 0.5);
         assert!((ACCESSIBILITY_DORMANT..ACCESSIBILITY_ACTIVE).contains(&accessibility));
-        assert!(matches!(state_from_accessibility(accessibility), MemoryState::Dormant));
+        assert!(matches!(
+            state_from_accessibility(accessibility),
+            MemoryState::Dormant
+        ));
 
         // Test Silent state
         let accessibility = compute_accessibility(0.2, 0.2, 0.2);
         assert!((ACCESSIBILITY_SILENT..ACCESSIBILITY_DORMANT).contains(&accessibility));
-        assert!(matches!(state_from_accessibility(accessibility), MemoryState::Silent));
+        assert!(matches!(
+            state_from_accessibility(accessibility),
+            MemoryState::Silent
+        ));
 
         // Test Unavailable state
         let accessibility = compute_accessibility(0.05, 0.05, 0.05);
         assert!(accessibility < ACCESSIBILITY_SILENT);
-        assert!(matches!(state_from_accessibility(accessibility), MemoryState::Unavailable));
+        assert!(matches!(
+            state_from_accessibility(accessibility),
+            MemoryState::Unavailable
+        ));
     }
 
     #[test]
@@ -545,7 +609,8 @@ mod tests {
     #[tokio::test]
     async fn test_get_nonexistent_memory() {
         let (storage, _dir) = test_storage().await;
-        let args = serde_json::json!({ "action": "get", "id": "00000000-0000-0000-0000-000000000000" });
+        let args =
+            serde_json::json!({ "action": "get", "id": "00000000-0000-0000-0000-000000000000" });
         let result = execute(&storage, &test_cognitive(), Some(args)).await;
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -569,13 +634,17 @@ mod tests {
     async fn test_delete_nonexistent_memory() {
         let (storage, _dir) = test_storage().await;
         // Ingest+delete a throwaway memory to warm writer after WAL migration
-        let warmup_id = storage.ingest(vestige_core::IngestInput {
-            content: "warmup".to_string(),
-            node_type: "fact".to_string(),
-            ..Default::default()
-        }).unwrap().id;
+        let warmup_id = storage
+            .ingest(vestige_core::IngestInput {
+                content: "warmup".to_string(),
+                node_type: "fact".to_string(),
+                ..Default::default()
+            })
+            .unwrap()
+            .id;
         let _ = storage.delete_node(&warmup_id);
-        let args = serde_json::json!({ "action": "delete", "id": "00000000-0000-0000-0000-000000000000" });
+        let args =
+            serde_json::json!({ "action": "delete", "id": "00000000-0000-0000-0000-000000000000" });
         let result = execute(&storage, &test_cognitive(), Some(args)).await;
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -588,7 +657,9 @@ mod tests {
         let (storage, _dir) = test_storage().await;
         let id = ingest_memory(&storage).await;
         let del_args = serde_json::json!({ "action": "delete", "id": id });
-        execute(&storage, &test_cognitive(), Some(del_args)).await.unwrap();
+        execute(&storage, &test_cognitive(), Some(del_args))
+            .await
+            .unwrap();
         let get_args = serde_json::json!({ "action": "get", "id": id });
         let result = execute(&storage, &test_cognitive(), Some(get_args)).await;
         let value = result.unwrap();
@@ -619,7 +690,8 @@ mod tests {
     #[tokio::test]
     async fn test_state_nonexistent_memory_fails() {
         let (storage, _dir) = test_storage().await;
-        let args = serde_json::json!({ "action": "state", "id": "00000000-0000-0000-0000-000000000000" });
+        let args =
+            serde_json::json!({ "action": "state", "id": "00000000-0000-0000-0000-000000000000" });
         let result = execute(&storage, &test_cognitive(), Some(args)).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
@@ -636,7 +708,10 @@ mod tests {
     fn test_accessibility_boundary_zero() {
         let a = compute_accessibility(0.0, 0.0, 0.0);
         assert_eq!(a, 0.0);
-        assert!(matches!(state_from_accessibility(a), MemoryState::Unavailable));
+        assert!(matches!(
+            state_from_accessibility(a),
+            MemoryState::Unavailable
+        ));
     }
 
     // ========================================================================
@@ -715,7 +790,8 @@ mod tests {
     #[tokio::test]
     async fn test_demote_nonexistent_node_fails() {
         let (storage, _dir) = test_storage().await;
-        let args = serde_json::json!({ "action": "demote", "id": "00000000-0000-0000-0000-000000000000" });
+        let args =
+            serde_json::json!({ "action": "demote", "id": "00000000-0000-0000-0000-000000000000" });
         let result = execute(&storage, &test_cognitive(), Some(args)).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Node not found"));
@@ -768,9 +844,24 @@ mod tests {
         assert_eq!(value["success"], true);
         assert_eq!(value["action"], "edit");
         assert_eq!(value["nodeId"], id);
-        assert!(value["oldContentPreview"].as_str().unwrap().contains("Memory unified test content"));
-        assert!(value["newContentPreview"].as_str().unwrap().contains("Updated memory content"));
-        assert!(value["note"].as_str().unwrap().contains("FSRS state preserved"));
+        assert!(
+            value["oldContentPreview"]
+                .as_str()
+                .unwrap()
+                .contains("Memory unified test content")
+        );
+        assert!(
+            value["newContentPreview"]
+                .as_str()
+                .unwrap()
+                .contains("Updated memory content")
+        );
+        assert!(
+            value["note"]
+                .as_str()
+                .unwrap()
+                .contains("FSRS state preserved")
+        );
     }
 
     #[tokio::test]
@@ -787,7 +878,9 @@ mod tests {
             "id": id,
             "content": "Completely new content after edit"
         });
-        execute(&storage, &test_cognitive(), Some(args)).await.unwrap();
+        execute(&storage, &test_cognitive(), Some(args))
+            .await
+            .unwrap();
 
         // Verify FSRS state preserved
         let after = storage.get_node(&id).unwrap().unwrap();

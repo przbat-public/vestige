@@ -5,7 +5,7 @@
 
 ## Status (May 2026)
 
-| | Apr 2026 | Tier 1+2 | + prompt v2 | + turn-level | **+ turn_extracted** |
+| | Apr 2026 | + harness fixes | + prompt v2 | + turn-level | **+ turn_extracted** |
 |---|---|---|---|---|---|
 | Recall@5 (full N=1540) | 65.84% | **79.68%** | 79.68% | 72.34% | **78.18%** |
 | Recall@10 | 80.39% | **86.30%** | 86.30% | 76.82% | **83.64%** |
@@ -16,11 +16,11 @@
 | LLM Judge — multi_hop | 0.00% | 26.04% | 42.71% | 44.79% | **46.88%** |
 | LLM Judge — open_domain | 52.73% | 65.16% | 68.61% | 69.56% | **74.79%** |
 
-**Cumulative gain since April baseline: +25.17 pp (41.00% → 66.17%).** Vestige now within 0.71 pp of Mem0 (66.88%), 8.07 pp above LangMem (58.10%). The breakthrough was Tier 4 PoC `turn_extracted` mode — ingest per-turn dialogue chunks PLUS pre-extracted atomic facts side-by-side. Reranker picks granularity per question.
+**Cumulative gain since April baseline: +25.17 pp (41.00% → 66.17%).** Vestige now within 0.71 pp of Mem0 (66.88%), 8.07 pp above LangMem (58.10%). The breakthrough was the typed-memory PoC `turn_extracted` mode — ingest per-turn dialogue chunks PLUS pre-extracted atomic facts side-by-side. Reranker picks granularity per question.
 
 The **prompt v2** improvement isolates a +5.32 pp full-N gain (+6.00 pp on a same-sample seed=42 N=200 A/B) from a single change to the answerer system prompt. The change targets the two largest failure buckets identified in `benchmarks/locomo/analyze_failures.py`: `REFUSE` (15.2% of all questions, model refused despite evidence in top-5) and `COMP` (15.6%, model answered but missed list items or paraphrased temporal phrases). Specifically: (a) explicit anti-refuse policy (only refuse on no relevant evidence at all), (b) hypothetical/inferential mode for "would/likely" questions, (c) temporal precision hint that copies the memory's exact phrasing for relative dates.
 
-### Tier 3: turn-level chunking (May 11, 2026)
+### Stage 3: turn-level chunking (May 11, 2026)
 
 **Net result: +2.08 pp full-N (60.13% → 62.21%). All four categories improved.** The smoke test on conv-26 alone showed +11.84 pp (53.95% → 65.79%), so the full-dataset gain is conservative — most of the conv-26 lift came from its unusually bad session-level single_hop baseline (12.50%), which average conversations don't share.
 
@@ -76,7 +76,7 @@ Sample size n=50 (single_hop), n=58 (temporal), n=18 (multi_hop), n=174 (open_do
 
 **Plateau hypothesis:** the answerer LLM (`gpt-4o-mini` with temperature=0) is hitting a discrimination ceiling around 64–65% on this sample. Multiple retrieval/rerank configurations cluster at the same score because the answerer cannot extract the right answer even when evidence is in front of it, OR the judge's grading is at saturation. Next round must change the LLM stack (different answer model, different judge calibration) or the memory representation (typed memory, structured fields), not the retrieval ranking.
 
-### Tier 3 #6b — hierarchical retrieval (May 11, 2026 — implemented, plateau)
+### Stage 3 #6b — hierarchical retrieval (May 11, 2026 — implemented, plateau)
 
 Implemented as `LOCOMO_HIERARCHICAL=1` env-var. Two-stage retrieval that runs `hybrid_search` with 3× overfetch, groups candidates by `session_key`, ranks each session by its best candidate score, keeps only the top `LOCOMO_HIER_SESSIONS` (default 5; tested up to 15), filters candidates to those sessions, then reranks. Smoke test on conv-26 showed +1.97 pp with K=15 over flat turn-level (65.79% → 67.76%) and a striking +15.38 pp on multi_hop (n=13, ±2 questions of noise but consistent direction).
 
@@ -106,7 +106,7 @@ To probe whether the answerer was the cap, ran the same retrieval through `gpt-4
 
 **+1 pp at 10× cost.** `single_hop` and `multi_hop` unchanged — the answerer is not the bottleneck either. With the right evidence in context, both models produce the same answers. The problem is upstream: even with high Recall@5, the right facts often aren't surfaced **as facts** — they're buried in dialogue chunks that the answerer has to re-extract under a token budget.
 
-### Tier 4 PoC — turn_extracted mode (May 11, 2026 — BREAKTHROUGH)
+### Typed-memory PoC — turn_extracted mode (May 11, 2026 — BREAKTHROUGH)
 
 `LOCOMO_CHUNK_LEVEL=turn_extracted` ingests per-turn dialogue chunks AND pre-extracted atomic facts side-by-side. The reranker picks fact-vs-turn granularity per query. Implementation:
 
@@ -152,7 +152,7 @@ Three settings, three outcomes within ±2.33 pp of baseline. boost=0.20 nets +0.
 
 Three independent post-retrieval re-ranking experiments now all confirmed: the Jina v2 reranker is the ceiling for heuristic rank adjustments. Further gains require either (a) Phase 1-side filtering with `Storage::hybrid_search(kind=...)`, (b) a much stronger reranker, or (c) different content (which is what `turn_extracted` did).
 
-### What's left (full Tier 4 in core)
+### What's left (full typed memory in core)
 
 After seven retrieval/rerank experiments and an answer-model swap all plateau at 62.21% full / 64.67% sample, **the structural change that hasn't been tried is changing the memory representation itself**. Currently every memory is a raw dialogue chunk. ENGRAM (arXiv 2511.12960) proposes splitting memory into:
 
@@ -162,9 +162,9 @@ After seven retrieval/rerank experiments and an answer-model swap all plateau at
 
 …with per-kind retrieval routing (temporal questions → episodic store, attribute questions → semantic store, multi-hop → set operations across kinds).
 
-ENGRAM reports +15 pp on LongMemEval. For LoCoMo we project +5–10 pp on overall (single_hop 34→48–55, multi_hop 43→55–65, temporal 66→72–78). The full design — schema migration, extraction pipeline, per-kind retrieval, four-PR rollout, risks — is in [`docs/TIER4-TYPED-MEMORY-DESIGN.md`](TIER4-TYPED-MEMORY-DESIGN.md).
+ENGRAM reports +15 pp on LongMemEval. For LoCoMo we project +5–10 pp on overall (single_hop 34→48–55, multi_hop 43→55–65, temporal 66→72–78). The full design — schema migration, extraction pipeline, per-kind retrieval, four-PR rollout, risks — is in [`docs/TYPED-MEMORY-DESIGN.md`](TYPED-MEMORY-DESIGN.md).
 
-**Decisions to make before starting Tier 4:**
+**Decisions to make before starting the core typed-memory work:**
 
 1. Schema variant — Option A (typed metadata columns on `KnowledgeNode`, recommended) vs Option B (separate tables per kind).
 2. Extraction approach — rule-based only, LLM-disambiguated, or feature-gated LLM?
@@ -173,9 +173,9 @@ ENGRAM reports +15 pp on LongMemEval. For LoCoMo we project +5–10 pp on overal
 
 ### Secondary roadmap items
 
-- **LongMemEval-S hold-out harness.** Whatever we change next, verify on a second dataset before claiming generalization. The harness lives in `benchmarks/longmemeval/`, mirrors the LoCoMo two-phase split. Not blocking Tier 4 start but should land before Tier 4 PR merges.
+- **LongMemEval-S hold-out harness.** Whatever we change next, verify on a second dataset before claiming generalization. The harness lives in `benchmarks/longmemeval/`, mirrors the LoCoMo two-phase split. Not blocking the typed-memory start but should land before its PR merges.
 
-- **Hybrid mode investigation deferred.** Hybrid (session ∪ turn) tied at 65.00% on N=300; the per-category split suggests a tag-aware retrieval that selects session-vs-turn granularity per question type *might* help. But that's a Tier 4-shaped change in its own right (question classifier deciding chunk granularity), so it's folded into the Tier 4 design.
+- **Hybrid mode investigation deferred.** Hybrid (session ∪ turn) tied at 65.00% on N=300; the per-category split suggests a tag-aware retrieval that selects session-vs-turn granularity per question type *might* help. But that's a typed-memory-shaped change in its own right (question classifier deciding chunk granularity), so it's folded into the typed-memory design.
 
 ### Failed experiment: prompt v3 (broader list-question detection)
 
@@ -196,7 +196,7 @@ Lesson: regex-based list detection is structurally fragile when the plural noun 
 **Caveats** (do not skip these):
 
 - The "Apr 2026 baseline" 41.00% is **not reproducible today** with the same code on the same data. Re-running the old `evaluate.py` against the old `retrieval_results.json` on the same seed=42 sample now yields ~21%, not 41%. `gpt-4o-mini` with `temperature=0` is not a stable contract. The clean apples-to-apples on the same 100-question sample, both arms run today, is **+28 pp** (21% → 49%); the +13.81 pp on full N is conservative because the baseline drifted up too.
-- Multi-hop n=96 is the smallest category and the new score 26.04% is still the worst. This is where Tier 4 (typed memory) is expected to help most.
+- Multi-hop n=96 is the smallest category and the new score 26.04% is still the worst. This is where typed memory is expected to help most.
 - Competitor numbers in the README (Mem0 66.88%, Zep 75.14%, Memobase 75.78%, SmartSearch 93.5%) come from each system's own harness with its own judge prompt. Treat them as rough order-of-magnitude until we run them through a shared harness.
 
 ## Diagnosis
@@ -242,7 +242,7 @@ Two architectural opportunities, beyond fixing the harness:
 
 ## Tiered plan (impact × cost)
 
-### Tier 1 — methodology fixes (no algorithm changes)
+### Stage 1 — methodology fixes (no algorithm changes)
 
 | # | Change | Where | Expected uplift | Cost |
 |---|---|---|---|---|
@@ -253,7 +253,7 @@ Two architectural opportunities, beyond fixing the harness:
 These three are "free" — they fix evaluation methodology to match Mem0/Zep
 and to actually exercise the production cognitive pipeline. Done in this PR.
 
-### Tier 2 — score-adaptive context packing
+### Stage 2 — score-adaptive context packing
 
 | # | Change | Where | Expected uplift | Cost |
 |---|---|---|---|---|
@@ -263,7 +263,7 @@ and to actually exercise the production cognitive pipeline. Done in this PR.
 The SmartSearch paper shows that intelligent truncation alone (their Sec 4)
 recovers 70%+ of evidence that naive top-K loses. Done in this PR.
 
-### Tier 3 — finer chunking (research)
+### Stage 3 — finer chunking (research)
 
 | # | Change | Where | Expected uplift | Cost | Status |
 |---|---|---|---|---|---|
@@ -271,9 +271,9 @@ recovers 70%+ of evidence that naive top-K loses. Done in this PR.
 | 6b | Hierarchical retrieval (session → turn within session) | same files | +1–3 pp on multi_hop/temporal | medium | pending |
 | 7 | Time-aware re-ranking for `temporal` category | `crates/vestige-core/src/search/temporal.rs` | +3–8 abs. on temporal | medium | pending |
 
-Tier 3 #6 done in a follow-up commit: `LOCOMO_CHUNK_LEVEL=turn` ingests each turn as a separate memory. No core changes, harness only. Tier 3 #6b (true hierarchy — find session first, then drill into its turns) is the next step; current implementation is "flat turn-level" and may double-retrieve turns from the same session at the cost of crowding out other sessions. Hybrid (`session ∪ turn`) was sketched but not run yet because flat turn-level already net positive.
+Stage 3 #6 done in a follow-up commit: `LOCOMO_CHUNK_LEVEL=turn` ingests each turn as a separate memory. No core changes, harness only. Stage 3 #6b (true hierarchy — find session first, then drill into its turns) is the next step; current implementation is "flat turn-level" and may double-retrieve turns from the same session at the cost of crowding out other sessions. Hybrid (`session ∪ turn`) was sketched but not run yet because flat turn-level already net positive.
 
-### Tier 4 — typed memory (ENGRAM-style)
+### Stage 4 — typed memory (ENGRAM-style)
 
 | # | Change | Where | Expected uplift | Cost |
 |---|---|---|---|---|
@@ -281,7 +281,7 @@ Tier 3 #6 done in a follow-up commit: `LOCOMO_CHUNK_LEVEL=turn` ingests each tur
 
 ENGRAM showed +15 abs. on LongMemEval with this. Big rewrite — not in this PR.
 
-### Tier 5 — long-list aggregation (already partially in Tier 2)
+### Stage 5 — long-list aggregation (already partially in Stage 2)
 
 | # | Change | Where | Expected uplift | Cost |
 |---|---|---|---|---|
@@ -318,20 +318,20 @@ up, and call it a win. We avoid this with:
 
 ## What this PR delivers
 
-- ✅ Tier 1 #1 — Jina v2 reranker wired into the harness (`LOCOMO_USE_RERANKER`,
+- ✅ Stage 1 #1 — Jina v2 reranker wired into the harness (`LOCOMO_USE_RERANKER`,
   default on; `LOCOMO_OVERFETCH=50`, `LOCOMO_TOPK=10`).
-- ✅ Tier 1 #2 — `evaluate.py` default judge is now `gpt-4o`.
-- ✅ Tier 1 #3 — `evaluate.py` defaults to top-10 contexts × 12 000 total char
+- ✅ Stage 1 #2 — `evaluate.py` default judge is now `gpt-4o`.
+- ✅ Stage 1 #3 — `evaluate.py` defaults to top-10 contexts × 12 000 total char
   budget (was top-3 × 800 char hard cap). Hard cap is still honourable via
   `LOCOMO_CONTEXT_MAX_CHARS=…` for back-compat reproductions.
-- ✅ Tier 2 #4 — Score-adaptive truncation with sentence-aware boundaries.
-- ✅ Tier 2 #5 — List-question detection + aggregation hint in answerer prompt.
+- ✅ Stage 2 #4 — Score-adaptive truncation with sentence-aware boundaries.
+- ✅ Stage 2 #5 — List-question detection + aggregation hint in answerer prompt.
 - ✅ Output format records the full pipeline config + sample params for
   reproducibility.
 
 ## What this PR does NOT change
 
-- Storage schema, retrieval algorithm core, or memory model. Tier 3 and 4 are
+- Storage schema, retrieval algorithm core, or memory model. Stage 3 and 4 are
   on the roadmap but require careful design and ablation; they belong in
   follow-up PRs with their own benchmarks.
 - The MCP-facing `tools/search_unified` is unchanged. The harness still
@@ -341,7 +341,7 @@ up, and call it a win. We avoid this with:
 ## Open work
 
 - LongMemEval-S harness (hold-out benchmark for transfer claims).
-- Turn-level chunking with hierarchical retrieval (Tier 3).
-- ENGRAM-style typed memory and per-type routing (Tier 4).
+- Turn-level chunking with hierarchical retrieval (Stage 3).
+- ENGRAM-style typed memory and per-type routing (Stage 4).
 - Stratified sampling for `LOCOMO_SAMPLE` so the per-category mix is
   representative even at N=100.

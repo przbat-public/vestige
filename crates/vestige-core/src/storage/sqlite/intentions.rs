@@ -7,7 +7,7 @@
 //! load when reading the storage layer.
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
 use super::{IntentionRecord, Result, Storage, StorageError};
 
@@ -15,9 +15,12 @@ impl Storage {
     /// Save an intention to the database
     pub fn save_intention(&self, intention: &IntentionRecord) -> Result<()> {
         let tags_json = serde_json::to_string(&intention.tags).unwrap_or_else(|_| "[]".to_string());
-        let related_json = serde_json::to_string(&intention.related_memories).unwrap_or_else(|_| "[]".to_string());
+        let related_json =
+            serde_json::to_string(&intention.related_memories).unwrap_or_else(|_| "[]".to_string());
 
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "INSERT OR REPLACE INTO intentions (
@@ -50,11 +53,11 @@ impl Storage {
 
     /// Get an intention by ID
     pub fn get_intention(&self, id: &str) -> Result<Option<IntentionRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT * FROM intentions WHERE id = ?1"
-        )?;
+        let mut stmt = reader.prepare("SELECT * FROM intentions WHERE id = ?1")?;
 
         stmt.query_row(params![id], Self::row_to_intention)
             .optional()
@@ -63,7 +66,9 @@ impl Storage {
 
     /// Get all active intentions
     pub fn get_active_intentions(&self) -> Result<Vec<IntentionRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT * FROM intentions WHERE status = 'active' ORDER BY priority DESC, created_at ASC"
@@ -79,10 +84,12 @@ impl Storage {
 
     /// Get intentions by status
     pub fn get_intentions_by_status(&self, status: &str) -> Result<Vec<IntentionRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
-            "SELECT * FROM intentions WHERE status = ?1 ORDER BY priority DESC, created_at ASC"
+            "SELECT * FROM intentions WHERE status = ?1 ORDER BY priority DESC, created_at ASC",
         )?;
 
         let rows = stmt.query_map(params![status], Self::row_to_intention)?;
@@ -96,9 +103,15 @@ impl Storage {
     /// Update intention status
     pub fn update_intention_status(&self, id: &str, status: &str) -> Result<bool> {
         let now = Utc::now();
-        let fulfilled_at = if status == "fulfilled" { Some(now.to_rfc3339()) } else { None };
+        let fulfilled_at = if status == "fulfilled" {
+            Some(now.to_rfc3339())
+        } else {
+            None
+        };
 
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let rows = writer.execute(
             "UPDATE intentions SET status = ?1, fulfilled_at = ?2 WHERE id = ?3",
@@ -109,7 +122,9 @@ impl Storage {
 
     /// Delete an intention
     pub fn delete_intention(&self, id: &str) -> Result<bool> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let rows = writer.execute("DELETE FROM intentions WHERE id = ?1", params![id])?;
         Ok(rows > 0)
@@ -118,7 +133,9 @@ impl Storage {
     /// Get overdue intentions
     pub fn get_overdue_intentions(&self) -> Result<Vec<IntentionRecord>> {
         let now = Utc::now().to_rfc3339();
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT * FROM intentions WHERE status = 'active' AND deadline IS NOT NULL AND deadline < ?1 ORDER BY deadline ASC"
@@ -134,7 +151,9 @@ impl Storage {
 
     /// Snooze an intention
     pub fn snooze_intention(&self, id: &str, until: DateTime<Utc>) -> Result<bool> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let rows = writer.execute(
             "UPDATE intentions SET status = 'snoozed', snoozed_until = ?1 WHERE id = ?2",

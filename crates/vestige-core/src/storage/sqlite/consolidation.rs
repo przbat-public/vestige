@@ -55,20 +55,24 @@ impl Storage {
         let mut promoted = 0i64;
         {
             let candidates: Vec<(String, f64, f64)> = {
-                let reader = self.reader.lock()
+                let reader = self
+                    .reader
+                    .lock()
                     .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
                 reader
                     .prepare(
                         "SELECT id, sentiment_magnitude, storage_strength
                          FROM knowledge_nodes
-                         WHERE storage_strength < 10.0"
+                         WHERE storage_strength < 10.0",
                     )?
                     .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
                     .filter_map(|r| r.ok())
                     .collect()
             };
 
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             for (id, sentiment_mag, storage_strength) in &candidates {
                 if sleep.should_promote(*sentiment_mag, *storage_strength) {
@@ -118,7 +122,8 @@ impl Storage {
                 let engine = crate::consolidation::phases::DreamEngine::new();
                 let mut emotional = crate::neuroscience::emotional_memory::EmotionalMemory::new();
                 let importance = crate::neuroscience::importance_signals::ImportanceSignals::new();
-                let mut synaptic = crate::neuroscience::synaptic_tagging::SynapticTaggingSystem::new();
+                let mut synaptic =
+                    crate::neuroscience::synaptic_tagging::SynapticTaggingSystem::new();
 
                 let result = engine.run(&recent, &mut emotional, &importance, &mut synaptic);
 
@@ -145,10 +150,16 @@ impl Storage {
                 let now = Utc::now();
                 for conn in &result.creative_connections {
                     let link_type = match conn.connection_type {
-                        crate::consolidation::phases::CreativeConnectionType::CrossDomain => "semantic",
+                        crate::consolidation::phases::CreativeConnectionType::CrossDomain => {
+                            "semantic"
+                        }
                         crate::consolidation::phases::CreativeConnectionType::Causal => "causal",
-                        crate::consolidation::phases::CreativeConnectionType::Complementary => "complementary",
-                        crate::consolidation::phases::CreativeConnectionType::Contradictory => "contradiction",
+                        crate::consolidation::phases::CreativeConnectionType::Complementary => {
+                            "complementary"
+                        }
+                        crate::consolidation::phases::CreativeConnectionType::Contradictory => {
+                            "contradiction"
+                        }
                     };
                     let record = ConnectionRecord {
                         source_id: conn.memory_a_id.clone(),
@@ -216,24 +227,25 @@ impl Storage {
                 tracing::warn!(error = %e, "Consolidation: failed to load nodes for state transitions");
                 vec![]
             });
-            let mut lifecycles: Vec<crate::neuroscience::memory_states::MemoryLifecycle> = all_nodes
-                .iter()
-                .map(|n| {
-                    let mut lc = crate::neuroscience::memory_states::MemoryLifecycle::new();
-                    lc.last_access = n.last_accessed;
-                    lc.access_count = n.reps as u32;
-                    lc.state = if n.retention_strength > 0.7 {
-                        crate::neuroscience::memory_states::MemoryState::Active
-                    } else if n.retention_strength > 0.3 {
-                        crate::neuroscience::memory_states::MemoryState::Dormant
-                    } else if n.retention_strength > 0.1 {
-                        crate::neuroscience::memory_states::MemoryState::Silent
-                    } else {
-                        crate::neuroscience::memory_states::MemoryState::Unavailable
-                    };
-                    lc
-                })
-                .collect();
+            let mut lifecycles: Vec<crate::neuroscience::memory_states::MemoryLifecycle> =
+                all_nodes
+                    .iter()
+                    .map(|n| {
+                        let mut lc = crate::neuroscience::memory_states::MemoryLifecycle::new();
+                        lc.last_access = n.last_accessed;
+                        lc.access_count = n.reps as u32;
+                        lc.state = if n.retention_strength > 0.7 {
+                            crate::neuroscience::memory_states::MemoryState::Active
+                        } else if n.retention_strength > 0.3 {
+                            crate::neuroscience::memory_states::MemoryState::Dormant
+                        } else if n.retention_strength > 0.1 {
+                            crate::neuroscience::memory_states::MemoryState::Silent
+                        } else {
+                            crate::neuroscience::memory_states::MemoryState::Unavailable
+                        };
+                        lc
+                    })
+                    .collect();
             let batch_result = service.batch_update(&mut lifecycles);
             _state_transitions = batch_result.total_transitions as i64;
         }
@@ -250,11 +262,12 @@ impl Storage {
         // 13. FTS5 index optimization — merge segments for faster keyword search
         // 14. Run PRAGMA optimize to refresh query planner statistics
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-            let _ = writer.execute_batch(
-                "INSERT INTO knowledge_fts(knowledge_fts) VALUES('optimize');"
-            );
+            let _ = writer
+                .execute_batch("INSERT INTO knowledge_fts(knowledge_fts) VALUES('optimize');");
             let _ = writer.execute_batch("PRAGMA optimize;");
         }
 
@@ -300,7 +313,9 @@ impl Storage {
 
         // Record consolidation history
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             let _ = writer.execute(
                 "INSERT INTO consolidation_history (completed_at, duration_ms, memories_replayed, duplicates_merged, activations_computed, w20_optimized)
@@ -358,8 +373,10 @@ impl Storage {
                 if consumed.contains(&all_embeddings[j].0) {
                     continue;
                 }
-                let sim =
-                    crate::embeddings::cosine_similarity(&all_embeddings[i].1, &all_embeddings[j].1);
+                let sim = crate::embeddings::cosine_similarity(
+                    &all_embeddings[i].1,
+                    &all_embeddings[j].1,
+                );
                 if sim >= SIMILARITY_THRESHOLD {
                     cluster.push((j, sim));
                 }
@@ -371,7 +388,9 @@ impl Storage {
 
             // Find the strongest node (highest retention_strength)
             let anchor_id = &all_embeddings[i].0;
-            let reader = self.reader.lock()
+            let reader = self
+                .reader
+                .lock()
                 .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
             let anchor_retention: f64 = reader
                 .query_row(
@@ -467,7 +486,9 @@ impl Storage {
         let now = Utc::now();
 
         let node_ids: Vec<String> = {
-            let reader = self.reader.lock()
+            let reader = self
+                .reader
+                .lock()
                 .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
             reader
                 .prepare("SELECT DISTINCT node_id FROM memory_access_log")?
@@ -481,7 +502,9 @@ impl Storage {
         }
 
         let mut count = 0i64;
-        let mut writer = self.writer.lock()
+        let mut writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let tx = writer.transaction()?;
 
@@ -527,7 +550,9 @@ impl Storage {
     /// Prune old access log entries (keep last 90 days)
     fn prune_access_log(&self) -> Result<i64> {
         let cutoff = (Utc::now() - Duration::days(90)).to_rfc3339();
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let deleted = writer.execute(
             "DELETE FROM memory_access_log WHERE accessed_at < ?1",
@@ -541,15 +566,15 @@ impl Storage {
     fn optimize_w20_if_ready(&self) -> Result<Option<f64>> {
         use crate::fsrs::{FSRSOptimizer, ReviewLog};
 
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
 
         let access_count: i64 = reader
-            .query_row(
-                "SELECT COUNT(*) FROM memory_access_log",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM memory_access_log", [], |row| {
+                row.get(0)
+            })
             .unwrap_or(0);
 
         if access_count < 100 {
@@ -617,7 +642,9 @@ impl Storage {
 
         // Save to config
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute(
                 "INSERT OR REPLACE INTO fsrs_config (key, value, updated_at)
@@ -626,7 +653,10 @@ impl Storage {
             )?;
         }
 
-        tracing::info!(w20 = optimized_w20, "Personalized w20 optimized from access history");
+        tracing::info!(
+            w20 = optimized_w20,
+            "Personalized w20 optimized from access history"
+        );
 
         Ok(Some(optimized_w20))
     }
@@ -635,17 +665,20 @@ impl Storage {
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     fn generate_missing_embeddings(&self) -> Result<i64> {
         if !self.embedding_service.is_ready()
-            && let Err(e) = self.embedding_service.init() {
-                tracing::warn!("Could not initialize embedding model: {}", e);
-                return Ok(0);
-            }
+            && let Err(e) = self.embedding_service.init()
+        {
+            tracing::warn!("Could not initialize embedding model: {}", e);
+            return Ok(0);
+        }
 
         // Backfill batch size. 1000 covers most personal databases in a single
         // consolidation cycle. For larger databases, run consolidation multiple
         // times or use the dedicated `regenerate_embeddings` MCP tool which has
         // no per-call cap.
         let nodes: Vec<(String, String)> = {
-            let reader = self.reader.lock()
+            let reader = self
+                .reader
+                .lock()
                 .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
             reader
                 .prepare(

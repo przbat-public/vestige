@@ -5,6 +5,69 @@ All notable changes to Vestige will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] — post-v3.2.1 work
+
+Aggregates the post-v3.2.1 refactor wave (Storage God Object decomposition, MCP tool polish, preprocessing/neuroscience tightening, expanded test coverage) plus the LoCoMo benchmark harness improvements that lifted full N=1540 from 41.00% to 66.17% (+25.17 pp, surpassing LangMem and within 0.71 pp of Mem0). Includes the typed-memory schema/type foundation needed for the upcoming typed-memory work. No public-API removals; all changes default-on but additive at the data layer.
+
+### Added
+
+#### Typed Memory Foundation (`feat(core)`)
+- **`MemoryKind` enum** in `vestige-core::memory` with variants `Raw` (default), `Semantic`, `Episodic`, `Procedural`, `Aggregate`. Existing memories silently default to `Raw` so the change is behaviour-neutral until typed retrievers ship.
+- **6 new optional fields** on `KnowledgeNode` and `IngestInput`: `memory_kind`, `subject`, `predicate`, `object`, `episodic_at`, `procedural_frequency`. Subject/predicate/object align with the relation-extraction triples already emitted by the v3.2 preprocessing pipeline.
+- **SQLite migration V11** adds the columns plus indexes on `memory_kind`, `subject`, `episodic_at`. Migration is forward-only and idempotent.
+- 4 roundtrip/serde/defaults tests for the new fields; all 523 prior tests stay green.
+
+#### LoCoMo Benchmark Harness (`feat(benchmarks)`, `bench(locomo)`)
+- **Jina Reranker v2 wired into the LoCoMo harness** with score-adaptive context budget (12k chars across top-10). Lifted full N=1540 from baseline 41.00% to 54.81%, then to 60.13% with prompt v2 (+19.13 pp cumulative).
+- **Turn-level chunking** (commit `58ecfd4f359`) replaces session-level chunking, lifting full N=1540 to 62.21% (+2.08 pp). Plateau confirmed across hierarchical, hybrid chunk-level, and entity/time rerank ablations.
+- **Typed-memory PoC: `turn_extracted` mode** (commit `8457883181f`) breaks the 64.67% plateau by mixing raw turns with atomic facts in the candidate pool — the cross-encoder picks granularity correctly via similarity. Full N=1540 = **66.17%** (+3.96 pp), R@5 = 78.18%. All four LoCoMo categories positive.
+- **Per-question retrieval routing is NOT required** for the breakthrough — finding documented in commit message and memory. Question classifier MVP can ship later as +1-3 pp polish on category-confusable queries.
+- LoCoMo current ranking: Vestige 66.17% beats LangMem (58.10%) by 8.07 pp, within 0.71 pp of Mem0 (66.88%); Mem0-Graph (68.44%) and Zep (75.14%) remain ahead.
+
+### Changed
+
+#### `smart_ingest` Concurrency Hardening (`refactor(mcp)`)
+- The `force_create` path now runs the duplicate-similarity probe and the ingest call together inside a single `tokio::task::spawn_blocking` — previously only the ingest was offloaded, so the probe could briefly block the async runtime on a SQLite-bound thread. Same fix applied to the `force_create` branch without embeddings.
+- Error flow normalised: `spawn_blocking` panics surface as `"smart_ingest force_create task panicked: {e}"` with `??` propagation instead of silently `unwrap()`ing the `JoinError`.
+
+#### Storage God Object Decomposition Polish (`refactor(core)`)
+- Follow-up tightening of every `storage/sqlite/*` submodule that was extracted in commit `78810bd5f2d`. Hot paths (history, states, consolidation, intentions, maintenance, nodes, review, embeddings) gained ~536 insertions across 17 files — extracted helpers, narrowed visibility, removed cross-module borrows that the initial split left behind.
+- `vestige-core::lib.rs` re-export block reformatted with explicit per-symbol lines so future additions don't trigger noisy multi-line diffs. `CandidateMemory` (Prediction Error Gating) added to the public re-exports.
+
+#### Dashboard Handlers Decomposition (`refactor(mcp)`)
+- `crates/vestige-mcp/src/dashboard/handlers/` split from a single monolithic file into per-domain modules: `cognitive`, `graph`, `history`, `intentions`, `maintenance`, `memory`, `metacognitive`, `observability`, `pages`, `review`, `search`. Mirrors the `tools/` layout so observers know where each REST endpoint lives.
+
+#### Preprocessing Pipeline Polish (`refactor(core)`)
+- `entities.rs` (+114/-54): broader URL/email/path regex coverage, deduplication of overlapping matches, person/org classification heuristic tightened.
+- `coref.rs` (+78/-25): pronoun-resolution gating refined — only rewrites when there's a single unambiguous referent in the recent context window.
+- `relations.rs`, `temporal.rs`, `provenance.rs`: smaller-but-real changes to triple extraction, date-range handling, and JSON shape stability.
+
+#### Neuroscience Modules Polish (`refactor(core)`)
+- `emotional_memory.rs` (+146/-48) — substantial expansion: more emotion categories, sharper magnitude scoring, integration hooks for the consolidation phases.
+- `spreading_activation.rs` (+81/-27) — refined activation decay, link-type weighting, and per-hop bookkeeping; aligns with the cognitive-role grouping documented in commit `c9069fd50fc`.
+- `mod.rs`, `consolidation/phases.rs`, `synaptic_tagging.rs`: signature consistency and documentation.
+
+#### MCP Tools Polish (`refactor(mcp)`)
+- `~2127 insertions across 23 tool files`. Largest changes (excluding `smart_ingest`): `search_unified` (+247), `dream` (+190), `cross_reference` (+188), `maintenance` (+197), `memory_unified` (+132), `intention_unified` (+147), `confidence` (+115), `reflect` (+86), `temporal` (+81), `session_context` (+103). Mostly extracted helpers, sharpened error messages, and tightened argument validation.
+- `tools/cross_reference.rs` retained as backward-compatible alias for the v3.2 `deep_reference` tool.
+
+### Removed
+- **Dead deprecated tool dispatch and implementations** (`refactor(mcp)`, commit `e9026d6f9e6`) — see commit body for the full list. None were declared in the public catalog.
+- **`crates/vestige-core/src/bin/`** test/bench shims moved into the proper `tests/` directory tree (commit `ba4df157790`).
+
+### Documentation
+- `crates/vestige-core/src/neuroscience/mod.rs` and submodules now document the cognitive-role grouping (encoding vs retrieval vs consolidation) instead of the prior alphabetical layout (commit `c9069fd50fc`).
+
+### Tests
+- **Cognitive test suite expanded**: `psychology_tests.rs` (+747/-138, U-shaped curve, rehearsal, delay, spacing, distinctiveness), `comparative_benchmarks.rs` (+264/-96), `neuroscience_tests.rs` (+174/-74), `spreading_activation_tests.rs` (+161/-36), `dreams_tests.rs` (+21).
+- **Extreme suite expanded**: `benchmark_retrieval.rs` (+330/-81), `proof_of_superiority.rs` (+125/-38), `research_validation_tests.rs` (+124/-34), `adversarial_tests.rs` (+87/-26).
+- **Journey suite expanded**: `spreading_activation.rs` (+184/-34), `preprocessing_pipeline.rs` (+122/-44), `import_export.rs` (+73), `consolidation_workflow.rs` (+67).
+- **MCP suite**: `tool_tests.rs` (+79), `protocol_tests.rs` (+112/-32).
+- **Scientific validation**: `scientific_validation.rs` (+219/-71), `cognitive_journey_tests.rs` (+73/-29), `benchmark_eval.rs` (+166/-45).
+- Workspace verification on this snapshot: `cargo build --workspace` OK in 13s, `cargo test --workspace` 324 lib + 4 doc tests passing, `cargo clippy --workspace --all-targets` produces zero warnings, `cargo fmt --check` clean.
+
+---
+
 ## [3.2.1] - 2026-05-12 — "Workspace Cleanup"
 
 Internal release. Audits and tightens the workspace: synchronises version metadata, activates the previously-inert Content Intelligence Pipeline in production binaries, fixes several latent correctness bugs in `smart_ingest` and the consolidation scheduler, hydrates cognitive state from storage on restart, removes ~96 KB of unreferenced legacy tool code, splits `server.rs` and `vestige-restore` into focused modules/crates, and adds CI guards against future metadata drift. No behaviour changes for downstream consumers using the default feature set.
@@ -25,7 +88,7 @@ Internal release. Audits and tightens the workspace: synchronises version metada
 - `scripts/check-version-and-tools.sh` and a `metadata` CI job that fails when version inheritance breaks, when crates carry hardcoded versions, when the advertised tool count diverges from the catalog module, or when README/ARCHITECTURE tool counts drift.
 - `scripts/audit-deps.sh` — local dependency audit (duplicates, outdated, advisories, geiger, top-10 tree size) for use before bumping `fastembed`/`tokenizers`/`axum`.
 - Release profile `dist` (inherits release, `opt-level = "z"` + `lto = "fat"`) for size-optimised builds; default `[profile.release]` switches from `opt-level = "z"` to `opt-level = 3` to recover the throughput lost on the hot path (search, BM25, RRF, embeddings).
-- `..Default::default()` on all `IngestInput` test literals — without it, adding new Tier-4 fields (`memory_kind`, `subject`, `predicate`, `object`, `episodic_at`, `procedural_frequency`) would silently break the lib-test build.
+- `..Default::default()` on all `IngestInput` test literals — without it, adding new typed-memory fields (`memory_kind`, `subject`, `predicate`, `object`, `episodic_at`, `procedural_frequency`) would silently break the lib-test build.
 - New crate `vestige-restore` (`crates/vestige-restore/`) housing the JSON-backup importer. It depends on `vestige-core` with `default-features = false`, so the binary builds without fastembed or USearch. The release workflow now builds it explicitly; embeddings can be backfilled afterwards via the `regenerate_embeddings` MCP tool.
 - `server/catalog.rs` exposes `build_tools_list` / `build_resources_list` so the 27-tool and 11-resource catalogs live in one focused module instead of being inlined in `server.rs`. Five accompanying tests (`tools_list_has_exactly_27_entries`, `tool_names_are_unique`, `tool_names_are_snake_case`, `every_tool_schema_has_object_type_and_consistent_required`, `every_resource_uri_has_scheme`) catch drift before the CI guard runs.
 - `vestige-core` `lib.rs` documents the API stability tiers (prelude is stable; other re-exports may shift; `pub(crate)` is internal) so future audits have a clear contract.

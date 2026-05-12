@@ -9,14 +9,14 @@
 //!
 //! Based on mathematical foundations of memory systems and neuroscience
 
-use vestige_core::neuroscience::spreading_activation::{
-    ActivationConfig, ActivationNetwork, LinkType,
-};
+use chrono::{Duration, Utc};
+use std::collections::HashMap;
 use vestige_core::neuroscience::hippocampal_index::{
     BarcodeGenerator, HippocampalIndex, INDEX_EMBEDDING_DIM,
 };
-use chrono::{Duration, Utc};
-use std::collections::HashMap;
+use vestige_core::neuroscience::spreading_activation::{
+    ActivationConfig, ActivationNetwork, LinkType,
+};
 
 // ============================================================================
 // EXPONENTIAL DECAY VALIDATION (1 test)
@@ -43,7 +43,7 @@ fn test_math_exponential_decay_law() {
             format!("node_{}", i),
             format!("node_{}", i + 1),
             LinkType::Semantic,
-            1.0,  // Unit weight to isolate decay effect
+            1.0, // Unit weight to isolate decay effect
         );
     }
 
@@ -218,10 +218,10 @@ fn test_math_activation_bounds() {
     // Total activation should be bounded
     // (for a tree with decay d, total <= 1 / (1 - d) for geometric series)
     let total_activation: f64 = results.iter().map(|r| r.activation).sum();
-    let theoretical_max = 1.0 / (1.0 - 0.8);  // = 5.0 for infinite series
+    let theoretical_max = 1.0 / (1.0 - 0.8); // = 5.0 for infinite series
 
     assert!(
-        total_activation < theoretical_max * 3.0,  // Allow margin for fan-out and multi-source
+        total_activation < theoretical_max * 3.0, // Allow margin for fan-out and multi-source
         "Total activation should be bounded: {} < {}",
         total_activation,
         theoretical_max * 3.0
@@ -276,7 +276,8 @@ fn test_math_barcode_statistics() {
 
     // Test 3: Content fingerprints should be mostly unique
     // (with 10000 samples, collision probability is low for good hash)
-    let unique_fingerprints: std::collections::HashSet<u32> = fingerprints.iter().copied().collect();
+    let unique_fingerprints: std::collections::HashSet<u32> =
+        fingerprints.iter().copied().collect();
     let uniqueness_ratio = unique_fingerprints.len() as f64 / num_barcodes as f64;
 
     assert!(
@@ -322,9 +323,7 @@ fn test_math_embedding_dimensions() {
     let now = Utc::now();
 
     // Create full-size embedding (384 dimensions)
-    let full_embedding: Vec<f32> = (0..384)
-        .map(|i| (i as f32 / 384.0).sin())
-        .collect();
+    let full_embedding: Vec<f32> = (0..384).map(|i| (i as f32 / 384.0).sin()).collect();
 
     // Index memory with embedding
     let result = index.index_memory(
@@ -340,8 +339,7 @@ fn test_math_embedding_dimensions() {
     // Verify index stats show correct dimensions
     let stats = index.stats();
     assert_eq!(
-        stats.index_dimensions,
-        INDEX_EMBEDDING_DIM,
+        stats.index_dimensions, INDEX_EMBEDDING_DIM,
         "Index should use compressed embedding dimension ({})",
         INDEX_EMBEDDING_DIM
     );

@@ -22,19 +22,39 @@
 use chrono::{Duration, Utc};
 use vestige_core::{
     // Advanced reconsolidation
-    AccessContext, AccessTrigger, Modification, ReconsolidationManager, RelationshipType,
-    // FSRS
-    Rating, retrievability, retrievability_with_decay, initial_difficulty,
-    next_interval, FSRSScheduler,
-    // Neuroscience - Synaptic Tagging
-    SynapticTaggingSystem, ImportanceEvent, ImportanceEventType,
-    CaptureWindow, DecayFunction,
-    // Neuroscience - Memory States
-    MemoryState, MemoryLifecycle, AccessibilityCalculator,
-    CompetitionManager, CompetitionCandidate,
+    AccessContext,
+    AccessTrigger,
+    AccessibilityCalculator,
+    ArousalSignal,
+    AttentionSession,
+    AttentionSignal,
+    CaptureWindow,
+    CompetitionCandidate,
+    CompetitionManager,
+    DecayFunction,
+    FSRSScheduler,
+    ImportanceContext,
+    ImportanceEvent,
+    ImportanceEventType,
     // Neuroscience - Importance Signals
-    ImportanceSignals, NoveltySignal, ArousalSignal, RewardSignal, AttentionSignal,
-    ImportanceContext, AttentionSession, OutcomeType,
+    ImportanceSignals,
+    MemoryLifecycle,
+    // Neuroscience - Memory States
+    MemoryState,
+    Modification,
+    NoveltySignal,
+    OutcomeType,
+    // FSRS
+    Rating,
+    ReconsolidationManager,
+    RelationshipType,
+    RewardSignal,
+    // Neuroscience - Synaptic Tagging
+    SynapticTaggingSystem,
+    initial_difficulty,
+    next_interval,
+    retrievability,
+    retrievability_with_decay,
 };
 
 // ============================================================================
@@ -91,7 +111,12 @@ fn test_stc_prp_trigger_captures_memories() {
 
     // The tagged memory should be captured
     assert!(result.has_captures());
-    assert!(result.captured_memories.iter().any(|c| c.memory_id == "mem-background"));
+    assert!(
+        result
+            .captured_memories
+            .iter()
+            .any(|c| c.memory_id == "mem-background")
+    );
     assert!(stc.is_captured("mem-background"));
 }
 
@@ -140,13 +165,20 @@ fn test_stc_capture_window_probability() {
 
     // Memory just before event - high probability (exponential decay with λ=4.605/9)
     let recent_before = event_time - Duration::hours(1);
-    let prob_recent = window.capture_probability(recent_before, event_time).unwrap();
+    let prob_recent = window
+        .capture_probability(recent_before, event_time)
+        .unwrap();
     // At 1h out of 9h with exponential decay: e^(-4.605/9 * 1) ≈ 0.6
-    assert!(prob_recent > 0.5, "Recent memory should have high capture probability");
+    assert!(
+        prob_recent > 0.5,
+        "Recent memory should have high capture probability"
+    );
 
     // Memory 6 hours before event - moderate probability
     let medium_before = event_time - Duration::hours(6);
-    let prob_medium = window.capture_probability(medium_before, event_time).unwrap();
+    let prob_medium = window
+        .capture_probability(medium_before, event_time)
+        .unwrap();
     assert!(prob_medium > 0.0 && prob_medium < prob_recent);
 
     // Memory outside window - no capture
@@ -165,14 +197,26 @@ fn test_stc_decay_functions() {
     let exp_at_half = exp_decay.apply(1.0, 6.0, 12.0);
     let exp_at_end = exp_decay.apply(1.0, 12.0, 12.0);
 
-    assert!((exp_at_zero - 1.0).abs() < 0.01, "Should be full strength at t=0");
-    assert!(exp_at_half > 0.0 && exp_at_half < 0.5, "Significant decay at halfway");
+    assert!(
+        (exp_at_zero - 1.0).abs() < 0.01,
+        "Should be full strength at t=0"
+    );
+    assert!(
+        exp_at_half > 0.0 && exp_at_half < 0.5,
+        "Significant decay at halfway"
+    );
     assert!(exp_at_end < 0.02, "Near zero at lifetime end");
 
     // Linear decay
     let linear_decay = DecayFunction::Linear;
-    assert!((linear_decay.apply(1.0, 5.0, 10.0) - 0.5).abs() < 0.01, "Linear: 50% at halfway");
-    assert!((linear_decay.apply(1.0, 10.0, 10.0) - 0.0).abs() < 0.01, "Linear: 0% at end");
+    assert!(
+        (linear_decay.apply(1.0, 5.0, 10.0) - 0.5).abs() < 0.01,
+        "Linear: 50% at halfway"
+    );
+    assert!(
+        (linear_decay.apply(1.0, 10.0, 10.0) - 0.0).abs() < 0.01,
+        "Linear: 0% at end"
+    );
 
     // Power decay (matches FSRS-6)
     let power_decay = DecayFunction::Power;
@@ -259,7 +303,10 @@ fn test_reconsolidation_marks_memory_labile() {
     let snapshot = vestige_core::MemorySnapshot::capture(
         "Test content".to_string(),
         vec!["test".to_string()],
-        0.8, 5.0, 0.9, vec![],
+        0.8,
+        5.0,
+        0.9,
+        vec![],
     );
 
     manager.mark_labile("mem-123", snapshot);
@@ -277,22 +324,30 @@ fn test_reconsolidation_apply_modifications() {
     let snapshot = vestige_core::MemorySnapshot::capture(
         "Original content".to_string(),
         vec!["original".to_string()],
-        0.8, 5.0, 0.9, vec![],
+        0.8,
+        5.0,
+        0.9,
+        vec![],
     );
 
     manager.mark_labile("mem-123", snapshot);
 
     // Apply various modifications
-    let success1 = manager.apply_modification("mem-123", Modification::AddTag {
-        tag: "new-tag".to_string(),
-    });
-    let success2 = manager.apply_modification("mem-123", Modification::BoostRetrieval {
-        boost: 0.1,
-    });
-    let success3 = manager.apply_modification("mem-123", Modification::LinkMemory {
-        related_memory_id: "mem-456".to_string(),
-        relationship: RelationshipType::Supports,
-    });
+    let success1 = manager.apply_modification(
+        "mem-123",
+        Modification::AddTag {
+            tag: "new-tag".to_string(),
+        },
+    );
+    let success2 =
+        manager.apply_modification("mem-123", Modification::BoostRetrieval { boost: 0.1 });
+    let success3 = manager.apply_modification(
+        "mem-123",
+        Modification::LinkMemory {
+            related_memory_id: "mem-456".to_string(),
+            relationship: RelationshipType::Supports,
+        },
+    );
 
     assert!(success1 && success2 && success3);
     assert_eq!(manager.get_stats().total_modifications, 3);
@@ -307,16 +362,25 @@ fn test_reconsolidation_finalizes_changes() {
     let snapshot = vestige_core::MemorySnapshot::capture(
         "Content".to_string(),
         vec!["tag".to_string()],
-        0.8, 5.0, 0.9, vec![],
+        0.8,
+        5.0,
+        0.9,
+        vec![],
     );
 
     manager.mark_labile("mem-123", snapshot);
-    manager.apply_modification("mem-123", Modification::AddTag {
-        tag: "new-tag".to_string(),
-    });
-    manager.apply_modification("mem-123", Modification::AddContext {
-        context: "Important meeting notes".to_string(),
-    });
+    manager.apply_modification(
+        "mem-123",
+        Modification::AddTag {
+            tag: "new-tag".to_string(),
+        },
+    );
+    manager.apply_modification(
+        "mem-123",
+        Modification::AddContext {
+            context: "Important meeting notes".to_string(),
+        },
+    );
 
     let result = manager.reconsolidate("mem-123");
 
@@ -333,10 +397,8 @@ fn test_reconsolidation_finalizes_changes() {
 #[test]
 fn test_reconsolidation_tracks_access_context() {
     let mut manager = ReconsolidationManager::new();
-    let snapshot = vestige_core::MemorySnapshot::capture(
-        "Content".to_string(),
-        vec![], 0.8, 5.0, 0.9, vec![],
-    );
+    let snapshot =
+        vestige_core::MemorySnapshot::capture("Content".to_string(), vec![], 0.8, 5.0, 0.9, vec![]);
     let context = AccessContext {
         trigger: AccessTrigger::Search,
         query: Some("test query".to_string()),
@@ -357,10 +419,8 @@ fn test_reconsolidation_tracks_access_context() {
 #[test]
 fn test_reconsolidation_retrieval_history() {
     let mut manager = ReconsolidationManager::new();
-    let snapshot = vestige_core::MemorySnapshot::capture(
-        "Content".to_string(),
-        vec![], 0.8, 5.0, 0.9, vec![],
-    );
+    let snapshot =
+        vestige_core::MemorySnapshot::capture("Content".to_string(), vec![], 0.8, 5.0, 0.9, vec![]);
 
     // Multiple retrievals
     for _ in 0..3 {
@@ -417,8 +477,10 @@ fn test_fsrs_custom_decay_parameter() {
     let r_high_decay = retrievability_with_decay(stability, elapsed, 0.5);
 
     // Lower decay = steeper curve = lower retrievability for same time
-    assert!(r_low_decay < r_high_decay,
-        "Lower decay parameter should result in faster forgetting");
+    assert!(
+        r_low_decay < r_high_decay,
+        "Lower decay parameter should result in faster forgetting"
+    );
 }
 
 /// Test interval calculation round-trips with retrievability.
@@ -436,7 +498,9 @@ fn test_fsrs_interval_retrievability_roundtrip() {
     assert!(
         (actual_r - target_r).abs() < 0.05,
         "Round-trip: interval={}, actual_R={:.3}, target_R={:.3}",
-        interval, actual_r, target_r
+        interval,
+        actual_r,
+        target_r
     );
 }
 
@@ -492,7 +556,10 @@ fn test_fsrs_difficulty_mean_reversion() {
     let high_d_after = result.state.difficulty;
 
     // Mean reversion should pull high difficulty down
-    assert!(high_d_after < high_d_before, "High difficulty should decrease");
+    assert!(
+        high_d_after < high_d_before,
+        "High difficulty should decrease"
+    );
 
     // Create card with low difficulty
     let mut low_d_card = scheduler.new_card();
@@ -502,7 +569,10 @@ fn test_fsrs_difficulty_mean_reversion() {
     // Again rating should increase difficulty
     let result = scheduler.review(&low_d_card, Rating::Again, 0.0, None);
     let low_d_after = result.state.difficulty;
-    assert!(low_d_after > low_d_before, "Again should increase low difficulty");
+    assert!(
+        low_d_after > low_d_before,
+        "Again should increase low difficulty"
+    );
 }
 
 /// Test scheduler lapse tracking.
@@ -541,12 +611,18 @@ fn test_memory_state_accessibility_multipliers() {
     assert!((MemoryState::Unavailable.accessibility_multiplier() - 0.05).abs() < 0.001);
 
     // Active > Dormant > Silent > Unavailable
-    assert!(MemoryState::Active.accessibility_multiplier() >
-            MemoryState::Dormant.accessibility_multiplier());
-    assert!(MemoryState::Dormant.accessibility_multiplier() >
-            MemoryState::Silent.accessibility_multiplier());
-    assert!(MemoryState::Silent.accessibility_multiplier() >
-            MemoryState::Unavailable.accessibility_multiplier());
+    assert!(
+        MemoryState::Active.accessibility_multiplier()
+            > MemoryState::Dormant.accessibility_multiplier()
+    );
+    assert!(
+        MemoryState::Dormant.accessibility_multiplier()
+            > MemoryState::Silent.accessibility_multiplier()
+    );
+    assert!(
+        MemoryState::Silent.accessibility_multiplier()
+            > MemoryState::Unavailable.accessibility_multiplier()
+    );
 }
 
 /// Test state retrievability properties.
@@ -589,11 +665,7 @@ fn test_memory_lifecycle_transitions() {
 fn test_memory_state_competition_suppression() {
     let mut lifecycle = MemoryLifecycle::new();
 
-    lifecycle.suppress_from_competition(
-        "winner-123".to_string(),
-        0.85,
-        Duration::hours(2),
-    );
+    lifecycle.suppress_from_competition("winner-123".to_string(), 0.85, Duration::hours(2));
 
     assert_eq!(lifecycle.state, MemoryState::Unavailable);
     assert!(!lifecycle.is_suppression_expired());
@@ -673,7 +745,10 @@ fn test_memory_state_accessibility_calculator() {
 
     assert!(active_threshold < 0.5, "Active has lower threshold");
     assert!(silent_threshold > 0.5, "Silent has higher threshold");
-    assert!(unavailable_threshold > 1.0, "Unavailable is effectively unreachable");
+    assert!(
+        unavailable_threshold > 1.0,
+        "Unavailable is effectively unreachable"
+    );
 }
 
 // ============================================================================
@@ -715,14 +790,19 @@ fn test_importance_arousal_signal() {
     let neutral_score = arousal.compute("The meeting is scheduled for tomorrow at 3pm.");
 
     // Highly emotional content
-    let emotional_score = arousal.compute(
-        "CRITICAL ERROR!!! Production database is DOWN! Data loss imminent!!!"
-    );
+    let emotional_score =
+        arousal.compute("CRITICAL ERROR!!! Production database is DOWN! Data loss imminent!!!");
 
-    assert!(emotional_score > neutral_score,
+    assert!(
+        emotional_score > neutral_score,
         "Emotional content should have higher arousal: {} vs {}",
-        emotional_score, neutral_score);
-    assert!(emotional_score > 0.5, "Highly emotional content should score high");
+        emotional_score,
+        neutral_score
+    );
+    assert!(
+        emotional_score > 0.5,
+        "Highly emotional content should score high"
+    );
 
     // Detect emotional markers
     let markers = arousal.detect_emotional_markers("URGENT: Critical failure!!!");
@@ -742,14 +822,20 @@ fn test_importance_reward_signal() {
     reward.record_outcome("mem-helpful", OutcomeType::Helpful);
 
     let helpful_score = reward.compute("mem-helpful");
-    assert!(helpful_score > 0.5, "Memory with positive outcomes should score high");
+    assert!(
+        helpful_score > 0.5,
+        "Memory with positive outcomes should score high"
+    );
 
     // Record negative outcomes
     reward.record_outcome("mem-unhelpful", OutcomeType::NotHelpful);
     reward.record_outcome("mem-unhelpful", OutcomeType::NotHelpful);
 
     let unhelpful_score = reward.compute("mem-unhelpful");
-    assert!(unhelpful_score < 0.5, "Memory with negative outcomes should score low");
+    assert!(
+        unhelpful_score < 0.5,
+        "Memory with negative outcomes should score low"
+    );
 
     assert!(helpful_score > unhelpful_score);
 }
@@ -770,11 +856,17 @@ fn test_importance_attention_signal() {
         edit_count: 2,
         unique_memories_accessed: 15,
         viewed_docs: true,
-        query_topics: vec!["rust".to_string(), "async".to_string(), "memory".to_string()],
+        query_topics: vec![
+            "rust".to_string(),
+            "async".to_string(),
+            "memory".to_string(),
+        ],
     };
 
-    assert!(attention.detect_learning_mode(&learning_session),
-        "Should detect learning mode from session patterns");
+    assert!(
+        attention.detect_learning_mode(&learning_session),
+        "Should detect learning mode from session patterns"
+    );
 
     // Non-learning session (quick edit)
     let quick_session = AttentionSession {
@@ -788,8 +880,10 @@ fn test_importance_attention_signal() {
         query_topics: vec![],
     };
 
-    assert!(!attention.detect_learning_mode(&quick_session),
-        "Quick edit session should not be learning mode");
+    assert!(
+        !attention.detect_learning_mode(&quick_session),
+        "Quick edit session should not be learning mode"
+    );
 }
 
 /// Test composite importance combines all signals.
@@ -808,9 +902,15 @@ fn test_importance_composite_score() {
         &context,
     );
 
-    assert!(score.composite > 0.4, "Important content should score moderately high");
+    assert!(
+        score.composite > 0.4,
+        "Important content should score moderately high"
+    );
     assert!(score.arousal > 0.4, "Emotional content should have arousal");
-    assert!(score.encoding_boost >= 1.0, "High importance should boost encoding");
+    assert!(
+        score.encoding_boost >= 1.0,
+        "High importance should boost encoding"
+    );
 
     // Verify all components are present
     assert!(score.novelty >= 0.0 && score.novelty <= 1.0);

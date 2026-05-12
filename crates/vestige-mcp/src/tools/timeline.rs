@@ -9,7 +9,6 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-
 use vestige_core::Storage;
 
 use super::search_unified::format_node;
@@ -88,10 +87,7 @@ fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
 }
 
 /// Execute memory_timeline tool
-pub async fn execute(
-    storage: &Arc<Storage>,
-    args: Option<Value>,
-) -> Result<Value, String> {
+pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
     let args: TimelineArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => TimelineArgs {
@@ -130,11 +126,16 @@ pub async fn execute(
 
     let limit = args.limit.unwrap_or(50).clamp(1, 200);
 
-
-    // Query memories in time range
-    let mut results = storage
-        .query_time_range(start, end, limit)
-        .map_err(|e| e.to_string())?;
+    // Query memories in time range on the blocking pool — range scans over
+    // memory_nodes can return hundreds of rows.
+    let storage_clone = storage.clone();
+    let mut results = tokio::task::spawn_blocking(move || {
+        storage_clone
+            .query_time_range(start, end, limit)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("query_time_range task panicked: {}", e))??;
 
     // Post-query filters
     if let Some(ref node_type) = args.node_type {
@@ -195,19 +196,20 @@ mod tests {
     }
 
     async fn ingest_test_memory(storage: &Arc<Storage>, content: &str) {
-        storage.ingest(vestige_core::IngestInput {
-            content: content.to_string(),
-            node_type: "fact".to_string(),
-            source: None,
-            sentiment_score: 0.0,
-            sentiment_magnitude: 0.0,
-            tags: vec!["timeline-test".to_string()],
-            valid_from: None,
-            valid_until: None,
-            provenance: None,
-            ..Default::default()
-        })
-        .unwrap();
+        storage
+            .ingest(vestige_core::IngestInput {
+                content: content.to_string(),
+                node_type: "fact".to_string(),
+                source: None,
+                sentiment_score: 0.0,
+                sentiment_magnitude: 0.0,
+                tags: vec!["timeline-test".to_string()],
+                valid_from: None,
+                valid_until: None,
+                provenance: None,
+                ..Default::default()
+            })
+            .unwrap();
     }
 
     #[test]

@@ -9,7 +9,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-
 use vestige_core::Storage;
 #[cfg(all(feature = "embeddings", feature = "vector-search"))]
 use vestige_core::cosine_similarity;
@@ -89,10 +88,7 @@ impl UnionFind {
     }
 }
 
-pub async fn execute(
-    storage: &Arc<Storage>,
-    args: Option<Value>,
-) -> Result<Value, String> {
+pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
     let args: DedupArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => DedupArgs {
@@ -108,7 +104,6 @@ pub async fn execute(
 
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     {
-
         // Load all embeddings
         let all_embeddings = storage
             .get_all_embeddings()
@@ -191,10 +186,8 @@ pub async fn execute(
         }
 
         // Only keep clusters with >1 member, sorted by size descending
-        let mut clusters: Vec<Vec<usize>> = cluster_map
-            .into_values()
-            .filter(|c| c.len() > 1)
-            .collect();
+        let mut clusters: Vec<Vec<usize>> =
+            cluster_map.into_values().filter(|c| c.len() > 1).collect();
         clusters.sort_by_key(|b| std::cmp::Reverse(b.len()));
         clusters.truncate(limit);
 

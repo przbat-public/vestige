@@ -300,7 +300,11 @@ impl MemoryChainBuilder {
         }
 
         // Sort by score (descending)
-        all_paths.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        all_paths.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Return top paths
         all_paths.into_iter().take(10).collect()

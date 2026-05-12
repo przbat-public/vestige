@@ -577,7 +577,11 @@ mod tests {
         let small: Vec<f32> = vec![3.0, 4.0];
         let result = matryoshka_truncate(small);
 
-        assert_eq!(result.len(), 2, "Vectors smaller than 384 should not be extended");
+        assert_eq!(
+            result.len(),
+            2,
+            "Vectors smaller than 384 should not be extended"
+        );
         // Should still be normalized
         let norm: f32 = result.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 0.001);
@@ -585,9 +589,7 @@ mod tests {
 
     #[test]
     fn test_embedding_from_bytes_roundtrip_384() {
-        let original = Embedding::new(
-            (0..384).map(|i| (i as f32 * 0.001).sin()).collect()
-        );
+        let original = Embedding::new((0..384).map(|i| (i as f32 * 0.001).sin()).collect());
         let bytes = original.to_bytes();
         assert_eq!(bytes.len(), 384 * 4, "384 f32s should be 1536 bytes");
 

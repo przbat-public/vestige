@@ -28,17 +28,18 @@ static RELATION_VERBS: LazyLock<Regex> = LazyLock::new(|| {
 ///
 /// Looks for patterns: `[Entity] [verb phrase] [Entity/noun phrase]`
 /// Only extracts relations where at least the subject is a known entity.
-pub fn extract_relations(
-    content: &str,
-    entities: &[ExtractedEntity],
-) -> Vec<ExtractedRelation> {
+pub fn extract_relations(content: &str, entities: &[ExtractedEntity]) -> Vec<ExtractedRelation> {
     let mut relations = Vec::new();
 
     // Build a set of entity texts for fast lookup
-    let entity_texts: Vec<&str> = entities.iter()
-        .filter(|e| matches!(e.entity_type,
-            EntityType::Person | EntityType::Organization | EntityType::ProperNoun
-        ))
+    let entity_texts: Vec<&str> = entities
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.entity_type,
+                EntityType::Person | EntityType::Organization | EntityType::ProperNoun
+            )
+        })
         .map(|e| e.text.as_str())
         .collect();
 
@@ -76,12 +77,14 @@ fn extract_from_sentence(
         let verb = verb_match.as_str().to_lowercase();
 
         // Find the closest entity BEFORE the verb (subject)
-        let subject = entity_positions.iter()
+        let subject = entity_positions
+            .iter()
             .filter(|&&(entity, pos)| pos + entity.len() <= verb_start)
             .max_by_key(|&&(_, pos)| pos);
 
         // Find the closest entity AFTER the verb (object)
-        let object = entity_positions.iter()
+        let object = entity_positions
+            .iter()
             .filter(|&&(_, pos)| pos >= verb_end)
             .min_by_key(|&&(_, pos)| pos);
 
@@ -112,7 +115,8 @@ fn extract_noun_phrase(text: &str) -> String {
         return String::new();
     }
 
-    let words: Vec<&str> = trimmed.split_whitespace()
+    let words: Vec<&str> = trimmed
+        .split_whitespace()
         .take(5)
         .take_while(|w| {
             let first = w.chars().next().unwrap_or(' ');
@@ -121,23 +125,30 @@ fn extract_noun_phrase(text: &str) -> String {
         .collect();
 
     // Skip leading articles/prepositions
-    let skip = words.iter()
+    let skip = words
+        .iter()
         .take_while(|w| {
             let lower = w.to_lowercase();
-            matches!(lower.as_str(), "the" | "a" | "an" | "to" | "for" | "with" | "on" | "in" | "at")
+            matches!(
+                lower.as_str(),
+                "the" | "a" | "an" | "to" | "for" | "with" | "on" | "in" | "at"
+            )
         })
         .count();
 
     let phrase: Vec<&str> = words.into_iter().skip(skip).take(4).collect();
-    phrase.join(" ").trim_end_matches(|c: char| !c.is_alphanumeric()).to_string()
+    phrase
+        .join(" ")
+        .trim_end_matches(|c: char| !c.is_alphanumeric())
+        .to_string()
 }
 
 fn split_sentences(text: &str) -> Vec<&str> {
-    static SENTENCE_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"[.!?]+\s+|[.!?]+$|\n+").unwrap()
-    });
+    static SENTENCE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"[.!?]+\s+|[.!?]+$|\n+").unwrap());
 
-    SENTENCE_RE.split(text)
+    SENTENCE_RE
+        .split(text)
         .filter(|s| !s.trim().is_empty())
         .collect()
 }
@@ -147,22 +158,34 @@ mod tests {
     use super::*;
 
     fn person(name: &str) -> ExtractedEntity {
-        ExtractedEntity { text: name.to_string(), entity_type: EntityType::Person }
+        ExtractedEntity {
+            text: name.to_string(),
+            entity_type: EntityType::Person,
+        }
     }
 
     fn org(name: &str) -> ExtractedEntity {
-        ExtractedEntity { text: name.to_string(), entity_type: EntityType::Organization }
+        ExtractedEntity {
+            text: name.to_string(),
+            entity_type: EntityType::Organization,
+        }
     }
 
     fn proper(name: &str) -> ExtractedEntity {
-        ExtractedEntity { text: name.to_string(), entity_type: EntityType::ProperNoun }
+        ExtractedEntity {
+            text: name.to_string(),
+            entity_type: EntityType::ProperNoun,
+        }
     }
 
     #[test]
     fn test_basic_relation_extraction() {
         let entities = vec![person("John"), org("Auth Team")];
         let relations = extract_relations("John manages the Auth Team since January.", &entities);
-        assert!(!relations.is_empty(), "Should extract at least one relation");
+        assert!(
+            !relations.is_empty(),
+            "Should extract at least one relation"
+        );
         let r = &relations[0];
         assert_eq!(r.subject, "John");
         assert_eq!(r.predicate, "manages");
@@ -185,11 +208,13 @@ mod tests {
     #[test]
     fn test_multiple_relations() {
         let entities = vec![person("Alice"), proper("Vestige"), proper("MCP")];
-        let relations = extract_relations(
-            "Alice created Vestige. Vestige implements MCP.",
-            &entities,
+        let relations =
+            extract_relations("Alice created Vestige. Vestige implements MCP.", &entities);
+        assert!(
+            !relations.is_empty(),
+            "Should extract at least one relation, got: {:?}",
+            relations
         );
-        assert!(relations.len() >= 1, "Should extract at least one relation, got: {:?}", relations);
     }
 
     #[test]
@@ -231,10 +256,10 @@ mod tests {
     #[test]
     fn test_sentence_splitting() {
         let entities = vec![person("Alice"), person("Bob")];
-        let rels = extract_relations(
-            "Alice manages the team. Bob leads the project.",
-            &entities,
+        let rels = extract_relations("Alice manages the team. Bob leads the project.", &entities);
+        assert!(
+            !rels.is_empty(),
+            "Should extract relations from separate sentences"
         );
-        assert!(rels.len() >= 1, "Should extract relations from separate sentences");
     }
 }

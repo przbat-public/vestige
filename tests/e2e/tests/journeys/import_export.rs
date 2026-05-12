@@ -13,9 +13,9 @@
 //! 5. User merges memories from multiple sources
 
 use chrono::{DateTime, Duration, Utc};
-use vestige_core::memory::IngestInput;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use vestige_core::memory::IngestInput;
 
 // ============================================================================
 // EXPORT/IMPORT FORMAT
@@ -183,7 +183,10 @@ fn test_export_serializes_memories_to_json() {
     assert!(json.contains("\"metadata\""), "Should contain metadata");
 
     // Verify content is present
-    assert!(json.contains("Rust ownership"), "Should contain memory content");
+    assert!(
+        json.contains("Rust ownership"),
+        "Should contain memory content"
+    );
     assert!(json.contains("rust"), "Should contain tags");
 
     // Verify FSRS state
@@ -219,12 +222,21 @@ fn test_import_deserializes_json_to_memories() {
 
     // Verify memories
     let mem1 = &imported.memories[0];
-    assert!(mem1.content.contains("ownership"), "Content should be preserved");
-    assert!(mem1.tags.contains(&"rust".to_string()), "Tags should be preserved");
+    assert!(
+        mem1.content.contains("ownership"),
+        "Content should be preserved"
+    );
+    assert!(
+        mem1.tags.contains(&"rust".to_string()),
+        "Tags should be preserved"
+    );
     assert!(mem1.stability > 0.0, "Stability should be preserved");
 
     // Verify metadata
-    assert_eq!(imported.metadata.get("project"), Some(&"vestige".to_string()));
+    assert_eq!(
+        imported.metadata.get("project"),
+        Some(&"vestige".to_string())
+    );
 }
 
 // ============================================================================
@@ -268,12 +280,24 @@ fn test_roundtrip_preserves_all_data() {
     assert_eq!(imported.content, original.content, "Content should match");
     assert_eq!(imported.node_type, original.node_type, "Type should match");
     assert_eq!(imported.tags, original.tags, "Tags should match");
-    assert_eq!(imported.stability, original.stability, "Stability should match");
-    assert_eq!(imported.difficulty, original.difficulty, "Difficulty should match");
+    assert_eq!(
+        imported.stability, original.stability,
+        "Stability should match"
+    );
+    assert_eq!(
+        imported.difficulty, original.difficulty,
+        "Difficulty should match"
+    );
     assert_eq!(imported.reps, original.reps, "Reps should match");
     assert_eq!(imported.lapses, original.lapses, "Lapses should match");
-    assert_eq!(imported.sentiment_score, original.sentiment_score, "Sentiment score should match");
-    assert_eq!(imported.sentiment_magnitude, original.sentiment_magnitude, "Sentiment magnitude should match");
+    assert_eq!(
+        imported.sentiment_score, original.sentiment_score,
+        "Sentiment score should match"
+    );
+    assert_eq!(
+        imported.sentiment_magnitude, original.sentiment_magnitude,
+        "Sentiment magnitude should match"
+    );
     assert_eq!(imported.source, original.source, "Source should match");
 }
 
@@ -290,11 +314,13 @@ fn test_roundtrip_preserves_all_data() {
 #[test]
 fn test_selective_export_by_tags() {
     // Create memories with different tags
-    let memories = [ExportedMemory::new("Rust ownership", "concept", vec!["rust", "memory"]),
+    let memories = [
+        ExportedMemory::new("Rust ownership", "concept", vec!["rust", "memory"]),
         ExportedMemory::new("Python generators", "concept", vec!["python", "generators"]),
         ExportedMemory::new("Rust borrowing", "concept", vec!["rust", "borrowing"]),
         ExportedMemory::new("JavaScript async", "concept", vec!["javascript", "async"]),
-        ExportedMemory::new("Rust async", "concept", vec!["rust", "async"])];
+        ExportedMemory::new("Rust async", "concept", vec!["rust", "async"]),
+    ];
 
     // Filter by "rust" tag
     let rust_memories: Vec<_> = memories
@@ -307,12 +333,14 @@ fn test_selective_export_by_tags() {
     // Filter by multiple tags (rust AND async)
     let rust_async_memories: Vec<_> = memories
         .iter()
-        .filter(|m| {
-            m.tags.contains(&"rust".to_string()) && m.tags.contains(&"async".to_string())
-        })
+        .filter(|m| m.tags.contains(&"rust".to_string()) && m.tags.contains(&"async".to_string()))
         .collect();
 
-    assert_eq!(rust_async_memories.len(), 1, "Should filter to 1 Rust async memory");
+    assert_eq!(
+        rust_async_memories.len(),
+        1,
+        "Should filter to 1 Rust async memory"
+    );
     assert!(rust_async_memories[0].content.contains("Rust async"));
 
     // Export filtered
@@ -338,8 +366,14 @@ fn test_selective_export_by_tags() {
 fn test_import_merges_with_existing_data() {
     // Simulate existing memories
     let existing: HashMap<String, ExportedMemory> = [
-        ("1".to_string(), ExportedMemory::new("Rust ownership memory safety", "concept", vec!["rust"])),
-        ("2".to_string(), ExportedMemory::new("Rust borrowing rules explained", "concept", vec!["rust"])),
+        (
+            "1".to_string(),
+            ExportedMemory::new("Rust ownership memory safety", "concept", vec!["rust"]),
+        ),
+        (
+            "2".to_string(),
+            ExportedMemory::new("Rust borrowing rules explained", "concept", vec!["rust"]),
+        ),
     ]
     .into_iter()
     .collect();
@@ -427,7 +461,10 @@ fn test_empty_bundle_handling() {
 
     // Serialize empty bundle
     let json = bundle.to_json().unwrap();
-    assert!(json.contains("\"memories\": []"), "Should have empty memories array");
+    assert!(
+        json.contains("\"memories\": []"),
+        "Should have empty memories array"
+    );
 
     // Deserialize and verify
     let imported = ExportBundle::from_json(&json).unwrap();

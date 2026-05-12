@@ -63,7 +63,7 @@ git2 = { version = "0.20", features = ["vendored-openssl"] }
 notify = "8"
 
 # ============================================================================
-# OPTIONAL: Embeddings (fastembed v5 - local ONNX inference, 2026 bleeding edge)
+# OPTIONAL: Embeddings (fastembed v5 - local ONNX inference)
 # ============================================================================
 # nomic-embed-text-v1.5: 768 dimensions, 8192 token context, Matryoshka support
 # v5.11: Adds Nomic v2 MoE (nomic-v2-moe feature) + Qwen3 reranker (qwen3 feature)

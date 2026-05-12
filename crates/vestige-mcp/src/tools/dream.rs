@@ -9,8 +9,8 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use chrono::Utc;
 use crate::cognitive::CognitiveEngine;
+use chrono::Utc;
 use vestige_core::{CreativeConnectionType, DreamHistoryRecord, InsightRecord, LinkType, Storage};
 
 pub fn schema() -> serde_json::Value {
@@ -39,40 +39,54 @@ pub async fn execute(
         .min(500) as usize;
 
     // v1.9.0: Waking SWR tagging — preferential replay of tagged memories (70/30 split)
-    let tagged_nodes = storage.get_waking_tagged_memories(memory_count as i32)
-        .unwrap_or_default();
-    let tagged_count = tagged_nodes.len();
+    // All four storage reads run on the blocking pool — they would otherwise
+    // monopolize a Tokio worker on large bases.
+    let storage_pre = storage.clone();
+    let memory_count_i32 = memory_count as i32;
+    let all_nodes = tokio::task::spawn_blocking(
+        move || -> Result<Vec<vestige_core::KnowledgeNode>, String> {
+            let tagged_nodes = storage_pre
+                .get_waking_tagged_memories(memory_count_i32)
+                .unwrap_or_default();
+            let tagged_count = tagged_nodes.len();
+            let tagged_target = (memory_count * 7 / 10).min(tagged_count); // 70% tagged
 
-    // Calculate how many tagged vs random to include
-    let tagged_target = (memory_count * 7 / 10).min(tagged_count); // 70% tagged
-    let _random_target = memory_count.saturating_sub(tagged_target);  // 30% random (used for logging)
+            let tagged_ids: std::collections::HashSet<String> = tagged_nodes
+                .iter()
+                .take(tagged_target)
+                .map(|n| n.id.clone())
+                .collect();
 
-    // Build the dream memory set: tagged memories first, then fill with random
-    let tagged_ids: std::collections::HashSet<String> = tagged_nodes.iter()
-        .take(tagged_target)
-        .map(|n| n.id.clone())
-        .collect();
+            let random_nodes = storage_pre
+                .get_all_nodes(memory_count_i32, 0)
+                .map_err(|e| format!("Failed to load memories: {}", e))?;
 
-    let random_nodes = storage.get_all_nodes(memory_count as i32, 0)
-        .map_err(|e| format!("Failed to load memories: {}", e))?;
-
-    let mut all_nodes: Vec<_> = tagged_nodes.into_iter().take(tagged_target).collect();
-    for node in random_nodes {
-        if !tagged_ids.contains(&node.id) && all_nodes.len() < memory_count {
-            all_nodes.push(node);
-        }
-    }
-    // If still under capacity (e.g., all memories are tagged), fill from remaining tagged
-    if all_nodes.len() < memory_count {
-        let used_ids: std::collections::HashSet<String> = all_nodes.iter().map(|n| n.id.clone()).collect();
-        let remaining_tagged = storage.get_waking_tagged_memories(memory_count as i32)
-            .unwrap_or_default();
-        for node in remaining_tagged {
-            if !used_ids.contains(&node.id) && all_nodes.len() < memory_count {
-                all_nodes.push(node);
+            let mut all_nodes: Vec<_> = tagged_nodes.into_iter().take(tagged_target).collect();
+            for node in random_nodes {
+                if !tagged_ids.contains(&node.id) && all_nodes.len() < memory_count {
+                    all_nodes.push(node);
+                }
             }
-        }
-    }
+            // If still under capacity (e.g., all memories are tagged), top up from
+            // the remaining tagged memories.
+            if all_nodes.len() < memory_count {
+                let used_ids: std::collections::HashSet<String> =
+                    all_nodes.iter().map(|n| n.id.clone()).collect();
+                let remaining_tagged = storage_pre
+                    .get_waking_tagged_memories(memory_count_i32)
+                    .unwrap_or_default();
+                for node in remaining_tagged {
+                    if !used_ids.contains(&node.id) && all_nodes.len() < memory_count {
+                        all_nodes.push(node);
+                    }
+                }
+            }
+            Ok(all_nodes)
+        },
+    )
+    .await
+    .map_err(|e| format!("dream pre-fetch task panicked: {}", e))??;
+    let tagged_target = (memory_count * 7 / 10).min(all_nodes.len());
 
     if all_nodes.len() < 5 {
         return Ok(serde_json::json!({
@@ -97,28 +111,62 @@ pub async fn execute(
         )
     };
 
-    // Also run legacy MemoryDreamer for backward-compatible insight synthesis
-    let dream_memories: Vec<vestige_core::DreamMemory> = all_nodes.iter().map(|n| {
-        vestige_core::DreamMemory {
-            id: n.id.clone(),
-            content: n.content.clone(),
-            embedding: storage.get_node_embedding(&n.id).ok().flatten(),
-            tags: n.tags.clone(),
-            created_at: n.created_at,
-            access_count: n.reps as u32,
-        }
-    }).collect();
+    // Also run legacy MemoryDreamer for backward-compatible insight synthesis.
+    // Fetch embeddings on the blocking pool — one SQL call per memory adds up
+    // to dozens of milliseconds even at 50 memories.
+    let storage_emb = storage.clone();
+    type NodeMeta = (
+        String,
+        String,
+        Vec<String>,
+        chrono::DateTime<chrono::Utc>,
+        i32,
+    );
+    let node_meta: Vec<NodeMeta> = all_nodes
+        .iter()
+        .map(|n| {
+            (
+                n.id.clone(),
+                n.content.clone(),
+                n.tags.clone(),
+                n.created_at,
+                n.reps,
+            )
+        })
+        .collect();
+    let dream_memories: Vec<vestige_core::DreamMemory> = tokio::task::spawn_blocking(move || {
+        node_meta
+            .into_iter()
+            .map(|(id, content, tags, created_at, reps)| {
+                let embedding = storage_emb.get_node_embedding(&id).ok().flatten();
+                vestige_core::DreamMemory {
+                    id,
+                    content,
+                    embedding,
+                    tags,
+                    created_at,
+                    access_count: reps as u32,
+                }
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("dream embedding fetch task panicked: {}", e))?;
 
     let extra_insights = {
         let cog = cognitive.lock().await;
         cog.dreamer.synthesize_insights(&dream_memories)
     };
 
-    // Persist creative connections from 4-phase dream cycle
-    let mut connections_persisted = 0u64;
-    {
+    // Persist creative connections from 4-phase dream cycle.
+    // Run all save_connection() inserts on the blocking pool — easily
+    // hundreds of writes on dense graphs.
+    let storage_conn = storage.clone();
+    let creative_for_persist = dream_result.creative_connections.clone();
+    let connections_persisted: u64 = tokio::task::spawn_blocking(move || {
         let now = Utc::now();
-        for conn in &dream_result.creative_connections {
+        let mut persisted = 0u64;
+        for conn in &creative_for_persist {
             let link_type = match conn.connection_type {
                 CreativeConnectionType::CrossDomain => "semantic",
                 CreativeConnectionType::Causal => "causal",
@@ -134,8 +182,8 @@ pub async fn execute(
                 last_activated: now,
                 activation_count: 1,
             };
-            match storage.save_connection(&record) {
-                Ok(_) => connections_persisted += 1,
+            match storage_conn.save_connection(&record) {
+                Ok(_) => persisted += 1,
                 Err(e) => {
                     tracing::warn!(
                         source = %conn.memory_a_id,
@@ -147,13 +195,16 @@ pub async fn execute(
                 }
             }
         }
-        if connections_persisted > 0 {
-            tracing::info!(
-                connections_persisted = connections_persisted,
-                "Dream: persisted {} connections to database",
-                connections_persisted
-            );
-        }
+        persisted
+    })
+    .await
+    .map_err(|e| format!("save_connection task panicked: {}", e))?;
+    if connections_persisted > 0 {
+        tracing::info!(
+            connections_persisted = connections_persisted,
+            "Dream: persisted {} connections to database",
+            connections_persisted
+        );
     }
 
     // Hydrate live cognitive engine with newly persisted connections
@@ -175,14 +226,18 @@ pub async fn execute(
         }
     }
 
-    // Persist dream history with per-phase timings
-    {
+    // Persist dream history + insights + clear waking tags in one blocking
+    // task — three sets of writes that together can run for hundreds of ms.
+    let storage_persist = storage.clone();
+    let dream_history_record = {
         let phase_ms = |name: vestige_core::DreamPhase| -> Option<i64> {
-            dream_result.phases.iter()
+            dream_result
+                .phases
+                .iter()
                 .find(|p| p.phase == name)
                 .map(|p| p.duration_ms as i64)
         };
-        let record = DreamHistoryRecord {
+        DreamHistoryRecord {
             dreamed_at: Utc::now(),
             duration_ms: dream_result.total_duration_ms as i64,
             memories_replayed: dream_result.memories_replayed as i32,
@@ -197,17 +252,17 @@ pub async fn execute(
             summaries_generated: None,
             emotional_memories_processed: Some(dream_result.emotional_processed as i32),
             creative_connections_found: Some(dream_result.creative_connections.len() as i32),
-        };
-        if let Err(e) = storage.save_dream_history(&record) {
+        }
+    };
+    let primary_insights = dream_result.insights.clone();
+    let extra_insights_owned = extra_insights.clone();
+    let tags_cleared: i64 = tokio::task::spawn_blocking(move || {
+        if let Err(e) = storage_persist.save_dream_history(&dream_history_record) {
             tracing::warn!("Failed to persist dream history: {}", e);
         }
-    }
-
-    // Persist insights to database
-    {
         let now = Utc::now();
         let mut insights_persisted = 0u64;
-        for insight in &dream_result.insights {
+        for insight in &primary_insights {
             let record = InsightRecord {
                 id: uuid::Uuid::new_v4().to_string(),
                 insight: insight.insight.clone(),
@@ -220,11 +275,11 @@ pub async fn execute(
                 feedback: None,
                 applied_count: 0,
             };
-            if storage.save_insight(&record).is_ok() {
+            if storage_persist.save_insight(&record).is_ok() {
                 insights_persisted += 1;
             }
         }
-        for insight in &extra_insights {
+        for insight in &extra_insights_owned {
             let record = InsightRecord {
                 id: uuid::Uuid::new_v4().to_string(),
                 insight: insight.insight.clone(),
@@ -237,45 +292,59 @@ pub async fn execute(
                 feedback: None,
                 applied_count: 0,
             };
-            if storage.save_insight(&record).is_ok() {
+            if storage_persist.save_insight(&record).is_ok() {
                 insights_persisted += 1;
             }
         }
         if insights_persisted > 0 {
-            tracing::info!(insights_persisted, "Dream: persisted {} insights to database", insights_persisted);
+            tracing::info!(
+                insights_persisted,
+                "Dream: persisted {} insights to database",
+                insights_persisted
+            );
         }
-    }
-
-    // Clear waking tags after dream processes them
-    let tags_cleared = storage.clear_waking_tags().unwrap_or(0);
+        storage_persist.clear_waking_tags().unwrap_or(0)
+    })
+    .await
+    .map_err(|e| format!("dream persist task panicked: {}", e))?;
 
     // Merge insights from 4-phase engine + legacy synthesizer
-    let all_insights: Vec<serde_json::Value> = dream_result.insights.iter()
-        .map(|i| serde_json::json!({
-            "insight_type": i.insight_type,
-            "insight": i.insight,
-            "source_memories": i.source_memory_ids,
-            "confidence": i.confidence,
-            "novelty_score": i.novelty,
+    let all_insights: Vec<serde_json::Value> = dream_result
+        .insights
+        .iter()
+        .map(|i| {
+            serde_json::json!({
+                "insight_type": i.insight_type,
+                "insight": i.insight,
+                "source_memories": i.source_memory_ids,
+                "confidence": i.confidence,
+                "novelty_score": i.novelty,
+            })
+        })
+        .chain(extra_insights.iter().map(|i| {
+            serde_json::json!({
+                "insight_type": format!("{:?}", i.insight_type),
+                "insight": i.insight,
+                "source_memories": i.source_memories,
+                "confidence": i.confidence,
+                "novelty_score": i.novelty_score,
+            })
         }))
-        .chain(extra_insights.iter().map(|i| serde_json::json!({
-            "insight_type": format!("{:?}", i.insight_type),
-            "insight": i.insight,
-            "source_memories": i.source_memories,
-            "confidence": i.confidence,
-            "novelty_score": i.novelty_score,
-        })))
         .collect();
 
     // Contradiction detection from creative connections
-    let contradictions: Vec<serde_json::Value> = dream_result.creative_connections.iter()
+    let contradictions: Vec<serde_json::Value> = dream_result
+        .creative_connections
+        .iter()
         .filter(|c| c.connection_type == CreativeConnectionType::Contradictory)
-        .map(|c| serde_json::json!({
-            "memoryA": c.memory_a_id,
-            "memoryB": c.memory_b_id,
-            "confidence": c.confidence,
-            "insight": c.insight,
-        }))
+        .map(|c| {
+            serde_json::json!({
+                "memoryA": c.memory_a_id,
+                "memoryB": c.memory_b_id,
+                "confidence": c.confidence,
+                "insight": c.insight,
+            })
+        })
         .collect();
 
     Ok(serde_json::json!({
@@ -323,19 +392,20 @@ mod tests {
 
     async fn ingest_n_memories(storage: &Arc<Storage>, n: usize) {
         for i in 0..n {
-            storage.ingest(vestige_core::IngestInput {
-                content: format!("Dream test memory number {}", i),
-                node_type: "fact".to_string(),
-                source: None,
-                sentiment_score: 0.0,
-                sentiment_magnitude: 0.0,
-                tags: vec!["dream-test".to_string()],
-                valid_from: None,
-                valid_until: None,
-                provenance: None,
-                ..Default::default()
-            })
-            .unwrap();
+            storage
+                .ingest(vestige_core::IngestInput {
+                    content: format!("Dream test memory number {}", i),
+                    node_type: "fact".to_string(),
+                    source: None,
+                    sentiment_score: 0.0,
+                    sentiment_magnitude: 0.0,
+                    tags: vec!["dream-test".to_string()],
+                    valid_from: None,
+                    valid_until: None,
+                    provenance: None,
+                    ..Default::default()
+                })
+                .unwrap();
         }
     }
 
@@ -436,7 +506,10 @@ mod tests {
         // After dream: dream history should exist
         {
             let last = storage.get_last_dream().unwrap();
-            assert!(last.is_some(), "Dream should have been persisted to database");
+            assert!(
+                last.is_some(),
+                "Dream should have been persisted to database"
+            );
         }
     }
 
@@ -447,22 +520,30 @@ mod tests {
 
         // Create enough diverse memories to trigger connection discovery
         for i in 0..15 {
-            storage.ingest(vestige_core::IngestInput {
-                content: format!(
-                    "Memory {} about topic {}: detailed content for connection discovery",
-                    i,
-                    if i % 3 == 0 { "rust" } else if i % 3 == 1 { "cargo" } else { "testing" }
-                ),
-                node_type: "fact".to_string(),
-                source: None,
-                sentiment_score: 0.0,
-                sentiment_magnitude: 0.0,
-                tags: vec!["dream-roundtrip".to_string()],
-                valid_from: None,
-                valid_until: None,
-                provenance: None,
-                ..Default::default()
-            }).unwrap();
+            storage
+                .ingest(vestige_core::IngestInput {
+                    content: format!(
+                        "Memory {} about topic {}: detailed content for connection discovery",
+                        i,
+                        if i % 3 == 0 {
+                            "rust"
+                        } else if i % 3 == 1 {
+                            "cargo"
+                        } else {
+                            "testing"
+                        }
+                    ),
+                    node_type: "fact".to_string(),
+                    source: None,
+                    sentiment_score: 0.0,
+                    sentiment_magnitude: 0.0,
+                    tags: vec!["dream-roundtrip".to_string()],
+                    valid_from: None,
+                    valid_until: None,
+                    provenance: None,
+                    ..Default::default()
+                })
+                .unwrap();
         }
 
         let cognitive = test_cognitive();
@@ -473,7 +554,10 @@ mod tests {
         if persisted > 0 {
             // Verify connections are queryable from storage
             let all_conns = storage.get_all_connections().unwrap();
-            assert!(!all_conns.is_empty(), "Persisted connections should be queryable");
+            assert!(
+                !all_conns.is_empty(),
+                "Persisted connections should be queryable"
+            );
 
             // Verify connection IDs reference valid memories
             let all_nodes = storage.get_all_nodes(100, 0).unwrap();
@@ -495,7 +579,9 @@ mod tests {
             // Verify live cognitive engine was hydrated
             let cog = cognitive.lock().await;
             let first_conn = &all_conns[0];
-            let assocs = cog.activation_network.get_associations(&first_conn.source_id);
+            let assocs = cog
+                .activation_network
+                .get_associations(&first_conn.source_id);
             assert!(
                 !assocs.is_empty(),
                 "Live cognitive engine should have been hydrated with dream connections"
@@ -511,18 +597,20 @@ mod tests {
         // Ingest memories and collect their IDs
         let mut ids = Vec::new();
         for i in 0..5 {
-            let result = storage.ingest(vestige_core::IngestInput {
-                content: format!("Save connection test memory {}", i),
-                node_type: "fact".to_string(),
-                source: None,
-                sentiment_score: 0.0,
-                sentiment_magnitude: 0.0,
-                tags: vec!["save-conn-test".to_string()],
-                valid_from: None,
-                valid_until: None,
-                provenance: None,
-                ..Default::default()
-            }).unwrap();
+            let result = storage
+                .ingest(vestige_core::IngestInput {
+                    content: format!("Save connection test memory {}", i),
+                    node_type: "fact".to_string(),
+                    source: None,
+                    sentiment_score: 0.0,
+                    sentiment_magnitude: 0.0,
+                    tags: vec!["save-conn-test".to_string()],
+                    valid_from: None,
+                    valid_until: None,
+                    provenance: None,
+                    ..Default::default()
+                })
+                .unwrap();
             ids.push(result.id);
         }
 
@@ -531,7 +619,7 @@ mod tests {
         let mut saved = 0u32;
         let mut errors = Vec::new();
         for i in 0..ids.len() {
-            for j in (i+1)..ids.len() {
+            for j in (i + 1)..ids.len() {
                 let record = vestige_core::ConnectionRecord {
                     source_id: ids[i].clone(),
                     target_id: ids[j].clone(),
@@ -543,10 +631,7 @@ mod tests {
                 };
                 match storage.save_connection(&record) {
                     Ok(_) => saved += 1,
-                    Err(e) => errors.push(format!(
-                        "{} -> {}: {}",
-                        ids[i], ids[j], e
-                    )),
+                    Err(e) => errors.push(format!("{} -> {}: {}", ids[i], ids[j], e)),
                 }
             }
         }
@@ -583,36 +668,64 @@ mod tests {
         // Memories with DIFFERENT primary tags but overlapping content words
         // to enable cross-domain Jaccard similarity matching in REM phase
         let topics = [
-            ("Error handling with Result type prevents crashes in production code", vec!["safety"]),
-            ("Type safety prevents runtime crashes and data corruption", vec!["safety"]),
-            ("Error handling with try-catch prevents crashes in production code", vec!["typescript"]),
-            ("Type checking prevents runtime errors in compiled code", vec!["typescript"]),
-            ("Error handling patterns prevent production failures in services", vec!["architecture"]),
-            ("Production monitoring prevents cascading failures in code", vec!["architecture"]),
-            ("Database error handling prevents data loss in production", vec!["database"]),
-            ("Query optimization prevents timeout errors in production code", vec!["database"]),
+            (
+                "Error handling with Result type prevents crashes in production code",
+                vec!["safety"],
+            ),
+            (
+                "Type safety prevents runtime crashes and data corruption",
+                vec!["safety"],
+            ),
+            (
+                "Error handling with try-catch prevents crashes in production code",
+                vec!["typescript"],
+            ),
+            (
+                "Type checking prevents runtime errors in compiled code",
+                vec!["typescript"],
+            ),
+            (
+                "Error handling patterns prevent production failures in services",
+                vec!["architecture"],
+            ),
+            (
+                "Production monitoring prevents cascading failures in code",
+                vec!["architecture"],
+            ),
+            (
+                "Database error handling prevents data loss in production",
+                vec!["database"],
+            ),
+            (
+                "Query optimization prevents timeout errors in production code",
+                vec!["database"],
+            ),
         ];
 
         for (content, tags) in &topics {
-            storage.ingest(vestige_core::IngestInput {
-                content: content.to_string(),
-                node_type: "fact".to_string(),
-                source: None,
-                sentiment_score: 0.0,
-                sentiment_magnitude: 0.0,
-                tags: tags.iter().map(|t| t.to_string()).collect(),
-                valid_from: None,
-                valid_until: None,
-                provenance: None,
-                ..Default::default()
-            }).unwrap();
+            storage
+                .ingest(vestige_core::IngestInput {
+                    content: content.to_string(),
+                    node_type: "fact".to_string(),
+                    source: None,
+                    sentiment_score: 0.0,
+                    sentiment_magnitude: 0.0,
+                    tags: tags.iter().map(|t| t.to_string()).collect(),
+                    valid_from: None,
+                    valid_until: None,
+                    provenance: None,
+                    ..Default::default()
+                })
+                .unwrap();
         }
 
         let cognitive = test_cognitive();
         let result = execute(&storage, &cognitive, None).await.unwrap();
         assert_eq!(result["status"], "dreamed");
 
-        let found = result["stats"]["creative_connections_found"].as_u64().unwrap_or(0);
+        let found = result["stats"]["creative_connections_found"]
+            .as_u64()
+            .unwrap_or(0);
         let persisted = result["connectionsPersisted"].as_u64().unwrap_or(0);
 
         assert!(

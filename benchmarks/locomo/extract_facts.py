@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tier 4 fact extraction for LoCoMo.
+"""Typed-memory fact extraction for LoCoMo.
 
 Reads a LoCoMo conversation dataset (locomo10.json) and, for each session of
 each conversation, calls an LLM to extract atomic facts. Writes a sidecar

@@ -915,7 +915,11 @@ impl PredictiveMemory {
         predictions.retain(|p| p.confidence >= self.config.min_confidence);
 
         // Sort by confidence
-        predictions.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        predictions.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Truncate to max
         predictions.truncate(self.config.max_predictions);

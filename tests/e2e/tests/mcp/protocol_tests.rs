@@ -25,9 +25,18 @@ fn test_jsonrpc_request_required_fields() {
         "params": {}
     });
 
-    assert_eq!(valid_request["jsonrpc"], "2.0", "jsonrpc version must be 2.0");
-    assert!(valid_request["method"].is_string(), "method must be a string");
-    assert!(valid_request["id"].is_number(), "id should be present for requests");
+    assert_eq!(
+        valid_request["jsonrpc"], "2.0",
+        "jsonrpc version must be 2.0"
+    );
+    assert!(
+        valid_request["method"].is_string(),
+        "method must be a string"
+    );
+    assert!(
+        valid_request["id"].is_number(),
+        "id should be present for requests"
+    );
 }
 
 /// Test that JSON-RPC notifications have no id field.
@@ -40,7 +49,10 @@ fn test_jsonrpc_notification_has_no_id() {
         "method": "notifications/initialized"
     });
 
-    assert!(notification.get("id").is_none(), "Notifications must not have an id field");
+    assert!(
+        notification.get("id").is_none(),
+        "Notifications must not have an id field"
+    );
     assert_eq!(notification["method"], "notifications/initialized");
 }
 
@@ -66,8 +78,14 @@ fn test_jsonrpc_success_response_format() {
     });
 
     assert_eq!(success_response["jsonrpc"], "2.0");
-    assert!(success_response["result"].is_object(), "Success response must have result");
-    assert!(success_response.get("error").is_none(), "Success response must not have error");
+    assert!(
+        success_response["result"].is_object(),
+        "Success response must have result"
+    );
+    assert!(
+        success_response.get("error").is_none(),
+        "Success response must not have error"
+    );
 }
 
 /// Test JSON-RPC response format for errors.
@@ -89,10 +107,22 @@ fn test_jsonrpc_error_response_format() {
     });
 
     assert_eq!(error_response["jsonrpc"], "2.0");
-    assert!(error_response["error"].is_object(), "Error response must have error object");
-    assert!(error_response["error"]["code"].is_number(), "Error must have code");
-    assert!(error_response["error"]["message"].is_string(), "Error must have message");
-    assert!(error_response.get("result").is_none(), "Error response must not have result");
+    assert!(
+        error_response["error"].is_object(),
+        "Error response must have error object"
+    );
+    assert!(
+        error_response["error"]["code"].is_number(),
+        "Error must have code"
+    );
+    assert!(
+        error_response["error"]["message"].is_string(),
+        "Error must have message"
+    );
+    assert!(
+        error_response.get("result").is_none(),
+        "Error response must not have result"
+    );
 }
 
 // ============================================================================
@@ -119,8 +149,12 @@ fn test_standard_jsonrpc_error_codes() {
 
     for (code, message) in error_codes {
         // All standard codes are in the reserved range
-        assert!((-32700..=-32600).contains(&code),
-            "Standard error code {} ({}) must be in reserved range", code, message);
+        assert!(
+            (-32700..=-32600).contains(&code),
+            "Standard error code {} ({}) must be in reserved range",
+            code,
+            message
+        );
     }
 }
 
@@ -142,8 +176,12 @@ fn test_mcp_specific_error_codes() {
 
     for (code, name) in mcp_error_codes {
         // MCP-specific codes are in the server error range
-        assert!((-32099..=-32000).contains(&code),
-            "MCP error code {} ({}) must be in server error range", code, name);
+        assert!(
+            (-32099..=-32000).contains(&code),
+            "MCP error code {} ({}) must be in server error range",
+            code,
+            name
+        );
     }
 }
 
@@ -177,11 +215,20 @@ fn test_mcp_initialize_request_format() {
     });
 
     let params = &init_request["params"];
-    assert!(params["protocolVersion"].is_string(), "protocolVersion required");
+    assert!(
+        params["protocolVersion"].is_string(),
+        "protocolVersion required"
+    );
     assert!(params["capabilities"].is_object(), "capabilities required");
     assert!(params["clientInfo"].is_object(), "clientInfo required");
-    assert!(params["clientInfo"]["name"].is_string(), "clientInfo.name required");
-    assert!(params["clientInfo"]["version"].is_string(), "clientInfo.version required");
+    assert!(
+        params["clientInfo"]["name"].is_string(),
+        "clientInfo.name required"
+    );
+    assert!(
+        params["clientInfo"]["version"].is_string(),
+        "clientInfo.version required"
+    );
 }
 
 /// Test MCP initialize response format.
@@ -206,11 +253,26 @@ fn test_mcp_initialize_response_format() {
         "instructions": "Vestige is your long-term memory system."
     });
 
-    assert!(init_response["protocolVersion"].is_string(), "protocolVersion required");
-    assert!(init_response["serverInfo"].is_object(), "serverInfo required");
-    assert!(init_response["serverInfo"]["name"].is_string(), "serverInfo.name required");
-    assert!(init_response["serverInfo"]["version"].is_string(), "serverInfo.version required");
-    assert!(init_response["capabilities"].is_object(), "capabilities required");
+    assert!(
+        init_response["protocolVersion"].is_string(),
+        "protocolVersion required"
+    );
+    assert!(
+        init_response["serverInfo"].is_object(),
+        "serverInfo required"
+    );
+    assert!(
+        init_response["serverInfo"]["name"].is_string(),
+        "serverInfo.name required"
+    );
+    assert!(
+        init_response["serverInfo"]["version"].is_string(),
+        "serverInfo.version required"
+    );
+    assert!(
+        init_response["capabilities"].is_object(),
+        "capabilities required"
+    );
 }
 
 /// Test that requests before initialization are rejected.
@@ -229,8 +291,10 @@ fn test_server_rejects_requests_before_initialize() {
         }
     });
 
-    assert_eq!(pre_init_error["error"]["code"], -32003,
-        "Pre-initialization requests should return ServerNotInitialized error");
+    assert_eq!(
+        pre_init_error["error"]["code"], -32003,
+        "Pre-initialization requests should return ServerNotInitialized error"
+    );
 }
 
 // ============================================================================
@@ -277,9 +341,14 @@ fn test_tools_list_response_format() {
 
     for tool in tools {
         assert!(tool["name"].is_string(), "Tool must have name");
-        assert!(tool["inputSchema"].is_object(), "Tool must have inputSchema");
-        assert_eq!(tool["inputSchema"]["type"], "object",
-            "inputSchema must be an object type");
+        assert!(
+            tool["inputSchema"].is_object(),
+            "Tool must have inputSchema"
+        );
+        assert_eq!(
+            tool["inputSchema"]["type"], "object",
+            "inputSchema must be an object type"
+        );
     }
 }
 
@@ -306,7 +375,10 @@ fn test_tools_call_request_format() {
 
     let params = &tools_call_request["params"];
     assert!(params["name"].is_string(), "Tool name required");
-    assert!(params["arguments"].is_object(), "Arguments should be an object");
+    assert!(
+        params["arguments"].is_object(),
+        "Arguments should be an object"
+    );
 }
 
 /// Test tools/call response format.
@@ -328,8 +400,14 @@ fn test_tools_call_response_format() {
 
     let content = tools_call_response["content"].as_array().unwrap();
     assert!(!content.is_empty(), "Content array should not be empty");
-    assert!(content[0]["type"].is_string(), "Content item must have type");
-    assert!(content[0]["text"].is_string(), "Text content must have text field");
+    assert!(
+        content[0]["type"].is_string(),
+        "Content item must have type"
+    );
+    assert!(
+        content[0]["text"].is_string(),
+        "Text content must have text field"
+    );
 }
 
 // ============================================================================
@@ -407,6 +485,8 @@ fn test_resources_read_response_format() {
     assert!(!contents.is_empty(), "Contents should not be empty");
     assert!(contents[0]["uri"].is_string(), "Content must have uri");
     // Must have either text or blob
-    assert!(contents[0]["text"].is_string() || contents[0]["blob"].is_string(),
-        "Content must have text or blob");
+    assert!(
+        contents[0]["text"].is_string() || contents[0]["blob"].is_string(),
+        "Content must have text or blob"
+    );
 }

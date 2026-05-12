@@ -15,8 +15,8 @@
 use chrono::{Duration, Utc};
 use vestige_core::{
     advanced::dreams::{
-        ActivityTracker, ConnectionGraph, ConnectionReason, ConsolidationScheduler,
-        DreamConfig, DreamMemory, MemoryDreamer,
+        ActivityTracker, ConnectionGraph, ConnectionReason, ConsolidationScheduler, DreamConfig,
+        DreamMemory, MemoryDreamer,
     },
     consolidation::SleepConsolidation,
 };
@@ -38,6 +38,7 @@ fn make_dream_memory(id: &str, content: &str, tags: Vec<&str>) -> DreamMemory {
 }
 
 /// Create a memory with specific age
+#[allow(dead_code)]
 fn make_aged_memory(id: &str, content: &str, tags: Vec<&str>, hours_ago: i64) -> DreamMemory {
     DreamMemory {
         id: id.to_string(),
@@ -50,6 +51,7 @@ fn make_aged_memory(id: &str, content: &str, tags: Vec<&str>, hours_ago: i64) ->
 }
 
 /// Create a memory with access count
+#[allow(dead_code)]
 fn make_accessed_memory(
     id: &str,
     content: &str,
@@ -82,10 +84,7 @@ fn test_consolidation_detects_idle_periods() {
 
     // Initially should be idle (no activity)
     let stats = scheduler.get_activity_stats();
-    assert!(
-        stats.is_idle,
-        "Fresh scheduler should be idle"
-    );
+    assert!(stats.is_idle, "Fresh scheduler should be idle");
 
     // Record activity - should no longer be idle
     scheduler.record_activity();
@@ -93,10 +92,7 @@ fn test_consolidation_detects_idle_periods() {
     scheduler.record_activity();
 
     let active_stats = scheduler.get_activity_stats();
-    assert!(
-        !active_stats.is_idle,
-        "Should not be idle after activity"
-    );
+    assert!(!active_stats.is_idle, "Should not be idle after activity");
     assert_eq!(
         active_stats.total_events, 3,
         "Should track 3 activity events"
@@ -176,9 +172,24 @@ fn test_connections_form_between_related_memories() {
     let mut graph = ConnectionGraph::new();
 
     // Add connections simulating discovered relationships
-    graph.add_connection("rust_async", "tokio_runtime", 0.9, ConnectionReason::Semantic);
-    graph.add_connection("tokio_runtime", "green_threads", 0.8, ConnectionReason::Semantic);
-    graph.add_connection("rust_async", "futures_crate", 0.85, ConnectionReason::SharedConcepts);
+    graph.add_connection(
+        "rust_async",
+        "tokio_runtime",
+        0.9,
+        ConnectionReason::Semantic,
+    );
+    graph.add_connection(
+        "tokio_runtime",
+        "green_threads",
+        0.8,
+        ConnectionReason::Semantic,
+    );
+    graph.add_connection(
+        "rust_async",
+        "futures_crate",
+        0.85,
+        ConnectionReason::SharedConcepts,
+    );
 
     // Verify graph structure
     let stats = graph.get_stats();
@@ -329,9 +340,18 @@ fn test_pruning_removes_weak_memories() {
 
     // Verify the config accessor works
     let config = consolidation.config();
-    assert!(!config.enable_pruning, "Default should have pruning disabled");
-    assert!(config.pruning_threshold > 0.0, "Should have a threshold configured");
-    assert!(config.pruning_min_age_days > 0, "Should have a min age configured");
+    assert!(
+        !config.enable_pruning,
+        "Default should have pruning disabled"
+    );
+    assert!(
+        config.pruning_threshold > 0.0,
+        "Should have a threshold configured"
+    );
+    assert!(
+        config.pruning_min_age_days > 0,
+        "Should have a min age configured"
+    );
 }
 
 // ============================================================================
@@ -415,22 +435,13 @@ fn test_retention_calculation() {
 
     // Full retrieval, max storage
     let r2 = consolidation.calculate_retention(10.0, 1.0);
-    assert!(
-        (r2 - 1.0).abs() < 0.01,
-        "Max everything should be ~1.0"
-    );
+    assert!((r2 - 1.0).abs() < 0.01, "Max everything should be ~1.0");
 
     // Low retrieval, max storage
     let r3 = consolidation.calculate_retention(10.0, 0.0);
-    assert!(
-        (r3 - 0.3).abs() < 0.01,
-        "Low retrieval should cap at ~0.3"
-    );
+    assert!((r3 - 0.3).abs() < 0.01, "Low retrieval should cap at ~0.3");
 
     // Both low
     let r4 = consolidation.calculate_retention(0.0, 0.0);
-    assert!(
-        r4 < 0.1,
-        "Both low should mean low retention"
-    );
+    assert!(r4 < 0.1, "Both low should mean low retention");
 }

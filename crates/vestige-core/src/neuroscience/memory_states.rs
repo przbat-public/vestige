@@ -1299,13 +1299,14 @@ impl MemoryStateInfo {
             }
             MemoryState::Unavailable => {
                 if let Some(until) = lifecycle.suppression_until
-                    && until > now {
-                        recommendations.push(format!(
-                            "This memory is temporarily suppressed. \
+                    && until > now
+                {
+                    recommendations.push(format!(
+                        "This memory is temporarily suppressed. \
                              It will become accessible again after {}.",
-                            until.format("%Y-%m-%d %H:%M UTC")
-                        ));
-                    }
+                        until.format("%Y-%m-%d %H:%M UTC")
+                    ));
+                }
             }
             MemoryState::Dormant => {
                 if duration_since_access.num_days() > 20 {
@@ -1651,8 +1652,16 @@ mod tests {
         // With the old approximation: (0.5 + 0.5) / 2 = 0.5 < 0.7 → no competition
         // With pairwise cosine: ≈ 0.995 > 0.7 → competition triggered
         let result = manager.run_competition(&candidates, 0.7);
-        assert!(result.is_some(), "Pairwise cosine should trigger competition");
-        assert!(result.unwrap().suppressed_ids.contains(&"loser".to_string()));
+        assert!(
+            result.is_some(),
+            "Pairwise cosine should trigger competition"
+        );
+        assert!(
+            result
+                .unwrap()
+                .suppressed_ids
+                .contains(&"loser".to_string())
+        );
     }
 
     #[test]

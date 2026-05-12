@@ -3,8 +3,8 @@
 //! Clients connect to `/ws` and receive all VestigeEvents as JSON.
 //! Also sends heartbeats every 5 seconds with system stats.
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use chrono::Utc;
@@ -26,10 +26,11 @@ pub async fn ws_handler(
     // Non-browser clients (curl, wscat) won't have Origin — allowed since localhost-only.
     match headers.get("origin").and_then(|v| v.to_str().ok()) {
         Some(origin) => {
-            let allowed = origin.starts_with("http://127.0.0.1:")
-                || origin.starts_with("http://localhost:");
+            let allowed =
+                origin.starts_with("http://127.0.0.1:") || origin.starts_with("http://localhost:");
             #[cfg(debug_assertions)]
-            let allowed = allowed || origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173";
+            let allowed =
+                allowed || origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173";
             if !allowed {
                 warn!("Rejected WebSocket connection from origin: {}", origin);
                 return StatusCode::FORBIDDEN.into_response();

@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 
 use crate::cognitive::CognitiveEngine;
 use vestige_core::{
-    ContentType, ImportanceContext, ImportanceEventType, ImportanceEvent, IngestInput, Storage,
+    ContentType, ImportanceContext, ImportanceEvent, ImportanceEventType, IngestInput, Storage,
 };
 
 /// Input schema for smart_ingest tool
@@ -151,7 +151,9 @@ pub async fn execute(
     }
 
     // Single mode: content is required
-    let content = args.content.ok_or("Missing 'content' field. Provide 'content' for single mode or 'items' for batch mode.")?;
+    let content = args.content.ok_or(
+        "Missing 'content' field. Provide 'content' for single mode or 'items' for batch mode.",
+    )?;
 
     // Validate content
     if content.trim().is_empty() {
@@ -193,7 +195,9 @@ pub async fn execute(
         // 4A. Full 4-channel importance scoring (Anderson 1983, Yonelinas 2002,
         //     LaBar & Cabeza 2006).
         let context = ImportanceContext::current();
-        let importance = cog.importance_signals.compute_importance(&content, &context);
+        let importance = cog
+            .importance_signals
+            .compute_importance(&content, &context);
 
         // 4B. Intent detection → auto-tag
         let intent_result = cog.intent_detector.detect_intent();
@@ -236,8 +240,12 @@ pub async fn execute(
         )
     };
     #[cfg(not(feature = "preprocessing"))]
-    let (pp_tags, pp_valid_from, pp_valid_until, pp_provenance): (Vec<String>, Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, Option<serde_json::Value>) =
-        (Vec::new(), None, None, None);
+    let (pp_tags, pp_valid_from, pp_valid_until, pp_provenance): (
+        Vec<String>,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<serde_json::Value>,
+    ) = (Vec::new(), None, None, None);
     #[cfg(not(feature = "preprocessing"))]
     let pp_relations: Vec<()> = Vec::new();
 
@@ -278,23 +286,45 @@ pub async fn execute(
 
     // Check if force_create is enabled
     if args.force_create.unwrap_or(false) {
-        // Quick duplicate check (non-blocking advisory only)
+        // Run duplicate-similarity probe + ingest together on the blocking
+        // pool — both touch SQLite, both can briefly block the runtime.
+        let storage_fc = storage.clone();
+        let input_fc = input.clone();
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-        let nearest_sim: Option<f64> = storage
-            .semantic_search_raw(&input.content, 1)
-            .ok()
-            .and_then(|results| results.into_iter().next())
-            .map(|(_, score)| score as f64);
+        let (nearest_sim, node) = tokio::task::spawn_blocking(
+            move || -> Result<(Option<f64>, vestige_core::KnowledgeNode), String> {
+                let nearest_sim = storage_fc
+                    .semantic_search_raw(&input_fc.content, 1)
+                    .ok()
+                    .and_then(|results| results.into_iter().next())
+                    .map(|(_, score)| score as f64);
+                let node = storage_fc.ingest(input_fc).map_err(|e| e.to_string())?;
+                Ok((nearest_sim, node))
+            },
+        )
+        .await
+        .map_err(|e| format!("smart_ingest force_create task panicked: {}", e))??;
         #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
-        let nearest_sim: Option<f64> = None;
+        let (nearest_sim, node): (Option<f64>, vestige_core::KnowledgeNode) =
+            tokio::task::spawn_blocking(move || {
+                let node = storage_fc.ingest(input_fc).map_err(|e| e.to_string())?;
+                Ok::<_, String>((None, node))
+            })
+            .await
+            .map_err(|e| format!("smart_ingest force_create task panicked: {}", e))??;
 
-        let node = storage.ingest(input).map_err(|e| e.to_string())?;
         let node_id = node.id.clone();
         let node_content = node.content.clone();
         let node_type = node.node_type.clone();
         let has_embedding = node.has_embedding.unwrap_or(false);
 
-        run_post_ingest(cognitive, &node_id, &node_content, &node_type, importance_composite);
+        run_post_ingest(
+            cognitive,
+            &node_id,
+            &node_content,
+            &node_type,
+            importance_composite,
+        );
 
         let mut response = serde_json::json!({
             "success": true,
@@ -310,27 +340,39 @@ pub async fn execute(
             response["compound_content_warning"] = serde_json::json!(warning);
         }
         if let Some(sim) = nearest_sim
-            && sim > 0.9 {
-                response["near_duplicate_warning"] = serde_json::json!(format!(
-                    "Content is {:.0}% similar to an existing memory. This was created because force_create=true, but consider using memory(action='edit') instead.",
-                    sim * 100.0
-                ));
-            }
+            && sim > 0.9
+        {
+            response["near_duplicate_warning"] = serde_json::json!(format!(
+                "Content is {:.0}% similar to an existing memory. This was created because force_create=true, but consider using memory(action='edit') instead.",
+                sim * 100.0
+            ));
+        }
         return Ok(response);
     }
 
     // Use smart ingest with prediction error gating
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     {
-        // Pre-compute nearest neighbors for prospective indexing
-        let neighbor_ids: Vec<String> = storage
-            .semantic_search_raw(&input.content, 5)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect();
-
-        let result = storage.smart_ingest(input).map_err(|e| e.to_string())?;
+        // Run nearest-neighbor lookup + smart_ingest together on the
+        // blocking pool — both call into SQLite/vector-search.
+        let storage_si = storage.clone();
+        let input_si = input.clone();
+        let (neighbor_ids, result) = tokio::task::spawn_blocking(
+            move || -> Result<(Vec<String>, vestige_core::SmartIngestResult), String> {
+                let neighbor_ids: Vec<String> = storage_si
+                    .semantic_search_raw(&input_si.content, 5)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(id, _)| id)
+                    .collect();
+                let result = storage_si
+                    .smart_ingest(input_si)
+                    .map_err(|e| e.to_string())?;
+                Ok((neighbor_ids, result))
+            },
+        )
+        .await
+        .map_err(|e| format!("smart_ingest task panicked: {}", e))??;
         let node_id = result.node.id.clone();
         let node_content = result.node.content.clone();
         let node_type = result.node.node_type.clone();
@@ -338,13 +380,17 @@ pub async fn execute(
 
         // Post-ingest cognitive side effects + prospective indexing
         run_post_ingest_with_neighbors(
-            cognitive, &node_id, &node_content, &node_type,
-            importance_composite, &neighbor_ids,
+            cognitive,
+            &node_id,
+            &node_content,
+            &node_type,
+            importance_composite,
+            &neighbor_ids,
         );
 
         // Create activation-network edges from extracted relations
         #[cfg(feature = "preprocessing")]
-        create_relation_edges(cognitive, storage, &node_id, &_pp_relations);
+        create_relation_edges(cognitive, storage, &node_id, &_pp_relations).await;
 
         let mut response = serde_json::json!({
             "success": true,
@@ -382,23 +428,37 @@ pub async fn execute(
         // cases that warrant a manual look).
         const NEAR_DUPLICATE_ADVISORY_THRESHOLD: f32 = 0.6;
         if let Some(sim) = result.similarity
-            && sim >= NEAR_DUPLICATE_ADVISORY_THRESHOLD && result.decision == "create" {
-                response["near_duplicate_warning"] = serde_json::json!(format!(
-                    "Content is {:.0}% similar to an existing memory but was created as new. Consider using memory(action='edit') if you intended to update an existing memory.",
-                    sim * 100.0
-                ));
-            }
+            && sim >= NEAR_DUPLICATE_ADVISORY_THRESHOLD
+            && result.decision == "create"
+        {
+            response["near_duplicate_warning"] = serde_json::json!(format!(
+                "Content is {:.0}% similar to an existing memory but was created as new. Consider using memory(action='edit') if you intended to update an existing memory.",
+                sim * 100.0
+            ));
+        }
         Ok(response)
     }
 
     #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
     {
-        let node = storage.ingest(input).map_err(|e| e.to_string())?;
+        let storage_clone = storage.clone();
+        let input_clone = input.clone();
+        let node = tokio::task::spawn_blocking(move || {
+            storage_clone.ingest(input_clone).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| format!("smart_ingest fallback task panicked: {}", e))??;
         let node_id = node.id.clone();
         let node_content = node.content.clone();
         let node_type = node.node_type.clone();
 
-        run_post_ingest(cognitive, &node_id, &node_content, &node_type, importance_composite);
+        run_post_ingest(
+            cognitive,
+            &node_id,
+            &node_content,
+            &node_type,
+            importance_composite,
+        );
 
         let mut response = serde_json::json!({
             "success": true,
@@ -478,7 +538,9 @@ async fn execute_batch(
         let (importance_composite, emotional_arousal) = {
             let cog = cognitive.lock().await;
             let context = ImportanceContext::current();
-            let importance = cog.importance_signals.compute_importance(&item.content, &context);
+            let importance = cog
+                .importance_signals
+                .compute_importance(&item.content, &context);
 
             let intent_result = cog.intent_detector.detect_intent();
             if intent_result.confidence > 0.5 {
@@ -500,10 +562,24 @@ async fn execute_batch(
         // PREPROCESSING PIPELINE (per batch item)
         // ============================================================
         #[cfg(feature = "preprocessing")]
-        let (item_content, batch_pp_tags, batch_pp_from, batch_pp_until, _batch_pp_rels, batch_pp_prov) = {
+        let (
+            item_content,
+            batch_pp_tags,
+            batch_pp_from,
+            batch_pp_until,
+            _batch_pp_rels,
+            batch_pp_prov,
+        ) = {
             let config = vestige_core::preprocessing::PreprocessingConfig::default();
             let pp = vestige_core::preprocessing::preprocess(&item.content, &config);
-            (pp.content, pp.auto_tags, pp.valid_from, pp.valid_until, pp.relations, Some(pp.provenance.to_json()))
+            (
+                pp.content,
+                pp.auto_tags,
+                pp.valid_from,
+                pp.valid_until,
+                pp.relations,
+                Some(pp.provenance.to_json()),
+            )
         };
         #[cfg(not(feature = "preprocessing"))]
         let (item_content, batch_pp_tags, batch_pp_from, batch_pp_until, batch_pp_prov) =
@@ -541,14 +617,26 @@ async fn execute_batch(
         // Check force_create: global flag OR per-item flag
         let item_force = global_force_create || item_force_create;
         if item_force {
-            match storage.ingest(input) {
+            let storage_item = storage.clone();
+            let input_item = input.clone();
+            let ingest_outcome =
+                tokio::task::spawn_blocking(move || storage_item.ingest(input_item))
+                    .await
+                    .map_err(|e| format!("batch ingest task panicked: {}", e))?;
+            match ingest_outcome {
                 Ok(node) => {
                     let node_id = node.id.clone();
                     let node_content = node.content.clone();
                     let node_type = node.node_type.clone();
 
                     created += 1;
-                    run_post_ingest(cognitive, &node_id, &node_content, &node_type, importance_composite);
+                    run_post_ingest(
+                        cognitive,
+                        &node_id,
+                        &node_content,
+                        &node_type,
+                        importance_composite,
+                    );
 
                     results.push(serde_json::json!({
                         "index": i,
@@ -573,7 +661,13 @@ async fn execute_batch(
 
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
         {
-            match storage.smart_ingest(input) {
+            let storage_si = storage.clone();
+            let input_si = input.clone();
+            let ingest_outcome =
+                tokio::task::spawn_blocking(move || storage_si.smart_ingest(input_si))
+                    .await
+                    .map_err(|e| format!("batch smart_ingest task panicked: {}", e))?;
+            match ingest_outcome {
                 Ok(result) => {
                     let node_id = result.node.id.clone();
                     let node_content = result.node.content.clone();
@@ -586,7 +680,13 @@ async fn execute_batch(
                     }
 
                     // Post-ingest cognitive side effects
-                    run_post_ingest(cognitive, &node_id, &node_content, &node_type, importance_composite);
+                    run_post_ingest(
+                        cognitive,
+                        &node_id,
+                        &node_content,
+                        &node_type,
+                        importance_composite,
+                    );
 
                     results.push(serde_json::json!({
                         "index": i,
@@ -611,14 +711,26 @@ async fn execute_batch(
 
         #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
         {
-            match storage.ingest(input) {
+            let storage_clone = storage.clone();
+            let input_clone = input.clone();
+            let ingest_outcome =
+                tokio::task::spawn_blocking(move || storage_clone.ingest(input_clone))
+                    .await
+                    .map_err(|e| format!("batch ingest fallback task panicked: {}", e))?;
+            match ingest_outcome {
                 Ok(node) => {
                     let node_id = node.id.clone();
                     let node_content = node.content.clone();
                     let node_type = node.node_type.clone();
 
                     created += 1;
-                    run_post_ingest(cognitive, &node_id, &node_content, &node_type, importance_composite);
+                    run_post_ingest(
+                        cognitive,
+                        &node_id,
+                        &node_content,
+                        &node_type,
+                        importance_composite,
+                    );
 
                     results.push(serde_json::json!({
                         "index": i,
@@ -666,12 +778,16 @@ fn detect_compound_content(content: &str) -> Option<String> {
     let mut signals: Vec<&str> = Vec::new();
 
     let lines: Vec<&str> = content.lines().collect();
-    let paragraph_count = content.split("\n\n").filter(|p| p.trim().len() > 30).count();
+    let paragraph_count = content
+        .split("\n\n")
+        .filter(|p| p.trim().len() > 30)
+        .count();
     if paragraph_count >= 3 {
         signals.push("multiple paragraphs covering different topics");
     }
 
-    let speaker_pattern_count = lines.iter()
+    let speaker_pattern_count = lines
+        .iter()
         .filter(|l| {
             let trimmed = l.trim();
             // "Speaker: text" or "Speaker Name: text"
@@ -679,7 +795,9 @@ fn detect_compound_content(content: &str) -> Option<String> {
                 let before_colon = &trimmed[..colon_pos];
                 colon_pos < 40
                     && !before_colon.is_empty()
-                    && before_colon.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '-' || c == '_')
+                    && before_colon
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == ' ' || c == '-' || c == '_')
                     && trimmed.len() > colon_pos + 5
             } else {
                 false
@@ -690,11 +808,15 @@ fn detect_compound_content(content: &str) -> Option<String> {
         signals.push("conversation transcript (multiple 'Speaker: text' lines)");
     }
 
-    let bullet_count = lines.iter()
+    let bullet_count = lines
+        .iter()
         .filter(|l| {
             let t = l.trim();
-            t.starts_with("- ") || t.starts_with("* ") || t.starts_with("• ")
-                || (t.len() > 3 && t.chars().next().is_some_and(|c| c.is_ascii_digit())
+            t.starts_with("- ")
+                || t.starts_with("* ")
+                || t.starts_with("• ")
+                || (t.len() > 3
+                    && t.chars().next().is_some_and(|c| c.is_ascii_digit())
                     && (t.contains(". ") || t.contains(") ")))
         })
         .count();
@@ -703,12 +825,22 @@ fn detect_compound_content(content: &str) -> Option<String> {
     }
 
     let topic_shift_indicators = [
-        "also,", "additionally,", "on another note", "separately,",
-        "moving on", "another thing", "by the way", "btw,",
-        "oh and", "also worth noting", "furthermore,",
-        "in other news", "on a different topic",
+        "also,",
+        "additionally,",
+        "on another note",
+        "separately,",
+        "moving on",
+        "another thing",
+        "by the way",
+        "btw,",
+        "oh and",
+        "also worth noting",
+        "furthermore,",
+        "in other news",
+        "on a different topic",
     ];
-    let topic_shifts = lines.iter()
+    let topic_shifts = lines
+        .iter()
         .filter(|l| {
             let lower = l.to_lowercase();
             topic_shift_indicators.iter().any(|ind| lower.contains(ind))
@@ -742,7 +874,14 @@ fn run_post_ingest(
     node_type: &str,
     importance_composite: f64,
 ) {
-    run_post_ingest_with_neighbors(cognitive, node_id, content, node_type, importance_composite, &[]);
+    run_post_ingest_with_neighbors(
+        cognitive,
+        node_id,
+        content,
+        node_type,
+        importance_composite,
+        &[],
+    );
 }
 
 /// Extended post-ingest that also creates activation-network edges
@@ -766,17 +905,15 @@ fn run_post_ingest_with_neighbors(
 
         cog.importance_signals.learn_content(content);
 
-        if let Err(e) = cog.hippocampal_index.index_memory(
-            node_id,
-            content,
-            node_type,
-            Utc::now(),
-            None,
-        ) {
+        if let Err(e) =
+            cog.hippocampal_index
+                .index_memory(node_id, content, node_type, Utc::now(), None)
+        {
             tracing::warn!(error = %e, node_id = %node_id, "Failed to index memory in hippocampal index");
         }
 
-        cog.cross_project.record_project_memory(node_id, "default", None);
+        cog.cross_project
+            .record_project_memory(node_id, "default", None);
 
         // Prospective indexing: link new memory to its vector-space neighbors
         // in the spreading-activation network so future searches reach it via
@@ -799,7 +936,7 @@ fn run_post_ingest_with_neighbors(
 /// entity. This builds the knowledge graph incrementally at ingest time
 /// rather than waiting for dream consolidation.
 #[cfg(feature = "preprocessing")]
-fn create_relation_edges(
+async fn create_relation_edges(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     storage: &Arc<Storage>,
     node_id: &str,
@@ -809,19 +946,37 @@ fn create_relation_edges(
         return;
     }
 
+    // Run every keyword_search on the blocking pool first; then take the
+    // cognitive lock and add edges synchronously. Keeps SQLite calls off
+    // the async runtime and minimises lock-hold time.
+    let storage_clone = storage.clone();
+    let objects: Vec<String> = relations.iter().map(|r| r.object.clone()).collect();
+    let matches_per_relation = tokio::task::spawn_blocking(move || {
+        objects
+            .into_iter()
+            .map(|object| {
+                storage_clone
+                    .keyword_search(&object, 3, 0.0)
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>()
+    })
+    .await;
+
+    let Ok(matches_per_relation) = matches_per_relation else {
+        return;
+    };
+
     if let Ok(mut cog) = cognitive.try_lock() {
-        for relation in relations {
-            // Search for memories containing the object entity
-            if let Ok(matches) = storage.keyword_search(&relation.object, 3, 0.0) {
-                for matched in matches {
-                    if matched.id != node_id {
-                        cog.activation_network.add_edge(
-                            node_id.to_string(),
-                            matched.id.clone(),
-                            vestige_core::neuroscience::spreading_activation::LinkType::Causal,
-                            0.6,
-                        );
-                    }
+        for matches in matches_per_relation {
+            for matched in matches {
+                if matched.id != node_id {
+                    cog.activation_network.add_edge(
+                        node_id.to_string(),
+                        matched.id.clone(),
+                        vestige_core::neuroscience::spreading_activation::LinkType::Causal,
+                        0.6,
+                    );
                 }
             }
         }
@@ -886,8 +1041,13 @@ mod tests {
         let value = result.unwrap();
         assert_eq!(value["success"], true);
         assert_eq!(value["decision"], "create");
-        assert!(value["reason"].as_str().unwrap().contains("Forced") ||
-                value["reason"].as_str().unwrap().contains("Embeddings not available"));
+        assert!(
+            value["reason"].as_str().unwrap().contains("Forced")
+                || value["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Embeddings not available")
+        );
     }
 
     #[test]
@@ -1039,7 +1199,12 @@ mod tests {
     #[tokio::test]
     async fn test_batch_empty_items_fails() {
         let (storage, _dir) = test_storage().await;
-        let result = execute(&storage, &test_cognitive(), Some(serde_json::json!({ "items": [] }))).await;
+        let result = execute(
+            &storage,
+            &test_cognitive(),
+            Some(serde_json::json!({ "items": [] })),
+        )
+        .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("empty"));
     }
@@ -1048,14 +1213,16 @@ mod tests {
     async fn test_batch_ingest() {
         let (storage, _dir) = test_storage().await;
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "items": [
                     { "content": "First batch item", "tags": ["test"] },
                     { "content": "Second batch item", "tags": ["test"] }
                 ]
             })),
-        ).await;
+        )
+        .await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["mode"], "batch");
@@ -1066,7 +1233,8 @@ mod tests {
     async fn test_batch_skips_empty_content() {
         let (storage, _dir) = test_storage().await;
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "items": [
                     { "content": "Valid item" },
@@ -1074,7 +1242,8 @@ mod tests {
                     { "content": "Another valid item" }
                 ]
             })),
-        ).await;
+        )
+        .await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["summary"]["skipped"], 1);
@@ -1094,7 +1263,12 @@ mod tests {
         let items: Vec<serde_json::Value> = (0..21)
             .map(|i| serde_json::json!({ "content": format!("Item {}", i) }))
             .collect();
-        let result = execute(&storage, &test_cognitive(), Some(serde_json::json!({ "items": items }))).await;
+        let result = execute(
+            &storage,
+            &test_cognitive(),
+            Some(serde_json::json!({ "items": items })),
+        )
+        .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Maximum 20 items"));
     }
@@ -1105,7 +1279,12 @@ mod tests {
         let items: Vec<serde_json::Value> = (0..20)
             .map(|i| serde_json::json!({ "content": format!("Item {}", i) }))
             .collect();
-        let result = execute(&storage, &test_cognitive(), Some(serde_json::json!({ "items": items }))).await;
+        let result = execute(
+            &storage,
+            &test_cognitive(),
+            Some(serde_json::json!({ "items": items })),
+        )
+        .await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["summary"]["total"], 20);
@@ -1115,14 +1294,16 @@ mod tests {
     async fn test_batch_skips_whitespace_only_content() {
         let (storage, _dir) = test_storage().await;
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "items": [
                     { "content": "   \t\n  " },
                     { "content": "Valid content" }
                 ]
             })),
-        ).await;
+        )
+        .await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["summary"]["skipped"], 1);
@@ -1133,11 +1314,13 @@ mod tests {
     async fn test_batch_single_item_succeeds() {
         let (storage, _dir) = test_storage().await;
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "items": [{ "content": "Single item" }]
             })),
-        ).await;
+        )
+        .await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["summary"]["total"], 1);
@@ -1148,7 +1331,8 @@ mod tests {
     async fn test_batch_items_with_all_fields() {
         let (storage, _dir) = test_storage().await;
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "items": [{
                     "content": "Full fields item",
@@ -1157,7 +1341,8 @@ mod tests {
                     "source": "test-suite"
                 }]
             })),
-        ).await;
+        )
+        .await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["summary"]["created"], 1);
@@ -1167,7 +1352,8 @@ mod tests {
     async fn test_batch_results_array_matches_items() {
         let (storage, _dir) = test_storage().await;
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "items": [
                     { "content": "First" },
@@ -1175,7 +1361,8 @@ mod tests {
                     { "content": "Third" }
                 ]
             })),
-        ).await;
+        )
+        .await;
         let value = result.unwrap();
         let results = value["results"].as_array().unwrap();
         assert_eq!(results.len(), 3);
@@ -1189,14 +1376,16 @@ mod tests {
     async fn test_batch_success_true_when_only_skipped() {
         let (storage, _dir) = test_storage().await;
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "items": [
                     { "content": "" },
                     { "content": "   " }
                 ]
             })),
-        ).await;
+        )
+        .await;
         let value = result.unwrap();
         assert_eq!(value["success"], true); // skipped ≠ errors
         assert_eq!(value["summary"]["errors"], 0);
@@ -1207,11 +1396,13 @@ mod tests {
     async fn test_batch_has_importance_scores() {
         let (storage, _dir) = test_storage().await;
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "items": [{ "content": "Important batch memory content" }]
             })),
-        ).await;
+        )
+        .await;
         let value = result.unwrap();
         let results = value["results"].as_array().unwrap();
         assert!(results[0]["importanceScore"].is_number());
@@ -1222,7 +1413,8 @@ mod tests {
         let (storage, _dir) = test_storage().await;
         // Three items with very similar content + global forceCreate
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "forceCreate": true,
                 "items": [
@@ -1231,7 +1423,8 @@ mod tests {
                     { "content": "Physics question about quantum mechanics and wave behavior" }
                 ]
             })),
-        ).await;
+        )
+        .await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["mode"], "batch");
@@ -1251,7 +1444,8 @@ mod tests {
         let (storage, _dir) = test_storage().await;
         // Mix of forced and non-forced items
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({
                 "items": [
                     { "content": "Forced item one", "forceCreate": true },
@@ -1259,7 +1453,8 @@ mod tests {
                     { "content": "Forced item three", "forceCreate": true }
                 ]
             })),
-        ).await;
+        )
+        .await;
         assert!(result.is_ok());
         let value = result.unwrap();
         let results = value["results"].as_array().unwrap();
@@ -1296,7 +1491,11 @@ mod tests {
                         because the staging environment is running out of disk space on the worker nodes.\n\n\
                         Third paragraph about topic C: John mentioned in the standup that he prefers \
                         using dark mode and wants us to add theme support to the internal dashboard tool.";
-        assert!(content.len() >= 300, "Test content must be >=300 chars, got {}", content.len());
+        assert!(
+            content.len() >= 300,
+            "Test content must be >=300 chars, got {}",
+            content.len()
+        );
         let result = detect_compound_content(content);
         assert!(result.is_some());
         assert!(result.unwrap().contains("COMPOUND CONTENT DETECTED"));
@@ -1308,7 +1507,11 @@ mod tests {
                         Bob: That works for me, but let's make sure to run the full integration test suite first before we proceed.\n\
                         Alice: Sure, I'll set up the CI pipeline today and configure the deployment scripts for the new environment.\n\
                         Carol: Can we also add a staging verification step before production? Last time we had issues with config.";
-        assert!(content.len() >= 300, "Test content must be >=300 chars, got {}", content.len());
+        assert!(
+            content.len() >= 300,
+            "Test content must be >=300 chars, got {}",
+            content.len()
+        );
         let result = detect_compound_content(content);
         assert!(result.is_some());
         assert!(result.unwrap().contains("conversation transcript"));
@@ -1322,7 +1525,11 @@ mod tests {
                         - John prefers dark mode in all editors and wants the dashboard to support theme switching\n\
                         - Deployment deadline moved to next Friday because of the infrastructure migration blocking us\n\
                         - Added rate limiting to the API gateway to prevent abuse from unauthenticated clients";
-        assert!(content.len() >= 300, "Test content must be >=300 chars, got {}", content.len());
+        assert!(
+            content.len() >= 300,
+            "Test content must be >=300 chars, got {}",
+            content.len()
+        );
         let result = detect_compound_content(content);
         assert!(result.is_some());
         assert!(result.unwrap().contains("bulleted list"));
@@ -1345,9 +1552,11 @@ mod tests {
                          Carol: I agree with that plan and I'll prepare the rollback scripts just in case something goes wrong.\n\
                          Dave: Make sure the staging environment passes all health checks first and monitoring is configured properly.";
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({ "content": compound })),
-        ).await;
+        )
+        .await;
         let value = result.unwrap();
         assert!(value["compound_content_warning"].is_string());
     }
@@ -1356,10 +1565,15 @@ mod tests {
     async fn test_no_compound_warning_for_atomic() {
         let (storage, _dir) = test_storage().await;
         let result = execute(
-            &storage, &test_cognitive(),
+            &storage,
+            &test_cognitive(),
             Some(serde_json::json!({ "content": "Single atomic fact about Rust memory safety." })),
-        ).await;
+        )
+        .await;
         let value = result.unwrap();
-        assert!(value.get("compound_content_warning").is_none() || value["compound_content_warning"].is_null());
+        assert!(
+            value.get("compound_content_warning").is_none()
+                || value["compound_content_warning"].is_null()
+        );
     }
 }

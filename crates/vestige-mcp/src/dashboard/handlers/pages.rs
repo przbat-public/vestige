@@ -5,7 +5,6 @@
 
 use axum::response::Redirect;
 
-
 /// Redirect root to the React dashboard
 pub async fn serve_dashboard() -> Redirect {
     Redirect::permanent("/dashboard")

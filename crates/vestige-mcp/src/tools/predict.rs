@@ -57,23 +57,30 @@ pub async fn execute(
         project_context: context
             .and_then(|c| c.get("codebase"))
             .and_then(|v| v.as_str())
-            .map(|name| vestige_core::neuroscience::predictive_retrieval::ProjectContext {
-                name: name.to_string(),
-                path: String::new(),
-                technologies: Vec::new(),
-                primary_language: None,
-            }),
+            .map(
+                |name| vestige_core::neuroscience::predictive_retrieval::ProjectContext {
+                    name: name.to_string(),
+                    path: String::new(),
+                    technologies: Vec::new(),
+                    primary_language: None,
+                },
+            ),
     };
 
     // Get predictions from predictive memory
-    let predictions = cog.predictive_memory.predict_needed_memories(&session_ctx)
+    let predictions = cog
+        .predictive_memory
+        .predict_needed_memories(&session_ctx)
         .unwrap_or_default();
-    let suggestions = cog.predictive_memory.get_proactive_suggestions(0.3)
+    let suggestions = cog
+        .predictive_memory
+        .get_proactive_suggestions(0.3)
         .unwrap_or_default();
-    let top_interests = cog.predictive_memory.get_top_interests(10)
+    let top_interests = cog
+        .predictive_memory
+        .get_top_interests(10)
         .unwrap_or_default();
-    let accuracy = cog.predictive_memory.prediction_accuracy()
-        .unwrap_or(0.0);
+    let accuracy = cog.predictive_memory.prediction_accuracy().unwrap_or(0.0);
 
     // Build speculative context
     let speculative_context = vestige_core::PredictionContext {
@@ -91,7 +98,9 @@ pub async fn execute(
             .map(PathBuf::from),
         timestamp: Some(chrono::Utc::now()),
     };
-    let speculative = cog.speculative_retriever.predict_needed(&speculative_context);
+    let speculative = cog
+        .speculative_retriever
+        .predict_needed(&speculative_context);
 
     Ok(serde_json::json!({
         "predictions": predictions.iter().map(|p| serde_json::json!({

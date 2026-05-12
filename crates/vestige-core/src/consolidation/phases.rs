@@ -18,7 +18,7 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 
 use crate::memory::KnowledgeNode;
-use crate::neuroscience::emotional_memory::{EmotionalMemory, EmotionCategory};
+use crate::neuroscience::emotional_memory::{EmotionCategory, EmotionalMemory};
 use crate::neuroscience::importance_signals::ImportanceSignals;
 use crate::neuroscience::synaptic_tagging::SynapticTaggingSystem;
 
@@ -197,13 +197,11 @@ impl DreamEngine {
         phases.push(phase2);
 
         // ==================== PHASE 3: REM (Creative) ====================
-        let (connections, emotional_processed, phase3) =
-            self.phase_rem(&triaged, emotional_memory);
+        let (connections, emotional_processed, phase3) = self.phase_rem(&triaged, emotional_memory);
         phases.push(phase3);
 
         // ==================== PHASE 4: Integration ====================
-        let (insights, phase4) =
-            self.phase_integration(&connections, &triaged);
+        let (insights, phase4) = self.phase_integration(&connections, &triaged);
         phases.push(phase4);
 
         FourPhaseDreamResult {
@@ -262,26 +260,31 @@ impl DreamEngine {
         }
 
         // Sort by importance (highest first)
-        triaged.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap_or(std::cmp::Ordering::Equal));
+        triaged.sort_by(|a, b| {
+            b.importance
+                .partial_cmp(&a.importance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Build replay queue: 70% high-value, 30% random noise floor
         let high_value_count = (triaged.len() as f64 * self.high_value_ratio).ceil() as usize;
         let random_count = triaged.len().saturating_sub(high_value_count);
 
-        let mut replay_queue: Vec<String> = triaged.iter()
+        let mut replay_queue: Vec<String> = triaged
+            .iter()
             .take(high_value_count)
             .map(|m| m.id.clone())
             .collect();
 
         // Add random noise floor from the remaining memories
         if random_count > 0 {
-            let remaining: Vec<&TriagedMemory> = triaged.iter()
-                .skip(high_value_count)
-                .collect();
+            let remaining: Vec<&TriagedMemory> = triaged.iter().skip(high_value_count).collect();
             // Simple deterministic shuffle using content hash
             let mut noise: Vec<&TriagedMemory> = remaining;
             noise.sort_by_key(|m| {
-                let hash: u64 = m.id.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+                let hash: u64 =
+                    m.id.bytes()
+                        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
                 hash
             });
             for m in noise.iter().take(random_count) {
@@ -307,7 +310,9 @@ impl DreamEngine {
         actions.push(format!(
             "Replay queue: {} high-value + {} noise = {} total",
             high_value_count.min(triaged.len()),
-            replay_queue.len().saturating_sub(high_value_count.min(triaged.len())),
+            replay_queue
+                .len()
+                .saturating_sub(high_value_count.min(triaged.len())),
             replay_queue.len()
         ));
 
@@ -333,16 +338,25 @@ impl DreamEngine {
         emotion: &EmotionCategory,
     ) -> TriageCategory {
         // High emotional content
-        if matches!(emotion, EmotionCategory::Frustration | EmotionCategory::Urgency | EmotionCategory::Joy | EmotionCategory::Surprise)
-            && node.sentiment_magnitude > 0.4 {
-                return TriageCategory::Emotional;
-            }
+        if matches!(
+            emotion,
+            EmotionCategory::Frustration
+                | EmotionCategory::Urgency
+                | EmotionCategory::Joy
+                | EmotionCategory::Surprise
+        ) && node.sentiment_magnitude > 0.4
+        {
+            return TriageCategory::Emotional;
+        }
 
         // Future-relevant (intentions, TODOs)
         let content_lower = node.content.to_lowercase();
-        if content_lower.contains("todo") || content_lower.contains("remind")
-            || content_lower.contains("intention") || content_lower.contains("next time")
-            || content_lower.contains("plan to") {
+        if content_lower.contains("todo")
+            || content_lower.contains("remind")
+            || content_lower.contains("intention")
+            || content_lower.contains("next time")
+            || content_lower.contains("plan to")
+        {
             return TriageCategory::FutureRelevant;
         }
 
@@ -380,9 +394,8 @@ impl DreamEngine {
         let mut strengthened_ids = Vec::new();
 
         let replay_set: HashSet<&String> = replay_queue.iter().collect();
-        let _triaged_map: HashMap<&str, &TriagedMemory> = triaged.iter()
-            .map(|m| (m.id.as_str(), m))
-            .collect();
+        let _triaged_map: HashMap<&str, &TriagedMemory> =
+            triaged.iter().map(|m| (m.id.as_str(), m)).collect();
 
         // Process replay queue in oscillation waves
         let wave_count = replay_queue.len().div_ceil(self.wave_batch_size);
@@ -406,7 +419,8 @@ impl DreamEngine {
 
         actions.push(format!(
             "Processed {} waves of {} memories",
-            wave_count, replay_queue.len()
+            wave_count,
+            replay_queue.len()
         ));
         actions.push(format!(
             "Strengthened {} memories via synaptic tagging",
@@ -462,7 +476,11 @@ impl DreamEngine {
         // Group memories by primary tag for cross-domain pairing
         let mut tag_groups: HashMap<String, Vec<&TriagedMemory>> = HashMap::new();
         for tm in triaged {
-            let primary_tag = tm.tags.first().cloned().unwrap_or_else(|| "untagged".to_string());
+            let primary_tag = tm
+                .tags
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "untagged".to_string());
             tag_groups.entry(primary_tag).or_default().push(tm);
         }
 
@@ -490,7 +508,11 @@ impl DreamEngine {
                         if similarity > self.min_insight_confidence {
                             let conn_type = self.classify_connection(mem_a, mem_b, similarity);
                             let insight = self.generate_connection_insight(
-                                mem_a, mem_b, &tag_keys[i], &tag_keys[j], conn_type,
+                                mem_a,
+                                mem_b,
+                                &tag_keys[i],
+                                &tag_keys[j],
+                                conn_type,
                             );
 
                             connections.push(CreativeConnection {
@@ -534,7 +556,10 @@ impl DreamEngine {
         // Pattern extraction: find repeated patterns across memories
         let pattern_count = self.extract_patterns(triaged, &mut connections);
         if pattern_count > 0 {
-            actions.push(format!("Pattern extraction: {} shared patterns found", pattern_count));
+            actions.push(format!(
+                "Pattern extraction: {} shared patterns found",
+                pattern_count
+            ));
         }
 
         let phase = PhaseResult {
@@ -548,11 +573,13 @@ impl DreamEngine {
     }
 
     fn content_similarity(&self, a: &str, b: &str) -> f64 {
-        let words_a: HashSet<&str> = a.split_whitespace()
+        let words_a: HashSet<&str> = a
+            .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
             .filter(|w| w.len() > 3)
             .collect();
-        let words_b: HashSet<&str> = b.split_whitespace()
+        let words_b: HashSet<&str> = b
+            .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
             .filter(|w| w.len() > 3)
             .collect();
@@ -601,8 +628,16 @@ impl DreamEngine {
         tag_b: &str,
         conn_type: CreativeConnectionType,
     ) -> String {
-        let a_summary = if a.content.len() > 60 { &a.content[..60] } else { &a.content };
-        let b_summary = if b.content.len() > 60 { &b.content[..60] } else { &b.content };
+        let a_summary = if a.content.len() > 60 {
+            &a.content[..60]
+        } else {
+            &a.content
+        };
+        let b_summary = if b.content.len() > 60 {
+            &b.content[..60]
+        } else {
+            &b.content
+        };
 
         match conn_type {
             CreativeConnectionType::CrossDomain => {
@@ -641,7 +676,9 @@ impl DreamEngine {
         let mut bigram_index: HashMap<(String, String), Vec<usize>> = HashMap::new();
 
         for (idx, tm) in triaged.iter().enumerate() {
-            let words: Vec<String> = tm.content.split_whitespace()
+            let words: Vec<String> = tm
+                .content
+                .split_whitespace()
                 .map(|w| w.to_lowercase())
                 .filter(|w| w.len() > 3)
                 .collect();
@@ -659,18 +696,21 @@ impl DreamEngine {
                 pattern_count += 1;
                 // Create a connection between the first and last memory sharing this pattern
                 if let (Some(&first), Some(&last)) = (indices.first(), indices.last())
-                    && first != last {
-                        connections.push(CreativeConnection {
-                            memory_a_id: triaged[first].id.clone(),
-                            memory_b_id: triaged[last].id.clone(),
-                            insight: format!(
-                                "Shared pattern '{}  {}' found across {} memories",
-                                bigram.0, bigram.1, indices.len()
-                            ),
-                            confidence: (indices.len() as f64 / triaged.len() as f64).min(1.0),
-                            connection_type: CreativeConnectionType::CrossDomain,
-                        });
-                    }
+                    && first != last
+                {
+                    connections.push(CreativeConnection {
+                        memory_a_id: triaged[first].id.clone(),
+                        memory_b_id: triaged[last].id.clone(),
+                        insight: format!(
+                            "Shared pattern '{}  {}' found across {} memories",
+                            bigram.0,
+                            bigram.1,
+                            indices.len()
+                        ),
+                        confidence: (indices.len() as f64 / triaged.len() as f64).min(1.0),
+                        connection_type: CreativeConnectionType::CrossDomain,
+                    });
+                }
             }
         }
 
@@ -695,7 +735,8 @@ impl DreamEngine {
         let mut actions = Vec::new();
 
         // Validate connections: keep only those above threshold
-        let valid_connections: Vec<&CreativeConnection> = connections.iter()
+        let valid_connections: Vec<&CreativeConnection> = connections
+            .iter()
             .filter(|c| c.confidence >= self.validation_threshold)
             .collect();
 
@@ -727,8 +768,12 @@ impl DreamEngine {
         insights.retain(|i| {
             if i.source_memory_ids.len() >= 2 {
                 let pair = (
-                    i.source_memory_ids[0].clone().min(i.source_memory_ids[1].clone()),
-                    i.source_memory_ids[0].clone().max(i.source_memory_ids[1].clone()),
+                    i.source_memory_ids[0]
+                        .clone()
+                        .min(i.source_memory_ids[1].clone()),
+                    i.source_memory_ids[0]
+                        .clone()
+                        .max(i.source_memory_ids[1].clone()),
                 );
                 seen_pairs.insert(pair)
             } else {
@@ -740,7 +785,9 @@ impl DreamEngine {
         insights.sort_by(|a, b| {
             let score_a = a.confidence * a.novelty;
             let score_b = b.confidence * b.novelty;
-            score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+            score_b
+                .partial_cmp(&score_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Cap at 20 insights
@@ -754,7 +801,10 @@ impl DreamEngine {
         } else {
             triaged.iter().map(|m| m.retention_strength).sum::<f64>() / triaged.len() as f64
         };
-        actions.push(format!("Average retention across dreamed memories: {:.2}", avg_retention));
+        actions.push(format!(
+            "Average retention across dreamed memories: {:.2}",
+            avg_retention
+        ));
 
         let phase = PhaseResult {
             phase: DreamPhase::Integration,
@@ -866,13 +916,15 @@ mod tests {
         let importance = ImportanceSignals::new();
         let mut synaptic = SynapticTaggingSystem::new();
 
-        let memories: Vec<KnowledgeNode> = (0..10).map(|i| {
-            make_test_node(
-                &format!("mem-{}", i),
-                &format!("Test memory content for dream cycle number {}", i),
-                &["test"],
-            )
-        }).collect();
+        let memories: Vec<KnowledgeNode> = (0..10)
+            .map(|i| {
+                make_test_node(
+                    &format!("mem-{}", i),
+                    &format!("Test memory content for dream cycle number {}", i),
+                    &["test"],
+                )
+            })
+            .collect();
 
         let result = engine.run(&memories, &mut emotional, &importance, &mut synaptic);
 
@@ -893,7 +945,11 @@ mod tests {
 
         let memories = vec![
             make_emotional_node("emo-1", "Critical production crash error panic!", 0.9),
-            make_test_node("future-1", "TODO: remind me to add caching next time", &["planning"]),
+            make_test_node(
+                "future-1",
+                "TODO: remind me to add caching next time",
+                &["planning"],
+            ),
             make_test_node("standard-1", "The function returns a string", &["docs"]),
         ];
 
@@ -918,13 +974,15 @@ mod tests {
         let mut emotional = EmotionalMemory::new();
         let importance = ImportanceSignals::new();
 
-        let memories: Vec<KnowledgeNode> = (0..20).map(|i| {
-            make_test_node(
-                &format!("mem-{}", i),
-                &format!("Memory with varying importance content {}", i),
-                &["test"],
-            )
-        }).collect();
+        let memories: Vec<KnowledgeNode> = (0..20)
+            .map(|i| {
+                make_test_node(
+                    &format!("mem-{}", i),
+                    &format!("Memory with varying importance content {}", i),
+                    &["test"],
+                )
+            })
+            .collect();
 
         let (_triaged, queue, _phase) = engine.phase_nrem1(&memories, &mut emotional, &importance);
 
@@ -937,8 +995,8 @@ mod tests {
         let engine = DreamEngine::new();
         let mut synaptic = SynapticTaggingSystem::new();
 
-        let triaged: Vec<TriagedMemory> = (0..10).map(|i| {
-            TriagedMemory {
+        let triaged: Vec<TriagedMemory> = (0..10)
+            .map(|i| TriagedMemory {
                 id: format!("mem-{}", i),
                 content: format!("Test memory {}", i),
                 importance: 0.5,
@@ -948,8 +1006,8 @@ mod tests {
                 retention_strength: 0.7,
                 emotional_valence: 0.0,
                 is_flashbulb: false,
-            }
-        }).collect();
+            })
+            .collect();
 
         let replay_queue: Vec<String> = triaged.iter().map(|m| m.id.clone()).collect();
 
@@ -1034,7 +1092,10 @@ mod tests {
 
         assert_eq!(phase.phase, DreamPhase::Rem);
         // Should find connection via shared "error handling" and "pattern" words
-        assert!(!connections.is_empty(), "Should find cross-domain error handling pattern");
+        assert!(
+            !connections.is_empty(),
+            "Should find cross-domain error handling pattern"
+        );
     }
 
     #[test]
@@ -1042,23 +1103,25 @@ mod tests {
         let engine = DreamEngine::new();
         let mut emotional = EmotionalMemory::new();
 
-        let triaged = vec![
-            TriagedMemory {
-                id: "angry-1".to_string(),
-                content: "Critical production error crashed the entire system".to_string(),
-                importance: 0.8,
-                category: TriageCategory::Emotional,
-                tags: vec!["incident".to_string()],
-                created_at: Utc::now(),
-                retention_strength: 0.9,
-                emotional_valence: -0.8,
-                is_flashbulb: false,
-            },
-        ];
+        let triaged = vec![TriagedMemory {
+            id: "angry-1".to_string(),
+            content: "Critical production error crashed the entire system".to_string(),
+            importance: 0.8,
+            category: TriageCategory::Emotional,
+            tags: vec!["incident".to_string()],
+            created_at: Utc::now(),
+            retention_strength: 0.9,
+            emotional_valence: -0.8,
+            is_flashbulb: false,
+        }];
 
-        let (_connections, emotional_processed, _phase) = engine.phase_rem(&triaged, &mut emotional);
+        let (_connections, emotional_processed, _phase) =
+            engine.phase_rem(&triaged, &mut emotional);
 
-        assert_eq!(emotional_processed, 1, "Negative emotional memory should be processed");
+        assert_eq!(
+            emotional_processed, 1,
+            "Negative emotional memory should be processed"
+        );
     }
 
     #[test]
@@ -1123,7 +1186,11 @@ mod tests {
             "error handling with Result type pattern",
             "error handling with try-catch pattern",
         );
-        assert!(sim > 0.2, "Similar content should have >0.2 Jaccard: {}", sim);
+        assert!(
+            sim > 0.2,
+            "Similar content should have >0.2 Jaccard: {}",
+            sim
+        );
 
         let dissim = engine.content_similarity(
             "Rust memory management with ownership",
@@ -1154,16 +1221,19 @@ mod tests {
         let importance = ImportanceSignals::new();
         let mut synaptic = SynapticTaggingSystem::new();
 
-        let memories: Vec<KnowledgeNode> = (0..5).map(|i| {
-            make_test_node(&format!("m{}", i), &format!("Content {}", i), &["test"])
-        }).collect();
+        let memories: Vec<KnowledgeNode> = (0..5)
+            .map(|i| make_test_node(&format!("m{}", i), &format!("Content {}", i), &["test"]))
+            .collect();
 
         let result = engine.run(&memories, &mut emotional, &importance, &mut synaptic);
 
         for phase in &result.phases {
             // Duration should be non-negative (might be 0ms for fast operations)
             assert!(phase.duration_ms < 10000);
-            assert!(!phase.actions.is_empty(), "Each phase should report actions");
+            assert!(
+                !phase.actions.is_empty(),
+                "Each phase should report actions"
+            );
         }
     }
 
@@ -1173,7 +1243,11 @@ mod tests {
         let mut emotional = EmotionalMemory::new();
         let importance = ImportanceSignals::new();
 
-        let mut node = make_test_node("flash-1", "CRITICAL: Production server crash! Emergency rollback needed immediately!", &["incident"]);
+        let mut node = make_test_node(
+            "flash-1",
+            "CRITICAL: Production server crash! Emergency rollback needed immediately!",
+            &["incident"],
+        );
         node.sentiment_magnitude = 0.9;
 
         let (triaged, _queue, phase) = engine.phase_nrem1(&[node], &mut emotional, &importance);

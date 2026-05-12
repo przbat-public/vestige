@@ -11,13 +11,13 @@
 //! preserved bit-for-bit.
 
 use chrono::{Duration, Utc};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::fts::sanitize_fts5_query;
 use crate::memory::{IngestInput, KnowledgeNode};
 
-use super::{normalize_tags, Result, Storage, StorageError};
+use super::{Result, Storage, StorageError, normalize_tags};
 
 impl Storage {
     /// Ingest a new memory
@@ -30,7 +30,9 @@ impl Storage {
         // e.g. "bug-fix", "Bug Fix", "bugfix" → "bug-fix"
         input.tags = normalize_tags(&input.tags);
 
-        let fsrs_state = self.scheduler.lock()
+        let fsrs_state = self
+            .scheduler
+            .lock()
             .map_err(|_| StorageError::Init("Scheduler lock poisoned".into()))?
             .new_card();
 
@@ -45,13 +47,16 @@ impl Storage {
         let next_review = now + Duration::days(fsrs_state.scheduled_days as i64);
         let valid_from_str = input.valid_from.map(|dt| dt.to_rfc3339());
         let valid_until_str = input.valid_until.map(|dt| dt.to_rfc3339());
-        let provenance_json = input.provenance
+        let provenance_json = input
+            .provenance
             .as_ref()
             .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "{}".to_string()))
             .unwrap_or_else(|| "{}".to_string());
 
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute(
                 "INSERT INTO knowledge_nodes (
@@ -97,7 +102,7 @@ impl Storage {
                     0,
                     Option::<String>::None,
                     provenance_json,
-                    // Tier 4 typed memory fields. IngestInput passes through
+                    // Typed memory fields. IngestInput passes through
                     // optional typed metadata; missing values default to Raw.
                     input.memory_kind.as_str(),
                     input.subject.as_deref(),
@@ -132,7 +137,9 @@ impl Storage {
             .map_err(|e| StorageError::Init(format!("Failed to serialize tags: {}", e)))?;
         let now = Utc::now();
 
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "UPDATE knowledge_nodes SET tags = ?1, updated_at = ?2 WHERE id = ?3",
@@ -146,7 +153,9 @@ impl Storage {
         let now = Utc::now();
 
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute(
                 "UPDATE knowledge_nodes SET content = ?1, updated_at = ?2 WHERE id = ?3",
@@ -172,14 +181,13 @@ impl Storage {
 
     /// Get a node by ID
     pub fn get_node(&self, id: &str) -> Result<Option<KnowledgeNode>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader
-            .prepare("SELECT * FROM knowledge_nodes WHERE id = ?1")?;
+        let mut stmt = reader.prepare("SELECT * FROM knowledge_nodes WHERE id = ?1")?;
 
-        let node = stmt
-            .query_row(params![id], Self::row_to_node)
-            .optional()?;
+        let node = stmt.query_row(params![id], Self::row_to_node).optional()?;
         Ok(node)
     }
 
@@ -190,7 +198,10 @@ impl Storage {
         }
         let reader = self.acquire_reader()?;
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("SELECT * FROM knowledge_nodes WHERE id IN ({})", placeholders);
+        let sql = format!(
+            "SELECT * FROM knowledge_nodes WHERE id IN ({})",
+            placeholders
+        );
         let mut stmt = reader.prepare(&sql)?;
         let params: Vec<&dyn rusqlite::ToSql> =
             ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
@@ -203,17 +214,19 @@ impl Storage {
 
     /// Delete a node
     pub fn delete_node(&self, id: &str) -> Result<bool> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-        let rows = writer
-            .execute("DELETE FROM knowledge_nodes WHERE id = ?1", params![id])?;
+        let rows = writer.execute("DELETE FROM knowledge_nodes WHERE id = ?1", params![id])?;
 
         // Clean up vector index to prevent stale search results
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
         if rows > 0
-            && let Ok(mut index) = self.vector_index.lock() {
-                let _ = index.remove(id);
-            }
+            && let Ok(mut index) = self.vector_index.lock()
+        {
+            let _ = index.remove(id);
+        }
 
         Ok(rows > 0)
     }
@@ -222,7 +235,9 @@ impl Storage {
     pub fn search(&self, query: &str, limit: i32) -> Result<Vec<KnowledgeNode>> {
         let sanitized_query = sanitize_fts5_query(query);
 
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT n.* FROM knowledge_nodes n
@@ -243,7 +258,9 @@ impl Storage {
 
     /// Get all nodes (paginated)
     pub fn get_all_nodes(&self, limit: i32, offset: i32) -> Result<Vec<KnowledgeNode>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT * FROM knowledge_nodes
@@ -270,7 +287,9 @@ impl Storage {
         tag_filter: Option<&str>,
         limit: i32,
     ) -> Result<Vec<KnowledgeNode>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         match tag_filter {
             Some(tag) => {

@@ -19,7 +19,7 @@ pub mod temporal;
 use chrono::{DateTime, Utc};
 
 use coref::CorefResult;
-use entities::{ExtractedEntity, extract_entities, entities_to_tags};
+use entities::{ExtractedEntity, entities_to_tags, extract_entities};
 use provenance::ProvenanceMetadata;
 use relations::{ExtractedRelation, extract_relations};
 use temporal::{TemporalResult, anchor_temporal};
@@ -51,8 +51,7 @@ pub struct PreprocessingResult {
 }
 
 /// Configuration for the preprocessing pipeline.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PreprocessingConfig {
     /// Session identifier for provenance
     pub session_id: Option<String>,
@@ -63,7 +62,6 @@ pub struct PreprocessingConfig {
     /// Pre-existing valid_until (won't be overridden by temporal anchoring)
     pub existing_valid_until: Option<DateTime<Utc>>,
 }
-
 
 /// Run the full preprocessing pipeline on content.
 ///
@@ -79,23 +77,33 @@ pub fn preprocess(content: &str, config: &PreprocessingConfig) -> PreprocessingR
     let auto_tags = entities_to_tags(&entities, MAX_AUTO_TAGS);
 
     // 2. Coreference rewriting
-    let CorefResult { content: rewritten, rewrites } =
-        coref::resolve_coreferences(content, &entities);
+    let CorefResult {
+        content: rewritten,
+        rewrites,
+    } = coref::resolve_coreferences(content, &entities);
 
     // 3. Temporal anchoring (on rewritten content)
-    let TemporalResult { valid_from, valid_until, anchors_found } =
-        anchor_temporal(&rewritten, config.existing_valid_from, config.existing_valid_until);
+    let TemporalResult {
+        valid_from,
+        valid_until,
+        anchors_found,
+    } = anchor_temporal(
+        &rewritten,
+        config.existing_valid_from,
+        config.existing_valid_until,
+    );
 
     // 4. Relation extraction (on rewritten content, using original entities)
     let relations = extract_relations(&rewritten, &entities);
 
     // 5. Assemble provenance
-    let mut provenance = ProvenanceMetadata::new()
-        .with_context(config.session_id.clone(), config.agent.clone());
+    let mut provenance =
+        ProvenanceMetadata::new().with_context(config.session_id.clone(), config.agent.clone());
     provenance.coref_rewrites = rewrites;
     provenance.auto_entities = entities.iter().map(|e| e.text.clone()).collect();
     provenance.temporal_anchors_found = anchors_found;
-    provenance.relations_extracted = relations.iter()
+    provenance.relations_extracted = relations
+        .iter()
         .map(|r| format!("{} → {} → {}", r.subject, r.predicate, r.object))
         .collect();
 
@@ -137,8 +145,11 @@ mod tests {
 
         // Check that entities were extracted
         let entity_names: Vec<&str> = result.entities.iter().map(|e| e.text.as_str()).collect();
-        assert!(entity_names.iter().any(|n| n.contains("Sophie")),
-            "Should extract Sophie Wilson, got: {:?}", entity_names);
+        assert!(
+            entity_names.iter().any(|n| n.contains("Sophie")),
+            "Should extract Sophie Wilson, got: {:?}",
+            entity_names
+        );
     }
 
     #[test]
@@ -151,8 +162,14 @@ mod tests {
         };
 
         let result = preprocess("Deploy by tomorrow. Starting from next week.", &config);
-        assert!(result.valid_from.is_none(), "Should not override explicit valid_from");
-        assert!(result.valid_until.is_none(), "Should not override explicit valid_until");
+        assert!(
+            result.valid_from.is_none(),
+            "Should not override explicit valid_from"
+        );
+        assert!(
+            result.valid_until.is_none(),
+            "Should not override explicit valid_until"
+        );
     }
 
     #[test]
@@ -163,7 +180,10 @@ mod tests {
             ..Default::default()
         };
 
-        let result = preprocess("Alice manages the backend. Check https://example.com.", &config);
+        let result = preprocess(
+            "Alice manages the backend. Check https://example.com.",
+            &config,
+        );
         assert_eq!(result.provenance.session_id.as_deref(), Some("sess-abc"));
         assert_eq!(result.provenance.agent.as_deref(), Some("cursor"));
         assert!(!result.provenance.auto_entities.is_empty());
@@ -191,15 +211,23 @@ mod tests {
         let content = "Alice manages the Auth Team. She deployed https://auth.example.com \
                         and fixed bug #1234. The deadline is by next Friday. \
                         Contact alice@example.com for details.";
-        let result = preprocess(content, &PreprocessingConfig {
-            session_id: Some("test-sess".into()),
-            agent: Some("test-agent".into()),
-            ..Default::default()
-        });
+        let result = preprocess(
+            content,
+            &PreprocessingConfig {
+                session_id: Some("test-sess".into()),
+                agent: Some("test-agent".into()),
+                ..Default::default()
+            },
+        );
 
-        assert!(!result.entities.is_empty(), "Should extract multiple entities");
-        assert!(result.auto_tags.iter().any(|t| t.starts_with("entity:")),
-            "Should generate entity: tags");
+        assert!(
+            !result.entities.is_empty(),
+            "Should extract multiple entities"
+        );
+        assert!(
+            result.auto_tags.iter().any(|t| t.starts_with("entity:")),
+            "Should generate entity: tags"
+        );
         assert!(result.provenance.session_id.as_deref() == Some("test-sess"));
         assert!(result.provenance.agent.as_deref() == Some("test-agent"));
         assert!(!result.provenance.auto_entities.is_empty());
@@ -218,7 +246,11 @@ mod tests {
         }
         let elapsed = start.elapsed();
         let per_call_us = elapsed.as_micros() / 100;
-        assert!(per_call_us < 5000, "Pipeline should be < 5ms per call, got {}µs", per_call_us);
+        assert!(
+            per_call_us < 5000,
+            "Pipeline should be < 5ms per call, got {}µs",
+            per_call_us
+        );
     }
 
     #[test]
@@ -227,9 +259,14 @@ mod tests {
             "a simple lowercase sentence with no special features",
             &PreprocessingConfig::default(),
         );
-        assert!(result.entities.is_empty() || result.entities.iter().all(|e| {
-            matches!(e.entity_type, entities::EntityType::ProperNoun)
-        }), "Plain text should have few/no entities");
+        assert!(
+            result.entities.is_empty()
+                || result
+                    .entities
+                    .iter()
+                    .all(|e| { matches!(e.entity_type, entities::EntityType::ProperNoun) }),
+            "Plain text should have few/no entities"
+        );
         assert!(result.relations.is_empty());
         assert_eq!(result.coref_rewrites, 0);
     }

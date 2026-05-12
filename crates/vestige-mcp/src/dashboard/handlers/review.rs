@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::super::state::AppState;
-use super::log_err;
+use super::{log_err, log_join_err};
 
 /// Body for `POST /api/memories/{id}/review` — FSRS-6 rating.
 /// 1=Again, 2=Hard, 3=Good, 4=Easy. Defaults to 3 if omitted.
@@ -30,17 +30,24 @@ pub async fn review_memory(
     Json(body): Json<ReviewBody>,
 ) -> Result<Json<Value>, StatusCode> {
     let rating_value = body.rating.unwrap_or(3);
-    let rating = vestige_core::Rating::from_i32(rating_value)
-        .ok_or(StatusCode::BAD_REQUEST)?;
+    let rating = vestige_core::Rating::from_i32(rating_value).ok_or(StatusCode::BAD_REQUEST)?;
 
-    let before = state.storage
-        .get_node(&id)
-        .map_err(log_err("get_node before review"))?
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    let node = state.storage
-        .mark_reviewed(&id, rating)
-        .map_err(log_err("mark_reviewed"))?;
+    // mark_reviewed does a SELECT + UPDATE plus FSRS-6 math; group both reads
+    // into one blocking task. The inner `Option` preserves "not found" so the
+    // outer handler can still map it to 404.
+    let storage = state.storage.clone();
+    let id_owned = id.clone();
+    let pair = tokio::task::spawn_blocking(move || -> vestige_core::Result<_> {
+        let Some(before) = storage.get_node(&id_owned)? else {
+            return Ok(None);
+        };
+        let node = storage.mark_reviewed(&id_owned, rating)?;
+        Ok(Some((before, node)))
+    })
+    .await
+    .map_err(log_join_err("review_memory task panicked"))?
+    .map_err(log_err("mark_reviewed"))?;
+    let (before, node) = pair.ok_or(StatusCode::NOT_FOUND)?;
 
     let rating_name = match rating {
         vestige_core::Rating::Again => "again",
@@ -78,8 +85,10 @@ pub async fn get_review_queue(
     Query(params): Query<ReviewQueueParams>,
 ) -> Result<Json<Value>, StatusCode> {
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
-    let nodes = state.storage
-        .get_review_queue(limit)
+    let storage = state.storage.clone();
+    let nodes = tokio::task::spawn_blocking(move || storage.get_review_queue(limit))
+        .await
+        .map_err(log_join_err("get_review_queue task panicked"))?
         .map_err(log_err("get_review_queue"))?;
 
     let formatted: Vec<Value> = nodes

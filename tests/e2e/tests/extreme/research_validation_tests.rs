@@ -10,6 +10,10 @@
 //! Each test cites the specific research findings being validated.
 
 use chrono::{Duration, Utc};
+use std::collections::HashSet;
+use vestige_core::neuroscience::hippocampal_index::{
+    HippocampalIndex, HippocampalIndexConfig, IndexQuery,
+};
 use vestige_core::neuroscience::spreading_activation::{
     ActivationConfig, ActivationNetwork, LinkType,
 };
@@ -17,10 +21,6 @@ use vestige_core::neuroscience::synaptic_tagging::{
     CaptureWindow, ImportanceEvent, ImportanceEventType, SynapticTaggingConfig,
     SynapticTaggingSystem,
 };
-use vestige_core::neuroscience::hippocampal_index::{
-    HippocampalIndex, HippocampalIndexConfig, IndexQuery,
-};
-use std::collections::HashSet;
 
 // ============================================================================
 // COLLINS & LOFTUS (1975) SPREADING ACTIVATION VALIDATION (1 test)
@@ -39,7 +39,7 @@ use std::collections::HashSet;
 #[test]
 fn test_research_collins_loftus_spreading_activation() {
     let config = ActivationConfig {
-        decay_factor: 0.75,  // Semantic distance decay
+        decay_factor: 0.75, // Semantic distance decay
         max_hops: 4,
         min_threshold: 0.05,
         allow_cycles: false,
@@ -48,29 +48,91 @@ fn test_research_collins_loftus_spreading_activation() {
 
     // Recreate classic semantic network from the paper
     // "Fire truck" example: fire_truck -> red -> roses, fire_truck -> vehicle
-    network.add_edge("fire_truck".to_string(), "red".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("fire_truck".to_string(), "vehicle".to_string(), LinkType::Semantic, 0.85);
-    network.add_edge("fire_truck".to_string(), "fire".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("red".to_string(), "roses".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("red".to_string(), "cherries".to_string(), LinkType::Semantic, 0.65);
-    network.add_edge("red".to_string(), "apples".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("vehicle".to_string(), "car".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("vehicle".to_string(), "truck".to_string(), LinkType::Semantic, 0.85);
-    network.add_edge("fire".to_string(), "flames".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("fire".to_string(), "heat".to_string(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        "fire_truck".to_string(),
+        "red".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "fire_truck".to_string(),
+        "vehicle".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
+    network.add_edge(
+        "fire_truck".to_string(),
+        "fire".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "red".to_string(),
+        "roses".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "red".to_string(),
+        "cherries".to_string(),
+        LinkType::Semantic,
+        0.65,
+    );
+    network.add_edge(
+        "red".to_string(),
+        "apples".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "vehicle".to_string(),
+        "car".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "vehicle".to_string(),
+        "truck".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
+    network.add_edge(
+        "fire".to_string(),
+        "flames".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "fire".to_string(),
+        "heat".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     // Add convergent paths (multiple routes to same concept)
-    network.add_edge("apples".to_string(), "fruit".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("cherries".to_string(), "fruit".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "apples".to_string(),
+        "fruit".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "cherries".to_string(),
+        "fruit".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     let results = network.activate("fire_truck", 1.0);
 
     // Validation 1: Direct connections (distance 1) have highest activation
-    let red_activation = results.iter()
+    let red_activation = results
+        .iter()
         .find(|r| r.memory_id == "red")
         .map(|r| r.activation)
         .unwrap_or(0.0);
-    let roses_activation = results.iter()
+    let roses_activation = results
+        .iter()
         .find(|r| r.memory_id == "roses")
         .map(|r| r.activation)
         .unwrap_or(0.0);
@@ -83,11 +145,13 @@ fn test_research_collins_loftus_spreading_activation() {
     );
 
     // Validation 2: Activation decreases with semantic distance
-    let distance_1: Vec<f64> = results.iter()
+    let distance_1: Vec<f64> = results
+        .iter()
         .filter(|r| r.distance == 1)
         .map(|r| r.activation)
         .collect();
-    let distance_2: Vec<f64> = results.iter()
+    let distance_2: Vec<f64> = results
+        .iter()
         .filter(|r| r.distance == 2)
         .map(|r| r.activation)
         .collect();
@@ -107,7 +171,10 @@ fn test_research_collins_loftus_spreading_activation() {
     assert!(reachable.contains("red"), "Should reach 'red'");
     assert!(reachable.contains("vehicle"), "Should reach 'vehicle'");
     assert!(reachable.contains("fire"), "Should reach 'fire'");
-    assert!(reachable.contains("roses"), "Should reach 'roses' through 'red'");
+    assert!(
+        reachable.contains("roses"),
+        "Should reach 'roses' through 'red'"
+    );
 
     // Validation 4: Path information is preserved
     let roses_result = results.iter().find(|r| r.memory_id == "roses").unwrap();
@@ -135,7 +202,7 @@ fn test_research_collins_loftus_spreading_activation() {
 #[test]
 fn test_research_frey_morris_synaptic_tagging() {
     let config = SynapticTaggingConfig {
-        capture_window: CaptureWindow::new(9.0, 2.0),  // Hours: 9 back, 2 forward
+        capture_window: CaptureWindow::new(9.0, 2.0), // Hours: 9 back, 2 forward
         prp_threshold: 0.7,
         tag_lifetime_hours: 12.0,
         min_tag_strength: 0.3,
@@ -148,7 +215,7 @@ fn test_research_frey_morris_synaptic_tagging() {
     let mut stc = SynapticTaggingSystem::with_config(config);
 
     // Finding 1: Weak stimulation creates tags
-    stc.tag_memory_with_strength("weak_stim_1", 0.4);  // Above min (0.3), weak
+    stc.tag_memory_with_strength("weak_stim_1", 0.4); // Above min (0.3), weak
     stc.tag_memory_with_strength("weak_stim_2", 0.5);
 
     let stats_after_weak = stc.stats();
@@ -164,7 +231,7 @@ fn test_research_frey_morris_synaptic_tagging() {
         event_type: ImportanceEventType::EmotionalContent,
         memory_id: Some("strong_trigger".to_string()),
         timestamp: Utc::now(),
-        strength: 0.95,  // Above threshold (0.7)
+        strength: 0.95, // Above threshold (0.7)
         context: Some("Strong emotional event triggers PRP".to_string()),
     };
 
@@ -236,7 +303,7 @@ fn test_research_frey_morris_synaptic_tagging() {
 /// theory and episodic memory: updating the index. Hippocampus, 17(12), 1158-1169.
 #[test]
 fn test_research_teyler_rudy_hippocampal_indexing() {
-    let config = HippocampalIndexConfig::default();
+    let _config = HippocampalIndexConfig::default();
     let index = HippocampalIndex::new();
     let now = Utc::now();
 
@@ -245,21 +312,26 @@ fn test_research_teyler_rudy_hippocampal_indexing() {
         .map(|i| ((i as f32 / 100.0) * std::f32::consts::PI).sin())
         .collect();
 
-    let barcode = index.index_memory(
-        "episodic_memory_1",
-        "Detailed episodic memory content with rich context",
-        "episodic",
-        now,
-        Some(full_embedding.clone()),
-    ).expect("Should create barcode");
+    let barcode = index
+        .index_memory(
+            "episodic_memory_1",
+            "Detailed episodic memory content with rich context",
+            "episodic",
+            now,
+            Some(full_embedding.clone()),
+        )
+        .expect("Should create barcode");
 
     // Barcode should be a valid identifier (u64 ID)
     // First barcode may have id=0, which is valid
-    assert!(barcode.creation_hash > 0 || barcode.content_fingerprint > 0,
-        "T&R Finding 1: Barcode should have valid fingerprints");
+    assert!(
+        barcode.creation_hash > 0 || barcode.content_fingerprint > 0,
+        "T&R Finding 1: Barcode should have valid fingerprints"
+    );
 
     // Finding 2: Index points to content (content pointers)
-    let memory_index = index.get_index("episodic_memory_1")
+    let memory_index = index
+        .get_index("episodic_memory_1")
         .expect("Should retrieve")
         .expect("Should exist");
 
@@ -348,7 +420,7 @@ fn test_research_ebbinghaus_forgetting_curve() {
 
     let forgetting_curve = |t: f64| -> f64 {
         // Ebbinghaus formula: R = e^(-t/S) where S is stability
-        let stability = 2.0;  // Memory stability parameter
+        let stability = 2.0; // Memory stability parameter
         (-t / stability).exp()
     };
 
@@ -368,7 +440,10 @@ fn test_research_ebbinghaus_forgetting_curve() {
     // Collect activations by "age"
     let mut age_activations: Vec<(u32, f64)> = Vec::new();
     for t in 0..10 {
-        if let Some(result) = results.iter().find(|r| r.memory_id == format!("memory_age_{}", t)) {
+        if let Some(result) = results
+            .iter()
+            .find(|r| r.memory_id == format!("memory_age_{}", t))
+        {
             age_activations.push((t, result.activation));
         }
     }
@@ -387,7 +462,8 @@ fn test_research_ebbinghaus_forgetting_curve() {
     // Check that differences decrease over time
     if age_activations.len() >= 3 {
         let diff_early = age_activations[0].1 - age_activations[1].1;
-        let diff_late = age_activations[age_activations.len() - 2].1 - age_activations[age_activations.len() - 1].1;
+        let diff_late = age_activations[age_activations.len() - 2].1
+            - age_activations[age_activations.len() - 1].1;
 
         // Early differences should be larger (rapid initial forgetting)
         // But we need to account for near-zero values at the end
@@ -403,8 +479,18 @@ fn test_research_ebbinghaus_forgetting_curve() {
 
     // Finding 3: Test overlearning (reinforcement)
     let mut overlearned_network = ActivationNetwork::new();
-    overlearned_network.add_edge("study".to_string(), "normal_learning".to_string(), LinkType::Semantic, 0.5);
-    overlearned_network.add_edge("study".to_string(), "overlearned".to_string(), LinkType::Semantic, 0.5);
+    overlearned_network.add_edge(
+        "study".to_string(),
+        "normal_learning".to_string(),
+        LinkType::Semantic,
+        0.5,
+    );
+    overlearned_network.add_edge(
+        "study".to_string(),
+        "overlearned".to_string(),
+        LinkType::Semantic,
+        0.5,
+    );
 
     // Simulate overlearning with multiple reinforcements
     for _ in 0..5 {
@@ -413,11 +499,13 @@ fn test_research_ebbinghaus_forgetting_curve() {
 
     let study_results = overlearned_network.activate("study", 1.0);
 
-    let normal_act = study_results.iter()
+    let normal_act = study_results
+        .iter()
         .find(|r| r.memory_id == "normal_learning")
         .map(|r| r.activation)
         .unwrap_or(0.0);
-    let overlearned_act = study_results.iter()
+    let overlearned_act = study_results
+        .iter()
         .find(|r| r.memory_id == "overlearned")
         .map(|r| r.activation)
         .unwrap_or(0.0);
@@ -447,7 +535,7 @@ fn test_research_ebbinghaus_forgetting_curve() {
 #[test]
 fn test_research_fsrs6_properties() {
     // FSRS-6 default weights
-    const W20: f64 = 0.1542;  // Forgetting curve exponent
+    const W20: f64 = 0.1542; // Forgetting curve exponent
 
     // FSRS-6 retrievability formula
     fn fsrs6_retrievability(stability: f64, elapsed_days: f64, w20: f64) -> f64 {
@@ -455,7 +543,9 @@ fn test_research_fsrs6_properties() {
             return 1.0;
         }
         let factor = 0.9_f64.powf(-1.0 / w20) - 1.0;
-        (1.0 + factor * elapsed_days / stability).powf(-w20).clamp(0.0, 1.0)
+        (1.0 + factor * elapsed_days / stability)
+            .powf(-w20)
+            .clamp(0.0, 1.0)
     }
 
     // Property 1: R = 0.9 when t = S (by design)

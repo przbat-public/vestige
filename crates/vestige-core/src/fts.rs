@@ -84,10 +84,7 @@ mod tests {
     #[test]
     fn test_sanitize_fts5_query_special_chars() {
         assert_eq!(sanitize_fts5_query("hello* world"), "\"hello world\"");
-        assert_eq!(
-            sanitize_fts5_query("content:secret"),
-            "\"content secret\""
-        );
+        assert_eq!(sanitize_fts5_query("content:secret"), "\"content secret\"");
         assert_eq!(sanitize_fts5_query("^boost"), "\"boost\"");
     }
 

@@ -70,7 +70,9 @@ pub async fn execute(
 
     // Use CognitiveEngine's persistent signals (novelty/reward/attention accumulate)
     let cog = cognitive.lock().await;
-    let score = cog.importance_signals.compute_importance(&args.content, &context);
+    let score = cog
+        .importance_signals
+        .compute_importance(&args.content, &context);
 
     // Also detect emotional markers for richer output
     let emotional_markers = cog.arousal_signal.detect_emotional_markers(&args.content);
@@ -129,10 +131,12 @@ mod tests {
         let schema = schema();
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"]["content"].is_object());
-        assert!(schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("content")));
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("content"))
+        );
     }
 
     #[tokio::test]
@@ -140,7 +144,12 @@ mod tests {
         let storage = Arc::new(
             Storage::new(Some(std::path::PathBuf::from("/tmp/test_importance.db"))).unwrap(),
         );
-        let result = execute(&storage, &test_cognitive(), Some(serde_json::json!({ "content": "" }))).await;
+        let result = execute(
+            &storage,
+            &test_cognitive(),
+            Some(serde_json::json!({ "content": "" })),
+        )
+        .await;
         assert!(result.is_err());
     }
 

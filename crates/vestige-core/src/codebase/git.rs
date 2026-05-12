@@ -275,9 +275,10 @@ impl GitAnalyzer {
                     files.push(path.to_path_buf());
                 }
                 if let Some(path) = delta.old_file().path()
-                    && !files.contains(&path.to_path_buf()) {
-                        files.push(path.to_path_buf());
-                    }
+                    && !files.contains(&path.to_path_buf())
+                {
+                    files.push(path.to_path_buf());
+                }
             }
         }
 
@@ -408,7 +409,11 @@ impl GitAnalyzer {
         }
 
         // Sort by strength
-        relationships.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap_or(std::cmp::Ordering::Equal));
+        relationships.sort_by(|a, b| {
+            b.strength
+                .partial_cmp(&a.strength)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(relationships)
     }
@@ -492,9 +497,10 @@ impl GitAnalyzer {
                 .unwrap_or_else(Utc::now);
 
             if let Some(since_time) = since
-                && commit_time < since_time {
-                    continue;
-                }
+                && commit_time < since_time
+            {
+                continue;
+            }
 
             let message = commit.message().map(|m| m.to_string()).unwrap_or_default();
 
@@ -541,7 +547,12 @@ impl GitAnalyzer {
         let symptom = if let Some(colon_byte_pos) = first_line.find(':') {
             // Convert byte position to char position for safe slicing
             let colon_char_pos = first_line[..colon_byte_pos].chars().count();
-            first_line.chars().skip(colon_char_pos + 1).collect::<String>().trim().to_string()
+            first_line
+                .chars()
+                .skip(colon_char_pos + 1)
+                .collect::<String>()
+                .trim()
+                .to_string()
         } else {
             first_line.to_string()
         };

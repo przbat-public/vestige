@@ -309,14 +309,8 @@ mod tests {
 
     #[test]
     fn test_rrf_rewards_documents_in_both_lists() {
-        let keyword = vec![
-            ("only-kw".to_string(), 1.0),
-            ("both".to_string(), 0.5),
-        ];
-        let semantic = vec![
-            ("only-sem".to_string(), 1.0),
-            ("both".to_string(), 0.5),
-        ];
+        let keyword = vec![("only-kw".to_string(), 1.0), ("both".to_string(), 0.5)];
+        let semantic = vec![("only-sem".to_string(), 1.0), ("both".to_string(), 0.5)];
 
         let results = reciprocal_rank_fusion(&keyword, &semantic, 60.0);
 
@@ -336,14 +330,8 @@ mod tests {
 
     #[test]
     fn test_rrf_is_scale_invariant() {
-        let kw_high = vec![
-            ("a".to_string(), 100.0),
-            ("b".to_string(), 50.0),
-        ];
-        let sem_low = vec![
-            ("b".to_string(), 0.01),
-            ("a".to_string(), 0.005),
-        ];
+        let kw_high = vec![("a".to_string(), 100.0), ("b".to_string(), 50.0)];
+        let sem_low = vec![("b".to_string(), 0.01), ("a".to_string(), 0.005)];
 
         let results = reciprocal_rank_fusion(&kw_high, &sem_low, 60.0);
 

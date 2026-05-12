@@ -766,6 +766,6 @@ fn main() -> Result<(), std::io::Error> {
         embedder.embed_auto("Another text sample.");
 
         let stats = embedder.stats();
-        assert!(stats.len() > 0);
+        assert!(!stats.is_empty());
     }
 }

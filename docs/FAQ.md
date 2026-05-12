@@ -782,22 +782,22 @@ This helps trace why you know something.
 <details>
 <summary><b>"What's planned for future versions?"</b></summary>
 
-Based on codebase exploration, these features exist in various stages:
+The advanced cognitive features below are now implemented and shipping. Live in `crates/vestige-core/src/advanced/`:
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Memory Dreams | Partial | Automated offline consolidation |
-| Reconsolidation | Planned | Update memories when accessed |
-| Memory Chains | Partial | Link related memories explicitly |
-| Adaptive Embedding | Planned | Re-embed old memories with better models |
-| Cross-Project Learning | Planned | Share patterns across codebases |
+| Memory Dreams | Implemented | 4-phase consolidation cycle (NREM1 triage → NREM3 → REM creative → integration), persists discovered connections |
+| Reconsolidation | Implemented | Nader-style 5-minute labile window after access, modifications enhanced during window |
+| Memory Chains | Implemented | A*-like reasoning chain builder across memories (`MemoryChainBuilder`) |
+| Adaptive Embedding | Implemented | `AdaptiveEmbedder` — re-embeds memories when the model version changes |
+| Cross-Project Learning | Implemented | `CrossProjectLearner` tracks 6 pattern types (error handling, async/concurrency, testing, architecture, performance, security) across projects |
 
-**Community wishlist** (from Reddit):
+**Roadmap (not yet implemented):**
+- Typed memory routing (V11 schema is in place; per-kind retrieval is the next core change — see `docs/TYPED-MEMORY-DESIGN.md` and `docs/BENCHMARK-IMPROVEMENT-PLAN.md`)
 - Stream ingestion mode
-- GUI for memory browsing
-- Export/import formats
 - Sync between devices (encrypted)
 - Team collaboration features
+- GUI for memory browsing (the 3D dashboard covers most browsing today)
 
 Contributions welcome!
 </details>

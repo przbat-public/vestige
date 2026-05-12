@@ -12,9 +12,9 @@
 //! 5. User benefits from improved recall over time
 
 use vestige_core::{
+    consolidation::SleepConsolidation,
     fsrs::{FSRSScheduler, LearningState, Rating},
     memory::{IngestInput, RecallInput, SearchMode},
-    consolidation::SleepConsolidation,
 };
 
 // ============================================================================
@@ -108,8 +108,7 @@ fn test_recall_finds_memories_by_content() {
     // Verify search mode
     match recall.search_mode {
         SearchMode::Keyword => {
-            // Keyword search uses FTS5
-            assert!(true, "Keyword mode should be supported");
+            // Keyword search uses FTS5 — variant match is the actual assertion
         }
         _ => panic!("Expected Keyword search mode"),
     }
@@ -139,7 +138,10 @@ fn test_review_strengthens_memory_with_fsrs() {
     let result = scheduler.review(&initial_state, Rating::Good, 0.0, None);
 
     // Stability should be set from initial parameters
-    assert!(result.state.stability > 0.0, "Stability should be positive after review");
+    assert!(
+        result.state.stability > 0.0,
+        "Stability should be positive after review"
+    );
 
     // Reps should increase
     assert_eq!(result.state.reps, 1, "Reps should increase after review");
@@ -160,7 +162,10 @@ fn test_review_strengthens_memory_with_fsrs() {
         again_result.interval <= second_result.interval,
         "Again rating should reduce interval"
     );
-    assert_eq!(again_result.state.lapses, 1, "Lapses should increase on Again");
+    assert_eq!(
+        again_result.state.lapses, 1,
+        "Lapses should increase on Again"
+    );
 }
 
 // ============================================================================
@@ -184,7 +189,11 @@ fn test_memory_lifecycle_follows_expected_pattern() {
 
     // Simulate 10 successful reviews
     for i in 0..10 {
-        let elapsed = if i == 0 { 0.0 } else { intervals.last().copied().unwrap_or(1) as f64 };
+        let elapsed = if i == 0 {
+            0.0
+        } else {
+            intervals.last().copied().unwrap_or(1) as f64
+        };
         let result = scheduler.review(&state, Rating::Good, elapsed, None);
         intervals.push(result.interval);
         state = result.state;
@@ -192,7 +201,10 @@ fn test_memory_lifecycle_follows_expected_pattern() {
 
     // Verify lifecycle progression
     assert!(state.reps >= 10, "Should have at least 10 reps");
-    assert_eq!(state.lapses, 0, "Should have no lapses with all Good ratings");
+    assert_eq!(
+        state.lapses, 0,
+        "Should have no lapses with all Good ratings"
+    );
 
     // Verify interval growth (early intervals may be similar, but should eventually grow)
     let early_avg: f64 = intervals[..3].iter().map(|&i| i as f64).sum::<f64>() / 3.0;
@@ -207,7 +219,7 @@ fn test_memory_lifecycle_follows_expected_pattern() {
     // Verify state is Review (mature)
     match state.state {
         LearningState::Review => {
-            assert!(true, "Mature memory should be in Review state");
+            // Mature memory in Review state — variant match is the assertion
         }
         _ => {
             // Also acceptable - depends on FSRS parameters
@@ -260,10 +272,7 @@ fn test_sentiment_affects_memory_consolidation() {
 
     // Test promotion boost
     let boosted = consolidation.promotion_boost(5.0);
-    assert!(
-        boosted > 5.0,
-        "Promotion should increase storage strength"
-    );
+    assert!(boosted > 5.0, "Promotion should increase storage strength");
     assert!(
         boosted <= 10.0,
         "Promotion should cap at max storage strength"

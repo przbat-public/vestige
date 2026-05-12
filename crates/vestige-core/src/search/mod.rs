@@ -5,7 +5,7 @@
 //! - Keyword search using BM25/FTS5
 //! - Hybrid search with RRF fusion
 //! - Temporal-aware search
-//! - Reranking for precision (GOD TIER 2026)
+//! - Reranking for precision
 
 pub mod decompose;
 mod hybrid;
@@ -16,21 +16,21 @@ mod temporal;
 mod vector;
 
 pub use vector::{
-    VectorIndex, VectorIndexConfig, VectorIndexStats, VectorSearchError, DEFAULT_CONNECTIVITY,
-    DEFAULT_DIMENSIONS,
+    DEFAULT_CONNECTIVITY, DEFAULT_DIMENSIONS, VectorIndex, VectorIndexConfig, VectorIndexStats,
+    VectorSearchError,
 };
 
-pub use keyword::{sanitize_fts5_query, KeywordSearcher};
+pub use keyword::{KeywordSearcher, sanitize_fts5_query};
 
-pub use hybrid::{linear_combination, reciprocal_rank_fusion, HybridSearchConfig, HybridSearcher};
+pub use hybrid::{HybridSearchConfig, HybridSearcher, linear_combination, reciprocal_rank_fusion};
 
 pub use temporal::TemporalSearcher;
 
-// GOD TIER 2026: Reranking for +15-20% precision
+// Reranking for +15-20% precision
 pub use reranker::{
-    Reranker, RerankerConfig, RerankerError, RerankedResult,
-    DEFAULT_RERANK_COUNT, DEFAULT_RETRIEVAL_COUNT,
+    DEFAULT_RERANK_COUNT, DEFAULT_RETRIEVAL_COUNT, RerankedResult, Reranker, RerankerConfig,
+    RerankerError,
 };
 
 // v2.0: HyDE-inspired query expansion for improved semantic search
-pub use hyde::{classify_intent, expand_query, centroid_embedding, QueryIntent};
+pub use hyde::{QueryIntent, centroid_embedding, classify_intent, expand_query};

@@ -1,4 +1,4 @@
-# Vestige v3.2.0 — Cognitive Memory System
+# Vestige — Cognitive Memory System
 
 Vestige is your long-term memory. Use it automatically. Use it aggressively. Retrieve context silently — do not announce memory operations to the user.
 
@@ -133,7 +133,7 @@ Node types: `fact` | `concept` | `event` | `person` | `place` | `note` | `patter
 
 All local heuristic/regex, zero model downloads, sub-millisecond latency.
 
-### search — 7-Stage Cognitive Search
+### search — 8-Stage Cognitive Search
 ```json
 { "query": "search query", "limit": 10, "min_retention": 0.0,
   "min_similarity": 0.5, "detail_level": "summary",
@@ -142,7 +142,7 @@ All local heuristic/regex, zero model downloads, sub-millisecond latency.
 ```
 Every search strengthens the memories it finds (Testing Effect).
 
-**Retrieval modes:** `precise` (top results only, fast, skips activation/competition), `balanced` (full 7-stage cognitive pipeline, default), `exhaustive` (maximum recall with 5x overfetch, deep graph traversal, no competition suppression).
+**Retrieval modes:** `precise` (top results only, fast, skips activation/competition), `balanced` (full 8-stage cognitive pipeline, default), `exhaustive` (maximum recall with 5x overfetch, deep graph traversal, no competition suppression).
 
 **Compound query decomposition:** Queries containing semicolons, question chains, or conjunctions are automatically split into sub-queries, searched independently, and merged (union, max-score dedup). Improves MRR by +43% on multi-topic queries.
 
@@ -326,21 +326,21 @@ restore: { "path": "/path/to/backup.json" }
 ## Development
 
 - **Crate:** `vestige-mcp` v3.2.1, Rust 2024 edition, MSRV 1.91
-- **Tools:** 26 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference)
+- **Tools:** 27 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference). Canonical list lives in `vestige-mcp/src/server/catalog.rs::build_tools_list`.
 - **Tests:** 1,080+ (unit + E2E + cognitive + journey + extreme) + 18 cognitive journey + 10 scientific validation
 - **Build:** `cargo build --release -p vestige-mcp` (features: `embeddings` + `vector-search` + `preprocessing`)
 - **Build (no embeddings):** `cargo build --release -p vestige-mcp --no-default-features`
 - **Preprocessing:** entity extraction, coreference rewriting, temporal anchoring, relation extraction — all local regex/heuristic, zero model downloads. Feature-gated under `preprocessing` (default on).
 - **Bench:** `cargo bench -p vestige-core`
 - **Architecture:** `McpServer` → `Arc<Storage>` + `Arc<Mutex<CognitiveEngine>>`
-- **Storage:** SQLite WAL mode, `Mutex<Connection>` reader/writer split, FTS5 full-text search
+- **Storage:** SQLite WAL mode, `Mutex<Connection>` reader/writer split, FTS5 full-text search. Implementation split across `storage/sqlite/` per concern (nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats). Migrations v1–v11.
 - **Embeddings:** nomic-embed-text-v1.5 (768D → 384D Matryoshka truncation, 8K context) via fastembed (local ONNX, no API)
 - **Reranker:** Jina Reranker v2 Base Multilingual (278M params) cross-encoder
 - **Search:** Compound query decomposition + Triple hybrid scoring (BM25 + semantic + RRF), active forgetting, prospective indexing
 - **Vector index:** USearch HNSW (20x faster than FAISS)
 - **Binaries:** `vestige-mcp` (MCP server), `vestige` (CLI), `vestige-restore`
 - **Dashboard:** React 19 + Vite 6 + React Router 7 + Three.js + Tailwind 4 + i18next (EN/PL), embedded at `/dashboard`
-- **Dashboard API:** 18 REST endpoints (including `/api/reflect`, `/api/temporal`, `/api/confidence`)
+- **Dashboard API:** 28 REST operations across 26 paths (including `/api/reflect`, `/api/temporal`, `/api/confidence`). Handlers split per domain under `dashboard/handlers/` (memory, search, graph, history, intentions, maintenance, review, cognitive, metacognitive, observability, pages).
 - **Env vars:** `VESTIGE_DASHBOARD_PORT` (default 3927), `VESTIGE_CONSOLIDATION_INTERVAL_HOURS` (default 6), `RUST_LOG`
 
 For cognitive architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).

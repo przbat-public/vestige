@@ -129,15 +129,15 @@ fn test_serial_position_u_shaped_curve() {
 
     // U-shaped curve: high-low-high pattern
     let items = vec![
-        ("pos_1", 0.90),  // High (primacy)
+        ("pos_1", 0.90), // High (primacy)
         ("pos_2", 0.80),
         ("pos_3", 0.65),
-        ("pos_4", 0.55),  // Low (middle)
-        ("pos_5", 0.50),  // Low (middle)
+        ("pos_4", 0.55), // Low (middle)
+        ("pos_5", 0.50), // Low (middle)
         ("pos_6", 0.55),
         ("pos_7", 0.70),
         ("pos_8", 0.85),
-        ("pos_9", 0.95),  // High (recency)
+        ("pos_9", 0.95), // High (recency)
     ];
 
     for (item, strength) in &items {
@@ -151,13 +151,35 @@ fn test_serial_position_u_shaped_curve() {
 
     let results = network.activate("list_context", 1.0);
 
-    let pos_1 = results.iter().find(|r| r.memory_id == "pos_1").map(|r| r.activation).unwrap_or(0.0);
-    let pos_5 = results.iter().find(|r| r.memory_id == "pos_5").map(|r| r.activation).unwrap_or(0.0);
-    let pos_9 = results.iter().find(|r| r.memory_id == "pos_9").map(|r| r.activation).unwrap_or(0.0);
+    let pos_1 = results
+        .iter()
+        .find(|r| r.memory_id == "pos_1")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let pos_5 = results
+        .iter()
+        .find(|r| r.memory_id == "pos_5")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let pos_9 = results
+        .iter()
+        .find(|r| r.memory_id == "pos_9")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
 
     // U-shape: ends higher than middle
-    assert!(pos_1 > pos_5, "First position ({}) > middle position ({})", pos_1, pos_5);
-    assert!(pos_9 > pos_5, "Last position ({}) > middle position ({})", pos_9, pos_5);
+    assert!(
+        pos_1 > pos_5,
+        "First position ({}) > middle position ({})",
+        pos_1,
+        pos_5
+    );
+    assert!(
+        pos_9 > pos_5,
+        "Last position ({}) > middle position ({})",
+        pos_9,
+        pos_5
+    );
 }
 
 /// Test that rehearsal strengthens primacy items.
@@ -168,9 +190,24 @@ fn test_serial_position_rehearsal_strengthens_primacy() {
     let mut network = ActivationNetwork::new();
 
     // Initial weak connections
-    network.add_edge("learning".to_string(), "first_concept".to_string(), LinkType::Semantic, 0.3);
-    network.add_edge("learning".to_string(), "middle_concept".to_string(), LinkType::Semantic, 0.3);
-    network.add_edge("learning".to_string(), "last_concept".to_string(), LinkType::Semantic, 0.3);
+    network.add_edge(
+        "learning".to_string(),
+        "first_concept".to_string(),
+        LinkType::Semantic,
+        0.3,
+    );
+    network.add_edge(
+        "learning".to_string(),
+        "middle_concept".to_string(),
+        LinkType::Semantic,
+        0.3,
+    );
+    network.add_edge(
+        "learning".to_string(),
+        "last_concept".to_string(),
+        LinkType::Semantic,
+        0.3,
+    );
 
     // Simulate rehearsal - first items get more rehearsal
     // (5 rehearsals for first, 2 for middle, 3 for last)
@@ -217,12 +254,12 @@ fn test_serial_position_delay_eliminates_recency() {
     // After delay: primacy preserved, recency diminished
     // (modeling that working memory has cleared)
     let delayed_items = vec![
-        ("early_1", 0.85),  // Primacy preserved
+        ("early_1", 0.85), // Primacy preserved
         ("early_2", 0.75),
         ("middle_1", 0.50),
         ("middle_2", 0.45),
-        ("late_1", 0.40),   // Recency lost after delay
-        ("late_2", 0.35),   // (items not transferred to LTM)
+        ("late_1", 0.40), // Recency lost after delay
+        ("late_2", 0.35), // (items not transferred to LTM)
     ];
 
     for (item, strength) in &delayed_items {
@@ -271,7 +308,12 @@ fn test_spacing_effect_distributed_vs_massed() {
     let mut network = ActivationNetwork::new();
 
     // Massed practice: all reinforcements close together (less effective)
-    network.add_edge("massed".to_string(), "concept_a".to_string(), LinkType::Semantic, 0.2);
+    network.add_edge(
+        "massed".to_string(),
+        "concept_a".to_string(),
+        LinkType::Semantic,
+        0.2,
+    );
     // 5 rapid reinforcements
     for _ in 0..5 {
         network.reinforce_edge("massed", "concept_a", 0.1);
@@ -279,7 +321,12 @@ fn test_spacing_effect_distributed_vs_massed() {
 
     // Spaced practice: reinforcements distributed (more effective)
     // Simulated by giving higher reinforcement values (representing better encoding)
-    network.add_edge("spaced".to_string(), "concept_b".to_string(), LinkType::Semantic, 0.2);
+    network.add_edge(
+        "spaced".to_string(),
+        "concept_b".to_string(),
+        LinkType::Semantic,
+        0.2,
+    );
     // 5 spaced reinforcements with better encoding
     for _ in 0..5 {
         network.reinforce_edge("spaced", "concept_b", 0.15); // Higher value = better encoding
@@ -316,12 +363,22 @@ fn test_spacing_effect_optimal_interval() {
     let mut network = ActivationNetwork::new();
 
     // Short retention interval: shorter spacing optimal
-    network.add_edge("short_retention".to_string(), "fact_1".to_string(), LinkType::Semantic, 0.3);
+    network.add_edge(
+        "short_retention".to_string(),
+        "fact_1".to_string(),
+        LinkType::Semantic,
+        0.3,
+    );
     network.reinforce_edge("short_retention", "fact_1", 0.2);
     network.reinforce_edge("short_retention", "fact_1", 0.2);
 
     // Long retention interval: longer spacing optimal (simulated with stronger encoding)
-    network.add_edge("long_retention".to_string(), "fact_2".to_string(), LinkType::Semantic, 0.3);
+    network.add_edge(
+        "long_retention".to_string(),
+        "fact_2".to_string(),
+        LinkType::Semantic,
+        0.3,
+    );
     network.reinforce_edge("long_retention", "fact_2", 0.25);
     network.reinforce_edge("long_retention", "fact_2", 0.25);
 
@@ -346,9 +403,24 @@ fn test_spacing_effect_semantic_associations() {
     let mut network = ActivationNetwork::new();
 
     // Create semantic network with spaced learning
-    network.add_edge("programming".to_string(), "rust".to_string(), LinkType::Semantic, 0.5);
-    network.add_edge("rust".to_string(), "ownership".to_string(), LinkType::Semantic, 0.5);
-    network.add_edge("ownership".to_string(), "borrowing".to_string(), LinkType::Semantic, 0.5);
+    network.add_edge(
+        "programming".to_string(),
+        "rust".to_string(),
+        LinkType::Semantic,
+        0.5,
+    );
+    network.add_edge(
+        "rust".to_string(),
+        "ownership".to_string(),
+        LinkType::Semantic,
+        0.5,
+    );
+    network.add_edge(
+        "ownership".to_string(),
+        "borrowing".to_string(),
+        LinkType::Semantic,
+        0.5,
+    );
 
     // Spaced reinforcement of the path
     for _ in 0..3 {
@@ -361,7 +433,10 @@ fn test_spacing_effect_semantic_associations() {
 
     // Should reach borrowing through the strengthened path
     let borrowing_result = results.iter().find(|r| r.memory_id == "borrowing");
-    assert!(borrowing_result.is_some(), "Spaced learning should strengthen multi-hop paths");
+    assert!(
+        borrowing_result.is_some(),
+        "Spaced learning should strengthen multi-hop paths"
+    );
 
     let borrowing_activation = borrowing_result.unwrap().activation;
     assert!(
@@ -379,7 +454,12 @@ fn test_spacing_effect_expanding_retrieval() {
     let mut network = ActivationNetwork::new();
 
     // Expanding intervals: each retrieval strengthens more as intervals grow
-    network.add_edge("expanding".to_string(), "memory".to_string(), LinkType::Semantic, 0.2);
+    network.add_edge(
+        "expanding".to_string(),
+        "memory".to_string(),
+        LinkType::Semantic,
+        0.2,
+    );
 
     // Simulate expanding intervals with increasing reinforcement
     let expanding_reinforcements = [0.1, 0.12, 0.15, 0.18, 0.22]; // Increasing gains
@@ -411,9 +491,24 @@ fn test_spacing_effect_multi_hop_paths() {
     let mut network = ActivationNetwork::with_config(config);
 
     // Create a learning chain
-    network.add_edge("topic".to_string(), "subtopic_a".to_string(), LinkType::Semantic, 0.4);
-    network.add_edge("subtopic_a".to_string(), "detail_1".to_string(), LinkType::Semantic, 0.4);
-    network.add_edge("detail_1".to_string(), "example".to_string(), LinkType::Semantic, 0.4);
+    network.add_edge(
+        "topic".to_string(),
+        "subtopic_a".to_string(),
+        LinkType::Semantic,
+        0.4,
+    );
+    network.add_edge(
+        "subtopic_a".to_string(),
+        "detail_1".to_string(),
+        LinkType::Semantic,
+        0.4,
+    );
+    network.add_edge(
+        "detail_1".to_string(),
+        "example".to_string(),
+        LinkType::Semantic,
+        0.4,
+    );
 
     // Spaced practice on entire chain
     for _ in 0..4 {
@@ -426,11 +521,18 @@ fn test_spacing_effect_multi_hop_paths() {
 
     // Example should be reachable with good activation
     let example_result = results.iter().find(|r| r.memory_id == "example");
-    assert!(example_result.is_some(), "Spaced practice should enable deep retrieval");
+    assert!(
+        example_result.is_some(),
+        "Spaced practice should enable deep retrieval"
+    );
 
     let example = example_result.unwrap();
     assert_eq!(example.distance, 3, "Example should be 3 hops away");
-    assert!(example.activation > 0.1, "Example should have sufficient activation: {}", example.activation);
+    assert!(
+        example.activation > 0.1,
+        "Example should have sufficient activation: {}",
+        example.activation
+    );
 }
 
 // ============================================================================
@@ -448,27 +550,58 @@ fn test_context_dependent_matching_context() {
     let mut network = ActivationNetwork::new();
 
     // Memory encoded in "office" context
-    network.add_edge("office_context".to_string(), "project_deadline".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("office_context".to_string(), "meeting_notes".to_string(), LinkType::Semantic, 0.85);
+    network.add_edge(
+        "office_context".to_string(),
+        "project_deadline".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "office_context".to_string(),
+        "meeting_notes".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     // Memory encoded in "home" context
-    network.add_edge("home_context".to_string(), "grocery_list".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("home_context".to_string(), "family_event".to_string(), LinkType::Semantic, 0.85);
+    network.add_edge(
+        "home_context".to_string(),
+        "grocery_list".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "home_context".to_string(),
+        "family_event".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     // Recall from office context
     let office_results = network.activate("office_context", 1.0);
     let home_results = network.activate("home_context", 1.0);
 
     // Office context should find office memories
-    let found_deadline = office_results.iter().any(|r| r.memory_id == "project_deadline");
+    let found_deadline = office_results
+        .iter()
+        .any(|r| r.memory_id == "project_deadline");
     let found_grocery = office_results.iter().any(|r| r.memory_id == "grocery_list");
 
-    assert!(found_deadline, "Office context should activate office memories");
-    assert!(!found_grocery, "Office context should NOT directly activate home memories");
+    assert!(
+        found_deadline,
+        "Office context should activate office memories"
+    );
+    assert!(
+        !found_grocery,
+        "Office context should NOT directly activate home memories"
+    );
 
     // Home context should find home memories
     let home_found_grocery = home_results.iter().any(|r| r.memory_id == "grocery_list");
-    assert!(home_found_grocery, "Home context should activate home memories");
+    assert!(
+        home_found_grocery,
+        "Home context should activate home memories"
+    );
 }
 
 /// Test encoding specificity principle.
@@ -479,12 +612,32 @@ fn test_context_dependent_encoding_specificity() {
     let mut network = ActivationNetwork::new();
 
     // Highly specific encoding context
-    network.add_edge("rainy_monday_morning".to_string(), "specific_memory".to_string(), LinkType::Temporal, 0.95);
-    network.add_edge("rainy_monday_morning".to_string(), "coffee_shop_idea".to_string(), LinkType::Temporal, 0.9);
+    network.add_edge(
+        "rainy_monday_morning".to_string(),
+        "specific_memory".to_string(),
+        LinkType::Temporal,
+        0.95,
+    );
+    network.add_edge(
+        "rainy_monday_morning".to_string(),
+        "coffee_shop_idea".to_string(),
+        LinkType::Temporal,
+        0.9,
+    );
 
     // General context (partial match)
-    network.add_edge("monday".to_string(), "rainy_monday_morning".to_string(), LinkType::Temporal, 0.6);
-    network.add_edge("morning".to_string(), "rainy_monday_morning".to_string(), LinkType::Temporal, 0.5);
+    network.add_edge(
+        "monday".to_string(),
+        "rainy_monday_morning".to_string(),
+        LinkType::Temporal,
+        0.6,
+    );
+    network.add_edge(
+        "morning".to_string(),
+        "rainy_monday_morning".to_string(),
+        LinkType::Temporal,
+        0.5,
+    );
 
     // Specific context retrieval
     let specific_results = network.activate("rainy_monday_morning", 1.0);
@@ -520,20 +673,50 @@ fn test_context_dependent_state_dependent() {
     let mut network = ActivationNetwork::new();
 
     // Memories encoded in different emotional states
-    network.add_edge("happy_state".to_string(), "positive_memory_1".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("happy_state".to_string(), "positive_memory_2".to_string(), LinkType::Semantic, 0.85);
+    network.add_edge(
+        "happy_state".to_string(),
+        "positive_memory_1".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "happy_state".to_string(),
+        "positive_memory_2".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
-    network.add_edge("stressed_state".to_string(), "work_problem_1".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("stressed_state".to_string(), "work_problem_2".to_string(), LinkType::Semantic, 0.85);
+    network.add_edge(
+        "stressed_state".to_string(),
+        "work_problem_1".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "stressed_state".to_string(),
+        "work_problem_2".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     // Retrieve from happy state
     let happy_results = network.activate("happy_state", 1.0);
 
-    let found_positive = happy_results.iter().any(|r| r.memory_id == "positive_memory_1");
-    let found_work = happy_results.iter().any(|r| r.memory_id == "work_problem_1");
+    let found_positive = happy_results
+        .iter()
+        .any(|r| r.memory_id == "positive_memory_1");
+    let found_work = happy_results
+        .iter()
+        .any(|r| r.memory_id == "work_problem_1");
 
-    assert!(found_positive, "Happy state should activate positive memories");
-    assert!(!found_work, "Happy state should NOT directly activate stressed memories");
+    assert!(
+        found_positive,
+        "Happy state should activate positive memories"
+    );
+    assert!(
+        !found_work,
+        "Happy state should NOT directly activate stressed memories"
+    );
 }
 
 /// Test context reinstatement improves retrieval.
@@ -544,20 +727,55 @@ fn test_context_dependent_reinstatement() {
     let mut network = ActivationNetwork::new();
 
     // Memory with multiple context cues
-    network.add_edge("library".to_string(), "study_session".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("quiet".to_string(), "study_session".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("evening".to_string(), "study_session".to_string(), LinkType::Temporal, 0.6);
+    network.add_edge(
+        "library".to_string(),
+        "study_session".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "quiet".to_string(),
+        "study_session".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "evening".to_string(),
+        "study_session".to_string(),
+        LinkType::Temporal,
+        0.6,
+    );
 
     // Study session links to learned material
-    network.add_edge("study_session".to_string(), "learned_concept".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "study_session".to_string(),
+        "learned_concept".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     // Single context cue
     let single_cue = network.activate("library", 1.0);
 
     // Multiple context cues (reinstatement) - we need to create a combined node
-    network.add_edge("reinstated_context".to_string(), "library".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("reinstated_context".to_string(), "quiet".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("reinstated_context".to_string(), "evening".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "reinstated_context".to_string(),
+        "library".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "reinstated_context".to_string(),
+        "quiet".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "reinstated_context".to_string(),
+        "evening".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     let reinstated_results = network.activate("reinstated_context", 1.0);
 
@@ -587,10 +805,20 @@ fn test_context_dependent_transfer_appropriate() {
     let mut network = ActivationNetwork::new();
 
     // Semantic encoding (deep processing)
-    network.add_edge("meaning_focused".to_string(), "concept_meaning".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "meaning_focused".to_string(),
+        "concept_meaning".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     // Perceptual encoding (shallow processing)
-    network.add_edge("appearance_focused".to_string(), "concept_appearance".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "appearance_focused".to_string(),
+        "concept_appearance".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     // Semantic retrieval cue
     let semantic_results = network.activate("meaning_focused", 1.0);
@@ -599,15 +827,30 @@ fn test_context_dependent_transfer_appropriate() {
     let perceptual_results = network.activate("appearance_focused", 1.0);
 
     // Matching encoding-retrieval processing should work best
-    let semantic_found = semantic_results.iter().any(|r| r.memory_id == "concept_meaning");
-    let perceptual_found = perceptual_results.iter().any(|r| r.memory_id == "concept_appearance");
+    let semantic_found = semantic_results
+        .iter()
+        .any(|r| r.memory_id == "concept_meaning");
+    let perceptual_found = perceptual_results
+        .iter()
+        .any(|r| r.memory_id == "concept_appearance");
 
-    assert!(semantic_found, "Semantic cue should retrieve semantically encoded info");
-    assert!(perceptual_found, "Perceptual cue should retrieve perceptually encoded info");
+    assert!(
+        semantic_found,
+        "Semantic cue should retrieve semantically encoded info"
+    );
+    assert!(
+        perceptual_found,
+        "Perceptual cue should retrieve perceptually encoded info"
+    );
 
     // Cross-retrieval should be weaker (not directly connected)
-    let cross_found = semantic_results.iter().any(|r| r.memory_id == "concept_appearance");
-    assert!(!cross_found, "Semantic cue should NOT directly retrieve perceptual encoding");
+    let cross_found = semantic_results
+        .iter()
+        .any(|r| r.memory_id == "concept_appearance");
+    assert!(
+        !cross_found,
+        "Semantic cue should NOT directly retrieve perceptual encoding"
+    );
 }
 
 // ============================================================================
@@ -622,26 +865,51 @@ fn test_context_dependent_transfer_appropriate() {
 #[test]
 fn test_tot_partial_activation() {
     let config = ActivationConfig {
-        decay_factor: 0.6,  // Higher decay = weaker far connections
+        decay_factor: 0.6, // Higher decay = weaker far connections
         max_hops: 3,
-        min_threshold: 0.15,  // Higher threshold = some items not retrieved
+        min_threshold: 0.15, // Higher threshold = some items not retrieved
         allow_cycles: false,
     };
     let mut network = ActivationNetwork::with_config(config);
 
     // Target word "serendipity" with various features
-    network.add_edge("word_search".to_string(), "starts_with_s".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("word_search".to_string(), "four_syllables".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("word_search".to_string(), "meaning_lucky_discovery".to_string(), LinkType::Semantic, 0.85);
-    network.add_edge("starts_with_s".to_string(), "serendipity".to_string(), LinkType::Semantic, 0.3);  // Weak link to target
+    network.add_edge(
+        "word_search".to_string(),
+        "starts_with_s".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "word_search".to_string(),
+        "four_syllables".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "word_search".to_string(),
+        "meaning_lucky_discovery".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
+    network.add_edge(
+        "starts_with_s".to_string(),
+        "serendipity".to_string(),
+        LinkType::Semantic,
+        0.3,
+    ); // Weak link to target
 
     let results = network.activate("word_search", 1.0);
 
     // Should find partial information
     let found_starts_s = results.iter().any(|r| r.memory_id == "starts_with_s");
-    let found_meaning = results.iter().any(|r| r.memory_id == "meaning_lucky_discovery");
+    let found_meaning = results
+        .iter()
+        .any(|r| r.memory_id == "meaning_lucky_discovery");
 
-    assert!(found_starts_s, "Should retrieve partial info (first letter)");
+    assert!(
+        found_starts_s,
+        "Should retrieve partial info (first letter)"
+    );
     assert!(found_meaning, "Should retrieve partial info (meaning)");
 
     // Target might not be found due to weak link and threshold
@@ -669,17 +937,49 @@ fn test_tot_related_words_activated() {
 
     // Searching for "archipelago"
     // Related words get activated instead
-    network.add_edge("island_chain_concept".to_string(), "archipelago".to_string(), LinkType::Semantic, 0.4);  // Weak
-    network.add_edge("island_chain_concept".to_string(), "peninsula".to_string(), LinkType::Semantic, 0.7);  // Related, stronger
-    network.add_edge("island_chain_concept".to_string(), "atoll".to_string(), LinkType::Semantic, 0.65);  // Related
-    network.add_edge("island_chain_concept".to_string(), "islands".to_string(), LinkType::Semantic, 0.8);  // Generic, strong
+    network.add_edge(
+        "island_chain_concept".to_string(),
+        "archipelago".to_string(),
+        LinkType::Semantic,
+        0.4,
+    ); // Weak
+    network.add_edge(
+        "island_chain_concept".to_string(),
+        "peninsula".to_string(),
+        LinkType::Semantic,
+        0.7,
+    ); // Related, stronger
+    network.add_edge(
+        "island_chain_concept".to_string(),
+        "atoll".to_string(),
+        LinkType::Semantic,
+        0.65,
+    ); // Related
+    network.add_edge(
+        "island_chain_concept".to_string(),
+        "islands".to_string(),
+        LinkType::Semantic,
+        0.8,
+    ); // Generic, strong
 
     let results = network.activate("island_chain_concept", 1.0);
 
     // Generic/related words should be more activated than target
-    let archipelago_act = results.iter().find(|r| r.memory_id == "archipelago").map(|r| r.activation).unwrap_or(0.0);
-    let islands_act = results.iter().find(|r| r.memory_id == "islands").map(|r| r.activation).unwrap_or(0.0);
-    let peninsula_act = results.iter().find(|r| r.memory_id == "peninsula").map(|r| r.activation).unwrap_or(0.0);
+    let archipelago_act = results
+        .iter()
+        .find(|r| r.memory_id == "archipelago")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let islands_act = results
+        .iter()
+        .find(|r| r.memory_id == "islands")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let peninsula_act = results
+        .iter()
+        .find(|r| r.memory_id == "peninsula")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
 
     assert!(
         islands_act > archipelago_act,
@@ -703,10 +1003,25 @@ fn test_tot_phonological_cue_resolution() {
 
     // Target: "ephemeral"
     // Weak semantic link
-    network.add_edge("temporary_concept".to_string(), "ephemeral".to_string(), LinkType::Semantic, 0.3);
+    network.add_edge(
+        "temporary_concept".to_string(),
+        "ephemeral".to_string(),
+        LinkType::Semantic,
+        0.3,
+    );
     // Strong phonological link
-    network.add_edge("starts_with_eph".to_string(), "ephemeral".to_string(), LinkType::Semantic, 0.85);
-    network.add_edge("temporary_concept".to_string(), "starts_with_eph".to_string(), LinkType::Semantic, 0.5);
+    network.add_edge(
+        "starts_with_eph".to_string(),
+        "ephemeral".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
+    network.add_edge(
+        "temporary_concept".to_string(),
+        "starts_with_eph".to_string(),
+        LinkType::Semantic,
+        0.5,
+    );
 
     // Without phonological cue (just semantic)
     let semantic_only = network.activate("temporary_concept", 1.0);
@@ -741,11 +1056,21 @@ fn test_tot_phonological_cue_resolution() {
 fn test_tot_age_related_increase() {
     // "Young" network - strong connections
     let mut young_network = ActivationNetwork::new();
-    young_network.add_edge("cue".to_string(), "target_word".to_string(), LinkType::Semantic, 0.85);
+    young_network.add_edge(
+        "cue".to_string(),
+        "target_word".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     // "Older" network - weakened connections
     let mut older_network = ActivationNetwork::new();
-    older_network.add_edge("cue".to_string(), "target_word".to_string(), LinkType::Semantic, 0.45);
+    older_network.add_edge(
+        "cue".to_string(),
+        "target_word".to_string(),
+        LinkType::Semantic,
+        0.45,
+    );
 
     let young_results = young_network.activate("cue", 1.0);
     let older_results = older_network.activate("cue", 1.0);
@@ -778,8 +1103,18 @@ fn test_tot_blocking_effect() {
     let mut network = ActivationNetwork::new();
 
     // Target and blocker both connected to cue
-    network.add_edge("definition_cue".to_string(), "blocker_word".to_string(), LinkType::Semantic, 0.9);  // Strong
-    network.add_edge("definition_cue".to_string(), "target_word".to_string(), LinkType::Semantic, 0.5);  // Weaker
+    network.add_edge(
+        "definition_cue".to_string(),
+        "blocker_word".to_string(),
+        LinkType::Semantic,
+        0.9,
+    ); // Strong
+    network.add_edge(
+        "definition_cue".to_string(),
+        "target_word".to_string(),
+        LinkType::Semantic,
+        0.5,
+    ); // Weaker
 
     let results = network.activate("definition_cue", 1.0);
 
@@ -819,13 +1154,15 @@ fn test_drm_basic_false_memory() {
     let mut network = ActivationNetwork::new();
 
     // Study list - all semantically related to "sleep" (the critical lure)
-    let study_words = ["bed", "rest", "awake", "tired", "dream", "pillow", "blanket", "nap"];
+    let study_words = [
+        "bed", "rest", "awake", "tired", "dream", "pillow", "blanket", "nap",
+    ];
 
     // Create associations from study words to the critical lure
     for word in &study_words {
         network.add_edge(
             word.to_string(),
-            "sleep".to_string(),  // Critical lure (never studied)
+            "sleep".to_string(), // Critical lure (never studied)
             LinkType::Semantic,
             0.7,
         );
@@ -833,7 +1170,12 @@ fn test_drm_basic_false_memory() {
 
     // Also link study words to a study context
     for word in &study_words {
-        network.add_edge("study_list".to_string(), word.to_string(), LinkType::Temporal, 0.8);
+        network.add_edge(
+            "study_list".to_string(),
+            word.to_string(),
+            LinkType::Temporal,
+            0.8,
+        );
     }
 
     // Activate from study context
@@ -856,15 +1198,45 @@ fn test_drm_convergent_activation() {
     let mut network = ActivationNetwork::new();
 
     // Multiple words converging on critical lure
-    network.add_edge("cold".to_string(), "hot".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("warm".to_string(), "hot".to_string(), LinkType::Semantic, 0.85);
-    network.add_edge("heat".to_string(), "hot".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("burn".to_string(), "hot".to_string(), LinkType::Semantic, 0.75);
-    network.add_edge("fire".to_string(), "hot".to_string(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        "cold".to_string(),
+        "hot".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "warm".to_string(),
+        "hot".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
+    network.add_edge(
+        "heat".to_string(),
+        "hot".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "burn".to_string(),
+        "hot".to_string(),
+        LinkType::Semantic,
+        0.75,
+    );
+    network.add_edge(
+        "fire".to_string(),
+        "hot".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     // Study context
     for word in ["cold", "warm", "heat", "burn", "fire"] {
-        network.add_edge("study_context".to_string(), word.to_string(), LinkType::Temporal, 0.8);
+        network.add_edge(
+            "study_context".to_string(),
+            word.to_string(),
+            LinkType::Temporal,
+            0.8,
+        );
     }
 
     let results = network.activate("study_context", 1.0);
@@ -894,20 +1266,80 @@ fn test_drm_semantic_relatedness() {
     let mut network = ActivationNetwork::new();
 
     // Strongly related list
-    network.add_edge("strong_list".to_string(), "nurse".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("strong_list".to_string(), "hospital".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("strong_list".to_string(), "medicine".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("nurse".to_string(), "doctor".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("hospital".to_string(), "doctor".to_string(), LinkType::Semantic, 0.85);
-    network.add_edge("medicine".to_string(), "doctor".to_string(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        "strong_list".to_string(),
+        "nurse".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "strong_list".to_string(),
+        "hospital".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "strong_list".to_string(),
+        "medicine".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "nurse".to_string(),
+        "doctor".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "hospital".to_string(),
+        "doctor".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
+    network.add_edge(
+        "medicine".to_string(),
+        "doctor".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     // Weakly related list
-    network.add_edge("weak_list".to_string(), "white".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("weak_list".to_string(), "smart".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("weak_list".to_string(), "office".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("white".to_string(), "doctor".to_string(), LinkType::Semantic, 0.3);  // Weak
-    network.add_edge("smart".to_string(), "doctor".to_string(), LinkType::Semantic, 0.25);  // Weak
-    network.add_edge("office".to_string(), "doctor".to_string(), LinkType::Semantic, 0.2);  // Weak
+    network.add_edge(
+        "weak_list".to_string(),
+        "white".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "weak_list".to_string(),
+        "smart".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "weak_list".to_string(),
+        "office".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "white".to_string(),
+        "doctor".to_string(),
+        LinkType::Semantic,
+        0.3,
+    ); // Weak
+    network.add_edge(
+        "smart".to_string(),
+        "doctor".to_string(),
+        LinkType::Semantic,
+        0.25,
+    ); // Weak
+    network.add_edge(
+        "office".to_string(),
+        "doctor".to_string(),
+        LinkType::Semantic,
+        0.2,
+    ); // Weak
 
     let strong_results = network.activate("strong_list", 1.0);
     let weak_results = network.activate("weak_list", 1.0);
@@ -940,11 +1372,26 @@ fn test_drm_source_monitoring() {
     let mut network = ActivationNetwork::new();
 
     // Studied word
-    network.add_edge("study_session".to_string(), "actually_studied".to_string(), LinkType::Temporal, 0.85);
+    network.add_edge(
+        "study_session".to_string(),
+        "actually_studied".to_string(),
+        LinkType::Temporal,
+        0.85,
+    );
 
     // Critical lure (activated through association, not direct study)
-    network.add_edge("study_session".to_string(), "related_word".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("related_word".to_string(), "critical_lure".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "study_session".to_string(),
+        "related_word".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "related_word".to_string(),
+        "critical_lure".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     let results = network.activate("study_session", 1.0);
 
@@ -963,10 +1410,16 @@ fn test_drm_source_monitoring() {
 
     // Both should have activation (source confusion)
     assert!(studied_activation > 0.0, "Studied word should be activated");
-    assert!(lure_activation > 0.0, "Lure should also be activated, creating potential source confusion");
+    assert!(
+        lure_activation > 0.0,
+        "Lure should also be activated, creating potential source confusion"
+    );
 
     // The lure should have distance > 1 (indirect) but this is the only way to distinguish
-    let lure_result = results.iter().find(|r| r.memory_id == "critical_lure").unwrap();
+    let lure_result = results
+        .iter()
+        .find(|r| r.memory_id == "critical_lure")
+        .unwrap();
     assert!(
         lure_result.distance > 1,
         "Lure came through indirect activation (distance {}), but feels like direct memory",
@@ -982,31 +1435,117 @@ fn test_drm_list_length_effect() {
     let mut network = ActivationNetwork::new();
 
     // Short list
-    network.add_edge("short_list".to_string(), "word1".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("short_list".to_string(), "word2".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("word1".to_string(), "lure".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("word2".to_string(), "lure".to_string(), LinkType::Semantic, 0.7);
+    network.add_edge(
+        "short_list".to_string(),
+        "word1".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "short_list".to_string(),
+        "word2".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "word1".to_string(),
+        "lure".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "word2".to_string(),
+        "lure".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
 
     // Long list
-    network.add_edge("long_list".to_string(), "word_a".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("long_list".to_string(), "word_b".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("long_list".to_string(), "word_c".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("long_list".to_string(), "word_d".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("long_list".to_string(), "word_e".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("long_list".to_string(), "word_f".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("word_a".to_string(), "lure".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("word_b".to_string(), "lure".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("word_c".to_string(), "lure".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("word_d".to_string(), "lure".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("word_e".to_string(), "lure".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("word_f".to_string(), "lure".to_string(), LinkType::Semantic, 0.7);
+    network.add_edge(
+        "long_list".to_string(),
+        "word_a".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "long_list".to_string(),
+        "word_b".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "long_list".to_string(),
+        "word_c".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "long_list".to_string(),
+        "word_d".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "long_list".to_string(),
+        "word_e".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "long_list".to_string(),
+        "word_f".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "word_a".to_string(),
+        "lure".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "word_b".to_string(),
+        "lure".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "word_c".to_string(),
+        "lure".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "word_d".to_string(),
+        "lure".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "word_e".to_string(),
+        "lure".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "word_f".to_string(),
+        "lure".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
 
     let short_results = network.activate("short_list", 1.0);
     let long_results = network.activate("long_list", 1.0);
 
     // Count total activation paths to lure
-    let short_lure_count = short_results.iter().filter(|r| r.memory_id == "lure").count();
-    let long_lure_count = long_results.iter().filter(|r| r.memory_id == "lure").count();
+    let short_lure_count = short_results
+        .iter()
+        .filter(|r| r.memory_id == "lure")
+        .count();
+    let long_lure_count = long_results
+        .iter()
+        .filter(|r| r.memory_id == "lure")
+        .count();
 
     assert!(
         long_lure_count >= short_lure_count,
@@ -1029,10 +1568,20 @@ fn test_interference_proactive() {
     let mut network = ActivationNetwork::new();
 
     // Old learning (List A paired associates)
-    network.add_edge("cue_word".to_string(), "old_response".to_string(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        "cue_word".to_string(),
+        "old_response".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     // New learning (List B with same cues)
-    network.add_edge("cue_word".to_string(), "new_response".to_string(), LinkType::Semantic, 0.5);  // Weaker - harder to learn
+    network.add_edge(
+        "cue_word".to_string(),
+        "new_response".to_string(),
+        LinkType::Semantic,
+        0.5,
+    ); // Weaker - harder to learn
 
     let results = network.activate("cue_word", 1.0);
 
@@ -1065,10 +1614,20 @@ fn test_interference_retroactive() {
     let mut network = ActivationNetwork::new();
 
     // Original learning
-    network.add_edge("stimulus".to_string(), "original_memory".to_string(), LinkType::Semantic, 0.7);
+    network.add_edge(
+        "stimulus".to_string(),
+        "original_memory".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
 
     // Interpolated learning (new, stronger)
-    network.add_edge("stimulus".to_string(), "new_memory".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "stimulus".to_string(),
+        "new_memory".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     let results = network.activate("stimulus", 1.0);
 
@@ -1101,12 +1660,32 @@ fn test_interference_similarity_based() {
     let mut network = ActivationNetwork::new();
 
     // Similar competing memories
-    network.add_edge("topic".to_string(), "similar_fact_1".to_string(), LinkType::Semantic, 0.75);
-    network.add_edge("topic".to_string(), "similar_fact_2".to_string(), LinkType::Semantic, 0.73);
-    network.add_edge("topic".to_string(), "similar_fact_3".to_string(), LinkType::Semantic, 0.71);
+    network.add_edge(
+        "topic".to_string(),
+        "similar_fact_1".to_string(),
+        LinkType::Semantic,
+        0.75,
+    );
+    network.add_edge(
+        "topic".to_string(),
+        "similar_fact_2".to_string(),
+        LinkType::Semantic,
+        0.73,
+    );
+    network.add_edge(
+        "topic".to_string(),
+        "similar_fact_3".to_string(),
+        LinkType::Semantic,
+        0.71,
+    );
 
     // Dissimilar memory (should be easier to distinguish)
-    network.add_edge("topic".to_string(), "dissimilar_fact".to_string(), LinkType::Semantic, 0.80);
+    network.add_edge(
+        "topic".to_string(),
+        "dissimilar_fact".to_string(),
+        LinkType::Semantic,
+        0.80,
+    );
 
     let results = network.activate("topic", 1.0);
 
@@ -1160,13 +1739,23 @@ fn test_interference_fan_effect() {
 
     // Low fan: concept with few associations
     let mut low_fan_network = ActivationNetwork::with_config(config.clone());
-    low_fan_network.add_edge("low_fan_concept".to_string(), "fact_1".to_string(), LinkType::Semantic, 0.9);
-    low_fan_network.add_edge("low_fan_concept".to_string(), "fact_2".to_string(), LinkType::Semantic, 0.85);
+    low_fan_network.add_edge(
+        "low_fan_concept".to_string(),
+        "fact_1".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    low_fan_network.add_edge(
+        "low_fan_concept".to_string(),
+        "fact_2".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     // High fan: concept with many associations
     let mut high_fan_network = ActivationNetwork::with_config(config);
     for i in 1..=8 {
-        let strength = 0.9 - (i as f64 * 0.05);  // Decreasing strength due to fan
+        let strength = 0.9 - (i as f64 * 0.05); // Decreasing strength due to fan
         high_fan_network.add_edge(
             "high_fan_concept".to_string(),
             format!("fact_{}", i),
@@ -1179,16 +1768,16 @@ fn test_interference_fan_effect() {
     let high_results = high_fan_network.activate("high_fan_concept", 1.0);
 
     // Average activation for low fan
-    let low_avg: f64 = low_results.iter().map(|r| r.activation).sum::<f64>()
-        / low_results.len().max(1) as f64;
+    let low_avg: f64 =
+        low_results.iter().map(|r| r.activation).sum::<f64>() / low_results.len().max(1) as f64;
 
     // Average activation for high fan
-    let high_avg: f64 = high_results.iter().map(|r| r.activation).sum::<f64>()
-        / high_results.len().max(1) as f64;
+    let high_avg: f64 =
+        high_results.iter().map(|r| r.activation).sum::<f64>() / high_results.len().max(1) as f64;
 
     // Low fan should have higher average activation (less interference)
     assert!(
-        low_avg >= high_avg * 0.8,  // Allow some tolerance
+        low_avg >= high_avg * 0.8, // Allow some tolerance
         "Low fan concept should have higher average activation: low={}, high={}",
         low_avg,
         high_avg
@@ -1203,12 +1792,32 @@ fn test_interference_release_from_pi() {
     let mut network = ActivationNetwork::new();
 
     // Build up PI with category A items
-    network.add_edge("trial_1".to_string(), "category_a_item_1".to_string(), LinkType::Temporal, 0.7);
-    network.add_edge("trial_2".to_string(), "category_a_item_2".to_string(), LinkType::Temporal, 0.6);  // PI building
-    network.add_edge("trial_3".to_string(), "category_a_item_3".to_string(), LinkType::Temporal, 0.5);  // More PI
+    network.add_edge(
+        "trial_1".to_string(),
+        "category_a_item_1".to_string(),
+        LinkType::Temporal,
+        0.7,
+    );
+    network.add_edge(
+        "trial_2".to_string(),
+        "category_a_item_2".to_string(),
+        LinkType::Temporal,
+        0.6,
+    ); // PI building
+    network.add_edge(
+        "trial_3".to_string(),
+        "category_a_item_3".to_string(),
+        LinkType::Temporal,
+        0.5,
+    ); // More PI
 
     // Category shift (release from PI)
-    network.add_edge("trial_4".to_string(), "category_b_item_1".to_string(), LinkType::Temporal, 0.85);  // Recovery
+    network.add_edge(
+        "trial_4".to_string(),
+        "category_b_item_1".to_string(),
+        LinkType::Temporal,
+        0.85,
+    ); // Recovery
 
     let trial_3_results = network.activate("trial_3", 1.0);
     let trial_4_results = network.activate("trial_4", 1.0);

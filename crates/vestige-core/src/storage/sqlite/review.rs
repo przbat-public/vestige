@@ -46,7 +46,9 @@ impl Storage {
             scheduled_days: 0,
         };
 
-        let scheduler = self.scheduler.lock()
+        let scheduler = self
+            .scheduler
+            .lock()
             .map_err(|_| StorageError::Init("Scheduler lock poisoned".into()))?;
         let elapsed_days = scheduler.days_since_review(&current_state.last_review);
 
@@ -56,8 +58,7 @@ impl Storage {
             None
         };
 
-        let result = scheduler
-            .review(&current_state, rating, elapsed_days, sentiment_boost);
+        let result = scheduler.review(&current_state, rating, elapsed_days, sentiment_boost);
         drop(scheduler);
 
         let now = Utc::now();
@@ -74,7 +75,9 @@ impl Storage {
             (new_retrieval_strength * 0.7) + ((new_storage_strength / 10.0).min(1.0) * 0.3);
 
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute(
                 "UPDATE knowledge_nodes SET
@@ -122,7 +125,9 @@ impl Storage {
 
         // Primary boost on the accessed node
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute(
                 "UPDATE knowledge_nodes SET
@@ -157,7 +162,9 @@ impl Storage {
                 drop(index);
 
                 if let Ok(neighbors) = neighbors_result {
-                    let writer = self.writer.lock()
+                    let writer = self
+                        .writer
+                        .lock()
                         .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
                     for (neighbor_id, similarity) in neighbors {
                         if neighbor_id == id || similarity < 0.7 {
@@ -193,7 +200,9 @@ impl Storage {
         let now_str = now.to_rfc3339();
 
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute_batch("BEGIN IMMEDIATE")?;
             let mut stmt = writer.prepare_cached(
@@ -224,15 +233,16 @@ impl Storage {
         {
             for id in ids {
                 if let Ok(Some(embedding)) = self.get_node_embedding(id) {
-                    let index = self
-                        .vector_index
-                        .lock()
-                        .map_err(|_| StorageError::Init("Vector index lock poisoned".to_string()))?;
+                    let index = self.vector_index.lock().map_err(|_| {
+                        StorageError::Init("Vector index lock poisoned".to_string())
+                    })?;
                     let neighbors_result = index.search(&embedding, 6);
                     drop(index);
 
                     if let Ok(neighbors) = neighbors_result {
-                        let writer = self.writer.lock()
+                        let writer = self
+                            .writer
+                            .lock()
                             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
                         for (neighbor_id, similarity) in neighbors {
                             if neighbor_id == *id || similarity < 0.7 {
@@ -261,7 +271,9 @@ impl Storage {
     ///
     /// Increments `times_useful` and recomputes `utility_score = times_useful / times_retrieved`.
     pub fn mark_memory_useful(&self, id: &str) -> Result<()> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "UPDATE knowledge_nodes SET
@@ -285,7 +297,9 @@ impl Storage {
 
         // Strong boost: +0.2 retrieval, +0.1 retention, +1 useful count
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute(
                 "UPDATE knowledge_nodes SET
@@ -316,7 +330,9 @@ impl Storage {
 
         // Strong penalty: -0.3 retrieval, -0.15 retention, halve stability
         {
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute(
                 "UPDATE knowledge_nodes SET
@@ -339,7 +355,9 @@ impl Storage {
     pub fn get_review_queue(&self, limit: i32) -> Result<Vec<KnowledgeNode>> {
         let now = Utc::now().to_rfc3339();
 
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT * FROM knowledge_nodes
@@ -379,7 +397,9 @@ impl Storage {
             scheduled_days: 0,
         };
 
-        let scheduler = self.scheduler.lock()
+        let scheduler = self
+            .scheduler
+            .lock()
             .map_err(|_| StorageError::Init("Scheduler lock poisoned".into()))?;
         let elapsed_days = scheduler.days_since_review(&current_state.last_review);
 

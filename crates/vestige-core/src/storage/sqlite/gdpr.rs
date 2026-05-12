@@ -21,7 +21,9 @@ impl Storage {
     /// Returns the number of artifacts erased (node + connections + embeddings + logs).
     pub fn right_to_erasure(&self, id: &str) -> Result<i64> {
         let mut erased = 0i64;
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
 
         erased += writer.execute(
@@ -34,27 +36,23 @@ impl Storage {
             params![id],
         )? as i64;
 
-        erased += writer.execute(
-            "DELETE FROM access_log WHERE node_id = ?1",
-            params![id],
-        )? as i64;
+        erased += writer.execute("DELETE FROM access_log WHERE node_id = ?1", params![id])? as i64;
 
         erased += writer.execute(
             "DELETE FROM memory_states WHERE memory_id = ?1",
             params![id],
         )? as i64;
 
-        let node_deleted = writer.execute(
-            "DELETE FROM knowledge_nodes WHERE id = ?1",
-            params![id],
-        )?;
+        let node_deleted =
+            writer.execute("DELETE FROM knowledge_nodes WHERE id = ?1", params![id])?;
         erased += node_deleted as i64;
 
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
         if node_deleted > 0
-            && let Ok(mut index) = self.vector_index.lock() {
-                let _ = index.remove(id);
-            }
+            && let Ok(mut index) = self.vector_index.lock()
+        {
+            let _ = index.remove(id);
+        }
 
         Ok(erased)
     }
@@ -63,12 +61,13 @@ impl Storage {
     /// Returns (memories_erased, total_artifacts_erased).
     pub fn erase_by_tag(&self, tag: &str) -> Result<(i64, i64)> {
         let ids: Vec<String> = {
-            let reader = self.reader.lock()
+            let reader = self
+                .reader
+                .lock()
                 .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
             let pattern = format!("%\"{}%", tag.to_lowercase());
-            let mut stmt = reader.prepare(
-                "SELECT id FROM knowledge_nodes WHERE LOWER(tags) LIKE ?1"
-            )?;
+            let mut stmt =
+                reader.prepare("SELECT id FROM knowledge_nodes WHERE LOWER(tags) LIKE ?1")?;
             stmt.query_map(params![pattern], |row| row.get(0))?
                 .filter_map(|r| r.ok())
                 .collect()

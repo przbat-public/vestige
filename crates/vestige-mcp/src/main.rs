@@ -1,6 +1,6 @@
 //! Vestige MCP Server v1.0 - Cognitive Memory for Claude
 //!
-//! A bleeding-edge Rust MCP (Model Context Protocol) server that provides
+//! A Rust MCP (Model Context Protocol) server that provides
 //! Claude and other AI assistants with long-term memory capabilities
 //! powered by 130 years of memory research.
 //!
@@ -35,7 +35,7 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn, Level};
+use tracing::{Level, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 // Use vestige-core for the cognitive science engine
@@ -78,8 +78,12 @@ fn parse_args() -> Config {
                 println!("    --http-port <PORT>      HTTP transport port (default: 3928)");
                 println!();
                 println!("ENVIRONMENT:");
-                println!("    RUST_LOG                  Log level filter (e.g., debug, info, warn, error)");
-                println!("    VESTIGE_AUTH_TOKEN         Override the bearer token for HTTP transport");
+                println!(
+                    "    RUST_LOG                  Log level filter (e.g., debug, info, warn, error)"
+                );
+                println!(
+                    "    VESTIGE_AUTH_TOKEN         Override the bearer token for HTTP transport"
+                );
                 println!("    VESTIGE_HTTP_PORT          HTTP transport port (default: 3928)");
                 println!("    VESTIGE_DASHBOARD_PORT     Dashboard port (default: 3927)");
                 println!();
@@ -148,7 +152,10 @@ fn parse_args() -> Config {
         i += 1;
     }
 
-    Config { data_dir, http_port }
+    Config {
+        data_dir,
+        http_port,
+    }
 }
 
 #[tokio::main]
@@ -158,16 +165,16 @@ async fn main() {
 
     // Initialize logging to stderr (stdout is for JSON-RPC)
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive(Level::INFO.into())
-        )
+        .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
         .with_writer(io::stderr)
         .with_target(false)
         .with_ansi(false)
         .init();
 
-    info!("Vestige MCP Server v{} starting...", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Vestige MCP Server v{} starting...",
+        env!("CARGO_PKG_VERSION")
+    );
 
     // Initialize storage with optional custom data directory
     let storage = match Storage::new(config.data_dir) {
@@ -180,7 +187,9 @@ async fn main() {
                 if let Err(e) = s.init_embeddings() {
                     error!("Failed to initialize embedding service: {}", e);
                     error!("Smart ingest will fall back to regular ingest without deduplication");
-                    error!("Hint: Check FASTEMBED_CACHE_PATH or ensure ~/.cache/vestige/fastembed is writable");
+                    error!(
+                        "Hint: Check FASTEMBED_CACHE_PATH or ensure ~/.cache/vestige/fastembed is writable"
+                    );
                 } else {
                     info!("Embedding service initialized successfully");
                 }
@@ -222,7 +231,15 @@ async fn main() {
                 // consolidation schedule drift by up to one interval on every
                 // restart that landed within the window. (See AGENTS.md
                 // changelog.)
-                let (should_run, sleep_for) = match storage_clone.get_last_consolidation() {
+                let storage_for_check = storage_clone.clone();
+                let last_consolidation =
+                    tokio::task::spawn_blocking(move || storage_for_check.get_last_consolidation())
+                        .await
+                        .unwrap_or_else(|e| {
+                            warn!("get_last_consolidation task panicked: {}", e);
+                            Ok(None)
+                        });
+                let (should_run, sleep_for) = match last_consolidation {
                     Ok(Some(last)) => {
                         let now = chrono::Utc::now();
                         let elapsed = now - last;
@@ -248,7 +265,10 @@ async fn main() {
                         (true, interval)
                     }
                     Err(e) => {
-                        warn!("Could not read consolidation history: {} — running anyway", e);
+                        warn!(
+                            "Could not read consolidation history: {} — running anyway",
+                            e
+                        );
                         (true, interval)
                     }
                 };
@@ -283,15 +303,24 @@ async fn main() {
 
     // Create cognitive engine (stateful neuroscience modules)
     let cognitive = Arc::new(Mutex::new(cognitive::CognitiveEngine::new()));
-    // Hydrate cognitive modules from persisted connections
+    // Hydrate cognitive modules from persisted connections on the blocking
+    // pool — full table scans of connections and memory_nodes can take
+    // hundreds of ms on large databases.
     {
-        let mut cog = cognitive.lock().await;
-        cog.hydrate(&storage);
+        let cognitive_for_hydrate = cognitive.clone();
+        let storage_for_hydrate = storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut cog = cognitive_for_hydrate.blocking_lock();
+            cog.hydrate(&storage_for_hydrate);
+        })
+        .await
+        .expect("CognitiveEngine hydrate task panicked");
     }
     info!("CognitiveEngine initialized and hydrated");
 
     // Create shared event broadcast channel for dashboard <-> MCP tool events
-    let (event_tx, _) = tokio::sync::broadcast::channel::<vestige_mcp::dashboard::events::VestigeEvent>(1024);
+    let (event_tx, _) =
+        tokio::sync::broadcast::channel::<vestige_mcp::dashboard::events::VestigeEvent>(1024);
 
     // Spawn dashboard HTTP server alongside MCP server (now with CognitiveEngine access)
     {
@@ -308,7 +337,9 @@ async fn main() {
                 Some(dashboard_cognitive),
                 dashboard_event_tx,
                 dashboard_port,
-            ).await {
+            )
+            .await
+            {
                 Ok(_state) => {
                     info!("Dashboard started with WebSocket + CognitiveEngine + shared event bus");
                 }
@@ -328,7 +359,8 @@ async fn main() {
 
         match protocol::auth::get_or_create_auth_token() {
             Ok(token) => {
-                let bind = std::env::var("VESTIGE_HTTP_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
+                let bind =
+                    std::env::var("VESTIGE_HTTP_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
                 eprintln!("Vestige HTTP transport: http://{}:{}/mcp", bind, http_port);
                 eprintln!("Auth token: {}...", &token[..8]);
                 tokio::spawn(async move {
@@ -346,7 +378,10 @@ async fn main() {
                 });
             }
             Err(e) => {
-                warn!("Could not create auth token, HTTP transport disabled: {}", e);
+                warn!(
+                    "Could not create auth token, HTTP transport disabled: {}",
+                    e
+                );
             }
         }
     }
@@ -377,9 +412,7 @@ async fn main() {
         let _ = tokio::signal::ctrl_c().await;
         info!("Received shutdown signal — checkpointing WAL");
         let s = shutdown_storage;
-        let _ = tokio::task::spawn_blocking(move || {
-            s.wal_checkpoint()
-        }).await;
+        let _ = tokio::task::spawn_blocking(move || s.wal_checkpoint()).await;
         info!("WAL checkpoint complete — exiting");
         std::process::exit(0);
     });

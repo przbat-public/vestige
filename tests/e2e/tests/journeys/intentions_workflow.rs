@@ -13,8 +13,8 @@
 //! 5. User benefits from context-aware assistance
 
 use vestige_core::advanced::intent::{
-    ActionType, DetectedIntent, IntentDetector, LearningLevel, MaintenanceType,
-    OptimizationType, UserAction,
+    ActionType, DetectedIntent, IntentDetector, LearningLevel, MaintenanceType, OptimizationType,
+    UserAction,
 };
 
 // ============================================================================
@@ -89,7 +89,10 @@ fn test_debugging_intent_detection() {
 
     // Check intent properties
     match &result.primary_intent {
-        DetectedIntent::Debugging { suspected_area, symptoms } => {
+        DetectedIntent::Debugging {
+            suspected_area,
+            symptoms: _,
+        } => {
             assert!(!suspected_area.is_empty(), "Should identify suspected area");
             // Symptoms may or may not be captured depending on action order
         }
@@ -122,22 +125,19 @@ fn test_learning_intent_detection() {
 
     // Should detect learning with high confidence
     match &result.primary_intent {
-        DetectedIntent::Learning { topic, level } => {
+        DetectedIntent::Learning { topic, level: _ } => {
             assert!(!topic.is_empty(), "Should identify learning topic");
             // Level may vary
         }
         _ => {
             // Learning actions should typically detect learning intent
             // But other intents may score higher in some cases
-            assert!(
-                result.confidence > 0.0,
-                "Should detect some intent"
-            );
+            assert!(result.confidence > 0.0, "Should detect some intent");
         }
     }
 
     // Verify relevant tags
-    let tags = result.primary_intent.relevant_tags();
+    let _tags = result.primary_intent.relevant_tags();
     // Tags depend on detected intent type
 }
 
@@ -169,7 +169,9 @@ fn test_refactoring_intent_detection() {
             assert!(!target.is_empty(), "Should identify refactoring target");
             assert!(!goal.is_empty(), "Should identify refactoring goal");
         }
-        DetectedIntent::NewFeature { related_components, .. } => {
+        DetectedIntent::NewFeature {
+            related_components, ..
+        } => {
             let _ = related_components;
         }
         _ => {

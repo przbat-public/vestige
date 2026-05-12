@@ -17,6 +17,18 @@ pub(super) fn log_err(context: &'static str) -> impl Fn(vestige_core::StorageErr
     }
 }
 
+/// Helper for the `JoinError` returned by `tokio::task::spawn_blocking`.
+///
+/// We treat a panicked blocking task as `500` and log it loudly — there is no
+/// safe way to recover, but we want operators to notice. Kept as a sibling of
+/// `log_err` so handler files stay terse.
+pub(super) fn log_join_err(context: &'static str) -> impl Fn(tokio::task::JoinError) -> StatusCode {
+    move |e| {
+        tracing::error!(error = %e, context = context, "Blocking task panicked");
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
 mod cognitive;
 mod graph;
 mod history;

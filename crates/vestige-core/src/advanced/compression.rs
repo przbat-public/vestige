@@ -445,7 +445,11 @@ impl MemoryCompressor {
         }
 
         // Sort by importance and deduplicate
-        facts.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap_or(std::cmp::Ordering::Equal));
+        facts.sort_by(|a, b| {
+            b.importance
+                .partial_cmp(&a.importance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         self.deduplicate_facts(facts)
     }
 

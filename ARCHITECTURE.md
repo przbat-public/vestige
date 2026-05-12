@@ -47,8 +47,11 @@ vestige/
 ├── crates/
 │   ├── vestige-core/          # Cognitive engine, storage, embeddings, search, FSRS
 │   │   └── src/
-│   │       ├── storage/       # SQLite, migrations (v1-v9), WAL, FTS5
-│   │       ├── memory/        # Node types, FSRS strength, temporal
+│   │       ├── storage/       # SQLite (sqlite/ submodules: nodes, states, history,
+│   │       │                  # intentions, maintenance, embeddings, review, consolidation,
+│   │       │                  # search, graph, gdpr, temporal, smart_ingest, insights,
+│   │       │                  # records, stats), migrations v1-v11, WAL, FTS5
+│   │       ├── memory/        # Node types, FSRS strength, temporal, typed-memory MemoryKind
 │   │       ├── fsrs/          # Algorithm, scheduler, optimizer
 │   │       ├── embeddings/    # Nomic v1.5 local ONNX, hybrid, code embeddings
 │   │       ├── preprocessing/  # Content intelligence pipeline (entities, coref, temporal, relations, provenance)
@@ -66,13 +69,16 @@ vestige/
 │       └── src/
 │           ├── main.rs        # CLI, init, startup sequence
 │           ├── server.rs      # McpServer — JSON-RPC dispatch, tool routing, event emission
+│           ├── server/        # catalog.rs — canonical 27-tool/11-resource list (b15 split)
 │           ├── cognitive.rs   # CognitiveEngine wrapper
 │           ├── protocol/      # stdio.rs, http.rs, messages.rs, types.rs, auth.rs
-│           ├── dashboard/     # mod.rs (Axum router), handlers.rs, websocket.rs,
+│           ├── dashboard/     # mod.rs (Axum router), handlers/ (memory, search, graph,
+│           │                  # history, intentions, maintenance, review, cognitive,
+│           │                  # metacognitive, observability, pages), websocket.rs,
 │           │                  # events.rs, state.rs, static_files.rs
 │           ├── tools/         # One file per MCP tool (27 tools)
 │           ├── resources/     # MCP resources (memory.rs, codebase.rs)
-│           └── bin/           # CLI (cli.rs), restore (restore.rs)
+│           └── bin/           # cli.rs (vestige CLI). vestige-restore is its own crate.
 ├── apps/
 │   └── dashboard/             # React 19 + Vite 6 + React Router 7 + Three.js
 │       ├── src/
@@ -164,7 +170,7 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 |-----------|---------|
 | **SQLite** | WAL mode, reader/writer connection split, PRAGMA optimizations |
 | **FTS5** | Full-text search with porter tokenizer, page_size tuning |
-| **Migrations** | Versions 1-9 (FSRS, embeddings, neuroscience tables, graph/scopes, FSRS-6 upgrade, dream history, FTS5, autonomic fields, emotional/temporal hierarchy) |
+| **Migrations** | Versions 1-11 (FSRS, embeddings, neuroscience tables, graph/scopes, FSRS-6 upgrade, dream history, FTS5, autonomic fields, emotional/temporal hierarchy, V10 provenance tracking, V11 typed memory `MemoryKind`) |
 | **Vector index** | USearch HNSW, feature-gated behind `vector-search` |
 | **Embeddings** | Nomic Embed v1.5 via fastembed (local ONNX), feature-gated behind `embeddings` |
 | **FTS sanitization** | `fts.rs` — strips injection patterns, length limits, always available |

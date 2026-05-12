@@ -13,7 +13,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::params;
 
-use crate::fsrs::{retrievability_with_decay, DEFAULT_DECAY};
+use crate::fsrs::{DEFAULT_DECAY, retrievability_with_decay};
 use crate::memory::KnowledgeNode;
 
 use super::{Result, Storage, StorageError};
@@ -27,7 +27,9 @@ impl Storage {
     ) -> Result<Vec<KnowledgeNode>> {
         let timestamp = point_in_time.to_rfc3339();
 
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT * FROM knowledge_nodes
@@ -96,7 +98,9 @@ impl Storage {
             ),
         };
 
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(query)?;
         let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
@@ -127,7 +131,9 @@ impl Storage {
         loop {
             // Read batch using reader
             let batch: Vec<(String, String, f64, f64, f64, f64)> = {
-                let reader = self.reader.lock()
+                let reader = self
+                    .reader
+                    .lock()
                     .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
                 reader
                     .prepare(
@@ -159,7 +165,9 @@ impl Storage {
 
             // Write batch using writer transaction
             {
-                let mut writer = self.writer.lock()
+                let mut writer = self
+                    .writer
+                    .lock()
                     .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
                 let tx = writer.transaction()?;
 
@@ -175,12 +183,12 @@ impl Storage {
                         let effective_stability = stability * (1.0 + sentiment_mag * 0.5);
 
                         // Real FSRS-6 retrievability with personalized w20
-                        let new_retrieval = retrievability_with_decay(
-                            effective_stability, days_since, w20,
-                        );
+                        let new_retrieval =
+                            retrievability_with_decay(effective_stability, days_since, w20);
 
                         // Use SleepConsolidation for retention calculation
-                        let new_retention = sleep.calculate_retention(*storage_strength, new_retrieval);
+                        let new_retention =
+                            sleep.calculate_retention(*storage_strength, new_retrieval);
 
                         tx.execute(
                             "UPDATE knowledge_nodes SET retrieval_strength = ?1, retention_strength = ?2 WHERE id = ?3",
@@ -201,7 +209,9 @@ impl Storage {
 
     /// Read personalized w20 from fsrs_config table
     fn get_fsrs_w20(&self) -> Result<f64> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         reader
             .query_row(

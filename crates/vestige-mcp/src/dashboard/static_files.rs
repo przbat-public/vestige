@@ -4,9 +4,9 @@
 //! using `include_dir!`. This serves it at `/dashboard/` prefix.
 
 use axum::extract::Path;
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 
 /// Embed the entire React build output into the binary.
 /// Build with: cd apps/dashboard && npm run build
@@ -16,11 +16,11 @@ static DASHBOARD_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../apps/das
 /// Serve the React dashboard index
 pub async fn serve_dashboard_spa() -> impl IntoResponse {
     match DASHBOARD_DIR.get_file("index.html") {
-        Some(file) => Html(
-            String::from_utf8_lossy(file.contents()).to_string(),
+        Some(file) => Html(String::from_utf8_lossy(file.contents()).to_string()).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            "Dashboard not built. Run: cd apps/dashboard && pnpm build",
         )
-        .into_response(),
-        None => (StatusCode::NOT_FOUND, "Dashboard not built. Run: cd apps/dashboard && pnpm build")
             .into_response(),
     }
 }

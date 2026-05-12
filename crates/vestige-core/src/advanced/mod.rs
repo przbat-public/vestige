@@ -1,6 +1,6 @@
 //! # Advanced Memory Features
 //!
-//! Bleeding-edge 2026 cognitive memory capabilities that make Vestige
+//! Cognitive memory capabilities that make Vestige
 //! the most advanced memory system in existence.
 //!
 //! ## Features
@@ -58,14 +58,14 @@ pub use dreams::{
 };
 pub use importance::{ImportanceDecayConfig, ImportanceScore, ImportanceTracker, UsageEvent};
 pub use intent::{ActionType, DetectedIntent, IntentDetector, MaintenanceType, UserAction};
-pub use reconsolidation::{
-    AccessContext, AccessTrigger, AppliedModification, ChangeSummary, LabileState, MemorySnapshot,
-    Modification, ReconsolidatedMemory, ReconsolidationManager, ReconsolidationStats,
-    RelationshipType, RetrievalRecord,
-};
 pub use prediction_error::{
     CandidateMemory, CreateReason, EvaluationIntent, GateDecision, GateStats, MergeStrategy,
     PredictionErrorConfig, PredictionErrorGate, SimilarityResult, SupersedeReason, UpdateType,
     cosine_similarity,
+};
+pub use reconsolidation::{
+    AccessContext, AccessTrigger, AppliedModification, ChangeSummary, LabileState, MemorySnapshot,
+    Modification, ReconsolidatedMemory, ReconsolidationManager, ReconsolidationStats,
+    RelationshipType, RetrievalRecord,
 };
 pub use speculative::{PredictedMemory, PredictionContext, SpeculativeRetriever, UsagePattern};

@@ -3,7 +3,7 @@
 //! Comprehensive tests for all MCP tools provided by Vestige.
 //! Tests cover input validation, execution, and response formats.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -11,7 +11,10 @@ use serde_json::{json, Value};
 
 /// Validate a tool call response structure
 fn validate_tool_response(response: &Value) {
-    assert!(response["content"].is_array(), "Response must have content array");
+    assert!(
+        response["content"].is_array(),
+        "Response must have content array"
+    );
     let content = response["content"].as_array().unwrap();
     assert!(!content.is_empty(), "Content array must not be empty");
     assert!(content[0]["type"].is_string(), "Content must have type");
@@ -74,7 +77,10 @@ fn test_ingest_tool_rejects_empty_content() {
         "isError": true
     });
 
-    assert_eq!(expected_error["isError"], true, "Empty content should be an error");
+    assert_eq!(
+        expected_error["isError"], true,
+        "Empty content should be an error"
+    );
 }
 
 /// Test ingest tool with all optional fields.
@@ -193,7 +199,10 @@ fn test_semantic_search_valid() {
 
     validate_tool_response(&expected_response);
     let parsed = parse_response_text(&expected_response);
-    assert_eq!(parsed["method"], "semantic", "Should indicate semantic search");
+    assert_eq!(
+        parsed["method"], "semantic",
+        "Should indicate semantic search"
+    );
 }
 
 /// Test semantic search handles embedding not ready.
@@ -209,7 +218,10 @@ fn test_semantic_search_embedding_not_ready() {
     });
 
     let parsed = parse_response_text(&expected_response);
-    assert!(parsed["error"].is_string(), "Should explain embedding not ready");
+    assert!(
+        parsed["error"].is_string(),
+        "Should explain embedding not ready"
+    );
     assert!(parsed["hint"].is_string(), "Should provide hint");
 }
 
@@ -337,7 +349,10 @@ fn test_mark_reviewed_with_rating() {
 
     let parsed = parse_response_text(&expected_response);
     assert_eq!(parsed["success"], true, "Review should succeed");
-    assert!(parsed["nextReview"].is_string(), "Should return next review date");
+    assert!(
+        parsed["nextReview"].is_string(),
+        "Should return next review date"
+    );
 }
 
 /// Test mark_reviewed with invalid rating.
@@ -382,8 +397,14 @@ fn test_get_stats() {
 
     validate_tool_response(&expected_response);
     let parsed = parse_response_text(&expected_response);
-    assert!(parsed["totalNodes"].is_number(), "Should return total nodes");
-    assert!(parsed["averageRetention"].is_number(), "Should return average retention");
+    assert!(
+        parsed["totalNodes"].is_number(),
+        "Should return total nodes"
+    );
+    assert!(
+        parsed["averageRetention"].is_number(),
+        "Should return average retention"
+    );
 }
 
 /// Test health_check returns health status.
@@ -431,7 +452,10 @@ fn test_set_intention_basic() {
 
     let parsed = parse_response_text(&expected_response);
     assert_eq!(parsed["success"], true, "Should succeed");
-    assert!(parsed["intentionId"].is_string(), "Should return intention ID");
+    assert!(
+        parsed["intentionId"].is_string(),
+        "Should return intention ID"
+    );
     assert_eq!(parsed["priority"], 3, "High priority should be 3");
 }
 
@@ -477,8 +501,14 @@ fn test_check_intentions_with_context() {
     });
 
     let parsed = parse_response_text(&expected_response);
-    assert!(parsed["triggered"].is_array(), "Should return triggered intentions");
-    assert!(parsed["pending"].is_array(), "Should return pending intentions");
+    assert!(
+        parsed["triggered"].is_array(),
+        "Should return triggered intentions"
+    );
+    assert!(
+        parsed["pending"].is_array(),
+        "Should return pending intentions"
+    );
 }
 
 /// Test complete_intention marks as fulfilled.
@@ -523,7 +553,10 @@ fn test_list_intentions_with_filter() {
     });
 
     let parsed = parse_response_text(&expected_response);
-    assert!(parsed["intentions"].is_array(), "Should return intentions array");
+    assert!(
+        parsed["intentions"].is_array(),
+        "Should return intentions array"
+    );
     assert_eq!(parsed["status"], "active", "Should echo status filter");
 }
 
@@ -553,9 +586,18 @@ fn test_tool_schemas_are_valid_json_schema() {
         "required": ["content"]
     });
 
-    assert_eq!(ingest_schema["type"], "object", "Schema must be object type");
-    assert!(ingest_schema["properties"].is_object(), "Must have properties");
-    assert!(ingest_schema["required"].is_array(), "Must specify required fields");
+    assert_eq!(
+        ingest_schema["type"], "object",
+        "Schema must be object type"
+    );
+    assert!(
+        ingest_schema["properties"].is_object(),
+        "Must have properties"
+    );
+    assert!(
+        ingest_schema["required"].is_array(),
+        "Must specify required fields"
+    );
 }
 
 /// Test all tools have required inputSchema fields.
@@ -575,7 +617,10 @@ fn test_all_tools_have_schema() {
     ];
 
     for (tool_name, required_fields) in tool_definitions {
-        assert!(!required_fields.is_empty(),
-            "Tool {} should have at least one required field", tool_name);
+        assert!(
+            !required_fields.is_empty(),
+            "Tool {} should have at least one required field",
+            tool_name
+        );
     }
 }

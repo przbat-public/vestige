@@ -43,20 +43,18 @@ impl EntityType {
     }
 }
 
-static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"https?://[^\s)<>\]]+").unwrap()
-});
+static URL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://[^\s)<>\]]+").unwrap());
 
-static EMAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap()
-});
+static EMAIL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap());
 
 static FILE_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:^|[\s(])(/[a-zA-Z0-9_.\-]+(?:/[a-zA-Z0-9_.\-]+)+|[a-zA-Z]:\\[^\s]+|[a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_.\-]+){2,})").unwrap()
 });
 
 static MONETARY_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[\$€£¥]\s?\d[\d,]*(?:\.\d{1,2})?|\d[\d,]*(?:\.\d{1,2})?\s?(?:USD|EUR|GBP|PLN|JPY)").unwrap()
+    Regex::new(r"[\$€£¥]\s?\d[\d,]*(?:\.\d{1,2})?|\d[\d,]*(?:\.\d{1,2})?\s?(?:USD|EUR|GBP|PLN|JPY)")
+        .unwrap()
 });
 
 // Capitalized multi-word sequence (proper noun detection).
@@ -67,15 +65,11 @@ static PROPER_NOUN_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Common words that look like proper nouns but aren't, when appearing at sentence boundaries.
 const STOP_PROPER: &[&str] = &[
-    "The", "This", "That", "These", "Those", "There", "Here",
-    "It", "He", "She", "They", "We", "You", "I",
-    "What", "Which", "Who", "When", "Where", "Why", "How",
-    "And", "But", "Or", "Not", "If", "So", "Then",
-    "Also", "Just", "Only", "Still", "Even", "However",
-    "Because", "Since", "While", "After", "Before",
-    "Some", "Any", "All", "Each", "Every", "Most",
-    "New", "Old", "Good", "Bad", "First", "Last",
-    "Many", "Much", "More", "Few", "Less",
+    "The", "This", "That", "These", "Those", "There", "Here", "It", "He", "She", "They", "We",
+    "You", "I", "What", "Which", "Who", "When", "Where", "Why", "How", "And", "But", "Or", "Not",
+    "If", "So", "Then", "Also", "Just", "Only", "Still", "Even", "However", "Because", "Since",
+    "While", "After", "Before", "Some", "Any", "All", "Each", "Every", "Most", "New", "Old",
+    "Good", "Bad", "First", "Last", "Many", "Much", "More", "Few", "Less",
 ];
 
 /// Extract entities from text content.
@@ -90,7 +84,10 @@ pub fn extract_entities(content: &str, max_entities: usize) -> Vec<ExtractedEnti
         let lower = text.to_lowercase();
         if !seen_texts.contains(&lower) {
             seen_texts.insert(lower);
-            entities.push(ExtractedEntity { text, entity_type: etype });
+            entities.push(ExtractedEntity {
+                text,
+                entity_type: etype,
+            });
         }
     };
 
@@ -163,18 +160,27 @@ fn classify_proper_noun(text: &str) -> EntityType {
 
     // Multi-word with org indicators
     let lower = text.to_lowercase();
-    if lower.contains("team") || lower.contains("group") || lower.contains("corp")
-        || lower.contains("inc") || lower.contains("company") || lower.contains("dept")
-        || lower.contains("department") || lower.contains("university")
-        || lower.contains("institute") || lower.contains("foundation")
+    if lower.contains("team")
+        || lower.contains("group")
+        || lower.contains("corp")
+        || lower.contains("inc")
+        || lower.contains("company")
+        || lower.contains("dept")
+        || lower.contains("department")
+        || lower.contains("university")
+        || lower.contains("institute")
+        || lower.contains("foundation")
     {
         return EntityType::Organization;
     }
 
     // 2-3 capitalized words → likely a person name
-    if words.len() >= 2 && words.len() <= 3 && words.iter().all(|w| {
-        w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
-    }) {
+    if words.len() >= 2
+        && words.len() <= 3
+        && words
+            .iter()
+            .all(|w| w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
+    {
         return EntityType::Person;
     }
 
@@ -186,7 +192,8 @@ fn classify_proper_noun(text: &str) -> EntityType {
 /// Tags are slugified: "John Smith" → "entity:john-smith".
 /// Capped at `max_tags` (default 10).
 pub fn entities_to_tags(entities: &[ExtractedEntity], max_tags: usize) -> Vec<String> {
-    entities.iter()
+    entities
+        .iter()
         .take(max_tags)
         .filter_map(|e| {
             let slug = slugify(&e.text);
@@ -201,9 +208,13 @@ pub fn entities_to_tags(entities: &[ExtractedEntity], max_tags: usize) -> Vec<St
 fn slugify(text: &str) -> String {
     text.chars()
         .map(|c| {
-            if c.is_alphanumeric() { c.to_ascii_lowercase() }
-            else if c == ' ' || c == '_' || c == '.' { '-' }
-            else { '\0' }
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else if c == ' ' || c == '_' || c == '.' {
+                '-'
+            } else {
+                '\0'
+            }
         })
         .filter(|c| *c != '\0')
         .collect::<String>()
@@ -220,36 +231,59 @@ mod tests {
     #[test]
     fn test_extract_urls() {
         let entities = extract_entities("Check https://github.com/vestige for details", 10);
-        assert!(entities.iter().any(|e| e.entity_type == EntityType::Url && e.text.contains("github.com")));
+        assert!(
+            entities
+                .iter()
+                .any(|e| e.entity_type == EntityType::Url && e.text.contains("github.com"))
+        );
     }
 
     #[test]
     fn test_extract_emails() {
         let entities = extract_entities("Contact user@example.com for help", 10);
-        assert!(entities.iter().any(|e| e.entity_type == EntityType::Email && e.text == "user@example.com"));
+        assert!(
+            entities
+                .iter()
+                .any(|e| e.entity_type == EntityType::Email && e.text == "user@example.com")
+        );
     }
 
     #[test]
     fn test_extract_file_paths() {
         let entities = extract_entities("Edit the file /src/main.rs to fix the bug", 10);
-        assert!(entities.iter().any(|e| e.entity_type == EntityType::FilePath));
+        assert!(
+            entities
+                .iter()
+                .any(|e| e.entity_type == EntityType::FilePath)
+        );
     }
 
     #[test]
     fn test_extract_monetary() {
         let entities = extract_entities("The cost was $1,500.00 per month", 10);
-        assert!(entities.iter().any(|e| e.entity_type == EntityType::Monetary));
+        assert!(
+            entities
+                .iter()
+                .any(|e| e.entity_type == EntityType::Monetary)
+        );
     }
 
     #[test]
     fn test_extract_proper_nouns() {
-        let entities = extract_entities("The project was designed by Sophie Wilson at Cambridge", 20);
-        let names: Vec<&str> = entities.iter()
+        let entities =
+            extract_entities("The project was designed by Sophie Wilson at Cambridge", 20);
+        let names: Vec<&str> = entities
+            .iter()
             .filter(|e| matches!(e.entity_type, EntityType::Person | EntityType::ProperNoun))
             .map(|e| e.text.as_str())
             .collect();
-        assert!(names.iter().any(|n| n.contains("Sophie") || n.contains("Wilson") || n.contains("Cambridge")),
-            "Expected proper nouns, got: {:?}", names);
+        assert!(
+            names
+                .iter()
+                .any(|n| n.contains("Sophie") || n.contains("Wilson") || n.contains("Cambridge")),
+            "Expected proper nouns, got: {:?}",
+            names
+        );
     }
 
     #[test]
@@ -263,8 +297,14 @@ mod tests {
     #[test]
     fn test_entities_to_tags() {
         let entities = vec![
-            ExtractedEntity { text: "John Smith".to_string(), entity_type: EntityType::Person },
-            ExtractedEntity { text: "https://example.com".to_string(), entity_type: EntityType::Url },
+            ExtractedEntity {
+                text: "John Smith".to_string(),
+                entity_type: EntityType::Person,
+            },
+            ExtractedEntity {
+                text: "https://example.com".to_string(),
+                entity_type: EntityType::Url,
+            },
         ];
         let tags = entities_to_tags(&entities, 10);
         assert!(tags.contains(&"entity:john-smith".to_string()));
@@ -286,13 +326,17 @@ mod tests {
     #[test]
     fn test_dedup_entities() {
         let entities = extract_entities("Email user@test.com and also user@test.com again", 10);
-        let emails: Vec<_> = entities.iter().filter(|e| e.entity_type == EntityType::Email).collect();
+        let emails: Vec<_> = entities
+            .iter()
+            .filter(|e| e.entity_type == EntityType::Email)
+            .collect();
         assert_eq!(emails.len(), 1, "Duplicate emails should be deduped");
     }
 
     #[test]
     fn test_mixed_entity_types() {
-        let content = "Contact user@test.com at https://example.com for the $500 report on /var/log/app.log";
+        let content =
+            "Contact user@test.com at https://example.com for the $500 report on /var/log/app.log";
         let entities = extract_entities(content, 20);
         let types: Vec<EntityType> = entities.iter().map(|e| e.entity_type).collect();
         assert!(types.contains(&EntityType::Email));
@@ -304,10 +348,15 @@ mod tests {
     fn test_organization_detection() {
         let content = "The project was led by the Engineering Department at Stanford University";
         let entities = extract_entities(content, 20);
-        let orgs: Vec<_> = entities.iter()
+        let orgs: Vec<_> = entities
+            .iter()
             .filter(|e| e.entity_type == EntityType::Organization)
             .collect();
-        assert!(!orgs.is_empty(), "Should detect organization, got entities: {:?}", entities);
+        assert!(
+            !orgs.is_empty(),
+            "Should detect organization, got entities: {:?}",
+            entities
+        );
     }
 
     #[test]
@@ -323,9 +372,10 @@ mod tests {
 
     #[test]
     fn test_slugify_special_chars() {
-        let entities = vec![
-            ExtractedEntity { text: "user@test.com".to_string(), entity_type: EntityType::Email },
-        ];
+        let entities = vec![ExtractedEntity {
+            text: "user@test.com".to_string(),
+            entity_type: EntityType::Email,
+        }];
         let tags = entities_to_tags(&entities, 10);
         assert!(!tags.is_empty());
         assert!(tags[0].starts_with("entity:"));
@@ -334,10 +384,12 @@ mod tests {
 
     #[test]
     fn test_entities_to_tags_max_cap() {
-        let entities: Vec<_> = (0..20).map(|i| ExtractedEntity {
-            text: format!("Entity{}", i),
-            entity_type: EntityType::ProperNoun,
-        }).collect();
+        let entities: Vec<_> = (0..20)
+            .map(|i| ExtractedEntity {
+                text: format!("Entity{}", i),
+                entity_type: EntityType::ProperNoun,
+            })
+            .collect();
         let tags = entities_to_tags(&entities, 5);
         assert_eq!(tags.len(), 5);
     }
@@ -345,17 +397,25 @@ mod tests {
     #[test]
     fn test_eur_currency() {
         let entities = extract_entities("The price is €1,200.50 plus tax", 10);
-        assert!(entities.iter().any(|e| e.entity_type == EntityType::Monetary),
-            "Should detect EUR currency");
+        assert!(
+            entities
+                .iter()
+                .any(|e| e.entity_type == EntityType::Monetary),
+            "Should detect EUR currency"
+        );
     }
 
     #[test]
     fn test_case_insensitive_dedup() {
-        let entities = extract_entities(
-            "Contact admin@TEST.COM and also admin@test.com again",
-            10,
+        let entities = extract_entities("Contact admin@TEST.COM and also admin@test.com again", 10);
+        let emails: Vec<_> = entities
+            .iter()
+            .filter(|e| e.entity_type == EntityType::Email)
+            .collect();
+        assert_eq!(
+            emails.len(),
+            1,
+            "Case-insensitive dedup should collapse identical emails"
         );
-        let emails: Vec<_> = entities.iter().filter(|e| e.entity_type == EntityType::Email).collect();
-        assert_eq!(emails.len(), 1, "Case-insensitive dedup should collapse identical emails");
     }
 }

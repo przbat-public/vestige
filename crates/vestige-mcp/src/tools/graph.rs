@@ -125,52 +125,80 @@ pub async fn execute(
     storage: &Arc<Storage>,
     args: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let depth = args.as_ref()
+    let depth = args
+        .as_ref()
         .and_then(|a| a.get("depth"))
         .and_then(|v| v.as_u64())
         .unwrap_or(2)
         .min(3) as u32;
 
-    let max_nodes = args.as_ref()
+    let max_nodes = args
+        .as_ref()
         .and_then(|a| a.get("max_nodes"))
         .and_then(|v| v.as_u64())
         .unwrap_or(50)
         .min(200) as usize;
 
-    // Determine center node
-    let center_id = if let Some(id) = args.as_ref().and_then(|a| a.get("center_id")).and_then(|v| v.as_str()) {
-        id.to_string()
-    } else if let Some(query) = args.as_ref().and_then(|a| a.get("query")).and_then(|v| v.as_str()) {
-        // Search for center node
-        let results = storage.search(query, 1)
-            .map_err(|e| format!("Search failed: {}", e))?;
-        results.first()
-            .map(|n| n.id.clone())
-            .ok_or_else(|| "No memories found matching query".to_string())?
-    } else {
-        // Default: use the most recent memory
-        let recent = storage.get_all_nodes(1, 0)
-            .map_err(|e| format!("Failed to get recent node: {}", e))?;
-        recent.first()
-            .map(|n| n.id.clone())
-            .ok_or_else(|| "No memories in database".to_string())?
-    };
+    // Determine center node + load subgraph in one blocking task — three
+    // separate SQLite reads, each non-trivial, so a single hop is cheapest.
+    let storage_clone = storage.clone();
+    let center_id_arg = args
+        .as_ref()
+        .and_then(|a| a.get("center_id"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let query_arg = args
+        .as_ref()
+        .and_then(|a| a.get("query"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-    // Get subgraph
-    let (nodes, edges) = storage.get_memory_subgraph(&center_id, depth, max_nodes)
-        .map_err(|e| format!("Failed to get subgraph: {}", e))?;
+    let (center_id, nodes, edges) = tokio::task::spawn_blocking(
+        move || -> Result<(String, Vec<vestige_core::KnowledgeNode>, Vec<vestige_core::ConnectionRecord>), String> {
+            let center_id = if let Some(id) = center_id_arg {
+                id
+            } else if let Some(query) = query_arg {
+                let results = storage_clone
+                    .search(&query, 1)
+                    .map_err(|e| format!("Search failed: {}", e))?;
+                results
+                    .first()
+                    .map(|n| n.id.clone())
+                    .ok_or_else(|| "No memories found matching query".to_string())?
+            } else {
+                let recent = storage_clone
+                    .get_all_nodes(1, 0)
+                    .map_err(|e| format!("Failed to get recent node: {}", e))?;
+                recent
+                    .first()
+                    .map(|n| n.id.clone())
+                    .ok_or_else(|| "No memories in database".to_string())?
+            };
+            let (nodes, edges) = storage_clone
+                .get_memory_subgraph(&center_id, depth, max_nodes)
+                .map_err(|e| format!("Failed to get subgraph: {}", e))?;
+            Ok((center_id, nodes, edges))
+        },
+    )
+    .await
+    .map_err(|e| format!("memory_graph task panicked: {}", e))??;
 
     if nodes.is_empty() || !nodes.iter().any(|n| n.id == center_id) {
-        return Err(format!("Memory '{}' not found or has no accessible data", center_id));
+        return Err(format!(
+            "Memory '{}' not found or has no accessible data",
+            center_id
+        ));
     }
 
     // Build index map for FR layout
-    let id_to_idx: std::collections::HashMap<&str, usize> = nodes.iter()
+    let id_to_idx: std::collections::HashMap<&str, usize> = nodes
+        .iter()
         .enumerate()
         .map(|(i, n)| (n.id.as_str(), i))
         .collect();
 
-    let layout_edges: Vec<(usize, usize, f64)> = edges.iter()
+    let layout_edges: Vec<(usize, usize, f64)> = edges
+        .iter()
         .filter_map(|e| {
             let u = id_to_idx.get(e.source_id.as_str())?;
             let v = id_to_idx.get(e.target_id.as_str())?;
@@ -182,7 +210,8 @@ pub async fn execute(
     let positions = fruchterman_reingold(nodes.len(), &layout_edges, 800.0, 600.0, 50);
 
     // Build response
-    let nodes_json: Vec<serde_json::Value> = nodes.iter()
+    let nodes_json: Vec<serde_json::Value> = nodes
+        .iter()
         .enumerate()
         .map(|(i, n)| {
             let (x, y) = positions.get(i).copied().unwrap_or((400.0, 300.0));
@@ -203,7 +232,8 @@ pub async fn execute(
         })
         .collect();
 
-    let edges_json: Vec<serde_json::Value> = edges.iter()
+    let edges_json: Vec<serde_json::Value> = edges
+        .iter()
         .map(|e| {
             serde_json::json!({
                 "source": e.source_id,
@@ -293,18 +323,20 @@ mod tests {
     #[tokio::test]
     async fn test_graph_with_center_id() {
         let (storage, _dir) = test_storage().await;
-        let node = storage.ingest(vestige_core::IngestInput {
-            content: "Graph test memory".to_string(),
-            node_type: "fact".to_string(),
-            source: None,
-            sentiment_score: 0.0,
-            sentiment_magnitude: 0.0,
-            tags: vec!["test".to_string()],
-            valid_from: None,
-            valid_until: None,
-            provenance: None,
-            ..Default::default()
-        }).unwrap();
+        let node = storage
+            .ingest(vestige_core::IngestInput {
+                content: "Graph test memory".to_string(),
+                node_type: "fact".to_string(),
+                source: None,
+                sentiment_score: 0.0,
+                sentiment_magnitude: 0.0,
+                tags: vec!["test".to_string()],
+                valid_from: None,
+                valid_until: None,
+                provenance: None,
+                ..Default::default()
+            })
+            .unwrap();
 
         let args = serde_json::json!({ "center_id": node.id });
         let result = execute(&storage, Some(args)).await;
@@ -320,18 +352,20 @@ mod tests {
     #[tokio::test]
     async fn test_graph_with_query() {
         let (storage, _dir) = test_storage().await;
-        storage.ingest(vestige_core::IngestInput {
-            content: "Quantum computing fundamentals".to_string(),
-            node_type: "fact".to_string(),
-            source: None,
-            sentiment_score: 0.0,
-            sentiment_magnitude: 0.0,
-            tags: vec!["science".to_string()],
-            valid_from: None,
-            valid_until: None,
-            provenance: None,
-            ..Default::default()
-        }).unwrap();
+        storage
+            .ingest(vestige_core::IngestInput {
+                content: "Quantum computing fundamentals".to_string(),
+                node_type: "fact".to_string(),
+                source: None,
+                sentiment_score: 0.0,
+                sentiment_magnitude: 0.0,
+                tags: vec!["science".to_string()],
+                valid_from: None,
+                valid_until: None,
+                provenance: None,
+                ..Default::default()
+            })
+            .unwrap();
 
         let args = serde_json::json!({ "query": "quantum" });
         let result = execute(&storage, Some(args)).await;
@@ -343,18 +377,20 @@ mod tests {
     #[tokio::test]
     async fn test_graph_node_has_position() {
         let (storage, _dir) = test_storage().await;
-        let node = storage.ingest(vestige_core::IngestInput {
-            content: "Position test memory".to_string(),
-            node_type: "fact".to_string(),
-            source: None,
-            sentiment_score: 0.0,
-            sentiment_magnitude: 0.0,
-            tags: vec![],
-            valid_from: None,
-            valid_until: None,
-            provenance: None,
-            ..Default::default()
-        }).unwrap();
+        let node = storage
+            .ingest(vestige_core::IngestInput {
+                content: "Position test memory".to_string(),
+                node_type: "fact".to_string(),
+                source: None,
+                sentiment_score: 0.0,
+                sentiment_magnitude: 0.0,
+                tags: vec![],
+                valid_from: None,
+                valid_until: None,
+                provenance: None,
+                ..Default::default()
+            })
+            .unwrap();
 
         let args = serde_json::json!({ "center_id": node.id });
         let result = execute(&storage, Some(args)).await.unwrap();

@@ -21,8 +21,7 @@ pub struct CorefResult {
 }
 
 const PERSON_PRONOUNS: &[&str] = &[
-    "he", "she", "him", "her", "his", "hers",
-    "He", "She", "Him", "Her", "His", "Hers",
+    "he", "she", "him", "her", "his", "hers", "He", "She", "Him", "Her", "His", "Hers",
 ];
 
 const THING_PRONOUNS: &[&str] = &["it", "It", "its", "Its"];
@@ -34,18 +33,26 @@ const PLURAL_PRONOUNS: &[&str] = &["they", "They", "them", "Them", "their", "The
 /// Only rewrites when there's a single unambiguous referent for the pronoun type.
 /// Returns the original content unchanged if no entities match or if ambiguous.
 pub fn resolve_coreferences(content: &str, entities: &[ExtractedEntity]) -> CorefResult {
-    let persons: Vec<&ExtractedEntity> = entities.iter()
+    let persons: Vec<&ExtractedEntity> = entities
+        .iter()
         .filter(|e| e.entity_type == EntityType::Person)
         .collect();
 
-    let things: Vec<&ExtractedEntity> = entities.iter()
-        .filter(|e| matches!(e.entity_type,
-            EntityType::Organization | EntityType::ProperNoun
-        ))
+    let things: Vec<&ExtractedEntity> = entities
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.entity_type,
+                EntityType::Organization | EntityType::ProperNoun
+            )
+        })
         .collect();
 
     if persons.is_empty() && things.is_empty() {
-        return CorefResult { content: content.to_string(), rewrites: 0 };
+        return CorefResult {
+            content: content.to_string(),
+            rewrites: 0,
+        };
     }
 
     let mut result = content.to_string();
@@ -81,7 +88,8 @@ pub fn resolve_coreferences(content: &str, entities: &[ExtractedEntity]) -> Core
     }
 
     // Only rewrite "they"/"them" if there's exactly one organization
-    let orgs: Vec<&&ExtractedEntity> = things.iter()
+    let orgs: Vec<&&ExtractedEntity> = things
+        .iter()
         .filter(|e| e.entity_type == EntityType::Organization)
         .collect();
     if orgs.len() == 1 && persons.is_empty() {
@@ -96,7 +104,10 @@ pub fn resolve_coreferences(content: &str, entities: &[ExtractedEntity]) -> Core
         }
     }
 
-    CorefResult { content: result, rewrites }
+    CorefResult {
+        content: result,
+        rewrites,
+    }
 }
 
 /// Replace whole-word occurrences of `pronoun` in `text` with `replacement`.
@@ -107,7 +118,11 @@ fn replace_pronoun_occurrences(text: &mut String, pronoun: &str, replacement: &s
     let mut remaining = text.as_str();
 
     while let Some(pos) = remaining.find(pronoun) {
-        let before = if pos > 0 { remaining.as_bytes()[pos - 1] } else { b' ' };
+        let before = if pos > 0 {
+            remaining.as_bytes()[pos - 1]
+        } else {
+            b' '
+        };
         let after_pos = pos + pronoun.len();
         let after = if after_pos < remaining.len() {
             remaining.as_bytes()[after_pos]
@@ -115,9 +130,8 @@ fn replace_pronoun_occurrences(text: &mut String, pronoun: &str, replacement: &s
             b' '
         };
 
-        let is_word_boundary = |b: u8| -> bool {
-            !b.is_ascii_alphanumeric() && b != b'_' && b != b'\''
-        };
+        let is_word_boundary =
+            |b: u8| -> bool { !b.is_ascii_alphanumeric() && b != b'_' && b != b'\'' };
 
         if is_word_boundary(before) && is_word_boundary(after) {
             new_text.push_str(&remaining[..pos]);
@@ -143,22 +157,38 @@ mod tests {
     use super::*;
 
     fn person(name: &str) -> ExtractedEntity {
-        ExtractedEntity { text: name.to_string(), entity_type: EntityType::Person }
+        ExtractedEntity {
+            text: name.to_string(),
+            entity_type: EntityType::Person,
+        }
     }
 
     fn org(name: &str) -> ExtractedEntity {
-        ExtractedEntity { text: name.to_string(), entity_type: EntityType::Organization }
+        ExtractedEntity {
+            text: name.to_string(),
+            entity_type: EntityType::Organization,
+        }
     }
 
     fn proper(name: &str) -> ExtractedEntity {
-        ExtractedEntity { text: name.to_string(), entity_type: EntityType::ProperNoun }
+        ExtractedEntity {
+            text: name.to_string(),
+            entity_type: EntityType::ProperNoun,
+        }
     }
 
     #[test]
     fn test_single_person_pronoun_resolution() {
         let entities = vec![person("Sophie Wilson")];
-        let result = resolve_coreferences("She designed the ARM processor. He mentioned her work.", &entities);
-        assert!(result.content.contains("Sophie Wilson designed the ARM processor"));
+        let result = resolve_coreferences(
+            "She designed the ARM processor. He mentioned her work.",
+            &entities,
+        );
+        assert!(
+            result
+                .content
+                .contains("Sophie Wilson designed the ARM processor")
+        );
         assert!(result.rewrites > 0);
     }
 
@@ -166,14 +196,20 @@ mod tests {
     fn test_ambiguous_persons_no_rewrite() {
         let entities = vec![person("Alice"), person("Bob")];
         let result = resolve_coreferences("He said something to her.", &entities);
-        assert_eq!(result.rewrites, 0, "Ambiguous referents should not be rewritten");
+        assert_eq!(
+            result.rewrites, 0,
+            "Ambiguous referents should not be rewritten"
+        );
         assert!(result.content.contains("He said"));
     }
 
     #[test]
     fn test_single_org_it_resolution() {
         let entities = vec![proper("Vestige")];
-        let result = resolve_coreferences("It uses FSRS-6 for scheduling. Its architecture is modular.", &entities);
+        let result = resolve_coreferences(
+            "It uses FSRS-6 for scheduling. Its architecture is modular.",
+            &entities,
+        );
         assert!(result.content.contains("Vestige uses FSRS-6"));
         assert!(result.content.contains("Vestige's architecture"));
     }
@@ -203,7 +239,10 @@ mod tests {
     #[test]
     fn test_org_they_resolution() {
         let entities = vec![org("Auth Team")];
-        let result = resolve_coreferences("They handle authentication. Their codebase is clean.", &entities);
+        let result = resolve_coreferences(
+            "They handle authentication. Their codebase is clean.",
+            &entities,
+        );
         assert!(result.content.contains("Auth Team handle authentication"));
         assert!(result.content.contains("Auth Team's codebase"));
     }
@@ -212,27 +251,41 @@ mod tests {
     fn test_possessive_his() {
         let entities = vec![person("John")];
         let result = resolve_coreferences("His code was clean.", &entities);
-        assert!(result.content.contains("John's code"), "Expected possessive rewrite, got: {}", result.content);
+        assert!(
+            result.content.contains("John's code"),
+            "Expected possessive rewrite, got: {}",
+            result.content
+        );
     }
 
     #[test]
     fn test_multiple_pronouns_same_sentence() {
         let entities = vec![person("Alice")];
         let result = resolve_coreferences("She wrote the code and she tested it.", &entities);
-        assert!(result.rewrites >= 2, "Should rewrite multiple pronouns, got {} rewrites", result.rewrites);
+        assert!(
+            result.rewrites >= 2,
+            "Should rewrite multiple pronouns, got {} rewrites",
+            result.rewrites
+        );
     }
 
     #[test]
     fn test_mixed_org_and_person_no_they_rewrite() {
         let entities = vec![person("Bob"), org("Acme Corp")];
         let result = resolve_coreferences("They have a meeting.", &entities);
-        assert!(!result.content.contains("Bob"), "Ambiguous: both person and org present, should not rewrite 'they'");
+        assert!(
+            !result.content.contains("Bob"),
+            "Ambiguous: both person and org present, should not rewrite 'they'"
+        );
     }
 
     #[test]
     fn test_unicode_content_passthrough() {
         let entities = vec![person("Józef")];
         let result = resolve_coreferences("He napisał raport.", &entities);
-        assert!(result.content.contains("Józef napisał"), "Unicode names should be preserved");
+        assert!(
+            result.content.contains("Józef napisał"),
+            "Unicode names should be preserved"
+        );
     }
 }

@@ -123,9 +123,15 @@ impl GateDecision {
     /// Get the prediction error score
     pub fn prediction_error(&self) -> f32 {
         match self {
-            Self::Create { prediction_error, .. } => *prediction_error,
-            Self::Update { prediction_error, .. } => *prediction_error,
-            Self::Supersede { prediction_error, .. } => *prediction_error,
+            Self::Create {
+                prediction_error, ..
+            } => *prediction_error,
+            Self::Update {
+                prediction_error, ..
+            } => *prediction_error,
+            Self::Supersede {
+                prediction_error, ..
+            } => *prediction_error,
             Self::Merge { avg_similarity, .. } => 1.0 - avg_similarity,
         }
     }
@@ -368,7 +374,11 @@ impl PredictionErrorGate {
             .collect();
 
         // Sort by similarity (highest first)
-        similarities.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        similarities.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Take top candidates
         let top_candidates: Vec<_> = similarities
@@ -394,8 +404,9 @@ impl PredictionErrorGate {
             if let Some(c) = candidate {
                 // If similar and the existing memory was demoted, supersede it
                 if best.similarity >= self.config.similarity_threshold
-                   && c.was_demoted
-                   && self.config.auto_supersede_demoted {
+                    && c.was_demoted
+                    && self.config.auto_supersede_demoted
+                {
                     self.stats.supersedes += 1;
                     return GateDecision::Supersede {
                         old_memory_id: c.id.clone(),
@@ -406,8 +417,8 @@ impl PredictionErrorGate {
                 }
 
                 // Check for correction (similar but contradictory)
-                if best.similarity >= self.config.correction_threshold
-                   && best.appears_contradictory {
+                if best.similarity >= self.config.correction_threshold && best.appears_contradictory
+                {
                     self.stats.supersedes += 1;
                     return GateDecision::Supersede {
                         old_memory_id: c.id.clone(),
@@ -418,7 +429,8 @@ impl PredictionErrorGate {
                 }
 
                 // Regular update for similar content
-                if best.similarity >= self.config.similarity_threshold && self.config.prefer_updates {
+                if best.similarity >= self.config.similarity_threshold && self.config.prefer_updates
+                {
                     self.stats.updates += 1;
                     return GateDecision::Update {
                         target_id: best.memory_id.clone(),
@@ -442,7 +454,10 @@ impl PredictionErrorGate {
 
             self.stats.merges += 1;
             return GateDecision::Merge {
-                memory_ids: merge_candidates.iter().map(|s| s.memory_id.clone()).collect(),
+                memory_ids: merge_candidates
+                    .iter()
+                    .map(|s| s.memory_id.clone())
+                    .collect(),
                 avg_similarity,
                 strategy: MergeStrategy::Combine,
             };
@@ -501,7 +516,10 @@ impl PredictionErrorGate {
                     self.evaluate(new_content, new_embedding, candidates)
                 }
             }
-            EvaluationIntent::Supersede { old_memory_id, reason } => {
+            EvaluationIntent::Supersede {
+                old_memory_id,
+                reason,
+            } => {
                 if let Some(c) = candidates.iter().find(|c| c.id == old_memory_id) {
                     let similarity = cosine_similarity(new_embedding, &c.embedding);
                     self.stats.supersedes += 1;
@@ -515,9 +533,7 @@ impl PredictionErrorGate {
                     self.evaluate(new_content, new_embedding, candidates)
                 }
             }
-            EvaluationIntent::Auto => {
-                self.evaluate(new_content, new_embedding, candidates)
-            }
+            EvaluationIntent::Auto => self.evaluate(new_content, new_embedding, candidates),
         }
     }
 
@@ -596,7 +612,10 @@ pub enum EvaluationIntent {
     /// Force update of specific memory
     ForceUpdate { target_id: String },
     /// Force supersede of specific memory
-    Supersede { old_memory_id: String, reason: SupersedeReason },
+    Supersede {
+        old_memory_id: String,
+        reason: SupersedeReason,
+    },
 }
 
 // ============================================================================
@@ -680,18 +699,22 @@ mod tests {
         // Create embeddings with controlled similarity based on seed
         // Seeds close to each other = similar vectors
         // Seeds far apart = different vectors
-        (0..384).map(|i| {
-            let base = (i as f32 / 384.0) * std::f32::consts::PI * 2.0;
-            (base * seed).sin()
-        }).collect()
+        (0..384)
+            .map(|i| {
+                let base = (i as f32 / 384.0) * std::f32::consts::PI * 2.0;
+                (base * seed).sin()
+            })
+            .collect()
     }
 
     fn make_orthogonal_embedding() -> Vec<f32> {
         // Create an embedding that's orthogonal to seed=1.0
-        (0..384).map(|i| {
-            let base = (i as f32 / 384.0) * std::f32::consts::PI * 2.0;
-            (base + std::f32::consts::PI / 2.0).sin()  // 90 degree phase shift
-        }).collect()
+        (0..384)
+            .map(|i| {
+                let base = (i as f32 / 384.0) * std::f32::consts::PI * 2.0;
+                (base + std::f32::consts::PI / 2.0).sin() // 90 degree phase shift
+            })
+            .collect()
     }
 
     fn make_candidate(id: &str, seed: f32) -> CandidateMemory {
@@ -728,7 +751,13 @@ mod tests {
 
         let decision = gate.evaluate("New content", &embedding, &[]);
 
-        assert!(matches!(decision, GateDecision::Create { reason: CreateReason::FirstMemory, .. }));
+        assert!(matches!(
+            decision,
+            GateDecision::Create {
+                reason: CreateReason::FirstMemory,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -762,7 +791,10 @@ mod tests {
 
         // Should supersede the demoted memory if similarity is above threshold
         // If not superseding, it should at least update
-        assert!(matches!(decision, GateDecision::Supersede { .. } | GateDecision::Update { .. }));
+        assert!(matches!(
+            decision,
+            GateDecision::Supersede { .. } | GateDecision::Update { .. }
+        ));
     }
 
     #[test]
@@ -812,7 +844,13 @@ mod tests {
             EvaluationIntent::ForceCreate,
         );
 
-        assert!(matches!(decision, GateDecision::Create { reason: CreateReason::ExplicitCreate, .. }));
+        assert!(matches!(
+            decision,
+            GateDecision::Create {
+                reason: CreateReason::ExplicitCreate,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -825,7 +863,9 @@ mod tests {
             "Updated content",
             &embedding,
             &[candidate],
-            EvaluationIntent::ForceUpdate { target_id: "mem-1".to_string() },
+            EvaluationIntent::ForceUpdate {
+                target_id: "mem-1".to_string(),
+            },
         );
 
         assert!(matches!(decision, GateDecision::Update { .. }));

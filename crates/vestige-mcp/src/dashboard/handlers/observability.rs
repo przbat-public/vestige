@@ -9,14 +9,14 @@ use axum::response::Json;
 use serde_json::Value;
 
 use super::super::state::AppState;
-use super::log_err;
+use super::{log_err, log_join_err};
 
 /// Get system stats
-pub async fn get_stats(
-    State(state): State<AppState>,
-) -> Result<Json<Value>, StatusCode> {
-    let stats = state.storage
-        .get_stats()
+pub async fn get_stats(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+    let storage = state.storage.clone();
+    let stats = tokio::task::spawn_blocking(move || storage.get_stats())
+        .await
+        .map_err(log_join_err("get_stats task panicked"))?
         .map_err(log_err("storage operation"))?;
 
     let embedding_coverage = if stats.total_nodes > 0 {
@@ -40,11 +40,11 @@ pub async fn get_stats(
 }
 
 /// Health check
-pub async fn health_check(
-    State(state): State<AppState>,
-) -> Result<Json<Value>, StatusCode> {
-    let stats = state.storage
-        .get_stats()
+pub async fn health_check(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+    let storage = state.storage.clone();
+    let stats = tokio::task::spawn_blocking(move || storage.get_stats())
+        .await
+        .map_err(log_join_err("get_stats task panicked"))?
         .map_err(log_err("storage operation"))?;
 
     let status = if stats.total_nodes == 0 {
@@ -69,10 +69,13 @@ pub async fn health_check(
 pub async fn retention_distribution(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, StatusCode> {
-    // Cap at 1000 to prevent excessive memory usage on large databases
-    let nodes = state
-        .storage
-        .get_all_nodes(1000, 0)
+    // Cap at 1000 to prevent excessive memory usage on large databases.
+    // Even capped, a full SELECT + per-row deserialization runs >10ms on a
+    // warm DB, so dispatch to the blocking pool.
+    let storage = state.storage.clone();
+    let nodes = tokio::task::spawn_blocking(move || storage.get_all_nodes(1000, 0))
+        .await
+        .map_err(log_join_err("get_all_nodes task panicked"))?
         .map_err(log_err("storage operation"))?;
 
     // Build distribution buckets

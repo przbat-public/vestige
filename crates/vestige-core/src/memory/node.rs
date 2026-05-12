@@ -80,7 +80,7 @@ impl std::fmt::Display for NodeType {
 }
 
 // ============================================================================
-// MEMORY KIND (Tier 4 — ENGRAM-style typed memory)
+// MEMORY KIND (ENGRAM-style typed memory)
 // ============================================================================
 
 /// Memory kind classifies *how* the content is shaped and retrieved.
@@ -97,7 +97,7 @@ impl std::fmt::Display for NodeType {
 ///
 /// LoCoMo PoC results (full N=1540): replacing raw chunks with extracted
 /// facts alone loses −6.88 pp. Augmenting raw chunks with extracted facts
-/// side-by-side wins +3.96 pp. See `docs/TIER4-TYPED-MEMORY-DESIGN.md`.
+/// side-by-side wins +3.96 pp. See `docs/TYPED-MEMORY-DESIGN.md`.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -259,7 +259,7 @@ pub struct KnowledgeNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provenance: Option<serde_json::Value>,
 
-    // ========== Typed Memory (v3.3.0 Tier 4 — ENGRAM-style) ==========
+    // ========== Typed Memory (v3.3.0 — ENGRAM-style) ==========
     /// Memory kind classifies *how* the content is shaped and retrieved.
     /// Defaults to `Raw` for back-compat; extractors set this to a more
     /// specific kind when they distill content into atomic facts.
@@ -387,10 +387,16 @@ impl KnowledgeNode {
         let lower_content = self.content.to_lowercase();
         let tags_lower: Vec<String> = self.tags.iter().map(|t| t.to_lowercase()).collect();
 
-        if tags_lower.iter().any(|t| t == "preference" || t == "opinion") {
+        if tags_lower
+            .iter()
+            .any(|t| t == "preference" || t == "opinion")
+        {
             return super::EpistemicStatus::Opinion;
         }
-        if tags_lower.iter().any(|t| t == "pattern" || t == "observation") {
+        if tags_lower
+            .iter()
+            .any(|t| t == "pattern" || t == "observation")
+        {
             return super::EpistemicStatus::Observation;
         }
 
@@ -454,7 +460,7 @@ pub struct IngestInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<serde_json::Value>,
 
-    // ========== Typed Memory (Tier 4) ==========
+    // ========== Typed Memory ==========
     /// Memory kind. Defaults to `Raw`; extractors set a specific kind.
     #[serde(default)]
     pub memory_kind: MemoryKind,

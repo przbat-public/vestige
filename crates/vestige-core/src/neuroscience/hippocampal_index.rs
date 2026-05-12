@@ -1076,9 +1076,10 @@ impl ContentStore {
         // Check cache first
         let cache_key = self.cache_key(pointer);
         if let Ok(cache) = self.cache.read()
-            && let Some(data) = cache.get(&cache_key) {
-                return Ok(data.clone());
-            }
+            && let Some(data) = cache.get(&cache_key)
+        {
+            return Ok(data.clone());
+        }
 
         // Retrieve from storage
         let data = match &pointer.storage_location {
@@ -1131,22 +1132,23 @@ impl ContentStore {
         }
 
         if let Ok(mut cache) = self.cache.write()
-            && let Ok(mut size) = self.current_cache_size.write() {
-                // Evict if necessary
-                while *size + data_size > self.max_cache_size && !cache.is_empty() {
-                    // Simple eviction: remove first entry
-                    if let Some(key_to_remove) = cache.keys().next().cloned() {
-                        if let Some(removed) = cache.remove(&key_to_remove) {
-                            *size = size.saturating_sub(removed.len());
-                        }
-                    } else {
-                        break;
+            && let Ok(mut size) = self.current_cache_size.write()
+        {
+            // Evict if necessary
+            while *size + data_size > self.max_cache_size && !cache.is_empty() {
+                // Simple eviction: remove first entry
+                if let Some(key_to_remove) = cache.keys().next().cloned() {
+                    if let Some(removed) = cache.remove(&key_to_remove) {
+                        *size = size.saturating_sub(removed.len());
                     }
+                } else {
+                    break;
                 }
-
-                cache.insert(key.to_string(), data.to_vec());
-                *size += data_size;
             }
+
+            cache.insert(key.to_string(), data.to_vec());
+            *size += data_size;
+        }
     }
 
     /// Retrieve from SQLite (placeholder - to be integrated with Storage)
@@ -1393,15 +1395,16 @@ impl HippocampalIndex {
 
             // Calculate semantic score
             if let Some(ref query_embedding) = query.semantic_embedding
-                && !index.semantic_summary.is_empty() {
-                    let query_compressed = self.compress_embedding(query_embedding);
-                    match_result.semantic_score =
-                        self.cosine_similarity(&query_compressed, &index.semantic_summary);
+                && !index.semantic_summary.is_empty()
+            {
+                let query_compressed = self.compress_embedding(query_embedding);
+                match_result.semantic_score =
+                    self.cosine_similarity(&query_compressed, &index.semantic_summary);
 
-                    if match_result.semantic_score < query.min_similarity {
-                        continue;
-                    }
+                if match_result.semantic_score < query.min_similarity {
+                    continue;
                 }
+            }
 
             // Calculate text score
             if let Some(ref text_query) = query.text_query {
@@ -1442,21 +1445,24 @@ impl HippocampalIndex {
     fn passes_filters(&self, index: &MemoryIndex, query: &IndexQuery) -> bool {
         // Time range filter
         if let Some((start, end)) = query.time_range
-            && (index.temporal_marker.created_at < start || index.temporal_marker.created_at > end) {
-                return false;
-            }
+            && (index.temporal_marker.created_at < start || index.temporal_marker.created_at > end)
+        {
+            return false;
+        }
 
         // Importance flags filter
         if let Some(ref required) = query.required_flags
-            && !index.matches_importance(required.to_bits()) {
-                return false;
-            }
+            && !index.matches_importance(required.to_bits())
+        {
+            return false;
+        }
 
         // Node type filter
         if let Some(ref types) = query.node_types
-            && !types.contains(&index.node_type) {
-                return false;
-            }
+            && !types.contains(&index.node_type)
+        {
+            return false;
+        }
 
         true
     }
@@ -1574,9 +1580,10 @@ impl HippocampalIndex {
         for m in matches {
             // Record access
             if let Ok(mut indices) = self.indices.write()
-                && let Some(index) = indices.get_mut(&m.index.memory_id) {
-                    index.record_access();
-                }
+                && let Some(index) = indices.get_mut(&m.index.memory_id)
+            {
+                index.record_access();
+            }
 
             match self.retrieve_content(&m.index) {
                 Ok(memory) => memories.push(memory),
@@ -1881,36 +1888,38 @@ impl HippocampalIndex {
     ) -> Result<MemoryBarcode> {
         // Check if already indexed
         if let Ok(indices) = self.indices.read()
-            && indices.contains_key(node_id) {
-                return Err(HippocampalIndexError::MigrationError(
-                    "Node already indexed".to_string(),
-                ));
-            }
+            && indices.contains_key(node_id)
+        {
+            return Err(HippocampalIndexError::MigrationError(
+                "Node already indexed".to_string(),
+            ));
+        }
 
         // Create the index
         let barcode = self.index_memory(node_id, content, node_type, created_at, embedding)?;
 
         // Update importance flags based on existing data
         if let Ok(mut indices) = self.indices.write()
-            && let Some(index) = indices.get_mut(node_id) {
-                // Set high retention flag if applicable
-                if retention_strength > 0.7 {
-                    index.importance_flags.set_high_retention(true);
-                }
-
-                // Set emotional flag if applicable
-                if sentiment_magnitude > 0.5 {
-                    index.importance_flags.set_emotional(true);
-                }
-
-                // Add SQLite content pointer
-                index.content_pointers.clear();
-                index.add_content_pointer(ContentPointer::sqlite(
-                    "knowledge_nodes",
-                    barcode.id as i64,
-                    ContentType::Text,
-                ));
+            && let Some(index) = indices.get_mut(node_id)
+        {
+            // Set high retention flag if applicable
+            if retention_strength > 0.7 {
+                index.importance_flags.set_high_retention(true);
             }
+
+            // Set emotional flag if applicable
+            if sentiment_magnitude > 0.5 {
+                index.importance_flags.set_emotional(true);
+            }
+
+            // Add SQLite content pointer
+            index.content_pointers.clear();
+            index.add_content_pointer(ContentPointer::sqlite(
+                "knowledge_nodes",
+                barcode.id as i64,
+                ContentType::Text,
+            ));
+        }
 
         Ok(barcode)
     }

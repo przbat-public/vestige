@@ -122,7 +122,12 @@ pub async fn execute_system_status(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     _args: Option<Value>,
 ) -> Result<Value, String> {
-    let stats = storage.get_stats().map_err(|e| e.to_string())?;
+    // get_stats touches several tables; offload to the blocking pool.
+    let storage_stats = storage.clone();
+    let stats = tokio::task::spawn_blocking(move || storage_stats.get_stats())
+        .await
+        .map_err(|e| format!("get_stats task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
 
     // === Health assessment ===
     let status = if stats.total_nodes == 0 {
@@ -159,7 +164,8 @@ pub async fn execute_system_status(
 
     let mut recommendations = Vec::new();
     if status == "critical" {
-        recommendations.push("CRITICAL: Many memories have very low retention. Review important memories.");
+        recommendations
+            .push("CRITICAL: Many memories have very low retention. Review important memories.");
     }
     if stats.nodes_due_for_review > 5 {
         recommendations.push("Review due memories to strengthen retention.");
@@ -175,7 +181,11 @@ pub async fn execute_system_status(
     }
 
     // === State distribution ===
-    let nodes = storage.get_all_nodes(500, 0).map_err(|e| e.to_string())?;
+    let storage_nodes = storage.clone();
+    let nodes = tokio::task::spawn_blocking(move || storage_nodes.get_all_nodes(500, 0))
+        .await
+        .map_err(|e| format!("get_all_nodes task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
     let total = nodes.len();
     let (active, dormant, silent, unavailable) = if total > 0 {
         let mut a = 0usize;
@@ -245,14 +255,23 @@ pub async fn execute_system_status(
     };
 
     // === Automation triggers (for conditional dream/backup/gc at session start) ===
-    let last_consolidation = storage.get_last_consolidation().ok().flatten();
-    let last_dream = storage.get_last_dream().ok().flatten();
-    let saves_since_last_dream = match &last_dream {
-        Some(dt) => storage.count_memories_since(*dt).unwrap_or(0),
-        None => stats.total_nodes,
-    };
+    // Three sequential single-row SELECTs plus an optional COUNT. Cheap each,
+    // but never run blocking SQLite on the reactor — batch them.
+    let storage_auto = storage.clone();
+    let total_for_fallback = stats.total_nodes;
+    let (last_consolidation, last_dream, saves_since_last_dream) =
+        tokio::task::spawn_blocking(move || {
+            let last_consolidation = storage_auto.get_last_consolidation().ok().flatten();
+            let last_dream = storage_auto.get_last_dream().ok().flatten();
+            let saves_since_last_dream = match &last_dream {
+                Some(dt) => storage_auto.count_memories_since(*dt).unwrap_or(0),
+                None => total_for_fallback,
+            };
+            (last_consolidation, last_dream, saves_since_last_dream)
+        })
+        .await
+        .map_err(|e| format!("automation triggers task panicked: {}", e))?;
     let last_backup = Storage::get_last_backup_timestamp();
-
 
     Ok(serde_json::json!({
         "tool": "system_status",
@@ -299,7 +318,14 @@ pub async fn execute_consolidate(
     storage: &Arc<Storage>,
     _args: Option<Value>,
 ) -> Result<Value, String> {
-    let result = storage.run_consolidation().map_err(|e| e.to_string())?;
+    // run_consolidation walks the whole node table and rewrites multiple
+    // rows — easily hundreds of milliseconds on warm DBs and seconds on
+    // cold ones. Offload to the blocking pool.
+    let storage_clone = storage.clone();
+    let result = tokio::task::spawn_blocking(move || storage_clone.run_consolidation())
+        .await
+        .map_err(|e| format!("Consolidation task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
         "tool": "consolidate",
@@ -316,14 +342,13 @@ pub async fn execute_consolidate(
 }
 
 /// Backup tool
-pub async fn execute_backup(
-    storage: &Arc<Storage>,
-    _args: Option<Value>,
-) -> Result<Value, String> {
+pub async fn execute_backup(storage: &Arc<Storage>, _args: Option<Value>) -> Result<Value, String> {
     // Determine backup path
     let vestige_dir = directories::ProjectDirs::from("com", "vestige", "core")
         .ok_or("Could not determine data directory")?;
-    let backup_dir = vestige_dir.data_dir().parent()
+    let backup_dir = vestige_dir
+        .data_dir()
+        .parent()
         .unwrap_or(vestige_dir.data_dir())
         .join("backups");
 
@@ -333,9 +358,16 @@ pub async fn execute_backup(
     let timestamp = Utc::now().format("%Y%m%d-%H%M%S");
     let backup_path = backup_dir.join(format!("vestige-{}.db", timestamp));
 
-    // Use VACUUM INTO for a consistent backup (handles WAL properly)
+    // Use VACUUM INTO for a consistent backup (handles WAL properly).
+    // backup_to is a long-running blocking operation (single-digit seconds
+    // on multi-GB DBs), so push it to the blocking pool — otherwise we
+    // freeze every async task on the runtime worker that picked us up.
     {
-        storage.backup_to(&backup_path)
+        let storage_clone = storage.clone();
+        let backup_path_clone = backup_path.clone();
+        tokio::task::spawn_blocking(move || storage_clone.backup_to(&backup_path_clone))
+            .await
+            .map_err(|e| format!("Backup task panicked: {}", e))?
             .map_err(|e| format!("Failed to create backup: {}", e))?;
     }
 
@@ -361,10 +393,7 @@ struct ExportArgs {
 }
 
 /// Export tool
-pub async fn execute_export(
-    storage: &Arc<Storage>,
-    args: Option<Value>,
-) -> Result<Value, String> {
+pub async fn execute_export(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
     let args: ExportArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => ExportArgs {
@@ -377,7 +406,10 @@ pub async fn execute_export(
 
     let format = args.format.unwrap_or_else(|| "json".to_string());
     if format != "json" && format != "jsonl" {
-        return Err(format!("Invalid format '{}'. Must be 'json' or 'jsonl'.", format));
+        return Err(format!(
+            "Invalid format '{}'. Must be 'json' or 'jsonl'.",
+            format
+        ));
     }
 
     // Parse since date
@@ -385,33 +417,51 @@ pub async fn execute_export(
         Some(date_str) => {
             let naive = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
                 .map_err(|e| format!("Invalid date '{}': {}. Use YYYY-MM-DD.", date_str, e))?;
-            Some(naive.and_hms_opt(0, 0, 0).expect("midnight is always valid").and_utc())
+            Some(
+                naive
+                    .and_hms_opt(0, 0, 0)
+                    .expect("midnight is always valid")
+                    .and_utc(),
+            )
         }
         None => None,
     };
 
     let tag_filter: Vec<String> = args.tags.unwrap_or_default();
 
-    // Fetch all nodes (capped at 100K to prevent OOM)
-    let mut all_nodes = Vec::new();
-    let page_size = 500;
-    let max_nodes = 100_000;
-    let mut offset = 0;
-    loop {
-        let batch = storage.get_all_nodes(page_size, offset).map_err(|e| e.to_string())?;
-        let batch_len = batch.len();
-        all_nodes.extend(batch);
-        if batch_len < page_size as usize || all_nodes.len() >= max_nodes {
-            break;
-        }
-        offset += page_size;
-    }
+    // Fetch all nodes (capped at 100K to prevent OOM). Same offload pattern
+    // as `execute_gc` — paginated reads can run for seconds.
+    let storage_fetch = storage.clone();
+    let all_nodes = tokio::task::spawn_blocking(
+        move || -> Result<Vec<vestige_core::KnowledgeNode>, vestige_core::StorageError> {
+            let mut all = Vec::new();
+            let page_size = 500;
+            let max_nodes = 100_000;
+            let mut offset = 0;
+            loop {
+                let batch = storage_fetch.get_all_nodes(page_size, offset)?;
+                let batch_len = batch.len();
+                all.extend(batch);
+                if batch_len < page_size as usize || all.len() >= max_nodes {
+                    break;
+                }
+                offset += page_size;
+            }
+            Ok(all)
+        },
+    )
+    .await
+    .map_err(|e| format!("Export fetch task panicked: {}", e))?
+    .map_err(|e| e.to_string())?;
 
     // Apply filters
     let filtered: Vec<&vestige_core::KnowledgeNode> = all_nodes
         .iter()
         .filter(|node| {
-            if since_date.as_ref().is_some_and(|since_dt| node.created_at < *since_dt) {
+            if since_date
+                .as_ref()
+                .is_some_and(|since_dt| node.created_at < *since_dt)
+            {
                 return false;
             }
             if !tag_filter.is_empty() {
@@ -428,7 +478,9 @@ pub async fn execute_export(
     // Determine export path — always constrained to vestige exports directory
     let vestige_dir = directories::ProjectDirs::from("com", "vestige", "core")
         .ok_or("Could not determine data directory")?;
-    let export_dir = vestige_dir.data_dir().parent()
+    let export_dir = vestige_dir
+        .data_dir()
+        .parent()
         .unwrap_or(vestige_dir.data_dir())
         .join("exports");
     std::fs::create_dir_all(&export_dir)
@@ -475,7 +527,9 @@ pub async fn execute_export(
     }
     writer.flush().map_err(|e| e.to_string())?;
 
-    let file_size = std::fs::metadata(&export_path).map(|m| m.len()).unwrap_or(0);
+    let file_size = std::fs::metadata(&export_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
 
     Ok(serde_json::json!({
         "tool": "export",
@@ -499,10 +553,7 @@ struct GcArgs {
 }
 
 /// Garbage collection tool
-pub async fn execute_gc(
-    storage: &Arc<Storage>,
-    args: Option<Value>,
-) -> Result<Value, String> {
+pub async fn execute_gc(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
     let args: GcArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => GcArgs {
@@ -518,20 +569,30 @@ pub async fn execute_gc(
 
     let now = Utc::now();
 
-    // Fetch all nodes (capped at 100K to prevent OOM)
-    let mut all_nodes = Vec::new();
-    let page_size = 500;
-    let max_nodes = 100_000;
-    let mut offset = 0;
-    loop {
-        let batch = storage.get_all_nodes(page_size, offset).map_err(|e| e.to_string())?;
-        let batch_len = batch.len();
-        all_nodes.extend(batch);
-        if batch_len < page_size as usize || all_nodes.len() >= max_nodes {
-            break;
-        }
-        offset += page_size;
-    }
+    // Fetch all nodes (capped at 100K to prevent OOM). Paginated reads on
+    // a multi-GB DB can easily take seconds — never on the reactor.
+    let storage_fetch = storage.clone();
+    let all_nodes = tokio::task::spawn_blocking(
+        move || -> Result<Vec<vestige_core::KnowledgeNode>, vestige_core::StorageError> {
+            let mut all = Vec::new();
+            let page_size = 500;
+            let max_nodes = 100_000;
+            let mut offset = 0;
+            loop {
+                let batch = storage_fetch.get_all_nodes(page_size, offset)?;
+                let batch_len = batch.len();
+                all.extend(batch);
+                if batch_len < page_size as usize || all.len() >= max_nodes {
+                    break;
+                }
+                offset += page_size;
+            }
+            Ok(all)
+        },
+    )
+    .await
+    .map_err(|e| format!("GC fetch task panicked: {}", e))?
+    .map_err(|e| e.to_string())?;
 
     // Find candidates
     let candidates: Vec<&vestige_core::KnowledgeNode> = all_nodes
@@ -588,18 +649,25 @@ pub async fn execute_gc(
         }));
     }
 
-    // Perform actual deletion
-    let mut deleted = 0usize;
-    let mut errors = 0usize;
+    // Perform actual deletion on the blocking pool. Each DELETE is fast,
+    // but doing tens of thousands of them on the reactor would starve every
+    // other request on this worker thread.
     let ids: Vec<String> = candidates.iter().map(|n| n.id.clone()).collect();
-
-    for id in &ids {
-        match storage.delete_node(id) {
-            Ok(true) => deleted += 1,
-            Ok(false) => errors += 1,
-            Err(_) => errors += 1,
+    let storage_delete = storage.clone();
+    let (deleted, errors) = tokio::task::spawn_blocking(move || {
+        let mut deleted = 0usize;
+        let mut errors = 0usize;
+        for id in &ids {
+            match storage_delete.delete_node(id) {
+                Ok(true) => deleted += 1,
+                Ok(false) => errors += 1,
+                Err(_) => errors += 1,
+            }
         }
-    }
+        (deleted, errors)
+    })
+    .await
+    .map_err(|e| format!("GC delete task panicked: {}", e))?;
 
     Ok(serde_json::json!({
         "tool": "gc",
@@ -637,7 +705,9 @@ pub async fn execute_regenerate_embeddings(
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     {
         let args: RegenerateEmbeddingsArgs = match args {
-            Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
+            Some(v) => {
+                serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?
+            }
             None => RegenerateEmbeddingsArgs {
                 force: None,
                 node_ids: None,
@@ -678,7 +748,10 @@ pub async fn execute_regenerate_embeddings(
     #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
     {
         let _ = (storage, args);
-        Err("regenerate_embeddings requires the 'embeddings' and 'vector-search' features.".to_string())
+        Err(
+            "regenerate_embeddings requires the 'embeddings' and 'vector-search' features."
+                .to_string(),
+        )
     }
 }
 
@@ -725,14 +798,22 @@ pub async fn execute_split_memories(
 ) -> Result<Value, String> {
     let args: SplitMemoriesArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
-        None => SplitMemoriesArgs { min_length: None, limit: None, dry_run: None },
+        None => SplitMemoriesArgs {
+            min_length: None,
+            limit: None,
+            dry_run: None,
+        },
     };
 
     let min_length = args.min_length.unwrap_or(300);
     let limit = args.limit.unwrap_or(20);
     let dry_run = args.dry_run.unwrap_or(true);
 
-    let all_nodes = storage.get_all_nodes(500, 0).map_err(|e| e.to_string())?;
+    let storage_fetch = storage.clone();
+    let all_nodes = tokio::task::spawn_blocking(move || storage_fetch.get_all_nodes(500, 0))
+        .await
+        .map_err(|e| format!("get_all_nodes task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
 
     let mut compound_memories: Vec<Value> = Vec::new();
 
@@ -763,12 +844,22 @@ pub async fn execute_split_memories(
 
     let mut deleted_ids: Vec<String> = Vec::new();
     if !dry_run {
-        for mem in &compound_memories {
-            if let Some(id) = mem["id"].as_str()
-                && storage.delete_node(id).is_ok() {
-                    deleted_ids.push(id.to_string());
+        let ids: Vec<String> = compound_memories
+            .iter()
+            .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+            .collect();
+        let storage_delete = storage.clone();
+        deleted_ids = tokio::task::spawn_blocking(move || {
+            let mut ok = Vec::new();
+            for id in &ids {
+                if storage_delete.delete_node(id).is_ok() {
+                    ok.push(id.clone());
                 }
-        }
+            }
+            ok
+        })
+        .await
+        .map_err(|e| format!("Split delete task panicked: {}", e))?;
     }
 
     Ok(serde_json::json!({
@@ -806,19 +897,25 @@ fn detect_compound_content_reason(content: &str) -> Option<String> {
     let mut signals: Vec<&str> = Vec::new();
 
     let lines: Vec<&str> = content.lines().collect();
-    let paragraph_count = content.split("\n\n").filter(|p| p.trim().len() > 30).count();
+    let paragraph_count = content
+        .split("\n\n")
+        .filter(|p| p.trim().len() > 30)
+        .count();
     if paragraph_count >= 3 {
         signals.push("multiple paragraphs");
     }
 
-    let speaker_count = lines.iter()
+    let speaker_count = lines
+        .iter()
         .filter(|l| {
             let trimmed = l.trim();
             if let Some(colon_pos) = trimmed.find(':') {
                 let before = &trimmed[..colon_pos];
                 colon_pos < 40
                     && !before.is_empty()
-                    && before.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '-' || c == '_')
+                    && before
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == ' ' || c == '-' || c == '_')
                     && trimmed.len() > colon_pos + 5
             } else {
                 false
@@ -829,11 +926,15 @@ fn detect_compound_content_reason(content: &str) -> Option<String> {
         signals.push("conversation transcript");
     }
 
-    let bullet_count = lines.iter()
+    let bullet_count = lines
+        .iter()
         .filter(|l| {
             let t = l.trim();
-            t.starts_with("- ") || t.starts_with("* ") || t.starts_with("• ")
-                || (t.len() > 3 && t.chars().next().is_some_and(|c| c.is_ascii_digit())
+            t.starts_with("- ")
+                || t.starts_with("* ")
+                || t.starts_with("• ")
+                || (t.len() > 3
+                    && t.chars().next().is_some_and(|c| c.is_ascii_digit())
                     && (t.contains(". ") || t.contains(") ")))
         })
         .count();
@@ -842,11 +943,20 @@ fn detect_compound_content_reason(content: &str) -> Option<String> {
     }
 
     let topic_indicators = [
-        "also,", "additionally,", "on another note", "separately,",
-        "moving on", "another thing", "by the way", "btw,",
-        "oh and", "also worth noting", "furthermore,",
+        "also,",
+        "additionally,",
+        "on another note",
+        "separately,",
+        "moving on",
+        "another thing",
+        "by the way",
+        "btw,",
+        "oh and",
+        "also worth noting",
+        "furthermore,",
     ];
-    let topic_shifts = lines.iter()
+    let topic_shifts = lines
+        .iter()
         .filter(|l| {
             let lower = l.to_lowercase();
             topic_indicators.iter().any(|ind| lower.contains(ind))
@@ -906,18 +1016,20 @@ mod tests {
     async fn test_system_status_with_memories() {
         let (storage, _dir) = test_storage().await;
         {
-            storage.ingest(vestige_core::IngestInput {
-                content: "Test memory for status".to_string(),
-                node_type: "fact".to_string(),
-                source: None,
-                sentiment_score: 0.0,
-                sentiment_magnitude: 0.0,
-                tags: vec![],
-                valid_from: None,
-                valid_until: None,
-                provenance: None,
-                ..Default::default()
-            }).unwrap();
+            storage
+                .ingest(vestige_core::IngestInput {
+                    content: "Test memory for status".to_string(),
+                    node_type: "fact".to_string(),
+                    source: None,
+                    sentiment_score: 0.0,
+                    sentiment_magnitude: 0.0,
+                    tags: vec![],
+                    valid_from: None,
+                    valid_until: None,
+                    provenance: None,
+                    ..Default::default()
+                })
+                .unwrap();
         }
         let result = execute_system_status(&storage, &test_cognitive(), None).await;
         assert!(result.is_ok());
@@ -947,7 +1059,10 @@ mod tests {
         assert!(triggers.is_object(), "automationTriggers should be present");
         assert!(triggers["lastDreamTimestamp"].is_null(), "No dreams yet");
         assert_eq!(triggers["savesSinceLastDream"], 0, "Empty DB = 0 saves");
-        assert!(triggers["lastConsolidationTimestamp"].is_null(), "No consolidation yet");
+        assert!(
+            triggers["lastConsolidationTimestamp"].is_null(),
+            "No consolidation yet"
+        );
         // lastBackupTimestamp depends on filesystem state, just check it exists
         assert!(triggers.get("lastBackupTimestamp").is_some());
     }
@@ -957,18 +1072,20 @@ mod tests {
         let (storage, _dir) = test_storage().await;
         {
             for i in 0..3 {
-                storage.ingest(vestige_core::IngestInput {
-                    content: format!("Automation trigger test memory {}", i),
-                    node_type: "fact".to_string(),
-                    source: None,
-                    sentiment_score: 0.0,
-                    sentiment_magnitude: 0.0,
-                    tags: vec![],
-                    valid_from: None,
-                    valid_until: None,
-                    provenance: None,
-                    ..Default::default()
-                }).unwrap();
+                storage
+                    .ingest(vestige_core::IngestInput {
+                        content: format!("Automation trigger test memory {}", i),
+                        node_type: "fact".to_string(),
+                        source: None,
+                        sentiment_score: 0.0,
+                        sentiment_magnitude: 0.0,
+                        tags: vec![],
+                        valid_from: None,
+                        valid_until: None,
+                        provenance: None,
+                        ..Default::default()
+                    })
+                    .unwrap();
             }
         }
         let result = execute_system_status(&storage, &test_cognitive(), None).await;
@@ -998,30 +1115,34 @@ mod tests {
                          Bob: Let's do it Friday but make sure all the integration and unit tests pass first before deploy.\n\
                          Carol: I agree with that plan and I will prepare the rollback scripts for safety in case of failures.\n\
                          Dave: Make sure the staging environment passes all health checks and monitoring is configured properly.";
-        storage.ingest(vestige_core::IngestInput {
-            content: compound.to_string(),
-            node_type: "event".to_string(),
-            source: None,
-            sentiment_score: 0.0,
-            sentiment_magnitude: 0.0,
-            tags: vec![],
-            valid_from: None,
-            valid_until: None,
-            provenance: None,
-            ..Default::default()
-        }).unwrap();
-        storage.ingest(vestige_core::IngestInput {
-            content: "Single atomic fact about Rust.".to_string(),
-            node_type: "fact".to_string(),
-            source: None,
-            sentiment_score: 0.0,
-            sentiment_magnitude: 0.0,
-            tags: vec![],
-            valid_from: None,
-            valid_until: None,
-            provenance: None,
-            ..Default::default()
-        }).unwrap();
+        storage
+            .ingest(vestige_core::IngestInput {
+                content: compound.to_string(),
+                node_type: "event".to_string(),
+                source: None,
+                sentiment_score: 0.0,
+                sentiment_magnitude: 0.0,
+                tags: vec![],
+                valid_from: None,
+                valid_until: None,
+                provenance: None,
+                ..Default::default()
+            })
+            .unwrap();
+        storage
+            .ingest(vestige_core::IngestInput {
+                content: "Single atomic fact about Rust.".to_string(),
+                node_type: "fact".to_string(),
+                source: None,
+                sentiment_score: 0.0,
+                sentiment_magnitude: 0.0,
+                tags: vec![],
+                valid_from: None,
+                valid_until: None,
+                provenance: None,
+                ..Default::default()
+            })
+            .unwrap();
 
         let result = execute_split_memories(&storage, None).await;
         assert!(result.is_ok());
@@ -1032,7 +1153,12 @@ mod tests {
         assert_eq!(value["deleted"], 0);
         let memories = value["memories"].as_array().unwrap();
         assert_eq!(memories.len(), 1);
-        assert!(memories[0]["reason"].as_str().unwrap().contains("conversation transcript"));
+        assert!(
+            memories[0]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("conversation transcript")
+        );
     }
 
     #[test]

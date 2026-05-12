@@ -25,7 +25,6 @@ pub struct JsonRpcRequest {
     pub params: Option<Value>,
 }
 
-
 /// JSON-RPC Response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcResponse {
@@ -129,7 +128,10 @@ impl JsonRpcError {
 
     #[allow(dead_code)] // Reserved for future resource handling
     pub fn resource_not_found(uri: &str) -> Self {
-        Self::new(ErrorCode::ResourceNotFound, &format!("Resource not found: {}", uri))
+        Self::new(
+            ErrorCode::ResourceNotFound,
+            &format!("Resource not found: {}", uri),
+        )
     }
 }
 

@@ -432,10 +432,11 @@ impl CrossProjectLearner {
         // Check each trigger
         for trigger in &pattern.pattern.triggers {
             if let Some((matches, reason)) = self.check_trigger(trigger, context)
-                && matches {
-                    match_scores.push(trigger.confidence);
-                    match_reasons.push(reason);
-                }
+                && matches
+            {
+                match_scores.push(trigger.confidence);
+                match_reasons.push(reason);
+            }
         }
 
         if match_scores.is_empty() {
@@ -547,10 +548,11 @@ impl CrossProjectLearner {
         let success_rate = success_count as f64 / total_count as f64;
 
         if let Ok(mut patterns) = self.patterns.write()
-            && let Some(pattern) = patterns.get_mut(pattern_id) {
-                pattern.success_rate = success_rate;
-                pattern.application_count = total_count as u32;
-            }
+            && let Some(pattern) = patterns.get_mut(pattern_id)
+        {
+            pattern.success_rate = success_rate;
+            pattern.application_count = total_count as u32;
+        }
     }
 
     fn extract_patterns_from_category(
@@ -595,38 +597,39 @@ impl CrossProjectLearner {
                 let pattern_id = format!("auto-{}-{}", category_to_string(&category), keyword);
 
                 if let Ok(mut patterns) = self.patterns.write()
-                    && !patterns.contains_key(&pattern_id) {
-                        patterns.insert(
-                            pattern_id.clone(),
-                            UniversalPattern {
-                                id: pattern_id,
-                                pattern: CodePattern {
-                                    name: format!("{} pattern", keyword),
-                                    category: category.clone(),
-                                    description: format!(
-                                        "Pattern involving '{}' observed in {} projects",
-                                        keyword,
-                                        projects.len()
-                                    ),
-                                    example: None,
-                                    triggers: vec![PatternTrigger {
-                                        trigger_type: TriggerType::Topic,
-                                        value: keyword.clone(),
-                                        confidence: 0.5,
-                                    }],
-                                    benefits: vec![],
-                                    considerations: vec![],
-                                },
-                                projects_seen_in: projects.iter().map(|s| s.to_string()).collect(),
-                                success_rate: 0.5, // Default until validated
-                                applicability: format!("When working with {}", keyword),
-                                confidence: 0.5,
-                                first_seen: Utc::now(),
-                                last_seen: Utc::now(),
-                                application_count: 0,
+                    && !patterns.contains_key(&pattern_id)
+                {
+                    patterns.insert(
+                        pattern_id.clone(),
+                        UniversalPattern {
+                            id: pattern_id,
+                            pattern: CodePattern {
+                                name: format!("{} pattern", keyword),
+                                category: category.clone(),
+                                description: format!(
+                                    "Pattern involving '{}' observed in {} projects",
+                                    keyword,
+                                    projects.len()
+                                ),
+                                example: None,
+                                triggers: vec![PatternTrigger {
+                                    trigger_type: TriggerType::Topic,
+                                    value: keyword.clone(),
+                                    confidence: 0.5,
+                                }],
+                                benefits: vec![],
+                                considerations: vec![],
                             },
-                        );
-                    }
+                            projects_seen_in: projects.iter().map(|s| s.to_string()).collect(),
+                            success_rate: 0.5, // Default until validated
+                            applicability: format!("When working with {}", keyword),
+                            confidence: 0.5,
+                            first_seen: Utc::now(),
+                            last_seen: Utc::now(),
+                            application_count: 0,
+                        },
+                    );
+                }
             }
         }
     }

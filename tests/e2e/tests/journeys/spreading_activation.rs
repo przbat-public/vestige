@@ -12,10 +12,10 @@
 //! 4. Activation spreads to related memories via association links
 //! 5. User discovers hidden connections they didn't explicitly search for
 
+use std::collections::HashSet;
 use vestige_core::neuroscience::spreading_activation::{
     ActivationConfig, ActivationNetwork, LinkType,
 };
-use std::collections::HashSet;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -26,17 +26,62 @@ fn create_coding_network() -> ActivationNetwork {
     let mut network = ActivationNetwork::new();
 
     // Rust ecosystem
-    network.add_edge("rust".to_string(), "ownership".to_string(), LinkType::Semantic, 0.95);
-    network.add_edge("rust".to_string(), "borrowing".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("rust".to_string(), "cargo".to_string(), LinkType::PartOf, 0.85);
-    network.add_edge("ownership".to_string(), "memory_safety".to_string(), LinkType::Causal, 0.9);
-    network.add_edge("borrowing".to_string(), "lifetimes".to_string(), LinkType::Semantic, 0.85);
+    network.add_edge(
+        "rust".to_string(),
+        "ownership".to_string(),
+        LinkType::Semantic,
+        0.95,
+    );
+    network.add_edge(
+        "rust".to_string(),
+        "borrowing".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "rust".to_string(),
+        "cargo".to_string(),
+        LinkType::PartOf,
+        0.85,
+    );
+    network.add_edge(
+        "ownership".to_string(),
+        "memory_safety".to_string(),
+        LinkType::Causal,
+        0.9,
+    );
+    network.add_edge(
+        "borrowing".to_string(),
+        "lifetimes".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     // Async ecosystem
-    network.add_edge("rust".to_string(), "async_rust".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("async_rust".to_string(), "tokio".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("tokio".to_string(), "runtime".to_string(), LinkType::PartOf, 0.85);
-    network.add_edge("async_rust".to_string(), "futures".to_string(), LinkType::Semantic, 0.85);
+    network.add_edge(
+        "rust".to_string(),
+        "async_rust".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "async_rust".to_string(),
+        "tokio".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "tokio".to_string(),
+        "runtime".to_string(),
+        LinkType::PartOf,
+        0.85,
+    );
+    network.add_edge(
+        "async_rust".to_string(),
+        "futures".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     network
 }
@@ -52,10 +97,30 @@ fn create_chain_network() -> ActivationNetwork {
     let mut network = ActivationNetwork::with_config(config);
 
     // Create a chain: A -> B -> C -> D -> E
-    network.add_edge("node_a".to_string(), "node_b".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("node_b".to_string(), "node_c".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("node_c".to_string(), "node_d".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("node_d".to_string(), "node_e".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "node_a".to_string(),
+        "node_b".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "node_b".to_string(),
+        "node_c".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "node_c".to_string(),
+        "node_d".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "node_d".to_string(),
+        "node_e".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     network
 }
@@ -81,7 +146,10 @@ fn test_spreading_finds_hidden_chains() {
     // Should find all nodes in the chain
     let found_ids: HashSet<_> = results.iter().map(|r| r.memory_id.as_str()).collect();
 
-    assert!(found_ids.contains("node_b"), "Should find direct neighbor node_b");
+    assert!(
+        found_ids.contains("node_b"),
+        "Should find direct neighbor node_b"
+    );
     assert!(found_ids.contains("node_c"), "Should find 2-hop node_c");
     assert!(found_ids.contains("node_d"), "Should find 3-hop node_d");
     assert!(found_ids.contains("node_e"), "Should find 4-hop node_e");
@@ -127,9 +195,21 @@ fn test_activation_decays_with_distance() {
 
     let results = network.activate("a", 1.0);
 
-    let act_b = results.iter().find(|r| r.memory_id == "b").map(|r| r.activation).unwrap_or(0.0);
-    let act_c = results.iter().find(|r| r.memory_id == "c").map(|r| r.activation).unwrap_or(0.0);
-    let act_d = results.iter().find(|r| r.memory_id == "d").map(|r| r.activation).unwrap_or(0.0);
+    let act_b = results
+        .iter()
+        .find(|r| r.memory_id == "b")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let act_c = results
+        .iter()
+        .find(|r| r.memory_id == "c")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let act_d = results
+        .iter()
+        .find(|r| r.memory_id == "d")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
 
     // Verify monotonic decrease
     assert!(act_b > act_c, "b ({:.3}) > c ({:.3})", act_b, act_c);
@@ -159,7 +239,12 @@ fn test_edge_reinforcement_hebbian() {
     let mut network = ActivationNetwork::new();
 
     // Add edge with moderate strength
-    network.add_edge("concept_a".to_string(), "concept_b".to_string(), LinkType::Semantic, 0.5);
+    network.add_edge(
+        "concept_a".to_string(),
+        "concept_b".to_string(),
+        LinkType::Semantic,
+        0.5,
+    );
 
     // Get initial associations
     let initial = network.get_associations("concept_a");
@@ -169,7 +254,10 @@ fn test_edge_reinforcement_hebbian() {
         .map(|a| a.association_strength)
         .unwrap_or(0.0);
 
-    assert!((initial_strength - 0.5).abs() < 0.01, "Initial should be 0.5");
+    assert!(
+        (initial_strength - 0.5).abs() < 0.01,
+        "Initial should be 0.5"
+    );
 
     // Reinforce the connection
     network.reinforce_edge("concept_a", "concept_b", 0.2);
@@ -270,10 +358,30 @@ fn test_different_link_types_affect_activation() {
     let mut network = ActivationNetwork::new();
 
     // Add edges with different link types
-    network.add_edge("event".to_string(), "semantic_rel".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("event".to_string(), "temporal_rel".to_string(), LinkType::Temporal, 0.8);
-    network.add_edge("event".to_string(), "causal_rel".to_string(), LinkType::Causal, 0.85);
-    network.add_edge("event".to_string(), "part_of_rel".to_string(), LinkType::PartOf, 0.7);
+    network.add_edge(
+        "event".to_string(),
+        "semantic_rel".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "event".to_string(),
+        "temporal_rel".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
+    network.add_edge(
+        "event".to_string(),
+        "causal_rel".to_string(),
+        LinkType::Causal,
+        0.85,
+    );
+    network.add_edge(
+        "event".to_string(),
+        "part_of_rel".to_string(),
+        LinkType::PartOf,
+        0.7,
+    );
 
     let results = network.activate("event", 1.0);
 
@@ -285,10 +393,22 @@ fn test_different_link_types_affect_activation() {
     assert!(found.contains("part_of_rel"));
 
     // Verify link types are preserved
-    let semantic = results.iter().find(|r| r.memory_id == "semantic_rel").unwrap();
-    let temporal = results.iter().find(|r| r.memory_id == "temporal_rel").unwrap();
-    let causal = results.iter().find(|r| r.memory_id == "causal_rel").unwrap();
-    let part_of = results.iter().find(|r| r.memory_id == "part_of_rel").unwrap();
+    let semantic = results
+        .iter()
+        .find(|r| r.memory_id == "semantic_rel")
+        .unwrap();
+    let temporal = results
+        .iter()
+        .find(|r| r.memory_id == "temporal_rel")
+        .unwrap();
+    let causal = results
+        .iter()
+        .find(|r| r.memory_id == "causal_rel")
+        .unwrap();
+    let part_of = results
+        .iter()
+        .find(|r| r.memory_id == "part_of_rel")
+        .unwrap();
 
     assert_eq!(semantic.link_type, LinkType::Semantic);
     assert_eq!(temporal.link_type, LinkType::Temporal);
@@ -339,9 +459,9 @@ fn test_max_hops_limit() {
 #[test]
 fn test_minimum_threshold() {
     let config = ActivationConfig {
-        decay_factor: 0.5,   // 50% decay per hop
-        max_hops: 10,        // High limit
-        min_threshold: 0.2,  // But high threshold
+        decay_factor: 0.5,  // 50% decay per hop
+        max_hops: 10,       // High limit
+        min_threshold: 0.2, // But high threshold
         allow_cycles: false,
     };
     let mut network = ActivationNetwork::with_config(config);
@@ -370,8 +490,18 @@ fn test_minimum_threshold() {
 fn test_path_tracking() {
     let mut network = ActivationNetwork::new();
 
-    network.add_edge("start".to_string(), "middle".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("middle".to_string(), "end".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "start".to_string(),
+        "middle".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "middle".to_string(),
+        "end".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     let results = network.activate("start", 1.0);
 
@@ -390,10 +520,30 @@ fn test_convergent_paths() {
     let mut network = ActivationNetwork::new();
 
     // Create convergent paths: source -> a -> target and source -> b -> target
-    network.add_edge("source".to_string(), "path_a".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("source".to_string(), "path_b".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("path_a".to_string(), "target".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("path_b".to_string(), "target".to_string(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        "source".to_string(),
+        "path_a".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "source".to_string(),
+        "path_b".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "path_a".to_string(),
+        "target".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "path_b".to_string(),
+        "target".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     let results = network.activate("source", 1.0);
 

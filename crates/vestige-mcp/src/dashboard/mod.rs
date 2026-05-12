@@ -11,8 +11,8 @@ pub mod state;
 pub mod static_files;
 pub mod websocket;
 
-use axum::routing::{delete, get, patch, post};
 use axum::Router;
+use axum::routing::{delete, get, patch, post};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -47,7 +47,6 @@ pub fn build_router_with_event_tx(
 }
 
 fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
-
     #[allow(unused_mut)]
     let mut origins = vec![
         format!("http://127.0.0.1:{}", port)
@@ -61,8 +60,16 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
     // Vite dev server — only in debug builds
     #[cfg(debug_assertions)]
     {
-        origins.push("http://localhost:5173".parse::<axum::http::HeaderValue>().expect("valid origin"));
-        origins.push("http://127.0.0.1:5173".parse::<axum::http::HeaderValue>().expect("valid origin"));
+        origins.push(
+            "http://localhost:5173"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+        );
+        origins.push(
+            "http://127.0.0.1:5173"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+        );
     }
 
     let cors = CorsLayer::new()
@@ -116,7 +123,10 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
     let router = Router::new()
         // React Dashboard v2.1 (embedded static build)
         .route("/dashboard", get(static_files::serve_dashboard_spa))
-        .route("/dashboard/{*path}", get(static_files::serve_dashboard_asset))
+        .route(
+            "/dashboard/{*path}",
+            get(static_files::serve_dashboard_asset),
+        )
         // Legacy embedded HTML (keep for backward compat)
         .route("/", get(handlers::serve_dashboard))
         .route("/graph", get(handlers::serve_graph))
@@ -129,7 +139,10 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
         .route("/api/memories/{id}", patch(handlers::update_memory))
         .route("/api/memories/{id}/promote", post(handlers::promote_memory))
         .route("/api/memories/{id}/demote", post(handlers::demote_memory))
-        .route("/api/memories/{id}/changelog", get(handlers::get_memory_changelog))
+        .route(
+            "/api/memories/{id}/changelog",
+            get(handlers::get_memory_changelog),
+        )
         .route("/api/memories/{id}/review", post(handlers::review_memory))
         .route("/api/review/queue", get(handlers::get_review_queue))
         // Maintenance — thin REST wrappers around MCP tools, used by Settings UI
@@ -142,7 +155,10 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
             post(handlers::maintenance_find_duplicates),
         )
         .route("/api/maintenance/gc", post(handlers::maintenance_gc))
-        .route("/api/maintenance/backup", post(handlers::maintenance_backup))
+        .route(
+            "/api/maintenance/backup",
+            post(handlers::maintenance_backup),
+        )
         // Search
         .route("/api/search", get(handlers::search_memories))
         // Stats & health
@@ -158,9 +174,15 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
         .route("/api/predict", post(handlers::predict_memories))
         .route("/api/importance", post(handlers::score_importance))
         .route("/api/consolidate", post(handlers::trigger_consolidation))
-        .route("/api/retention-distribution", get(handlers::retention_distribution))
+        .route(
+            "/api/retention-distribution",
+            get(handlers::retention_distribution),
+        )
         // Intentions (v2.0)
-        .route("/api/intentions", get(handlers::list_intentions).post(handlers::create_intention))
+        .route(
+            "/api/intentions",
+            get(handlers::list_intentions).post(handlers::create_intention),
+        )
         // Metacognitive tools (v2.1)
         .route("/api/reflect", post(handlers::trigger_reflect))
         .route("/api/temporal", post(handlers::query_temporal))

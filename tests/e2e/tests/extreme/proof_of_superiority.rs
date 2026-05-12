@@ -10,6 +10,10 @@
 //! Each test demonstrates a capability that traditional systems cannot match.
 
 use chrono::{Duration, Utc};
+use std::collections::{HashMap, HashSet};
+use vestige_core::neuroscience::hippocampal_index::{
+    HippocampalIndex, INDEX_EMBEDDING_DIM, IndexQuery,
+};
 use vestige_core::neuroscience::spreading_activation::{
     ActivationConfig, ActivationNetwork, LinkType,
 };
@@ -17,10 +21,6 @@ use vestige_core::neuroscience::synaptic_tagging::{
     CaptureWindow, ImportanceEvent, ImportanceEventType, SynapticTaggingConfig,
     SynapticTaggingSystem,
 };
-use vestige_core::neuroscience::hippocampal_index::{
-    HippocampalIndex, IndexQuery, INDEX_EMBEDDING_DIM,
-};
-use std::collections::{HashMap, HashSet};
 
 // ============================================================================
 // RETROACTIVE IMPORTANCE - UNIQUE TO VESTIGE (1 test)
@@ -43,7 +43,7 @@ fn test_proof_retroactive_importance_unique() {
         min_tag_strength: 0.2,
         max_cluster_size: 100,
         enable_clustering: true,
-        auto_decay: false,  // Disable for test stability
+        auto_decay: false, // Disable for test stability
         cleanup_interval_hours: 24.0,
     };
 
@@ -75,7 +75,7 @@ fn test_proof_retroactive_importance_unique() {
         event_type: ImportanceEventType::EmotionalContent,
         memory_id: Some("bob_departure".to_string()),
         timestamp: Utc::now(),
-        strength: 1.0,  // Maximum importance
+        strength: 1.0, // Maximum importance
         context: Some("BREAKING: Bob is leaving the company!".to_string()),
     };
 
@@ -90,7 +90,8 @@ fn test_proof_retroactive_importance_unique() {
     );
 
     // 2. Earlier Bob-related memories should be captured
-    let captured_ids: HashSet<_> = capture_result.captured_memories
+    let captured_ids: HashSet<_> = capture_result
+        .captured_memories
         .iter()
         .map(|c| c.memory_id.as_str())
         .collect();
@@ -170,20 +171,51 @@ fn test_proof_multi_hop_beats_similarity() {
     let mut network = ActivationNetwork::with_config(config);
 
     // Create the knowledge chain (domain knowledge graph)
-    network.add_edge("memory_leaks".to_string(), "reference_counting".to_string(), LinkType::Causal, 0.9);
-    network.add_edge("reference_counting".to_string(), "arc_weak".to_string(), LinkType::Semantic, 0.85);
-    network.add_edge("arc_weak".to_string(), "cyclic_references".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("cyclic_references".to_string(), "solution_weak_refs".to_string(), LinkType::Semantic, 0.95);
+    network.add_edge(
+        "memory_leaks".to_string(),
+        "reference_counting".to_string(),
+        LinkType::Causal,
+        0.9,
+    );
+    network.add_edge(
+        "reference_counting".to_string(),
+        "arc_weak".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
+    network.add_edge(
+        "arc_weak".to_string(),
+        "cyclic_references".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "cyclic_references".to_string(),
+        "solution_weak_refs".to_string(),
+        LinkType::Semantic,
+        0.95,
+    );
 
     // Also add some direct but less relevant connections
-    network.add_edge("memory_leaks".to_string(), "valgrind".to_string(), LinkType::Semantic, 0.7);
-    network.add_edge("memory_leaks".to_string(), "profiling".to_string(), LinkType::Semantic, 0.6);
+    network.add_edge(
+        "memory_leaks".to_string(),
+        "valgrind".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
+    network.add_edge(
+        "memory_leaks".to_string(),
+        "profiling".to_string(),
+        LinkType::Semantic,
+        0.6,
+    );
 
     // === SPREADING ACTIVATION SEARCH ===
     let spreading_results = network.activate("memory_leaks", 1.0);
 
     // Collect what spreading activation found
-    let spreading_found: HashSet<_> = spreading_results.iter()
+    let spreading_found: HashSet<_> = spreading_results
+        .iter()
         .map(|r| r.memory_id.as_str())
         .collect();
 
@@ -198,7 +230,9 @@ fn test_proof_multi_hop_beats_similarity() {
     impl MockSimilaritySearch {
         fn search(&self, query: &str, top_k: usize) -> Vec<(&str, f64)> {
             let query_emb = self.embeddings.get(query).unwrap();
-            let mut results: Vec<_> = self.embeddings.iter()
+            let mut results: Vec<_> = self
+                .embeddings
+                .iter()
                 .filter(|(k, _)| k.as_str() != query)
                 .map(|(k, emb)| {
                     let sim = cosine_sim(query_emb, emb);
@@ -223,17 +257,27 @@ fn test_proof_multi_hop_beats_similarity() {
     }
 
     // Create mock embeddings where memory_leaks and cyclic_references are ORTHOGONAL
-    let mut mock = MockSimilaritySearch { embeddings: HashMap::new() };
-    mock.embeddings.insert("memory_leaks".to_string(), vec![1.0, 0.0, 0.0, 0.0]);
-    mock.embeddings.insert("reference_counting".to_string(), vec![0.7, 0.7, 0.0, 0.0]);
-    mock.embeddings.insert("arc_weak".to_string(), vec![0.0, 0.7, 0.7, 0.0]);
-    mock.embeddings.insert("cyclic_references".to_string(), vec![0.0, 0.0, 0.0, 1.0]);  // ORTHOGONAL!
-    mock.embeddings.insert("solution_weak_refs".to_string(), vec![0.0, 0.0, 0.2, 0.9]);
-    mock.embeddings.insert("valgrind".to_string(), vec![0.8, 0.2, 0.0, 0.0]);  // Similar
-    mock.embeddings.insert("profiling".to_string(), vec![0.6, 0.4, 0.0, 0.0]);  // Similar
+    let mut mock = MockSimilaritySearch {
+        embeddings: HashMap::new(),
+    };
+    mock.embeddings
+        .insert("memory_leaks".to_string(), vec![1.0, 0.0, 0.0, 0.0]);
+    mock.embeddings
+        .insert("reference_counting".to_string(), vec![0.7, 0.7, 0.0, 0.0]);
+    mock.embeddings
+        .insert("arc_weak".to_string(), vec![0.0, 0.7, 0.7, 0.0]);
+    mock.embeddings
+        .insert("cyclic_references".to_string(), vec![0.0, 0.0, 0.0, 1.0]); // ORTHOGONAL!
+    mock.embeddings
+        .insert("solution_weak_refs".to_string(), vec![0.0, 0.0, 0.2, 0.9]);
+    mock.embeddings
+        .insert("valgrind".to_string(), vec![0.8, 0.2, 0.0, 0.0]); // Similar
+    mock.embeddings
+        .insert("profiling".to_string(), vec![0.6, 0.4, 0.0, 0.0]); // Similar
 
     let similarity_results = mock.search("memory_leaks", 10);
-    let similarity_found: HashSet<_> = similarity_results.iter()
+    let similarity_found: HashSet<_> = similarity_results
+        .iter()
         .filter(|(_, sim)| *sim > 0.3)
         .map(|(id, _)| *id)
         .collect();
@@ -257,13 +301,16 @@ fn test_proof_multi_hop_beats_similarity() {
     );
 
     // Verify the discovery path
-    let solution_result = spreading_results.iter()
+    let solution_result = spreading_results
+        .iter()
         .find(|r| r.memory_id == "solution_weak_refs")
         .expect("Should find solution");
 
     assert_eq!(solution_result.distance, 4, "Solution is 4 hops away");
     assert!(
-        solution_result.path.contains(&"cyclic_references".to_string()),
+        solution_result
+            .path
+            .contains(&"cyclic_references".to_string()),
         "Path should include cyclic_references"
     );
 }
@@ -291,8 +338,12 @@ fn test_proof_hippocampal_indexing_efficiency() {
 
         let _ = index.index_memory(
             &format!("memory_{}", i),
-            &format!("This is memory number {} with content about topic {} and subtopic {}",
-                     i, i % 50, i % 10),
+            &format!(
+                "This is memory number {} with content about topic {} and subtopic {}",
+                i,
+                i % 50,
+                i % 10
+            ),
             "fact",
             now,
             Some(embedding),
@@ -322,7 +373,7 @@ fn test_proof_hippocampal_indexing_efficiency() {
     bf_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     bf_results.truncate(10);
 
-    let bf_duration = bf_start.elapsed();
+    let _bf_duration = bf_start.elapsed();
 
     // === PROOF OF EFFICIENCY ===
 
@@ -356,7 +407,7 @@ fn test_proof_hippocampal_indexing_efficiency() {
     );
 
     // 5. Memory efficiency
-    let memory_per_full = 384 * 4;  // 384 floats * 4 bytes
+    let memory_per_full = 384 * 4; // 384 floats * 4 bytes
     let memory_per_index = INDEX_EMBEDDING_DIM * 4;
     let savings_per_memory = memory_per_full - memory_per_index;
     let total_savings = savings_per_memory * NUM_MEMORIES;
@@ -389,10 +440,10 @@ fn test_proof_temporal_capture_accuracy() {
     // Memories encoded BEFORE the important event can be captured
 
     let backward_tests = vec![
-        (Duration::hours(1), true, 1.0),   // 1h before - should be captured with high prob
-        (Duration::hours(4), true, 0.9),   // 4h before - should be captured
-        (Duration::hours(8), true, 0.5),   // 8h before - edge of window
-        (Duration::hours(9), true, 0.0),   // 9h before - at boundary
+        (Duration::hours(1), true, 1.0), // 1h before - should be captured with high prob
+        (Duration::hours(4), true, 0.9), // 4h before - should be captured
+        (Duration::hours(8), true, 0.5), // 8h before - edge of window
+        (Duration::hours(9), true, 0.0), // 9h before - at boundary
         (Duration::hours(10), false, 0.0), // 10h before - outside window
     ];
 
@@ -401,7 +452,8 @@ fn test_proof_temporal_capture_accuracy() {
         let in_window = window.is_in_window(memory_time, event_time);
 
         assert_eq!(
-            in_window, *should_be_in_window,
+            in_window,
+            *should_be_in_window,
             "PROOF: Memory {}h before event: in_window={}, expected={}",
             offset.num_hours(),
             in_window,
@@ -421,10 +473,10 @@ fn test_proof_temporal_capture_accuracy() {
     // Brief period for memories encoded shortly after
 
     let forward_tests = vec![
-        (Duration::minutes(30), true),   // 30min after - in window
-        (Duration::hours(1), true),      // 1h after - in window
-        (Duration::hours(2), true),      // 2h after - at boundary
-        (Duration::hours(3), false),     // 3h after - outside
+        (Duration::minutes(30), true), // 30min after - in window
+        (Duration::hours(1), true),    // 1h after - in window
+        (Duration::hours(2), true),    // 2h after - at boundary
+        (Duration::hours(3), false),   // 3h after - outside
     ];
 
     for (offset, should_be_in_window) in &forward_tests {
@@ -432,7 +484,8 @@ fn test_proof_temporal_capture_accuracy() {
         let in_window = window.is_in_window(memory_time, event_time);
 
         assert_eq!(
-            in_window, *should_be_in_window,
+            in_window,
+            *should_be_in_window,
             "PROOF: Memory {}min after event: in_window={}, expected={}",
             offset.num_minutes(),
             in_window,
@@ -472,7 +525,10 @@ fn test_proof_comprehensive_capability_summary() {
     let result = stc.trigger_prp(event);
 
     let has_retroactive = result.has_captures();
-    assert!(has_retroactive, "Capability 1: Retroactive importance - PROVEN");
+    assert!(
+        has_retroactive,
+        "Capability 1: Retroactive importance - PROVEN"
+    );
 
     // === CAPABILITY 2: Multi-Hop Discovery ===
     // Traditional: NO (1-hop only) | Vestige: YES (configurable depth)
@@ -492,25 +548,36 @@ fn test_proof_comprehensive_capability_summary() {
     let results = network.activate("a", 1.0);
     let max_distance = results.iter().map(|r| r.distance).max().unwrap_or(0);
 
-    assert!(max_distance >= 4, "Capability 2: Multi-hop discovery (4+ hops) - PROVEN");
+    assert!(
+        max_distance >= 4,
+        "Capability 2: Multi-hop discovery (4+ hops) - PROVEN"
+    );
 
     // === CAPABILITY 3: Compressed Hippocampal Index ===
     // Traditional: Full embeddings | Vestige: Compressed index
 
     let compression = 384.0 / INDEX_EMBEDDING_DIM as f64;
-    assert!(compression >= 2.0, "Capability 3: Hippocampal compression ({:.1}x) - PROVEN", compression);
+    assert!(
+        compression >= 2.0,
+        "Capability 3: Hippocampal compression ({:.1}x) - PROVEN",
+        compression
+    );
 
     // === CAPABILITY 4: Asymmetric Temporal Windows ===
     // Traditional: NO temporal reasoning | Vestige: Biologically-grounded windows
 
-    let window = CaptureWindow::new(9.0, 2.0);
+    let _window = CaptureWindow::new(9.0, 2.0);
     let asymmetric = 9.0 / 2.0;
-    assert!(asymmetric > 4.0, "Capability 4: Asymmetric capture windows ({}:1) - PROVEN", asymmetric);
+    assert!(
+        asymmetric > 4.0,
+        "Capability 4: Asymmetric capture windows ({}:1) - PROVEN",
+        asymmetric
+    );
 
     // === CAPABILITY 5: Path Tracking ===
     // Traditional: Returns items only | Vestige: Returns full association paths
 
-    let path_result = &results[results.len() - 1];  // Furthest result
+    let path_result = &results[results.len() - 1]; // Furthest result
     let has_path = !path_result.path.is_empty();
     assert!(has_path, "Capability 5: Association path tracking - PROVEN");
 
@@ -518,10 +585,30 @@ fn test_proof_comprehensive_capability_summary() {
     // Traditional: Single similarity metric | Vestige: Multiple link types
 
     let mut typed_network = ActivationNetwork::new();
-    typed_network.add_edge("event".to_string(), "cause".to_string(), LinkType::Causal, 0.9);
-    typed_network.add_edge("event".to_string(), "time".to_string(), LinkType::Temporal, 0.9);
-    typed_network.add_edge("event".to_string(), "concept".to_string(), LinkType::Semantic, 0.9);
-    typed_network.add_edge("event".to_string(), "location".to_string(), LinkType::Spatial, 0.9);
+    typed_network.add_edge(
+        "event".to_string(),
+        "cause".to_string(),
+        LinkType::Causal,
+        0.9,
+    );
+    typed_network.add_edge(
+        "event".to_string(),
+        "time".to_string(),
+        LinkType::Temporal,
+        0.9,
+    );
+    typed_network.add_edge(
+        "event".to_string(),
+        "concept".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    typed_network.add_edge(
+        "event".to_string(),
+        "location".to_string(),
+        LinkType::Spatial,
+        0.9,
+    );
 
     let typed_results = typed_network.activate("event", 1.0);
     let link_types: HashSet<_> = typed_results.iter().map(|r| r.link_type).collect();

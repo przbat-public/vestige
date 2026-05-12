@@ -15,11 +15,11 @@
 //! 3. **Scheduler & Timing**: Tests for activity detection and idle triggers
 
 use chrono::{Duration, Utc};
+use std::collections::HashSet;
 use vestige_core::advanced::dreams::{
     ActivityTracker, ConnectionGraph, ConnectionReason, ConsolidationScheduler, DreamConfig,
     DreamMemory, InsightType, MemoryDreamer,
 };
-use std::collections::HashSet;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -65,7 +65,6 @@ fn make_memory_with_access(
         access_count,
     }
 }
-
 
 // ============================================================================
 // INSIGHT GENERATION TESTS (5 tests)
@@ -448,11 +447,7 @@ async fn test_consolidation_decay_stage() {
     let replay = report.stage1_replay.as_ref().unwrap();
 
     // Should replay memories in chronological order
-    assert_eq!(
-        replay.sequence.len(),
-        3,
-        "Should replay all 3 memories"
-    );
+    assert_eq!(replay.sequence.len(), 3, "Should replay all 3 memories");
 
     // Older memory should come first in replay sequence
     assert_eq!(
@@ -616,12 +611,7 @@ async fn test_consolidation_transfer_stage() {
             vec!["important"],
             5,
         ),
-        make_memory_with_access(
-            "low_access",
-            "Rarely accessed memory",
-            vec!["minor"],
-            1,
-        ),
+        make_memory_with_access("low_access", "Rarely accessed memory", vec!["minor"], 1),
     ];
 
     let report = scheduler.run_consolidation_cycle(&memories).await;
@@ -907,7 +897,10 @@ fn test_connection_graph_comprehensive() {
     // Test strengthening
     assert!(graph.strengthen_connection("a", "b", 0.1));
     let new_strength = graph.total_connection_strength("a");
-    assert!(new_strength > a_strength, "Strength should increase after reinforcement");
+    assert!(
+        new_strength > a_strength,
+        "Strength should increase after reinforcement"
+    );
 
     // Test decay and pruning
     graph.apply_decay(0.5);

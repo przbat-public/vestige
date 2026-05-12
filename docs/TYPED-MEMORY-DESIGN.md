@@ -1,4 +1,4 @@
-# Tier 4 — Typed Memory (ENGRAM-style)
+# Typed Memory (ENGRAM-style)
 
 **Status:** PoC validated (+3.96 pp full N), core implementation pending
 **Author:** initial draft May 11, 2026; PoC results added same day
@@ -72,7 +72,7 @@ Following ENGRAM, every ingested piece of information gets classified into exact
 | **Semantic**  | one row per (subject, attribute) | "Caroline lives in Berlin" | Attribute question ("where does X live", "what is Y's job") |
 | **Procedural**| one row per (actor, action_pattern) | "Caroline goes to therapy every Tuesday" | Habit/pattern question ("how often", "what does X usually do") |
 
-The current single-row `KnowledgeNode` represents none of these well — it's a "raw chunk" that happens to be tagged. The Tier 4 proposal is to keep `KnowledgeNode` as the unit of storage but add a typed view layer that classifies, indexes, and retrieves on top of it.
+The current single-row `KnowledgeNode` represents none of these well — it's a "raw chunk" that happens to be tagged. The proposal is to keep `KnowledgeNode` as the unit of storage but add a typed view layer that classifies, indexes, and retrieves on top of it.
 
 ## Architecture (low-disruption variant)
 
@@ -173,7 +173,7 @@ ENGRAM reports **+15 pp on LongMemEval** versus flat retrieval. LoCoMo is a diff
 
 The smaller question types where the win should be concentrated:
 
-| Category    | Current | Plausible after Tier 4 | Mechanism |
+| Category    | Current | Plausible after typed memory | Mechanism |
 |-------------|---------|------------------------|-----------|
 | single_hop  | 34.40%  | 48–55%                 | Semantic fact direct lookup |
 | temporal    | 65.73%  | 72–78%                 | Episodic table with timestamp index |

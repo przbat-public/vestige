@@ -271,16 +271,11 @@ macro_rules! assert_search_count {
 #[macro_export]
 macro_rules! assert_search_order {
     ($results:expr, $expected_first:expr) => {
-        assert!(
-            !$results.is_empty(),
-            "Expected non-empty search results"
-        );
+        assert!(!$results.is_empty(), "Expected non-empty search results");
         assert_eq!(
-            $results[0].id,
-            $expected_first,
+            $results[0].id, $expected_first,
             "Expected first result to be {}, got {}",
-            $expected_first,
-            $results[0].id
+            $expected_first, $results[0].id
         );
     };
 }
@@ -441,30 +436,31 @@ mod tests {
     use chrono::{Duration, Utc};
 
     fn create_test_node() -> KnowledgeNode {
-        let mut node = KnowledgeNode::default();
-        node.id = "test-id".to_string();
-        node.content = "test content".to_string();
-        node.node_type = "fact".to_string();
-        node.created_at = Utc::now();
-        node.updated_at = Utc::now();
-        node.last_accessed = Utc::now();
-        node.stability = 5.0;
-        node.difficulty = 5.0;
-        node.reps = 3;
-        node.lapses = 0;
-        node.storage_strength = 2.0;
-        node.retrieval_strength = 0.9;
-        node.retention_strength = 0.85;
-        node.sentiment_score = 0.0;
-        node.sentiment_magnitude = 0.0;
-        node.next_review = Some(Utc::now() + Duration::days(5));
-        node.source = None;
-        node.tags = vec!["test".to_string(), "example".to_string()];
-        node.valid_from = None;
-        node.valid_until = None;
-        node.has_embedding = None;
-        node.embedding_model = None;
-        node
+        KnowledgeNode {
+            id: "test-id".to_string(),
+            content: "test content".to_string(),
+            node_type: "fact".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_accessed: Utc::now(),
+            stability: 5.0,
+            difficulty: 5.0,
+            reps: 3,
+            lapses: 0,
+            storage_strength: 2.0,
+            retrieval_strength: 0.9,
+            retention_strength: 0.85,
+            sentiment_score: 0.0,
+            sentiment_magnitude: 0.0,
+            next_review: Some(Utc::now() + Duration::days(5)),
+            source: None,
+            tags: vec!["test".to_string(), "example".to_string()],
+            valid_from: None,
+            valid_until: None,
+            has_embedding: None,
+            embedding_model: None,
+            ..Default::default()
+        }
     }
 
     #[test]

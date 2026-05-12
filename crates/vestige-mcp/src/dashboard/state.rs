@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use vestige_core::Storage;
 
-use crate::cognitive::CognitiveEngine;
 use super::events::VestigeEvent;
+use crate::cognitive::CognitiveEngine;
 
 /// Broadcast channel capacity — how many events can buffer before old ones drop.
 const EVENT_CHANNEL_CAPACITY: usize = 1024;
@@ -22,10 +22,7 @@ pub struct AppState {
 
 impl AppState {
     /// Create a new AppState with event broadcasting.
-    pub fn new(
-        storage: Arc<Storage>,
-        cognitive: Option<Arc<Mutex<CognitiveEngine>>>,
-    ) -> Self {
+    pub fn new(storage: Arc<Storage>, cognitive: Option<Arc<Mutex<CognitiveEngine>>>) -> Self {
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Self {
             storage,

@@ -911,33 +911,38 @@ impl ContextMatcher {
 
         // Same session is a very strong match
         if let (Some(e_id), Some(r_id)) = (&encoding.session_id, &retrieval.session_id)
-            && e_id == r_id {
-                return 1.0;
-            }
+            && e_id == r_id
+        {
+            return 1.0;
+        }
 
         // Project match (0.4 weight)
         if let (Some(e_proj), Some(r_proj)) = (&encoding.project, &retrieval.project)
-            && e_proj == r_proj {
-                score += 0.4;
-            }
+            && e_proj == r_proj
+        {
+            score += 0.4;
+        }
 
         // Activity type match (0.3 weight)
         if let (Some(e_act), Some(r_act)) = (&encoding.activity_type, &retrieval.activity_type)
-            && e_act == r_act {
-                score += 0.3;
-            }
+            && e_act == r_act
+        {
+            score += 0.3;
+        }
 
         // Git branch match (0.2 weight)
         if let (Some(e_br), Some(r_br)) = (&encoding.git_branch, &retrieval.git_branch)
-            && e_br == r_br {
-                score += 0.2;
-            }
+            && e_br == r_br
+        {
+            score += 0.2;
+        }
 
         // Active file match (0.1 weight)
         if let (Some(e_file), Some(r_file)) = (&encoding.active_file, &retrieval.active_file)
-            && e_file == r_file {
-                score += 0.1;
-            }
+            && e_file == r_file
+        {
+            score += 0.1;
+        }
 
         score
     }
@@ -985,7 +990,11 @@ impl ContextMatcher {
             .collect();
 
         // Sort by combined score (descending)
-        scored.sort_by(|a, b| b.combined_score.partial_cmp(&a.combined_score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.combined_score
+                .partial_cmp(&a.combined_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         scored
     }
@@ -1103,9 +1112,11 @@ mod tests {
         topical.add_topic("security");
         topical.extract_keywords_from("implementing OAuth2 authentication flow");
 
-        assert!(topical
-            .active_topics
-            .contains(&"authentication".to_string()));
+        assert!(
+            topical
+                .active_topics
+                .contains(&"authentication".to_string())
+        );
         assert!(topical.keywords.contains(&"oauth2".to_string()));
 
         let terms = topical.all_terms();
@@ -1118,10 +1129,11 @@ mod tests {
         ctx.add_topic("api-design");
         ctx.set_project("vestige");
 
-        assert!(ctx
-            .topical
-            .active_topics
-            .contains(&"api-design".to_string()));
+        assert!(
+            ctx.topical
+                .active_topics
+                .contains(&"api-design".to_string())
+        );
         assert_eq!(ctx.session.project, Some("vestige".to_string()));
     }
 
@@ -1137,7 +1149,11 @@ mod tests {
         let ctx2 = ctx1.clone();
 
         let similarity = matcher.match_contexts(&ctx1, &ctx2);
-        assert!(similarity > 0.8, "Same context should have high similarity, got {}", similarity);
+        assert!(
+            similarity > 0.8,
+            "Same context should have high similarity, got {}",
+            similarity
+        );
     }
 
     #[test]

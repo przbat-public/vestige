@@ -40,12 +40,14 @@ pub async fn execute(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     args: Option<Value>,
 ) -> Result<Value, String> {
-    let focus = args.as_ref()
+    let focus = args
+        .as_ref()
         .and_then(|a| a.get("focus"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let depth = args.as_ref()
+    let depth = args
+        .as_ref()
         .and_then(|a| a.get("depth"))
         .and_then(|v| v.as_str())
         .unwrap_or("standard");
@@ -56,15 +58,30 @@ pub async fn execute(
         _ => 200,
     };
 
-    let memories = if let Some(ref query) = focus {
-        let results = storage.hybrid_search(query, memory_limit, 0.2, 0.8)
-            .map_err(|e| e.to_string())?;
-        results.into_iter()
-            .filter_map(|r| storage.get_node(&r.node.id).ok().flatten())
-            .collect::<Vec<_>>()
-    } else {
-        storage.get_all_nodes(memory_limit, 0).map_err(|e| e.to_string())?
-    };
+    // Pull source memories in one blocking hop — focused branch chains a
+    // hybrid_search with N get_node lookups; unfocused does a large
+    // get_all_nodes scan. Both potentially scan thousands of rows.
+    let storage_load = storage.clone();
+    let focus_owned = focus.clone();
+    let memories = tokio::task::spawn_blocking(
+        move || -> Result<Vec<vestige_core::KnowledgeNode>, String> {
+            if let Some(query) = focus_owned {
+                let results = storage_load
+                    .hybrid_search(&query, memory_limit, 0.2, 0.8)
+                    .map_err(|e| e.to_string())?;
+                Ok(results
+                    .into_iter()
+                    .filter_map(|r| storage_load.get_node(&r.node.id).ok().flatten())
+                    .collect())
+            } else {
+                storage_load
+                    .get_all_nodes(memory_limit, 0)
+                    .map_err(|e| e.to_string())
+            }
+        },
+    )
+    .await
+    .map_err(|e| format!("reflect load task panicked: {}", e))??;
 
     if memories.len() < 3 {
         return Ok(serde_json::json!({
@@ -88,7 +105,9 @@ pub async fn execute(
     };
 
     for indices in tags_map.values() {
-        if indices.len() < 2 { continue; }
+        if indices.len() < 2 {
+            continue;
+        }
         for i in 0..indices.len().min(10) {
             for j in (i + 1)..indices.len().min(10) {
                 let a = &memories[indices[i]];
@@ -106,7 +125,8 @@ pub async fn execute(
     }
 
     // 2. Knowledge gaps — topics with few memories or low retention
-    let mut topic_health: std::collections::HashMap<String, (usize, f64)> = std::collections::HashMap::new();
+    let mut topic_health: std::collections::HashMap<String, (usize, f64)> =
+        std::collections::HashMap::new();
     for mem in &memories {
         for tag in &mem.tags {
             let entry = topic_health.entry(tag.clone()).or_insert((0, 0.0));
@@ -130,40 +150,52 @@ pub async fn execute(
         })
         .collect();
     knowledge_gaps.sort_by(|a, b| {
-        let ar: f64 = a["avg_retention"].as_str().and_then(|s| s.parse().ok()).unwrap_or(1.0);
-        let br: f64 = b["avg_retention"].as_str().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+        let ar: f64 = a["avg_retention"]
+            .as_str()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.0);
+        let br: f64 = b["avg_retention"]
+            .as_str()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.0);
         ar.partial_cmp(&br).unwrap_or(std::cmp::Ordering::Equal)
     });
     knowledge_gaps.truncate(15);
 
     // 3. Stale decisions — decisions older than 30 days that haven't been reviewed
     let thirty_days_ago = now - Duration::days(30);
-    let stale_decisions: Vec<Value> = memories.iter()
+    let stale_decisions: Vec<Value> = memories
+        .iter()
         .filter(|m| {
             m.node_type == "decision"
                 && m.last_accessed < thirty_days_ago
                 && m.retention_strength < 0.5
         })
         .take(10)
-        .map(|m| serde_json::json!({
-            "id": m.id,
-            "content": truncate(&m.content, 150),
-            "days_since_access": (now - m.last_accessed).num_days(),
-            "retention": format!("{:.2}", m.retention_strength),
-        }))
+        .map(|m| {
+            serde_json::json!({
+                "id": m.id,
+                "content": truncate(&m.content, 150),
+                "days_since_access": (now - m.last_accessed).num_days(),
+                "retention": format!("{:.2}", m.retention_strength),
+            })
+        })
         .collect();
 
     // 4. Confidence calibration — compare retrieval vs storage strength
-    let overconfident: Vec<Value> = memories.iter()
+    let overconfident: Vec<Value> = memories
+        .iter()
         .filter(|m| m.retrieval_strength > 0.7 && m.storage_strength < 0.3)
         .take(10)
-        .map(|m| serde_json::json!({
-            "id": m.id,
-            "content": truncate(&m.content, 120),
-            "retrieval_strength": format!("{:.2}", m.retrieval_strength),
-            "storage_strength": format!("{:.2}", m.storage_strength),
-            "risk": "frequently retrieved but weakly encoded — may be unreliable"
-        }))
+        .map(|m| {
+            serde_json::json!({
+                "id": m.id,
+                "content": truncate(&m.content, 120),
+                "retrieval_strength": format!("{:.2}", m.retrieval_strength),
+                "storage_strength": format!("{:.2}", m.storage_strength),
+                "risk": "frequently retrieved but weakly encoded — may be unreliable"
+            })
+        })
         .collect();
 
     // 5. Pattern clusters — use spreading activation to find dense regions
@@ -187,9 +219,7 @@ pub async fn execute(
                 }));
             }
         }
-        found.sort_by(|a, b| {
-            b["connections"].as_u64().cmp(&a["connections"].as_u64())
-        });
+        found.sort_by(|a, b| b["connections"].as_u64().cmp(&a["connections"].as_u64()));
         found.truncate(10);
         found
     };
@@ -215,11 +245,13 @@ pub async fn execute(
             overconfident.len()
         ));
     }
-    let critical_gaps: Vec<_> = knowledge_gaps.iter()
+    let critical_gaps: Vec<_> = knowledge_gaps
+        .iter()
         .filter(|g| g["risk"] == "critical")
         .collect();
     if !critical_gaps.is_empty() {
-        let topics: Vec<_> = critical_gaps.iter()
+        let topics: Vec<_> = critical_gaps
+            .iter()
             .take(5)
             .filter_map(|g| g["topic"].as_str())
             .collect();
@@ -229,23 +261,34 @@ pub async fn execute(
         ));
     }
 
-    // Persist insights
-    for insight_text in &insights {
-        let record = InsightRecord {
-            id: Uuid::new_v4().to_string(),
-            insight: insight_text.clone(),
-            source_memories: vec![],
-            confidence: 0.7,
-            novelty_score: 0.5,
-            insight_type: "reflection".to_string(),
-            generated_at: now,
-            tags: focus.as_deref().map(|f| vec![f.to_string()]).unwrap_or_default(),
-            feedback: None,
-            applied_count: 0,
-        };
-        if let Err(e) = storage.save_insight(&record) {
-            tracing::warn!(error = %e, "Failed to persist reflection insight");
-        }
+    // Persist insights — one blocking task wraps all writes.
+    if !insights.is_empty() {
+        let storage_persist = storage.clone();
+        let insights_to_save = insights.clone();
+        let focus_for_tags = focus.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            for insight_text in &insights_to_save {
+                let record = InsightRecord {
+                    id: Uuid::new_v4().to_string(),
+                    insight: insight_text.clone(),
+                    source_memories: vec![],
+                    confidence: 0.7,
+                    novelty_score: 0.5,
+                    insight_type: "reflection".to_string(),
+                    generated_at: now,
+                    tags: focus_for_tags
+                        .as_deref()
+                        .map(|f| vec![f.to_string()])
+                        .unwrap_or_default(),
+                    feedback: None,
+                    applied_count: 0,
+                };
+                if let Err(e) = storage_persist.save_insight(&record) {
+                    tracing::warn!(error = %e, "Failed to persist reflection insight");
+                }
+            }
+        })
+        .await;
     }
 
     Ok(serde_json::json!({
@@ -275,11 +318,17 @@ fn content_conflicts(a: &str, b: &str) -> bool {
     let b_lower = b.to_lowercase();
 
     let negation_pairs = [
-        ("should", "should not"), ("should", "shouldn't"),
-        ("always", "never"), ("do", "don't"), ("do", "do not"),
-        ("use", "avoid"), ("enable", "disable"),
-        ("recommended", "not recommended"), ("deprecated", "recommended"),
-        ("works", "doesn't work"), ("works", "broken"),
+        ("should", "should not"),
+        ("should", "shouldn't"),
+        ("always", "never"),
+        ("do", "don't"),
+        ("do", "do not"),
+        ("use", "avoid"),
+        ("enable", "disable"),
+        ("recommended", "not recommended"),
+        ("deprecated", "recommended"),
+        ("works", "doesn't work"),
+        ("works", "broken"),
     ];
 
     for (pos, neg) in &negation_pairs {
@@ -306,7 +355,10 @@ mod tests {
 
     #[test]
     fn test_conflict_detection() {
-        assert!(content_conflicts("You should use Rust", "You should not use Rust"));
+        assert!(content_conflicts(
+            "You should use Rust",
+            "You should not use Rust"
+        ));
         assert!(content_conflicts("Always run tests", "Never run tests"));
         assert!(!content_conflicts("Rust is great", "Rust is performant"));
     }

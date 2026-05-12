@@ -3,7 +3,7 @@
 //! Personalizes FSRS parameters based on user review history.
 //! Uses gradient-free optimization to minimize prediction error.
 
-use super::algorithm::{retrievability_with_decay, FSRS6_WEIGHTS};
+use super::algorithm::{FSRS6_WEIGHTS, retrievability_with_decay};
 use chrono::{DateTime, Utc};
 
 // ============================================================================

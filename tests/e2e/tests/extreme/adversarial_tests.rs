@@ -11,12 +11,12 @@
 //!
 //! Based on security testing principles and fuzzing methodologies
 
+use chrono::Utc;
+use vestige_core::neuroscience::hippocampal_index::HippocampalIndex;
 use vestige_core::neuroscience::spreading_activation::{
     ActivationConfig, ActivationNetwork, LinkType,
 };
 use vestige_core::neuroscience::synaptic_tagging::SynapticTaggingSystem;
-use vestige_core::neuroscience::hippocampal_index::HippocampalIndex;
-use chrono::Utc;
 
 // ============================================================================
 // MALFORMED INPUT HANDLING (2 tests)
@@ -30,8 +30,18 @@ fn test_adversarial_empty_inputs() {
     let mut network = ActivationNetwork::new();
 
     // Empty string node IDs
-    network.add_edge("".to_string(), "target".to_string(), LinkType::Semantic, 0.5);
-    network.add_edge("source".to_string(), "".to_string(), LinkType::Semantic, 0.5);
+    network.add_edge(
+        "".to_string(),
+        "target".to_string(),
+        LinkType::Semantic,
+        0.5,
+    );
+    network.add_edge(
+        "source".to_string(),
+        "".to_string(),
+        LinkType::Semantic,
+        0.5,
+    );
     network.add_edge("".to_string(), "".to_string(), LinkType::Semantic, 0.5);
 
     // Should handle gracefully
@@ -40,14 +50,24 @@ fn test_adversarial_empty_inputs() {
     let _ = results.len();
 
     // Whitespace-only IDs
-    network.add_edge("   ".to_string(), "normal".to_string(), LinkType::Semantic, 0.6);
-    network.add_edge("\t\n".to_string(), "normal".to_string(), LinkType::Temporal, 0.5);
+    network.add_edge(
+        "   ".to_string(),
+        "normal".to_string(),
+        LinkType::Semantic,
+        0.6,
+    );
+    network.add_edge(
+        "\t\n".to_string(),
+        "normal".to_string(),
+        LinkType::Temporal,
+        0.5,
+    );
 
     let whitespace_results = network.activate("   ", 1.0);
     let _ = whitespace_results.len();
 
     // System should still work with normal nodes
-    let normal_results = network.activate("source", 1.0);
+    let _normal_results = network.activate("source", 1.0);
     assert!(
         network.node_count() >= 2,
         "Network should contain normal nodes"
@@ -65,16 +85,24 @@ fn test_adversarial_extremely_long_inputs() {
     let long_id_1: String = "a".repeat(10000);
     let long_id_2: String = "b".repeat(10000);
 
-    network.add_edge(long_id_1.clone(), long_id_2.clone(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        long_id_1.clone(),
+        long_id_2.clone(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     // Should handle long IDs
     let results = network.activate(&long_id_1, 1.0);
     assert_eq!(results.len(), 1, "Should find connection to long_id_2");
-    assert_eq!(results[0].memory_id, long_id_2, "Result should have correct long ID");
+    assert_eq!(
+        results[0].memory_id, long_id_2,
+        "Result should have correct long ID"
+    );
 
     // Test with hippocampal index
     let index = HippocampalIndex::new();
-    let very_long_content = "word ".repeat(50000);  // ~300KB of text
+    let very_long_content = "word ".repeat(50000); // ~300KB of text
 
     let result = index.index_memory(
         "long_content_memory",
@@ -100,18 +128,18 @@ fn test_adversarial_unicode_handling() {
 
     // Various Unicode edge cases
     let unicode_ids = vec![
-        "简体中文",                    // Chinese
-        "日本語テキスト",              // Japanese
-        "한국어",                      // Korean
-        "مرحبا",                       // Arabic (RTL)
-        "שלום",                        // Hebrew (RTL)
-        "🦀🔥💯",                      // Emojis
-        "Ã̲̊",                         // Combining characters
-        "\u{200B}",                    // Zero-width space
-        "\u{FEFF}",                    // BOM
-        "a\u{0308}",                   // 'a' with combining umlaut
-        "🏳️‍🌈",                         // Emoji sequence with ZWJ
-        "\u{202E}reversed\u{202C}",    // RTL override
+        "简体中文",                 // Chinese
+        "日本語テキスト",           // Japanese
+        "한국어",                   // Korean
+        "مرحبا",                    // Arabic (RTL)
+        "שלום",                     // Hebrew (RTL)
+        "🦀🔥💯",                   // Emojis
+        "Ã̲̊",                        // Combining characters
+        "\u{200B}",                 // Zero-width space
+        "\u{FEFF}",                 // BOM
+        "a\u{0308}",                // 'a' with combining umlaut
+        "🏳️‍🌈",                       // Emoji sequence with ZWJ
+        "\u{202E}reversed\u{202C}", // RTL override
     ];
 
     for (i, id) in unicode_ids.iter().enumerate() {
@@ -153,13 +181,13 @@ fn test_adversarial_control_characters() {
 
     // IDs with embedded control characters
     let control_ids = vec![
-        "before\0after",           // Null byte
-        "line1\nline2",            // Newline
-        "tab\there",               // Tab
-        "return\rhere",            // Carriage return
-        "bell\x07ring",            // Bell
-        "escape\x1B[31m",          // ANSI escape
-        "backspace\x08x",          // Backspace
+        "before\0after",  // Null byte
+        "line1\nline2",   // Newline
+        "tab\there",      // Tab
+        "return\rhere",   // Carriage return
+        "bell\x07ring",   // Bell
+        "escape\x1B[31m", // ANSI escape
+        "backspace\x08x", // Backspace
     ];
 
     for (i, id) in control_ids.iter().enumerate() {
@@ -227,9 +255,11 @@ fn test_adversarial_weight_boundaries() {
     let results = network.activate("hub", 1.0);
 
     // Higher weights should produce higher activation
-    let mut activations: Vec<(&str, f64)> = weight_cases.iter()
+    let mut activations: Vec<(&str, f64)> = weight_cases
+        .iter()
         .filter_map(|(name, _)| {
-            results.iter()
+            results
+                .iter()
                 .find(|r| r.memory_id == format!("weight_{}", name))
                 .map(|r| (*name, r.activation))
         })
@@ -249,7 +279,8 @@ fn test_adversarial_weight_boundaries() {
     }
 
     // Zero weight edges might not propagate activation at all
-    let zero_activation = results.iter()
+    let zero_activation = results
+        .iter()
         .find(|r| r.memory_id == "weight_zero")
         .map(|r| r.activation);
 
@@ -292,7 +323,7 @@ fn test_adversarial_config_boundaries() {
     low_decay_net.add_edge("a".to_string(), "b".to_string(), LinkType::Semantic, 0.9);
     low_decay_net.add_edge("b".to_string(), "c".to_string(), LinkType::Semantic, 0.9);
 
-    let low_results = low_decay_net.activate("a", 1.0);
+    let _low_results = low_decay_net.activate("a", 1.0);
     // With 0.01 decay, activation drops to 0.9 * 0.01 = 0.009 after one hop
     // Then 0.009 * 0.9 * 0.01 = 0.000081 after two hops (below most thresholds)
 
@@ -307,10 +338,7 @@ fn test_adversarial_config_boundaries() {
     zero_hops_net.add_edge("a".to_string(), "b".to_string(), LinkType::Semantic, 0.9);
 
     let zero_results = zero_hops_net.activate("a", 1.0);
-    assert!(
-        zero_results.is_empty(),
-        "Zero max_hops should find nothing"
-    );
+    assert!(zero_results.is_empty(), "Zero max_hops should find nothing");
 }
 
 // ============================================================================
@@ -332,9 +360,24 @@ fn test_adversarial_cyclic_graphs() {
     let mut no_cycle_net = ActivationNetwork::with_config(no_cycle_config);
 
     // Create a simple cycle: A -> B -> C -> A
-    no_cycle_net.add_edge("cycle_a".to_string(), "cycle_b".to_string(), LinkType::Semantic, 0.9);
-    no_cycle_net.add_edge("cycle_b".to_string(), "cycle_c".to_string(), LinkType::Semantic, 0.9);
-    no_cycle_net.add_edge("cycle_c".to_string(), "cycle_a".to_string(), LinkType::Semantic, 0.9);
+    no_cycle_net.add_edge(
+        "cycle_a".to_string(),
+        "cycle_b".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    no_cycle_net.add_edge(
+        "cycle_b".to_string(),
+        "cycle_c".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    no_cycle_net.add_edge(
+        "cycle_c".to_string(),
+        "cycle_a".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     let start = std::time::Instant::now();
     let results = no_cycle_net.activate("cycle_a", 1.0);
@@ -368,7 +411,7 @@ fn test_adversarial_cyclic_graphs() {
     cycle_net.add_edge("c".to_string(), "a".to_string(), LinkType::Semantic, 0.9);
 
     let start = std::time::Instant::now();
-    let cycle_results = cycle_net.activate("a", 1.0);
+    let _cycle_results = cycle_net.activate("a", 1.0);
     let duration = start.elapsed();
 
     // Should still complete quickly
@@ -387,10 +430,20 @@ fn test_adversarial_self_loops() {
     let mut network = ActivationNetwork::new();
 
     // Create self-loop
-    network.add_edge("self_loop".to_string(), "self_loop".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "self_loop".to_string(),
+        "self_loop".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     // Also connect to other nodes
-    network.add_edge("self_loop".to_string(), "other".to_string(), LinkType::Semantic, 0.7);
+    network.add_edge(
+        "self_loop".to_string(),
+        "other".to_string(),
+        LinkType::Semantic,
+        0.7,
+    );
 
     let start = std::time::Instant::now();
     let results = network.activate("self_loop", 1.0);
@@ -423,13 +476,18 @@ fn test_adversarial_special_numeric_values() {
     // We're testing that the system doesn't crash
 
     // Normal edge for baseline
-    network.add_edge("normal".to_string(), "target".to_string(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        "normal".to_string(),
+        "target".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     // Test activation with edge case values
     // (The implementation should clamp or validate these)
 
     // Test with 0.0 activation (should produce no results or minimal)
-    let zero_results = network.activate("normal", 0.0);
+    let _zero_results = network.activate("normal", 0.0);
     // Might be empty or have very low activation
 
     // Test with very small activation
@@ -457,5 +515,8 @@ fn test_adversarial_special_numeric_values() {
 
     // Edge should still exist and be valid
     let assoc = network.get_associations("normal");
-    assert!(!assoc.is_empty(), "Edge should still exist after negative reinforce attempt");
+    assert!(
+        !assoc.is_empty(),
+        "Edge should still exist after negative reinforce attempt"
+    );
 }

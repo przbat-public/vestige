@@ -81,13 +81,19 @@ pub fn merge_results<T: HasIdAndScore>(results: Vec<Vec<T>>) -> Vec<T> {
 
             match best_by_id.get(&id) {
                 Some(existing) if existing.score() >= score => {}
-                _ => { best_by_id.insert(id, item); }
+                _ => {
+                    best_by_id.insert(id, item);
+                }
             }
         }
     }
 
     let mut merged: Vec<T> = best_by_id.into_values().collect();
-    merged.sort_by(|a, b| b.score().partial_cmp(&a.score()).unwrap_or(std::cmp::Ordering::Equal));
+    merged.sort_by(|a, b| {
+        b.score()
+            .partial_cmp(&a.score())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     merged
 }
 
@@ -100,21 +106,19 @@ pub trait HasIdAndScore {
 // --- Splitting strategies ---
 
 fn split_by_semicolons(query: &str) -> Option<Vec<String>> {
-    let parts: Vec<String> = query.split(';')
+    let parts: Vec<String> = query
+        .split(';')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
 
-    if parts.len() >= 2 {
-        Some(parts)
-    } else {
-        None
-    }
+    if parts.len() >= 2 { Some(parts) } else { None }
 }
 
 fn split_by_question_chains(query: &str) -> Option<Vec<String>> {
     // Split on "? " followed by connectors
-    let parts: Vec<String> = query.split('?')
+    let parts: Vec<String> = query
+        .split('?')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|s| {
@@ -134,11 +138,7 @@ fn split_by_question_chains(query: &str) -> Option<Vec<String>> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    if parts.len() >= 2 {
-        Some(parts)
-    } else {
-        None
-    }
+    if parts.len() >= 2 { Some(parts) } else { None }
 }
 
 fn split_by_conjunctions(query: &str) -> Option<Vec<String>> {
@@ -204,7 +204,9 @@ mod tests {
 
     #[test]
     fn test_conjunction_split() {
-        let result = decompose_query("How does the embedding service work and also how does the search pipeline function");
+        let result = decompose_query(
+            "How does the embedding service work and also how does the search pipeline function",
+        );
         assert!(result.is_compound);
         assert_eq!(result.sub_queries.len(), 2);
     }
@@ -226,18 +228,33 @@ mod tests {
     #[test]
     fn test_merge_results_dedup() {
         let batch1 = vec![
-            FakeResult { id: "a".into(), score: 0.8 },
-            FakeResult { id: "b".into(), score: 0.6 },
+            FakeResult {
+                id: "a".into(),
+                score: 0.8,
+            },
+            FakeResult {
+                id: "b".into(),
+                score: 0.6,
+            },
         ];
         let batch2 = vec![
-            FakeResult { id: "a".into(), score: 0.9 },
-            FakeResult { id: "c".into(), score: 0.7 },
+            FakeResult {
+                id: "a".into(),
+                score: 0.9,
+            },
+            FakeResult {
+                id: "c".into(),
+                score: 0.7,
+            },
         ];
 
         let merged = merge_results(vec![batch1, batch2]);
         assert_eq!(merged.len(), 3, "Should have 3 unique results");
         assert_eq!(merged[0].id(), "a");
-        assert!((merged[0].score() - 0.9).abs() < 0.001, "Should keep max score for 'a'");
+        assert!(
+            (merged[0].score() - 0.9).abs() < 0.001,
+            "Should keep max score for 'a'"
+        );
     }
 
     #[test]
@@ -249,7 +266,8 @@ mod tests {
 
     #[test]
     fn test_as_well_as_conjunction() {
-        let result = decompose_query("How does the auth system work as well as the payment pipeline");
+        let result =
+            decompose_query("How does the auth system work as well as the payment pipeline");
         assert!(result.is_compound);
         assert_eq!(result.sub_queries.len(), 2);
     }
@@ -281,9 +299,10 @@ mod tests {
 
     #[test]
     fn test_merge_single_batch() {
-        let batch = vec![
-            FakeResult { id: "x".into(), score: 0.5 },
-        ];
+        let batch = vec![FakeResult {
+            id: "x".into(),
+            score: 0.5,
+        }];
         let merged = merge_results(vec![batch]);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].id(), "x");
@@ -292,12 +311,19 @@ mod tests {
     #[test]
     fn test_merge_preserves_sort_order() {
         let batch1 = vec![
-            FakeResult { id: "a".into(), score: 0.3 },
-            FakeResult { id: "b".into(), score: 0.9 },
+            FakeResult {
+                id: "a".into(),
+                score: 0.3,
+            },
+            FakeResult {
+                id: "b".into(),
+                score: 0.9,
+            },
         ];
-        let batch2 = vec![
-            FakeResult { id: "c".into(), score: 0.6 },
-        ];
+        let batch2 = vec![FakeResult {
+            id: "c".into(),
+            score: 0.6,
+        }];
         let merged = merge_results(vec![batch1, batch2]);
         assert_eq!(merged[0].id(), "b");
         assert_eq!(merged[1].id(), "c");
@@ -305,9 +331,16 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct FakeResult { id: String, score: f64 }
+    struct FakeResult {
+        id: String,
+        score: f64,
+    }
     impl HasIdAndScore for FakeResult {
-        fn id(&self) -> &str { &self.id }
-        fn score(&self) -> f64 { self.score }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn score(&self) -> f64 {
+            self.score
+        }
     }
 }

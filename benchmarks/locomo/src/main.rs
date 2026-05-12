@@ -47,7 +47,7 @@ use vestige_core::storage::Storage;
 //                                              pre-extracted atomic facts (kind ∈
 //                                              {semantic, episodic, procedural}).
 //                                              Each fact becomes one memory tagged
-//                                              with its kind and subject. Tier 4 PoC.
+//                                              with its kind and subject (typed-memory PoC).
 //                              turn_extracted: turn-level memories PLUS extracted facts,
 //                                              ingested side by side. Reranker chooses
 //                                              fact-vs-turn granularity per query.
@@ -102,7 +102,10 @@ impl ChunkLevel {
     }
 
     fn ingests_turns(self) -> bool {
-        matches!(self, ChunkLevel::Turn | ChunkLevel::Hybrid | ChunkLevel::TurnExtracted)
+        matches!(
+            self,
+            ChunkLevel::Turn | ChunkLevel::Hybrid | ChunkLevel::TurnExtracted
+        )
     }
 
     fn ingests_sessions(self) -> bool {
@@ -115,7 +118,7 @@ impl ChunkLevel {
 }
 
 // ============================================================================
-// Extracted-facts sidecar (Tier 4 PoC)
+// Extracted-facts sidecar (typed-memory PoC)
 // ============================================================================
 
 #[derive(Deserialize, Debug, Clone)]
@@ -278,14 +281,25 @@ fn parse_sessions(conversation: &serde_json::Value) -> Vec<SessionChunk> {
 
     let mut session_keys: Vec<String> = obj
         .keys()
-        .filter(|k| k.starts_with("session_") && !k.contains("date_time") && !k.contains("summary") && !k.contains("observation"))
+        .filter(|k| {
+            k.starts_with("session_")
+                && !k.contains("date_time")
+                && !k.contains("summary")
+                && !k.contains("observation")
+        })
         .filter(|k| obj.get(k.as_str()).is_some_and(|v| v.is_array()))
         .cloned()
         .collect();
 
     session_keys.sort_by(|a, b| {
-        let num_a: u32 = a.strip_prefix("session_").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let num_b: u32 = b.strip_prefix("session_").and_then(|s| s.parse().ok()).unwrap_or(0);
+        let num_a: u32 = a
+            .strip_prefix("session_")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let num_b: u32 = b
+            .strip_prefix("session_")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
         num_a.cmp(&num_b)
     });
 
@@ -308,13 +322,21 @@ fn parse_sessions(conversation: &serde_json::Value) -> Vec<SessionChunk> {
                             let speaker = turn.get("speaker")?.as_str()?.to_string();
                             let dia_id = turn.get("dia_id")?.as_str()?.to_string();
                             let text = turn.get("text")?.as_str()?.to_string();
-                            Some(Turn { speaker, dia_id, text })
+                            Some(Turn {
+                                speaker,
+                                dia_id,
+                                text,
+                            })
                         })
                         .collect()
                 })
                 .unwrap_or_default();
 
-            SessionChunk { session_key: key, timestamp, turns }
+            SessionChunk {
+                session_key: key,
+                timestamp,
+                turns,
+            }
         })
         .collect()
 }
@@ -403,8 +425,7 @@ fn evaluate_retrieval(
 // ============================================================================
 
 fn extract_session_key(tags: &[String]) -> Option<&str> {
-    tags.iter()
-        .find_map(|t| t.strip_prefix("session:"))
+    tags.iter().find_map(|t| t.strip_prefix("session:"))
 }
 
 fn filter_to_top_sessions(
@@ -467,7 +488,9 @@ fn main() {
             eprintln!("Download the dataset:");
             eprintln!("  mkdir -p benchmarks/locomo/data");
             eprintln!("  curl -L -o benchmarks/locomo/data/locomo10.json \\");
-            eprintln!("    https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json");
+            eprintln!(
+                "    https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json"
+            );
             std::process::exit(1);
         }
     });
@@ -529,7 +552,11 @@ fn main() {
         eprintln!(
             "Pipeline:   hybrid_search(top={}) {} top-{}",
             overfetch,
-            if use_reranker { "→ Jina v2 rerank →" } else { "→ truncate →" },
+            if use_reranker {
+                "→ Jina v2 rerank →"
+            } else {
+                "→ truncate →"
+            },
             topk
         );
     }
@@ -543,7 +570,9 @@ fn main() {
             result_count: topk,
             min_score: None,
         });
-        eprintln!("Loading Jina Reranker v2 Base Multilingual (cached if previously downloaded)...");
+        eprintln!(
+            "Loading Jina Reranker v2 Base Multilingual (cached if previously downloaded)..."
+        );
         let init_start = Instant::now();
         rr.init_cross_encoder();
         eprintln!(
@@ -724,10 +753,7 @@ fn main() {
                             ingested_sessions_count += 1;
                         }
                         Err(e) => {
-                            eprintln!(
-                                "    WARN: ingest failed for {}: {}",
-                                session.session_key, e
-                            );
+                            eprintln!("    WARN: ingest failed for {}: {}", session.session_key, e);
                         }
                     }
                 }
@@ -760,8 +786,7 @@ fn main() {
 
                     match storage.ingest(input) {
                         Ok(node) => {
-                            memory_id_to_dia_ids
-                                .insert(node.id.clone(), vec![turn.dia_id.clone()]);
+                            memory_id_to_dia_ids.insert(node.id.clone(), vec![turn.dia_id.clone()]);
                             ingested_units += 1;
                             ingested_turns += 1;
                         }
@@ -790,11 +815,8 @@ fn main() {
         // --- SEARCH PHASE ---
         let search_start = Instant::now();
 
-        let non_adversarial: Vec<&QAPair> = sample
-            .qa
-            .iter()
-            .filter(|qa| qa.category != 5)
-            .collect();
+        let non_adversarial: Vec<&QAPair> =
+            sample.qa.iter().filter(|qa| qa.category != 5).collect();
 
         let adversarial_count = sample.qa.len() - non_adversarial.len();
         skipped_adversarial += adversarial_count;
@@ -827,20 +849,23 @@ fn main() {
                 Ok(res) if !res.is_empty() => {
                     // Stage 2: optional cross-encoder rerank (Jina Reranker v2)
                     let rerank_start = Instant::now();
-                    let final_order: Vec<(String, String, f32)> = if let Some(rr) = reranker.as_mut() {
+                    let final_order: Vec<(String, String, f32)> = if let Some(rr) =
+                        reranker.as_mut()
+                    {
                         // Build candidates as (id, content, original_score)
                         let candidates: Vec<((String, f32), String)> = res
                             .iter()
                             .map(|r| {
-                                ((r.node.id.clone(), r.combined_score), r.node.content.clone())
+                                (
+                                    (r.node.id.clone(), r.combined_score),
+                                    r.node.content.clone(),
+                                )
                             })
                             .collect();
                         match rr.rerank(&qa.question, candidates, Some(topk)) {
                             Ok(reranked) => {
-                                let nodes: HashMap<String, &vestige_core::memory::SearchResult> = res
-                                    .iter()
-                                    .map(|r| (r.node.id.clone(), r))
-                                    .collect();
+                                let nodes: HashMap<String, &vestige_core::memory::SearchResult> =
+                                    res.iter().map(|r| (r.node.id.clone(), r)).collect();
                                 reranked
                                     .into_iter()
                                     .filter_map(|rr_item| {
@@ -852,10 +877,19 @@ fn main() {
                                     .collect()
                             }
                             Err(e) => {
-                                eprintln!("    WARN: rerank failed ({}); falling back to hybrid order", e);
+                                eprintln!(
+                                    "    WARN: rerank failed ({}); falling back to hybrid order",
+                                    e
+                                );
                                 res.iter()
                                     .take(topk)
-                                    .map(|r| (r.node.id.clone(), r.node.content.clone(), r.combined_score))
+                                    .map(|r| {
+                                        (
+                                            r.node.id.clone(),
+                                            r.node.content.clone(),
+                                            r.combined_score,
+                                        )
+                                    })
                                     .collect()
                             }
                         }
@@ -867,16 +901,12 @@ fn main() {
                     };
                     total_rerank_time += rerank_start.elapsed().as_secs_f64();
 
-                    let contexts: Vec<String> = final_order.iter().map(|(_, c, _)| c.clone()).collect();
+                    let contexts: Vec<String> =
+                        final_order.iter().map(|(_, c, _)| c.clone()).collect();
                     let scores: Vec<f32> = final_order.iter().map(|(_, _, s)| *s).collect();
                     let dia_sets: Vec<Vec<String>> = final_order
                         .iter()
-                        .map(|(id, _, _)| {
-                            memory_id_to_dia_ids
-                                .get(id)
-                                .cloned()
-                                .unwrap_or_default()
-                        })
+                        .map(|(id, _, _)| memory_id_to_dia_ids.get(id).cloned().unwrap_or_default())
                         .collect();
                     (contexts, scores, dia_sets)
                 }
@@ -923,7 +953,8 @@ fn main() {
     let mut per_category: HashMap<String, RetrievalMetrics> = HashMap::new();
     for cat in [1, 2, 3, 4] {
         let name = category_name(cat).to_string();
-        let subset: Vec<&QuestionResult> = all_results.iter().filter(|r| r.category == cat).collect();
+        let subset: Vec<&QuestionResult> =
+            all_results.iter().filter(|r| r.category == cat).collect();
         if !subset.is_empty() {
             per_category.insert(name, compute_metrics_refs(&subset));
         }
@@ -1026,7 +1057,11 @@ fn compute_metrics(results: &[QuestionResult]) -> RetrievalMetrics {
     let n = results.len() as f64;
     RetrievalMetrics {
         recall_at_5: results.iter().filter(|r| r.evidence_found_in_top_5).count() as f64 / n,
-        recall_at_10: results.iter().filter(|r| r.evidence_found_in_top_10).count() as f64 / n,
+        recall_at_10: results
+            .iter()
+            .filter(|r| r.evidence_found_in_top_10)
+            .count() as f64
+            / n,
         mrr: results.iter().map(|r| r.reciprocal_rank).sum::<f64>() / n,
         count: results.len(),
     }
@@ -1039,7 +1074,11 @@ fn compute_metrics_refs(results: &[&QuestionResult]) -> RetrievalMetrics {
     let n = results.len() as f64;
     RetrievalMetrics {
         recall_at_5: results.iter().filter(|r| r.evidence_found_in_top_5).count() as f64 / n,
-        recall_at_10: results.iter().filter(|r| r.evidence_found_in_top_10).count() as f64 / n,
+        recall_at_10: results
+            .iter()
+            .filter(|r| r.evidence_found_in_top_10)
+            .count() as f64
+            / n,
         mrr: results.iter().map(|r| r.reciprocal_rank).sum::<f64>() / n,
         count: results.len(),
     }

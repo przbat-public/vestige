@@ -40,13 +40,15 @@ struct BenchmarkResult {
 fn run_scenario(scenario: &BenchmarkScenario) -> BenchmarkResult {
     let mut nodes: Vec<KnowledgeNode> = Vec::new();
     for (i, (content, node_type, tags)) in scenario.corpus.iter().enumerate() {
-        let mut node = KnowledgeNode::default();
-        node.id = format!("bench-{}", i);
-        node.content = content.to_string();
-        node.node_type = node_type.to_string();
-        node.tags = tags.iter().map(|t| t.to_string()).collect();
-        node.retention_strength = 0.8;
-        node.retrieval_strength = 0.7;
+        let node = KnowledgeNode {
+            id: format!("bench-{}", i),
+            content: content.to_string(),
+            node_type: node_type.to_string(),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            retention_strength: 0.8,
+            retrieval_strength: 0.7,
+            ..Default::default()
+        };
         nodes.push(node);
     }
 
@@ -59,34 +61,45 @@ fn run_scenario(scenario: &BenchmarkScenario) -> BenchmarkResult {
         let lower_query = query.query.to_lowercase();
         let query_words: Vec<&str> = lower_query.split_whitespace().collect();
 
-        let mut scored: Vec<(usize, f64)> = nodes.iter().enumerate().map(|(i, node)| {
-            let lower_content = node.content.to_lowercase();
-            let word_hits = query_words.iter()
-                .filter(|w| lower_content.contains(*w))
-                .count() as f64;
-            let tag_hits = node.tags.iter()
-                .filter(|t| query_words.iter().any(|w| t.to_lowercase().contains(w)))
-                .count() as f64;
-            (i, word_hits * 2.0 + tag_hits)
-        }).collect();
+        let mut scored: Vec<(usize, f64)> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| {
+                let lower_content = node.content.to_lowercase();
+                let word_hits = query_words
+                    .iter()
+                    .filter(|w| lower_content.contains(*w))
+                    .count() as f64;
+                let tag_hits = node
+                    .tags
+                    .iter()
+                    .filter(|t| query_words.iter().any(|w| t.to_lowercase().contains(w)))
+                    .count() as f64;
+                (i, word_hits * 2.0 + tag_hits)
+            })
+            .collect();
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let top_5: Vec<usize> = scored.iter().take(5).map(|s| s.0).collect();
         let top_3: Vec<usize> = scored.iter().take(3).map(|s| s.0).collect();
 
-        let relevant_in_5 = query.expected_relevant.iter()
+        let relevant_in_5 = query
+            .expected_relevant
+            .iter()
             .filter(|r| top_5.contains(r))
             .count() as f64;
         total_recall += relevant_in_5 / query.expected_relevant.len() as f64;
 
-        let first_relevant_rank = top_5.iter().position(|idx|
-            query.expected_relevant.contains(idx)
-        );
+        let first_relevant_rank = top_5
+            .iter()
+            .position(|idx| query.expected_relevant.contains(idx));
         if let Some(rank) = first_relevant_rank {
             total_mrr += 1.0 / (rank as f64 + 1.0);
         }
 
-        let relevant_in_3 = query.expected_relevant.iter()
+        let relevant_in_3 = query
+            .expected_relevant
+            .iter()
             .filter(|r| top_3.contains(r))
             .count() as f64;
         total_precision += relevant_in_3 / 3.0;
@@ -111,12 +124,36 @@ fn bench_bug_fix_retrieval() {
     let scenario = BenchmarkScenario {
         name: "Bug-Fix Retrieval",
         corpus: vec![
-            ("BUG FIX: ConnectionResetError when calling auth API. Root cause: connection pool timeout set to 5s, upstream latency was 8s. Fix: increased timeout to 15s.", "fact", vec!["bug-fix", "auth", "timeout"]),
-            ("BUG FIX: OOM crash in image processing pipeline. Root cause: unbounded buffer accumulation. Fix: added backpressure with bounded channel.", "fact", vec!["bug-fix", "oom", "pipeline"]),
-            ("Architecture decision: chose PostgreSQL over MongoDB for transaction guarantees.", "decision", vec!["architecture", "database"]),
-            ("BUG FIX: Race condition in session management. Two requests updating the same session concurrently. Fix: added optimistic locking with version column.", "fact", vec!["bug-fix", "race-condition", "session"]),
-            ("User preference: always use structured logging with correlation IDs.", "note", vec!["preference", "logging"]),
-            ("BUG FIX: Memory leak in WebSocket handler. Event listeners not cleaned up on disconnect. Fix: added cleanup in onClose handler.", "fact", vec!["bug-fix", "memory-leak", "websocket"]),
+            (
+                "BUG FIX: ConnectionResetError when calling auth API. Root cause: connection pool timeout set to 5s, upstream latency was 8s. Fix: increased timeout to 15s.",
+                "fact",
+                vec!["bug-fix", "auth", "timeout"],
+            ),
+            (
+                "BUG FIX: OOM crash in image processing pipeline. Root cause: unbounded buffer accumulation. Fix: added backpressure with bounded channel.",
+                "fact",
+                vec!["bug-fix", "oom", "pipeline"],
+            ),
+            (
+                "Architecture decision: chose PostgreSQL over MongoDB for transaction guarantees.",
+                "decision",
+                vec!["architecture", "database"],
+            ),
+            (
+                "BUG FIX: Race condition in session management. Two requests updating the same session concurrently. Fix: added optimistic locking with version column.",
+                "fact",
+                vec!["bug-fix", "race-condition", "session"],
+            ),
+            (
+                "User preference: always use structured logging with correlation IDs.",
+                "note",
+                vec!["preference", "logging"],
+            ),
+            (
+                "BUG FIX: Memory leak in WebSocket handler. Event listeners not cleaned up on disconnect. Fix: added cleanup in onClose handler.",
+                "fact",
+                vec!["bug-fix", "memory-leak", "websocket"],
+            ),
         ],
         queries: vec![
             BenchmarkQuery {
@@ -139,8 +176,16 @@ fn bench_bug_fix_retrieval() {
     };
 
     let result = run_scenario(&scenario);
-    assert!(result.recall_at_5 >= 0.75, "Bug-fix recall@5 should be >=75%, got {:.0}%", result.recall_at_5 * 100.0);
-    assert!(result.mrr >= 0.5, "Bug-fix MRR should be >=0.50, got {:.2}", result.mrr);
+    assert!(
+        result.recall_at_5 >= 0.75,
+        "Bug-fix recall@5 should be >=75%, got {:.0}%",
+        result.recall_at_5 * 100.0
+    );
+    assert!(
+        result.mrr >= 0.5,
+        "Bug-fix MRR should be >=0.50, got {:.2}",
+        result.mrr
+    );
 }
 
 // ==========================================================================
@@ -153,12 +198,36 @@ fn bench_decision_retrieval() {
     let scenario = BenchmarkScenario {
         name: "Decision Retrieval",
         corpus: vec![
-            ("DECISION: Use Redis for session storage instead of PostgreSQL. Rationale: sub-millisecond reads, built-in TTL for session expiry.", "decision", vec!["decision", "redis", "session"]),
-            ("DECISION: Migrate from REST to gRPC for service-to-service communication. Rationale: type safety, streaming, lower latency.", "decision", vec!["decision", "grpc", "api"]),
-            ("Team standup notes from Monday: discussed sprint velocity.", "event", vec!["meeting", "standup"]),
-            ("DECISION: Deploy on Kubernetes instead of ECS. Rationale: multi-cloud portability, Helm ecosystem.", "decision", vec!["decision", "kubernetes", "deployment"]),
-            ("Code review feedback: use more descriptive variable names.", "note", vec!["code-review"]),
-            ("DECISION: Chose TypeScript over Python for the API layer. Rationale: shared types with frontend, better IDE support.", "decision", vec!["decision", "typescript", "api"]),
+            (
+                "DECISION: Use Redis for session storage instead of PostgreSQL. Rationale: sub-millisecond reads, built-in TTL for session expiry.",
+                "decision",
+                vec!["decision", "redis", "session"],
+            ),
+            (
+                "DECISION: Migrate from REST to gRPC for service-to-service communication. Rationale: type safety, streaming, lower latency.",
+                "decision",
+                vec!["decision", "grpc", "api"],
+            ),
+            (
+                "Team standup notes from Monday: discussed sprint velocity.",
+                "event",
+                vec!["meeting", "standup"],
+            ),
+            (
+                "DECISION: Deploy on Kubernetes instead of ECS. Rationale: multi-cloud portability, Helm ecosystem.",
+                "decision",
+                vec!["decision", "kubernetes", "deployment"],
+            ),
+            (
+                "Code review feedback: use more descriptive variable names.",
+                "note",
+                vec!["code-review"],
+            ),
+            (
+                "DECISION: Chose TypeScript over Python for the API layer. Rationale: shared types with frontend, better IDE support.",
+                "decision",
+                vec!["decision", "typescript", "api"],
+            ),
         ],
         queries: vec![
             BenchmarkQuery {
@@ -181,8 +250,16 @@ fn bench_decision_retrieval() {
     };
 
     let result = run_scenario(&scenario);
-    assert!(result.recall_at_5 >= 0.75, "Decision recall@5 should be >=75%, got {:.0}%", result.recall_at_5 * 100.0);
-    assert!(result.mrr >= 0.5, "Decision MRR should be >=0.50, got {:.2}", result.mrr);
+    assert!(
+        result.recall_at_5 >= 0.75,
+        "Decision recall@5 should be >=75%, got {:.0}%",
+        result.recall_at_5 * 100.0
+    );
+    assert!(
+        result.mrr >= 0.5,
+        "Decision MRR should be >=0.50, got {:.2}",
+        result.mrr
+    );
 }
 
 // ==========================================================================
@@ -196,12 +273,36 @@ fn bench_cross_domain_retrieval() {
     let scenario = BenchmarkScenario {
         name: "Cross-Domain Retrieval",
         corpus: vec![
-            ("Rust's borrow checker prevents data races at compile time.", "fact", vec!["rust", "safety"]),
-            ("PostgreSQL MVCC uses snapshots to provide transaction isolation.", "fact", vec!["postgresql", "database"]),
-            ("The CAP theorem states that distributed systems can only guarantee two of: consistency, availability, partition tolerance.", "concept", vec!["distributed-systems", "cap-theorem"]),
-            ("Rust async runtime Tokio uses a work-stealing scheduler for efficient task distribution.", "fact", vec!["rust", "async", "tokio"]),
-            ("PostgreSQL's LISTEN/NOTIFY provides real-time change notifications without polling.", "fact", vec!["postgresql", "realtime"]),
-            ("Building a distributed Rust service with PostgreSQL backend requires careful connection pool management.", "fact", vec!["rust", "postgresql", "distributed"]),
+            (
+                "Rust's borrow checker prevents data races at compile time.",
+                "fact",
+                vec!["rust", "safety"],
+            ),
+            (
+                "PostgreSQL MVCC uses snapshots to provide transaction isolation.",
+                "fact",
+                vec!["postgresql", "database"],
+            ),
+            (
+                "The CAP theorem states that distributed systems can only guarantee two of: consistency, availability, partition tolerance.",
+                "concept",
+                vec!["distributed-systems", "cap-theorem"],
+            ),
+            (
+                "Rust async runtime Tokio uses a work-stealing scheduler for efficient task distribution.",
+                "fact",
+                vec!["rust", "async", "tokio"],
+            ),
+            (
+                "PostgreSQL's LISTEN/NOTIFY provides real-time change notifications without polling.",
+                "fact",
+                vec!["postgresql", "realtime"],
+            ),
+            (
+                "Building a distributed Rust service with PostgreSQL backend requires careful connection pool management.",
+                "fact",
+                vec!["rust", "postgresql", "distributed"],
+            ),
         ],
         queries: vec![
             BenchmarkQuery {
@@ -216,7 +317,11 @@ fn bench_cross_domain_retrieval() {
     };
 
     let result = run_scenario(&scenario);
-    assert!(result.recall_at_5 >= 0.5, "Cross-domain recall@5 should be >=50%, got {:.0}%", result.recall_at_5 * 100.0);
+    assert!(
+        result.recall_at_5 >= 0.5,
+        "Cross-domain recall@5 should be >=50%, got {:.0}%",
+        result.recall_at_5 * 100.0
+    );
 }
 
 // ==========================================================================
@@ -236,7 +341,8 @@ fn bench_decay_favors_recent_memories() {
     assert!(
         recent_retention > old_retention,
         "Recent memory retention ({:.4}) should exceed 30-day-old ({:.4})",
-        recent_retention, old_retention
+        recent_retention,
+        old_retention
     );
 
     let ratio = recent_retention / old_retention;
@@ -265,14 +371,29 @@ fn bench_multi_hop_activation_retrieval() {
     let activated = net.activate("auth", 1.0);
     let ids: Vec<&str> = activated.iter().map(|a| a.memory_id.as_str()).collect();
 
-    assert!(ids.contains(&"session"), "Direct neighbor 'session' should be activated");
-    assert!(ids.contains(&"redis"), "2-hop neighbor 'redis' should be activated via session");
+    assert!(
+        ids.contains(&"session"),
+        "Direct neighbor 'session' should be activated"
+    );
+    assert!(
+        ids.contains(&"redis"),
+        "2-hop neighbor 'redis' should be activated via session"
+    );
 
-    let session_act = activated.iter().find(|a| a.memory_id == "session").unwrap().activation;
-    let redis_act = activated.iter().find(|a| a.memory_id == "redis").unwrap().activation;
+    let session_act = activated
+        .iter()
+        .find(|a| a.memory_id == "session")
+        .unwrap()
+        .activation;
+    let redis_act = activated
+        .iter()
+        .find(|a| a.memory_id == "redis")
+        .unwrap()
+        .activation;
     assert!(
         session_act > redis_act,
         "Direct neighbor ({:.4}) should have higher activation than 2-hop ({:.4})",
-        session_act, redis_act
+        session_act,
+        redis_act
     );
 }

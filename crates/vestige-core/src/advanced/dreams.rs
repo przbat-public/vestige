@@ -455,9 +455,10 @@ impl ConsolidationScheduler {
             // Strengthen connections between sequentially replayed memories
             for window in replay.sequence.windows(2) {
                 if let [id_a, id_b] = window
-                    && graph.strengthen_connection(id_a, id_b, 0.1) {
-                        strengthened += 1;
-                    }
+                    && graph.strengthen_connection(id_a, id_b, 0.1)
+                {
+                    strengthened += 1;
+                }
             }
 
             // Also strengthen based on discovered patterns
@@ -704,11 +705,12 @@ impl ConnectionGraph {
 
         for (a, b) in [(from_id, to_id), (to_id, from_id)] {
             if let Some(connections) = self.connections.get_mut(a)
-                && let Some(conn) = connections.iter_mut().find(|c| c.target_id == b) {
-                    conn.strength = (conn.strength + boost).min(2.0);
-                    conn.last_strengthened = now;
-                    strengthened = true;
-                }
+                && let Some(conn) = connections.iter_mut().find(|c| c.target_id == b)
+            {
+                conn.strength = (conn.strength + boost).min(2.0);
+                conn.last_strengthened = now;
+                strengthened = true;
+            }
         }
 
         strengthened
@@ -1132,11 +1134,10 @@ fn contains_word(haystack: &str, needle: &str) -> bool {
         return haystack.contains(needle);
     }
     for (idx, _) in haystack.match_indices(needle) {
-        let before_ok = idx == 0
-            || !haystack.as_bytes()[idx - 1].is_ascii_alphanumeric();
+        let before_ok = idx == 0 || !haystack.as_bytes()[idx - 1].is_ascii_alphanumeric();
         let after_idx = idx + needle.len();
-        let after_ok = after_idx >= haystack.len()
-            || !haystack.as_bytes()[after_idx].is_ascii_alphanumeric();
+        let after_ok =
+            after_idx >= haystack.len() || !haystack.as_bytes()[after_idx].is_ascii_alphanumeric();
         if before_ok && after_ok {
             return true;
         }
@@ -1421,15 +1422,39 @@ impl MemoryDreamer {
     /// (e.g. "nie" inside "poprawnie").
     fn has_negation_divergence(a: &str, b: &str) -> bool {
         const NEGATION_MARKERS: &[&str] = &[
-            "not", "don't", "doesn't", "didn't", "won't", "can't", "cannot",
-            "never", "no longer", "stopped", "removed", "deprecated",
-            "nie", "nigdy", "przestał", "usunięto", "nieprawidłow",
-            "incorrect", "wrong", "false", "broken", "failed",
+            "not",
+            "don't",
+            "doesn't",
+            "didn't",
+            "won't",
+            "can't",
+            "cannot",
+            "never",
+            "no longer",
+            "stopped",
+            "removed",
+            "deprecated",
+            "nie",
+            "nigdy",
+            "przestał",
+            "usunięto",
+            "nieprawidłow",
+            "incorrect",
+            "wrong",
+            "false",
+            "broken",
+            "failed",
         ];
         let a_low = a.to_lowercase();
         let b_low = b.to_lowercase();
-        let a_neg = NEGATION_MARKERS.iter().filter(|m| contains_word(&a_low, m)).count();
-        let b_neg = NEGATION_MARKERS.iter().filter(|m| contains_word(&b_low, m)).count();
+        let a_neg = NEGATION_MARKERS
+            .iter()
+            .filter(|m| contains_word(&a_low, m))
+            .count();
+        let b_neg = NEGATION_MARKERS
+            .iter()
+            .filter(|m| contains_word(&b_low, m))
+            .count();
         (a_neg as i32 - b_neg as i32).unsigned_abs() >= 2
     }
 
@@ -1550,9 +1575,10 @@ impl MemoryDreamer {
 
             // Try to generate insight from this cluster
             if let Some(insight) = self.generate_insight_from_cluster(&cluster_memories)
-                && insight.novelty_score >= self.config.min_novelty {
-                    insights.push(insight);
-                }
+                && insight.novelty_score >= self.config.min_novelty
+            {
+                insights.push(insight);
+            }
 
             if insights.len() >= self.config.max_insights {
                 break;
@@ -2229,7 +2255,8 @@ mod tests {
 
         let mem_old = DreamMemory {
             id: "old".to_string(),
-            content: "The function does not handle errors and cannot recover from failures".to_string(),
+            content: "The function does not handle errors and cannot recover from failures"
+                .to_string(),
             embedding: Some(vec![1.0, 0.0, 0.0]),
             tags: vec!["error-handling".to_string()],
             created_at: Utc::now() - Duration::days(30),
@@ -2237,7 +2264,8 @@ mod tests {
         };
         let mem_new = DreamMemory {
             id: "new".to_string(),
-            content: "The function handles errors gracefully and recovers from failures".to_string(),
+            content: "The function handles errors gracefully and recovers from failures"
+                .to_string(),
             embedding: Some(vec![0.95, 0.1, 0.0]),
             tags: vec!["error-handling".to_string()],
             created_at: Utc::now(),
@@ -2264,7 +2292,8 @@ mod tests {
 
         let mem_old = DreamMemory {
             id: "old".to_string(),
-            content: "The service does not support authentication and cannot verify users".to_string(),
+            content: "The service does not support authentication and cannot verify users"
+                .to_string(),
             embedding: Some(vec![1.0, 0.0, 0.0]),
             tags: vec!["auth".to_string()],
             created_at: Utc::now() - Duration::days(60),
@@ -2272,7 +2301,8 @@ mod tests {
         };
         let mem_new = DreamMemory {
             id: "new".to_string(),
-            content: "The service supports JWT authentication and verifies users properly".to_string(),
+            content: "The service supports JWT authentication and verifies users properly"
+                .to_string(),
             embedding: Some(vec![0.95, 0.1, 0.0]),
             tags: vec!["auth".to_string()],
             created_at: Utc::now(),

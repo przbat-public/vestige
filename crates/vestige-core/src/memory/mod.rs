@@ -20,7 +20,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
-// GOD TIER 2026: MEMORY SCOPES (Like Mem0)
+// MEMORY SCOPES (Like Mem0)
 // ============================================================================
 
 /// Memory scope - controls persistence and sharing behavior
@@ -61,7 +61,7 @@ impl std::str::FromStr for MemoryScope {
 }
 
 // ============================================================================
-// GOD TIER 2026: MEMORY SYSTEMS (Tulving 1972)
+// MEMORY SYSTEMS (Tulving 1972)
 // ============================================================================
 
 /// Memory system classification (based on Tulving's memory systems)
@@ -158,7 +158,7 @@ impl std::str::FromStr for EpistemicStatus {
 }
 
 // ============================================================================
-// GOD TIER 2026: KNOWLEDGE GRAPH EDGES (Like Zep's Graphiti)
+// KNOWLEDGE GRAPH EDGES (Like Zep's Graphiti)
 // ============================================================================
 
 /// Type of relationship between knowledge nodes
@@ -352,7 +352,6 @@ pub struct ConsolidationResult {
     pub w20_optimized: Option<f64>,
 }
 
-
 // ============================================================================
 // SEARCH RESULTS
 // ============================================================================
@@ -413,4 +412,3 @@ pub struct EmbeddingResult {
     /// Error messages for failures
     pub errors: Vec<String>,
 }
-

@@ -263,7 +263,9 @@ pub(super) fn build_resources_list() -> Vec<ResourceDescription> {
         ResourceDescription {
             uri: "memory://intentions".to_string(),
             name: "Active Intentions".to_string(),
-            description: Some("Future intentions (prospective memory) waiting to be triggered".to_string()),
+            description: Some(
+                "Future intentions (prospective memory) waiting to be triggered".to_string(),
+            ),
             mime_type: Some("application/json".to_string()),
         },
         ResourceDescription {
@@ -300,7 +302,11 @@ mod tests {
     #[test]
     fn every_tool_has_description_and_schema() {
         for tool in build_tools_list() {
-            assert!(tool.description.is_some(), "tool {} missing description", tool.name);
+            assert!(
+                tool.description.is_some(),
+                "tool {} missing description",
+                tool.name
+            );
             assert!(
                 tool.input_schema.is_object(),
                 "tool {} must expose a JSON-Schema object",
@@ -328,7 +334,11 @@ mod tests {
                 .get("type")
                 .and_then(|v| v.as_str())
                 .unwrap_or_else(|| panic!("schema for {} missing string `type`", tool.name));
-            assert_eq!(kind, "object", "schema for {} must use type=object", tool.name);
+            assert_eq!(
+                kind, "object",
+                "schema for {} must use type=object",
+                tool.name
+            );
 
             let properties = schema
                 .get("properties")
@@ -342,7 +352,10 @@ mod tests {
                     .unwrap_or_else(|| panic!("schema for {} has non-array `required`", tool.name));
                 for entry in required_arr {
                     let key = entry.as_str().unwrap_or_else(|| {
-                        panic!("schema for {} has non-string entry in `required`", tool.name)
+                        panic!(
+                            "schema for {} has non-string entry in `required`",
+                            tool.name
+                        )
                     });
                     assert!(
                         properties.contains_key(key),

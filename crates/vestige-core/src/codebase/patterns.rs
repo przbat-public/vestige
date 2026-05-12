@@ -210,18 +210,23 @@ impl PatternDetector {
 
         for pattern in relevant_patterns {
             if let Some(confidence) = self.calculate_match_confidence(code, &code_lower, pattern)
-                && confidence >= 0.3 {
-                    matches.push(PatternMatch {
-                        pattern: pattern.clone(),
-                        confidence,
-                        location: None, // Would need line-level analysis
-                        suggestions: self.generate_suggestions(pattern, code),
-                    });
-                }
+                && confidence >= 0.3
+            {
+                matches.push(PatternMatch {
+                    pattern: pattern.clone(),
+                    confidence,
+                    location: None, // Would need line-level analysis
+                    suggestions: self.generate_suggestions(pattern, code),
+                });
+            }
         }
 
         // Sort by confidence
-        matches.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        matches.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(matches)
     }
@@ -325,7 +330,11 @@ impl PatternDetector {
         }
 
         // Sort by relevance
-        suggestions.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap_or(std::cmp::Ordering::Equal));
+        suggestions.sort_by(|a, b| {
+            b.relevance
+                .partial_cmp(&a.relevance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(suggestions)
     }

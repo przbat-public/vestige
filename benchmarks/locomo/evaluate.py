@@ -110,7 +110,7 @@ def extract_entities(question: str) -> list[str]:
     return out
 
 
-# Kind-aware reranking (Tier 4 PoC follow-up). When the question clearly
+# Kind-aware reranking (typed-memory PoC follow-up). When the question clearly
 # matches one of {semantic, episodic, procedural}, boost candidates whose
 # content carries the matching [kind] prefix (added by extract_facts.py).
 # Auto-skips for ambiguous / mixed questions so open_domain and multi_hop

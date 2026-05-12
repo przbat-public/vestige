@@ -16,18 +16,19 @@
 //! `UPDATE` so the audit log can never lag the state.
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
-use super::{
-    MemoryStateRecord, Result, StateTransitionRecord, Storage, StorageError,
-};
+use super::{MemoryStateRecord, Result, StateTransitionRecord, Storage, StorageError};
 
 impl Storage {
     /// Save or update memory state
     pub fn save_memory_state(&self, state: &MemoryStateRecord) -> Result<()> {
-        let suppressed_json = serde_json::to_string(&state.suppressed_by).unwrap_or_else(|_| "[]".to_string());
+        let suppressed_json =
+            serde_json::to_string(&state.suppressed_by).unwrap_or_else(|_| "[]".to_string());
 
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "INSERT OR REPLACE INTO memory_states (
@@ -49,11 +50,11 @@ impl Storage {
 
     /// Get memory state
     pub fn get_memory_state(&self, memory_id: &str) -> Result<Option<MemoryStateRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT * FROM memory_states WHERE memory_id = ?1"
-        )?;
+        let mut stmt = reader.prepare("SELECT * FROM memory_states WHERE memory_id = ?1")?;
 
         stmt.query_row(params![memory_id], Self::row_to_memory_state)
             .optional()
@@ -62,11 +63,11 @@ impl Storage {
 
     /// Get memories by state
     pub fn get_memories_by_state(&self, state: &str) -> Result<Vec<String>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT memory_id FROM memory_states WHERE state = ?1"
-        )?;
+        let mut stmt = reader.prepare("SELECT memory_id FROM memory_states WHERE state = ?1")?;
 
         let rows = stmt.query_map(params![state], |row| row.get::<_, String>(0))?;
         let mut result = Vec::new();
@@ -77,13 +78,20 @@ impl Storage {
     }
 
     /// Update memory state
-    pub fn update_memory_state(&self, memory_id: &str, new_state: &str, reason: &str) -> Result<bool> {
+    pub fn update_memory_state(
+        &self,
+        memory_id: &str,
+        new_state: &str,
+        reason: &str,
+    ) -> Result<bool> {
         let now = Utc::now();
 
         // Get old state for transition record
         if let Some(old_record) = self.get_memory_state(memory_id)? {
             // Record state transition
-            let writer = self.writer.lock()
+            let writer = self
+                .writer
+                .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             writer.execute(
                 "INSERT INTO state_transitions (memory_id, from_state, to_state, reason_type, timestamp)
@@ -92,7 +100,9 @@ impl Storage {
             )?;
         }
 
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let rows = writer.execute(
             "UPDATE memory_states SET state = ?1, state_entered_at = ?2 WHERE memory_id = ?3",
@@ -105,7 +115,9 @@ impl Storage {
     pub fn record_memory_access(&self, memory_id: &str) -> Result<()> {
         let now = Utc::now();
 
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
 
         // Check if state exists (writer can read too)
@@ -140,7 +152,11 @@ impl Storage {
         let suppressed_by: Vec<String> = serde_json::from_str(&suppressed_json).unwrap_or_default();
 
         let parse_opt_dt = |s: Option<String>| -> Option<DateTime<Utc>> {
-            s.and_then(|v| DateTime::parse_from_rfc3339(&v).ok().map(|dt| dt.with_timezone(&Utc)))
+            s.and_then(|v| {
+                DateTime::parse_from_rfc3339(&v)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            })
         };
 
         Ok(MemoryStateRecord {
@@ -150,20 +166,28 @@ impl Storage {
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
             access_count: row.get("access_count").unwrap_or(1),
-            state_entered_at: DateTime::parse_from_rfc3339(&row.get::<_, String>("state_entered_at")?)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now()),
+            state_entered_at: DateTime::parse_from_rfc3339(
+                &row.get::<_, String>("state_entered_at")?,
+            )
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
             suppression_until: parse_opt_dt(row.get("suppression_until").ok().flatten()),
             suppressed_by,
         })
     }
 
     /// Get state transitions for a memory
-    pub fn get_state_transitions(&self, memory_id: &str, limit: i32) -> Result<Vec<StateTransitionRecord>> {
-        let reader = self.reader.lock()
+    pub fn get_state_transitions(
+        &self,
+        memory_id: &str,
+        limit: i32,
+    ) -> Result<Vec<StateTransitionRecord>> {
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
-            "SELECT * FROM state_transitions WHERE memory_id = ?1 ORDER BY timestamp DESC LIMIT ?2"
+            "SELECT * FROM state_transitions WHERE memory_id = ?1 ORDER BY timestamp DESC LIMIT ?2",
         )?;
 
         let rows = stmt.query_map(params![memory_id, limit], |row| {
@@ -189,11 +213,12 @@ impl Storage {
 
     /// Get recent state transitions across all memories (system-wide changelog)
     pub fn get_recent_state_transitions(&self, limit: i32) -> Result<Vec<StateTransitionRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT * FROM state_transitions ORDER BY timestamp DESC LIMIT ?1"
-        )?;
+        let mut stmt =
+            reader.prepare("SELECT * FROM state_transitions ORDER BY timestamp DESC LIMIT ?1")?;
 
         let rows = stmt.query_map(params![limit], |row| {
             Ok(StateTransitionRecord {

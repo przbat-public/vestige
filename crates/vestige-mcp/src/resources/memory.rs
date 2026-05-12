@@ -35,22 +35,26 @@ pub async fn read(storage: &Arc<Storage>, uri: &str) -> Result<String, String> {
 fn parse_query_param(query: Option<&str>, key: &str, default: i32) -> i32 {
     query
         .and_then(|q| {
-            q.split('&')
-                .find_map(|pair| {
-                    let (k, v) = pair.split_once('=')?;
-                    if k == key {
-                        v.parse().ok()
-                    } else {
-                        None
-                    }
-                })
+            q.split('&').find_map(|pair| {
+                let (k, v) = pair.split_once('=')?;
+                if k == key { v.parse().ok() } else { None }
+            })
         })
         .unwrap_or(default)
         .clamp(1, 100)
 }
 
 async fn read_stats(storage: &Arc<Storage>) -> Result<String, String> {
-    let stats = storage.get_stats().map_err(|e| e.to_string())?;
+    let storage_stats = storage.clone();
+    let storage_ready = storage.clone();
+    let (stats, embedding_service_ready) = tokio::task::spawn_blocking(move || {
+        let stats = storage_stats.get_stats();
+        let ready = storage_ready.is_embedding_ready();
+        (stats, ready)
+    })
+    .await
+    .map_err(|e| format!("read_stats task panicked: {}", e))?;
+    let stats = stats.map_err(|e| e.to_string())?;
 
     let embedding_coverage = if stats.total_nodes > 0 {
         (stats.nodes_with_embeddings as f64 / stats.total_nodes as f64) * 100.0
@@ -80,14 +84,18 @@ async fn read_stats(storage: &Arc<Storage>) -> Result<String, String> {
         "nodesWithEmbeddings": stats.nodes_with_embeddings,
         "embeddingCoverage": format!("{:.1}%", embedding_coverage),
         "embeddingModel": stats.embedding_model,
-        "embeddingServiceReady": storage.is_embedding_ready(),
+        "embeddingServiceReady": embedding_service_ready,
     });
 
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
 }
 
 async fn read_recent(storage: &Arc<Storage>, limit: i32) -> Result<String, String> {
-    let nodes = storage.get_all_nodes(limit, 0).map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let nodes = tokio::task::spawn_blocking(move || storage_clone.get_all_nodes(limit, 0))
+        .await
+        .map_err(|e| format!("get_all_nodes task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
 
     let items: Vec<serde_json::Value> = nodes
         .iter()
@@ -117,7 +125,11 @@ async fn read_recent(storage: &Arc<Storage>, limit: i32) -> Result<String, Strin
 
 async fn read_decaying(storage: &Arc<Storage>) -> Result<String, String> {
     // Get nodes with low retention (below 0.5)
-    let all_nodes = storage.get_all_nodes(100, 0).map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let all_nodes = tokio::task::spawn_blocking(move || storage_clone.get_all_nodes(100, 0))
+        .await
+        .map_err(|e| format!("get_all_nodes task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
 
     let mut decaying: Vec<_> = all_nodes
         .into_iter()
@@ -172,7 +184,11 @@ async fn read_decaying(storage: &Arc<Storage>) -> Result<String, String> {
 }
 
 async fn read_due(storage: &Arc<Storage>) -> Result<String, String> {
-    let nodes = storage.get_review_queue(20).map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let nodes = tokio::task::spawn_blocking(move || storage_clone.get_review_queue(20))
+        .await
+        .map_err(|e| format!("get_review_queue task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
 
     let items: Vec<serde_json::Value> = nodes
         .iter()
@@ -203,7 +219,11 @@ async fn read_due(storage: &Arc<Storage>) -> Result<String, String> {
 }
 
 async fn read_intentions(storage: &Arc<Storage>) -> Result<String, String> {
-    let intentions = storage.get_active_intentions().map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let intentions = tokio::task::spawn_blocking(move || storage_clone.get_active_intentions())
+        .await
+        .map_err(|e| format!("get_active_intentions task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
     let now = chrono::Utc::now();
 
     let items: Vec<serde_json::Value> = intentions
@@ -228,7 +248,10 @@ async fn read_intentions(storage: &Arc<Storage>) -> Result<String, String> {
         })
         .collect();
 
-    let overdue_count = items.iter().filter(|i| i["isOverdue"].as_bool().unwrap_or(false)).count();
+    let overdue_count = items
+        .iter()
+        .filter(|i| i["isOverdue"].as_bool().unwrap_or(false))
+        .count();
 
     let result = serde_json::json!({
         "total": intentions.len(),
@@ -241,7 +264,11 @@ async fn read_intentions(storage: &Arc<Storage>) -> Result<String, String> {
 }
 
 async fn read_triggered_intentions(storage: &Arc<Storage>) -> Result<String, String> {
-    let overdue = storage.get_overdue_intentions().map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let overdue = tokio::task::spawn_blocking(move || storage_clone.get_overdue_intentions())
+        .await
+        .map_err(|e| format!("get_overdue_intentions task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
     let now = chrono::Utc::now();
 
     let items: Vec<serde_json::Value> = overdue
@@ -286,10 +313,17 @@ async fn read_triggered_intentions(storage: &Arc<Storage>) -> Result<String, Str
 }
 
 async fn read_insights(storage: &Arc<Storage>) -> Result<String, String> {
-    let insights = storage.get_insights(50).map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let insights = tokio::task::spawn_blocking(move || storage_clone.get_insights(50))
+        .await
+        .map_err(|e| format!("get_insights task panicked: {}", e))?
+        .map_err(|e| e.to_string())?;
 
     let pending: Vec<_> = insights.iter().filter(|i| i.feedback.is_none()).collect();
-    let accepted: Vec<_> = insights.iter().filter(|i| i.feedback.as_deref() == Some("accepted")).collect();
+    let accepted: Vec<_> = insights
+        .iter()
+        .filter(|i| i.feedback.as_deref() == Some("accepted"))
+        .collect();
 
     let items: Vec<serde_json::Value> = insights
         .iter()
@@ -319,8 +353,16 @@ async fn read_insights(storage: &Arc<Storage>) -> Result<String, String> {
 }
 
 async fn read_consolidation_log(storage: &Arc<Storage>) -> Result<String, String> {
-    let history = storage.get_consolidation_history(20).map_err(|e| e.to_string())?;
-    let last_run = storage.get_last_consolidation().map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let (history_res, last_res) = tokio::task::spawn_blocking(move || {
+        let history = storage_clone.get_consolidation_history(20);
+        let last = storage_clone.get_last_consolidation();
+        (history, last)
+    })
+    .await
+    .map_err(|e| format!("consolidation log task panicked: {}", e))?;
+    let history = history_res.map_err(|e| e.to_string())?;
+    let last_run = last_res.map_err(|e| e.to_string())?;
 
     let items: Vec<serde_json::Value> = history
         .iter()

@@ -106,16 +106,17 @@ struct SearchArgs {
     retrieval_mode: Option<String>,
 }
 
-/// Execute unified search with 7-stage cognitive pipeline.
+/// Execute unified search with 8-stage cognitive pipeline.
 ///
-/// Pipeline:
+/// Pipeline (matches `ARCHITECTURE.md` ordering):
+///   0. Decompose compound queries (semicolons, conjunctions, question chains) and merge results
 ///   1. Hybrid search (keyword + semantic + RRF) with 3x over-fetch
-///   2. Reranker (BM25-like rescoring, trim to limit)
+///   2. Reranker (Jina Reranker v2 cross-encoder, trim to limit)
 ///   3. Temporal boosting (recency + validity windows)
 ///   4. Memory state accessibility filtering (Active/Dormant/Silent/Unavailable)
-///   5. Context matching (topic overlap boosting)
-///   6. Spreading activation (find associated memories)
-///   7. Side effects: predictive memory recording + reconsolidation labile marking
+///   5. Context matching (Tulving 1973 encoding specificity, topic overlap)
+///   6. Retrieval competition (Anderson 1994 retrieval-induced forgetting)
+///   7. Spreading activation + predictive memory recording + reconsolidation labile marking
 ///
 /// Also applies Testing Effect (Roediger & Karpicke 2006) by auto-strengthening on access.
 pub async fn execute(
@@ -215,14 +216,17 @@ pub async fn execute(
         }
 
         // Merge: union, dedup by node_id, keep max combined_score
-        let mut best: std::collections::HashMap<String, vestige_core::SearchResult> = std::collections::HashMap::new();
+        let mut best: std::collections::HashMap<String, vestige_core::SearchResult> =
+            std::collections::HashMap::new();
         for batch in all_results {
             for r in batch {
                 let id = r.node.id.clone();
                 let score = r.combined_score;
                 match best.get(&id) {
                     Some(existing) if existing.combined_score >= score => {}
-                    _ => { best.insert(id, r); }
+                    _ => {
+                        best.insert(id, r);
+                    }
                 }
             }
         }
@@ -238,7 +242,12 @@ pub async fn execute(
         let storage_clone = Arc::clone(storage);
         let query_clone = args.query.clone();
         tokio::task::spawn_blocking(move || {
-            storage_clone.hybrid_search(&query_clone, overfetch_limit, keyword_weight, semantic_weight)
+            storage_clone.hybrid_search(
+                &query_clone,
+                overfetch_limit,
+                keyword_weight,
+                semantic_weight,
+            )
         })
         .await
         .map_err(|e| format!("Search task panicked: {}", e))?
@@ -250,7 +259,12 @@ pub async fn execute(
         let storage_clone = Arc::clone(storage);
         let query_clone = args.query.clone();
         tokio::task::spawn_blocking(move || {
-            storage_clone.hybrid_search(&query_clone, overfetch_limit, keyword_weight, semantic_weight)
+            storage_clone.hybrid_search(
+                &query_clone,
+                overfetch_limit,
+                keyword_weight,
+                semantic_weight,
+            )
         })
         .await
         .map_err(|e| format!("Search task panicked: {}", e))?
@@ -264,9 +278,10 @@ pub async fn execute(
         .filter(|r| {
             // Exclude superseded memories (Graphiti temporal invalidation)
             if let Some(valid_until) = r.node.valid_until
-                && valid_until < now {
-                    return false;
-                }
+                && valid_until < now
+            {
+                return false;
+            }
             if r.node.retention_strength < min_retention {
                 return false;
             }
@@ -288,7 +303,10 @@ pub async fn execute(
             .map(|r| (r.clone(), r.node.content.clone()))
             .collect();
 
-        if let Ok(reranked) = cog.reranker.rerank(&args.query, candidates, Some(limit as usize)) {
+        if let Ok(reranked) = cog
+            .reranker
+            .rerank(&args.query, candidates, Some(limit as usize))
+        {
             // Replace filtered_results with reranked items (preserves original SearchResult)
             filtered_results = reranked.into_iter().map(|rr| rr.item).collect();
         } else {
@@ -311,10 +329,18 @@ pub async fn execute(
     if filtered_results.len() > 1 {
         let mut keep = vec![true; filtered_results.len()];
         for i in 0..filtered_results.len() {
-            if !keep[i] { continue; }
+            if !keep[i] {
+                continue;
+            }
             for j in (i + 1)..filtered_results.len() {
-                if !keep[j] { continue; }
-                if content_overlap(&filtered_results[i].node.content, &filtered_results[j].node.content) > 0.85 {
+                if !keep[j] {
+                    continue;
+                }
+                if content_overlap(
+                    &filtered_results[i].node.content,
+                    &filtered_results[j].node.content,
+                ) > 0.85
+                {
                     keep[j] = false;
                 }
             }
@@ -342,8 +368,8 @@ pub async fn execute(
             );
             // Blend: 85% relevance + 15% temporal signal
             let temporal_factor = recency * validity;
-            result.combined_score =
-                result.combined_score * 0.85 + (result.combined_score * temporal_factor as f32) * 0.15;
+            result.combined_score = result.combined_score * 0.85
+                + (result.combined_score * temporal_factor as f32) * 0.15;
         }
     }
 
@@ -361,15 +387,29 @@ pub async fn execute(
                 let score_i = filtered_results[i].combined_score;
                 let score_j = filtered_results[j].combined_score;
                 let max_score = score_i.max(score_j);
-                if max_score <= 0.0 { continue; }
+                if max_score <= 0.0 {
+                    continue;
+                }
 
                 let score_gap = (score_i - score_j).abs() / max_score;
-                if score_gap > 0.15 { continue; }
+                if score_gap > 0.15 {
+                    continue;
+                }
 
-                let tag_overlap = tag_jaccard(&filtered_results[i].node.tags, &filtered_results[j].node.tags);
-                if tag_overlap < 0.5 { continue; }
+                let tag_overlap = tag_jaccard(
+                    &filtered_results[i].node.tags,
+                    &filtered_results[j].node.tags,
+                );
+                if tag_overlap < 0.5 {
+                    continue;
+                }
 
-                let newer_idx = if filtered_results[i].node.created_at > filtered_results[j].node.created_at { i } else { j };
+                let newer_idx =
+                    if filtered_results[i].node.created_at > filtered_results[j].node.created_at {
+                        i
+                    } else {
+                        j
+                    };
                 filtered_results[newer_idx].combined_score *= 1.0 + (tag_overlap as f32 * 0.10);
             }
         }
@@ -408,14 +448,16 @@ pub async fn execute(
     if let Some(ref topics) = args.context_topics
         && !topics.is_empty()
     {
-        let retrieval_ctx = EncodingContext::new()
-            .with_topical(TopicalContext::with_topics(topics.clone()));
+        let retrieval_ctx =
+            EncodingContext::new().with_topical(TopicalContext::with_topics(topics.clone()));
         if let Ok(cog) = cognitive.try_lock() {
             for result in &mut filtered_results {
                 // Build encoding context from memory's tags
                 let encoding_ctx = EncodingContext::new()
                     .with_topical(TopicalContext::with_topics(result.node.tags.clone()));
-                let context_score = cog.context_matcher.match_contexts(&encoding_ctx, &retrieval_ctx);
+                let context_score = cog
+                    .context_matcher
+                    .match_contexts(&encoding_ctx, &retrieval_ctx);
                 // Blend: context match boosts relevance up to +30%
                 result.combined_score *= 1.0 + (context_score as f32 * 0.3);
             }
@@ -430,7 +472,9 @@ pub async fn execute(
             } else {
                 EncodingContext::new()
             };
-            let reinstatement = cog.context_matcher.reinstate_context(&first.node.id, &current_ctx);
+            let reinstatement = cog
+                .context_matcher
+                .reinstate_context(&first.node.id, &current_ctx);
             Some(serde_json::json!({
                 "memoryId": reinstatement.memory_id,
                 "temporalHint": reinstatement.temporal_hint,
@@ -450,32 +494,44 @@ pub async fn execute(
     // Skipped in precise mode (no need) and exhaustive mode (want all results)
     // ====================================================================
     let mut suppressed_count = 0_usize;
-    if retrieval_mode == "balanced"
-        && filtered_results.len() > 1
-        && let Ok(mut cog) = cognitive.try_lock()
-    {
-        let candidates: Vec<CompetitionCandidate> = filtered_results
-            .iter()
-            .map(|r| {
-                #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-                let embedding = storage.get_node_embedding(&r.node.id).ok().flatten();
-                #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
-                let embedding = None;
+    if retrieval_mode == "balanced" && filtered_results.len() > 1 {
+        // Pre-fetch all embeddings on the blocking pool, then run the
+        // competition under the cognitive lock without further SQL.
+        #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+        let embeddings: Vec<Option<Vec<f32>>> = {
+            let storage_emb = storage.clone();
+            let ids: Vec<String> = filtered_results.iter().map(|r| r.node.id.clone()).collect();
+            tokio::task::spawn_blocking(move || {
+                ids.into_iter()
+                    .map(|id| storage_emb.get_node_embedding(&id).ok().flatten())
+                    .collect()
+            })
+            .await
+            .map_err(|e| format!("search_unified embedding task panicked: {}", e))?
+        };
+        #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
+        let embeddings: Vec<Option<Vec<f32>>> = vec![None; filtered_results.len()];
 
-                CompetitionCandidate {
+        if let Ok(mut cog) = cognitive.try_lock() {
+            let candidates: Vec<CompetitionCandidate> = filtered_results
+                .iter()
+                .zip(embeddings.into_iter())
+                .map(|(r, embedding)| CompetitionCandidate {
                     memory_id: r.node.id.clone(),
                     relevance_score: r.combined_score as f64,
                     similarity_to_query: r.semantic_score.unwrap_or(0.0) as f64,
                     embedding,
-                }
-            })
-            .collect();
-        if let Some(result) = cog.competition_mgr.run_competition(&candidates, 0.7) {
-            // Apply suppression: losers get penalized
-            for suppressed_id in &result.suppressed_ids {
-                if let Some(r) = filtered_results.iter_mut().find(|r| &r.node.id == suppressed_id) {
-                    r.combined_score *= 0.85; // 15% suppression penalty
-                    suppressed_count += 1;
+                })
+                .collect();
+            if let Some(result) = cog.competition_mgr.run_competition(&candidates, 0.7) {
+                for suppressed_id in &result.suppressed_ids {
+                    if let Some(r) = filtered_results
+                        .iter_mut()
+                        .find(|r| &r.node.id == suppressed_id)
+                    {
+                        r.combined_score *= 0.85;
+                        suppressed_count += 1;
+                    }
                 }
             }
         }
@@ -537,7 +593,8 @@ pub async fn execute(
                 result.combined_score *= 1.05;
             }
             vestige_core::MemorySystem::Episodic => {
-                let age_days = (chrono::Utc::now() - result.node.created_at).num_hours() as f32 / 24.0;
+                let age_days =
+                    (chrono::Utc::now() - result.node.created_at).num_hours() as f32 / 24.0;
                 if age_days < 7.0 {
                     result.combined_score *= 1.0 + (1.0 - age_days / 7.0) * 0.10;
                 }
@@ -570,21 +627,45 @@ pub async fn execute(
     // ====================================================================
     {
         let result_ids: Vec<String> = filtered_results.iter().map(|r| r.node.id.clone()).collect();
-        let mut penalties: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+        // Fetch all connection rows in one blocking hop.
+        let storage_pi = storage.clone();
+        let ids_for_task = result_ids.clone();
+        let connections_per_id: Vec<Vec<vestige_core::ConnectionRecord>> =
+            tokio::task::spawn_blocking(move || {
+                ids_for_task
+                    .into_iter()
+                    .map(|id| {
+                        storage_pi
+                            .get_connections_for_memory(&id)
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            })
+            .await
+            .map_err(|e| format!("search_unified contradiction task panicked: {}", e))?;
 
-        for id in &result_ids {
-            if let Ok(connections) = storage.get_connections_for_memory(id) {
-                for conn in &connections {
-                    if conn.link_type == "contradiction" {
-                        let other = if conn.source_id == *id { &conn.target_id } else { &conn.source_id };
-                        if result_ids.contains(other) {
-                            // Find which is older and penalize it
-                            let id_time = filtered_results.iter().find(|r| r.node.id == *id).map(|r| r.node.created_at);
-                            let other_time = filtered_results.iter().find(|r| r.node.id == *other).map(|r| r.node.created_at);
-                            if let (Some(t1), Some(t2)) = (id_time, other_time) {
-                                let older = if t1 < t2 { id } else { other };
-                                penalties.entry(older.clone()).or_insert(0.20);
-                            }
+        let mut penalties: std::collections::HashMap<String, f32> =
+            std::collections::HashMap::new();
+        for (id, connections) in result_ids.iter().zip(connections_per_id.into_iter()) {
+            for conn in &connections {
+                if conn.link_type == "contradiction" {
+                    let other = if conn.source_id == *id {
+                        &conn.target_id
+                    } else {
+                        &conn.source_id
+                    };
+                    if result_ids.contains(other) {
+                        let id_time = filtered_results
+                            .iter()
+                            .find(|r| r.node.id == *id)
+                            .map(|r| r.node.created_at);
+                        let other_time = filtered_results
+                            .iter()
+                            .find(|r| r.node.id == *other)
+                            .map(|r| r.node.created_at);
+                        if let (Some(t1), Some(t2)) = (id_time, other_time) {
+                            let older = if t1 < t2 { id } else { other };
+                            penalties.entry(older.clone()).or_insert(0.20);
                         }
                     }
                 }
@@ -618,10 +699,11 @@ pub async fn execute(
     let pre_prune_count = filtered_results.len();
     if filtered_results.len() >= 3
         && let Some(top_score) = filtered_results.first().map(|r| r.combined_score)
-            && top_score > 0.0 {
-                let threshold = top_score * 0.30;
-                filtered_results.retain(|r| r.combined_score >= threshold);
-            }
+        && top_score > 0.0
+    {
+        let threshold = top_score * 0.30;
+        filtered_results.retain(|r| r.combined_score >= threshold);
+    }
     let prune_removed = pre_prune_count - filtered_results.len();
 
     // ====================================================================
@@ -689,11 +771,26 @@ pub async fn execute(
     // ====================================================================
     // STAGE 7: Side effects — predictive memory + reconsolidation
     // ====================================================================
+    // Persist record_memory_access for every result on the blocking pool
+    // first; the cognitive side-effects then run lock-bound with no SQL.
+    {
+        let storage_access = storage.clone();
+        let access_ids: Vec<String> = filtered_results.iter().map(|r| r.node.id.clone()).collect();
+        let _ = tokio::task::spawn_blocking(move || {
+            for id in &access_ids {
+                if let Err(e) = storage_access.record_memory_access(id) {
+                    tracing::debug!(error = %e, memory_id = %id, "Failed to record memory access");
+                }
+            }
+        })
+        .await;
+    }
+
     if let Ok(mut cog) = cognitive.try_lock() {
         // 7A. Record query for predictive memory
         let _ = cog.predictive_memory.record_query(&args.query, &[]);
 
-        // 7B. Record each accessed memory for predictive/speculative models + persistent state
+        // 7B. Record each accessed memory for predictive/speculative models
         for result in &filtered_results {
             let _ = cog.predictive_memory.record_memory_access(
                 &result.node.id,
@@ -701,15 +798,11 @@ pub async fn execute(
                 &result.node.tags,
             );
 
-            if let Err(e) = storage.record_memory_access(&result.node.id) {
-                tracing::debug!(error = %e, memory_id = %result.node.id, "Failed to record memory access");
-            }
-
             cog.speculative_retriever.record_access(
                 &result.node.id,
-                None,                           // file_context
-                Some(args.query.as_str()),       // query_context
-                None,                            // was_helpful (unknown yet)
+                None,                      // file_context
+                Some(args.query.as_str()), // query_context
+                None,                      // was_helpful (unknown yet)
             );
 
             // 7C. Mark labile for reconsolidation window (5 min)
@@ -752,11 +845,12 @@ pub async fn execute(
         let budget = budget.clamp(100, max_budget) as usize;
         let budget_chars = budget * 4;
 
-        let total_size: usize = formatted.iter()
+        let total_size: usize = formatted
+            .iter()
             .map(|r| serde_json::to_string(r).unwrap_or_default().len())
             .sum();
 
-        // Tier 2: compress content if over budget
+        // Step 2: compress content if over budget
         if total_size > budget_chars && detail_level != "brief" {
             let ratio = budget_chars as f64 / total_size as f64;
             for result in &mut formatted {
@@ -767,7 +861,7 @@ pub async fn execute(
             }
         }
 
-        // Tier 3: drop results that still don't fit
+        // Step 3: drop results that still don't fit
         let mut used = 0;
         let mut budgeted = Vec::new();
         for result in &formatted {
@@ -787,7 +881,11 @@ pub async fn execute(
     }
 
     // Check learning mode via attention signal
-    let learning_mode = cognitive.try_lock().ok().map(|cog| cog.attention_signal.is_learning_mode()).unwrap_or(false);
+    let learning_mode = cognitive
+        .try_lock()
+        .ok()
+        .map(|cog| cog.attention_signal.is_learning_mode())
+        .unwrap_or(false);
 
     let mut response = serde_json::json!({
         "query": args.query,
@@ -799,7 +897,9 @@ pub async fn execute(
     });
 
     if formatted.is_empty() {
-        response["hint"] = serde_json::json!("No memories found. Use smart_ingest to add memories, or try a broader query.");
+        response["hint"] = serde_json::json!(
+            "No memories found. Use smart_ingest to add memories, or try a broader query."
+        );
     }
     // Include associations if any were found
     if !associations.is_empty() {
@@ -842,12 +942,15 @@ pub async fn execute(
         let avg_conf = if filtered_results.is_empty() {
             0.0
         } else {
-            filtered_results.iter()
+            filtered_results
+                .iter()
                 .map(|r| r.node.confidence().point)
-                .sum::<f64>() / filtered_results.len() as f64
+                .sum::<f64>()
+                / filtered_results.len() as f64
         };
         let topic = args.query.split_whitespace().next().unwrap_or("unknown");
-        cog.metacognition.record_search(filtered_results.len(), avg_conf, topic);
+        cog.metacognition
+            .record_search(filtered_results.len(), avg_conf, topic);
 
         let report = cog.metacognition.report();
         if report.total_queries_tracked >= 5 {
@@ -858,7 +961,11 @@ pub async fn execute(
             });
             if !report.knowledge_gaps.is_empty() {
                 response["knowledgeGaps"] = serde_json::json!(
-                    report.knowledge_gaps.iter().map(|g| &g.topic).collect::<Vec<_>>()
+                    report
+                        .knowledge_gaps
+                        .iter()
+                        .map(|g| &g.topic)
+                        .collect::<Vec<_>>()
                 );
             }
         }
@@ -974,11 +1081,44 @@ pub fn format_node(node: &vestige_core::KnowledgeNode, detail_level: &str) -> Va
 
 /// Greetings, acknowledgments, and social phrases that never need memory retrieval.
 const TRIVIAL_PHRASES: &[&str] = &[
-    "hi", "hello", "hey", "thanks", "thank you", "ok", "okay", "sure",
-    "yes", "no", "bye", "goodbye", "got it", "right", "cool", "nice",
-    "please", "welcome", "cheers", "np", "ty", "thx", "ack", "roger",
-    "dzieki", "dzięki", "hej", "cześć", "tak", "nie", "dobra", "spoko",
-    "siema", "nara", "ok ok", "oki", "jasne", "luzik",
+    "hi",
+    "hello",
+    "hey",
+    "thanks",
+    "thank you",
+    "ok",
+    "okay",
+    "sure",
+    "yes",
+    "no",
+    "bye",
+    "goodbye",
+    "got it",
+    "right",
+    "cool",
+    "nice",
+    "please",
+    "welcome",
+    "cheers",
+    "np",
+    "ty",
+    "thx",
+    "ack",
+    "roger",
+    "dzieki",
+    "dzięki",
+    "hej",
+    "cześć",
+    "tak",
+    "nie",
+    "dobra",
+    "spoko",
+    "siema",
+    "nara",
+    "ok ok",
+    "oki",
+    "jasne",
+    "luzik",
 ];
 
 /// Compress content to fit within a token budget ratio.
@@ -997,20 +1137,41 @@ fn compress_content(content: &str, ratio: f64) -> String {
     }
 
     let target_count = ((sentences.len() as f64 * ratio).ceil() as usize).max(2);
-    let priority_markers = ["BUG", "DECISION", "because", "root cause", "solution", "fix",
-                            "important", "note", "warning", "error", "pattern"];
+    let priority_markers = [
+        "BUG",
+        "DECISION",
+        "because",
+        "root cause",
+        "solution",
+        "fix",
+        "important",
+        "note",
+        "warning",
+        "error",
+        "pattern",
+    ];
 
-    let mut scored: Vec<(usize, f64)> = sentences.iter().enumerate().map(|(i, s)| {
-        let mut score = 0.0_f64;
-        if i == 0 { score += 2.0; }
-        if i == sentences.len() - 1 { score += 1.5; }
-        let lower = s.to_lowercase();
-        for marker in &priority_markers {
-            if lower.contains(marker) { score += 1.0; }
-        }
-        score += s.len() as f64 / 200.0;
-        (i, score)
-    }).collect();
+    let mut scored: Vec<(usize, f64)> = sentences
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let mut score = 0.0_f64;
+            if i == 0 {
+                score += 2.0;
+            }
+            if i == sentences.len() - 1 {
+                score += 1.5;
+            }
+            let lower = s.to_lowercase();
+            for marker in &priority_markers {
+                if lower.contains(marker) {
+                    score += 1.0;
+                }
+            }
+            score += s.len() as f64 / 200.0;
+            (i, score)
+        })
+        .collect();
 
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let mut selected: Vec<usize> = scored.iter().take(target_count).map(|s| s.0).collect();
@@ -1019,7 +1180,12 @@ fn compress_content(content: &str, ratio: f64) -> String {
     let compressed: Vec<&str> = selected.iter().map(|&i| sentences[i]).collect();
     let result = compressed.join(". ");
     if sentences.len() > target_count {
-        format!("{}. [{} of {} segments]", result, target_count, sentences.len())
+        format!(
+            "{}. [{} of {} segments]",
+            result,
+            target_count,
+            sentences.len()
+        )
     } else {
         result
     }
@@ -1028,11 +1194,13 @@ fn compress_content(content: &str, ratio: f64) -> String {
 /// Word-level Jaccard overlap between two content strings.
 /// Returns 0.0 (no overlap) to 1.0 (identical word sets).
 fn content_overlap(a: &str, b: &str) -> f64 {
-    let words_a: std::collections::HashSet<&str> = a.split_whitespace()
+    let words_a: std::collections::HashSet<&str> = a
+        .split_whitespace()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .filter(|w| w.len() > 2)
         .collect();
-    let words_b: std::collections::HashSet<&str> = b.split_whitespace()
+    let words_b: std::collections::HashSet<&str> = b
+        .split_whitespace()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .filter(|w| w.len() > 2)
         .collect();
@@ -1393,10 +1561,12 @@ mod tests {
         let schema_value = schema();
         assert_eq!(schema_value["type"], "object");
         assert!(schema_value["properties"]["query"].is_object());
-        assert!(schema_value["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("query")));
+        assert!(
+            schema_value["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("query"))
+        );
     }
 
     #[test]
@@ -1553,7 +1723,10 @@ mod tests {
         for i in 0..10 {
             ingest_test_content(
                 &storage,
-                &format!("Budget test content number {} with some extra text to increase size.", i),
+                &format!(
+                    "Budget test content number {} with some extra text to increase size.",
+                    i
+                ),
             )
             .await;
         }

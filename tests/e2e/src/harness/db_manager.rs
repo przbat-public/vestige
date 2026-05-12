@@ -6,9 +6,9 @@
 //! - Database snapshots and restoration
 //! - Concurrent test isolation
 
-use vestige_core::{KnowledgeNode, Rating, Storage};
 use std::path::PathBuf;
 use tempfile::TempDir;
+use vestige_core::{KnowledgeNode, Rating, Storage};
 
 /// Helper to create IngestInput (works around non_exhaustive)
 #[allow(clippy::too_many_arguments)]
@@ -109,10 +109,7 @@ impl TestDatabaseManager {
 
     /// Get the number of nodes in the database
     pub fn node_count(&self) -> i64 {
-        self.storage
-            .get_stats()
-            .map(|s| s.total_nodes)
-            .unwrap_or(0)
+        self.storage.get_stats().map(|s| s.total_nodes).unwrap_or(0)
     }
 
     // ========================================================================
@@ -259,10 +256,7 @@ impl TestDatabaseManager {
 
     /// Take a snapshot of current database state
     pub fn take_snapshot(&mut self) {
-        let nodes = self
-            .storage
-            .get_all_nodes(10000, 0)
-            .unwrap_or_default();
+        let nodes = self.storage.get_all_nodes(10000, 0).unwrap_or_default();
         self.snapshot = Some(nodes);
     }
 
@@ -324,8 +318,8 @@ impl TestDatabaseManager {
         let _ = std::fs::remove_file(&self.db_path);
 
         // Recreate storage
-        self.storage = Storage::new(Some(self.db_path.clone()))
-            .expect("Failed to recreate storage");
+        self.storage =
+            Storage::new(Some(self.db_path.clone())).expect("Failed to recreate storage");
     }
 }
 

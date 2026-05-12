@@ -8,7 +8,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
 
-
 use vestige_core::{IngestInput, Storage};
 
 /// Input schema for restore tool
@@ -52,10 +51,7 @@ struct MemoryBackup {
     source: Option<String>,
 }
 
-pub async fn execute(
-    storage: &Arc<Storage>,
-    args: Option<Value>,
-) -> Result<Value, String> {
+pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
     let args: RestoreArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => return Err("Missing arguments".to_string()),
@@ -87,9 +83,9 @@ pub async fn execute(
             nodes
         } else {
             return Err(
-                "Unrecognized backup format. Expected MCP wrapper, RecallResult, or array of memories."
-                    .to_string(),
-            );
+            "Unrecognized backup format. Expected MCP wrapper, RecallResult, or array of memories."
+                .to_string(),
+        );
         };
 
     let total = memories.len();
@@ -103,28 +99,39 @@ pub async fn execute(
         }));
     }
 
-    let mut success_count = 0_usize;
-    let mut error_count = 0_usize;
-
-    for memory in &memories {
-        let input = IngestInput {
-            content: memory.content.clone(),
-            node_type: memory.node_type.clone().unwrap_or_else(|| "fact".to_string()),
-            source: memory.source.clone(),
-            sentiment_score: 0.0,
-            sentiment_magnitude: 0.0,
-            tags: memory.tags.clone().unwrap_or_default(),
-            valid_from: None,
-            valid_until: None,
-            provenance: None,
-            ..Default::default()
-        };
-
-        match storage.ingest(input) {
-            Ok(_) => success_count += 1,
-            Err(_) => error_count += 1,
+    // Restore is essentially an iterated INSERT — run the whole loop on
+    // the blocking pool so the async runtime stays responsive even when
+    // the backup contains tens of thousands of memories.
+    let storage_clone = storage.clone();
+    let memories_for_task = memories;
+    let (success_count, error_count) = tokio::task::spawn_blocking(move || {
+        let mut ok = 0_usize;
+        let mut err = 0_usize;
+        for memory in &memories_for_task {
+            let input = IngestInput {
+                content: memory.content.clone(),
+                node_type: memory
+                    .node_type
+                    .clone()
+                    .unwrap_or_else(|| "fact".to_string()),
+                source: memory.source.clone(),
+                sentiment_score: 0.0,
+                sentiment_magnitude: 0.0,
+                tags: memory.tags.clone().unwrap_or_default(),
+                valid_from: None,
+                valid_until: None,
+                provenance: None,
+                ..Default::default()
+            };
+            match storage_clone.ingest(input) {
+                Ok(_) => ok += 1,
+                Err(_) => err += 1,
+            }
         }
-    }
+        (ok, err)
+    })
+    .await
+    .map_err(|e| format!("restore task panicked: {}", e))?;
 
     Ok(serde_json::json!({
         "tool": "restore",
@@ -160,10 +167,12 @@ mod tests {
         let s = schema();
         assert_eq!(s["type"], "object");
         assert!(s["properties"]["path"].is_object());
-        assert!(s["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("path")));
+        assert!(
+            s["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("path"))
+        );
     }
 
     #[tokio::test]

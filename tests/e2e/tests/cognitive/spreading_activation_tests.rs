@@ -5,10 +5,10 @@
 //!
 //! Based on Collins & Loftus (1975) spreading activation theory.
 
+use std::collections::HashSet;
 use vestige_core::neuroscience::spreading_activation::{
     ActivationConfig, ActivationNetwork, LinkType,
 };
-use std::collections::HashSet;
 
 // ============================================================================
 // MULTI-HOP ASSOCIATION TESTS (6 tests)
@@ -41,9 +41,7 @@ fn test_spreading_finds_hidden_chains() {
     let results = network.activate("rust_async", 1.0);
 
     // Should find "green_threads" through the chain
-    let found_green_threads = results
-        .iter()
-        .any(|r| r.memory_id == "green_threads");
+    let found_green_threads = results.iter().any(|r| r.memory_id == "green_threads");
 
     assert!(
         found_green_threads,
@@ -71,9 +69,24 @@ fn test_spreading_3_hop_discovery() {
     let mut network = ActivationNetwork::with_config(config);
 
     // Create a 3-hop chain: A -> B -> C -> D
-    network.add_edge("memory_a".to_string(), "memory_b".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("memory_b".to_string(), "memory_c".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("memory_c".to_string(), "memory_d".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "memory_a".to_string(),
+        "memory_b".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "memory_b".to_string(),
+        "memory_c".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "memory_c".to_string(),
+        "memory_d".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     let results = network.activate("memory_a", 1.0);
 
@@ -147,8 +160,18 @@ fn test_spreading_beats_similarity_search() {
 fn test_spreading_path_tracking() {
     let mut network = ActivationNetwork::new();
 
-    network.add_edge("start".to_string(), "middle".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("middle".to_string(), "end".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "start".to_string(),
+        "middle".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "middle".to_string(),
+        "end".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     let results = network.activate("start", 1.0);
 
@@ -167,10 +190,30 @@ fn test_spreading_convergent_activation() {
     let mut network = ActivationNetwork::new();
 
     // Create convergent paths: A -> B -> D and A -> C -> D
-    network.add_edge("source".to_string(), "path1".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("source".to_string(), "path2".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("path1".to_string(), "target".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("path2".to_string(), "target".to_string(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        "source".to_string(),
+        "path1".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "source".to_string(),
+        "path2".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "path1".to_string(),
+        "target".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "path2".to_string(),
+        "target".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     let results = network.activate("source", 1.0);
 
@@ -244,13 +287,35 @@ fn test_activation_decay_per_hop() {
 
     let results = network.activate("a", 1.0);
 
-    let b_activation = results.iter().find(|r| r.memory_id == "b").map(|r| r.activation).unwrap_or(0.0);
-    let c_activation = results.iter().find(|r| r.memory_id == "c").map(|r| r.activation).unwrap_or(0.0);
-    let d_activation = results.iter().find(|r| r.memory_id == "d").map(|r| r.activation).unwrap_or(0.0);
+    let b_activation = results
+        .iter()
+        .find(|r| r.memory_id == "b")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let c_activation = results
+        .iter()
+        .find(|r| r.memory_id == "c")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let d_activation = results
+        .iter()
+        .find(|r| r.memory_id == "d")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
 
     // Each hop should reduce activation by decay factor (0.7)
-    assert!(b_activation > c_activation, "Activation should decay: b ({}) > c ({})", b_activation, c_activation);
-    assert!(c_activation > d_activation, "Activation should decay: c ({}) > d ({})", c_activation, d_activation);
+    assert!(
+        b_activation > c_activation,
+        "Activation should decay: b ({}) > c ({})",
+        b_activation,
+        c_activation
+    );
+    assert!(
+        c_activation > d_activation,
+        "Activation should decay: c ({}) > d ({})",
+        c_activation,
+        d_activation
+    );
 
     // Verify approximate decay rate (allowing for floating point)
     let ratio_bc = c_activation / b_activation;
@@ -289,8 +354,16 @@ fn test_activation_decay_factor_configurable() {
     let high_results = high_network.activate("a", 1.0);
     let low_results = low_network.activate("a", 1.0);
 
-    let high_c = high_results.iter().find(|r| r.memory_id == "c").map(|r| r.activation).unwrap_or(0.0);
-    let low_c = low_results.iter().find(|r| r.memory_id == "c").map(|r| r.activation).unwrap_or(0.0);
+    let high_c = high_results
+        .iter()
+        .find(|r| r.memory_id == "c")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let low_c = low_results
+        .iter()
+        .find(|r| r.memory_id == "c")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
 
     assert!(
         high_c > low_c,
@@ -320,10 +393,8 @@ fn test_activation_distance_law() {
     let results = network.activate("n0", 1.0);
 
     // Collect activations by distance
-    let mut activations_by_distance: Vec<(u32, f64)> = results
-        .iter()
-        .map(|r| (r.distance, r.activation))
-        .collect();
+    let mut activations_by_distance: Vec<(u32, f64)> =
+        results.iter().map(|r| (r.distance, r.activation)).collect();
     activations_by_distance.sort_by_key(|(d, _)| *d);
 
     // Verify monotonic decrease with distance
@@ -559,9 +630,21 @@ fn test_link_type_weights() {
     let results = network.activate("event", 1.0);
 
     // Verify different activations based on edge strength
-    let semantic_act = results.iter().find(|r| r.memory_id == "semantic_link").map(|r| r.activation).unwrap_or(0.0);
-    let temporal_act = results.iter().find(|r| r.memory_id == "temporal_link").map(|r| r.activation).unwrap_or(0.0);
-    let causal_act = results.iter().find(|r| r.memory_id == "causal_link").map(|r| r.activation).unwrap_or(0.0);
+    let semantic_act = results
+        .iter()
+        .find(|r| r.memory_id == "semantic_link")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let temporal_act = results
+        .iter()
+        .find(|r| r.memory_id == "temporal_link")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
+    let causal_act = results
+        .iter()
+        .find(|r| r.memory_id == "causal_link")
+        .map(|r| r.activation)
+        .unwrap_or(0.0);
 
     // Semantic (0.9) > Causal (0.7) > Temporal (0.5)
     assert!(
@@ -617,10 +700,30 @@ fn test_network_builds_from_semantic_similarity() {
     // These would typically be built from embedding similarity
 
     // Rust async ecosystem
-    network.add_edge("async_rust".to_string(), "tokio".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("async_rust".to_string(), "async_await".to_string(), LinkType::Semantic, 0.95);
-    network.add_edge("tokio".to_string(), "runtime".to_string(), LinkType::Semantic, 0.8);
-    network.add_edge("tokio".to_string(), "spawn".to_string(), LinkType::Semantic, 0.85);
+    network.add_edge(
+        "async_rust".to_string(),
+        "tokio".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "async_rust".to_string(),
+        "async_await".to_string(),
+        LinkType::Semantic,
+        0.95,
+    );
+    network.add_edge(
+        "tokio".to_string(),
+        "runtime".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
+    network.add_edge(
+        "tokio".to_string(),
+        "spawn".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     assert_eq!(network.node_count(), 5);
     assert_eq!(network.edge_count(), 4);
@@ -642,9 +745,24 @@ fn test_network_builds_from_temporal_proximity() {
     // Events that happened close in time
 
     // Morning standup sequence
-    network.add_edge("standup".to_string(), "jira_update".to_string(), LinkType::Temporal, 0.9);
-    network.add_edge("jira_update".to_string(), "code_review".to_string(), LinkType::Temporal, 0.85);
-    network.add_edge("code_review".to_string(), "merge_pr".to_string(), LinkType::Temporal, 0.8);
+    network.add_edge(
+        "standup".to_string(),
+        "jira_update".to_string(),
+        LinkType::Temporal,
+        0.9,
+    );
+    network.add_edge(
+        "jira_update".to_string(),
+        "code_review".to_string(),
+        LinkType::Temporal,
+        0.85,
+    );
+    network.add_edge(
+        "code_review".to_string(),
+        "merge_pr".to_string(),
+        LinkType::Temporal,
+        0.8,
+    );
 
     // Verify temporal chain
     let results = network.activate("standup", 1.0);
@@ -748,6 +866,13 @@ fn test_network_batch_construction() {
     let distance_1: Vec<_> = results.iter().filter(|r| r.distance == 1).collect();
     let distance_2: Vec<_> = results.iter().filter(|r| r.distance == 2).collect();
 
-    assert_eq!(distance_1.len(), 3, "Should have 3 nodes at distance 1 (cargo, ownership, traits)");
-    assert!(distance_2.len() >= 4, "Should have at least 4 nodes at distance 2");
+    assert_eq!(
+        distance_1.len(),
+        3,
+        "Should have 3 nodes at distance 1 (cargo, ownership, traits)"
+    );
+    assert!(
+        distance_2.len() >= 4,
+        "Should have at least 4 nodes at distance 2"
+    );
 }

@@ -1,6 +1,6 @@
 # Vestige MCP Server
 
-A bleeding-edge Rust MCP (Model Context Protocol) server for Vestige - providing Claude and other AI assistants with long-term memory capabilities.
+A Rust MCP (Model Context Protocol) server for Vestige - providing Claude and other AI assistants with long-term memory capabilities.
 
 ## Features
 

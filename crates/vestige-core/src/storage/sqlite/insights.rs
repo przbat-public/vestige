@@ -12,10 +12,13 @@ use super::{InsightRecord, Result, Storage, StorageError};
 impl Storage {
     /// Save an insight to the database
     pub fn save_insight(&self, insight: &InsightRecord) -> Result<()> {
-        let source_json = serde_json::to_string(&insight.source_memories).unwrap_or_else(|_| "[]".to_string());
+        let source_json =
+            serde_json::to_string(&insight.source_memories).unwrap_or_else(|_| "[]".to_string());
         let tags_json = serde_json::to_string(&insight.tags).unwrap_or_else(|_| "[]".to_string());
 
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "INSERT OR REPLACE INTO insights (
@@ -40,11 +43,12 @@ impl Storage {
 
     /// Get insights with optional limit
     pub fn get_insights(&self, limit: i32) -> Result<Vec<InsightRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT * FROM insights ORDER BY generated_at DESC LIMIT ?1"
-        )?;
+        let mut stmt =
+            reader.prepare("SELECT * FROM insights ORDER BY generated_at DESC LIMIT ?1")?;
 
         let rows = stmt.query_map(params![limit], Self::row_to_insight)?;
         let mut result = Vec::new();
@@ -56,11 +60,12 @@ impl Storage {
 
     /// Get insights without feedback (pending review)
     pub fn get_pending_insights(&self) -> Result<Vec<InsightRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT * FROM insights WHERE feedback IS NULL ORDER BY novelty_score DESC"
-        )?;
+        let mut stmt = reader
+            .prepare("SELECT * FROM insights WHERE feedback IS NULL ORDER BY novelty_score DESC")?;
 
         let rows = stmt.query_map([], Self::row_to_insight)?;
         let mut result = Vec::new();
@@ -72,7 +77,9 @@ impl Storage {
 
     /// Mark insight feedback
     pub fn mark_insight_feedback(&self, id: &str, feedback: &str) -> Result<bool> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let rows = writer.execute(
             "UPDATE insights SET feedback = ?1 WHERE id = ?2",
@@ -83,7 +90,9 @@ impl Storage {
 
     /// Clear all insights
     pub fn clear_insights(&self) -> Result<i32> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         let count: i32 = writer.query_row("SELECT COUNT(*) FROM insights", [], |row| row.get(0))?;
         writer.execute("DELETE FROM insights", [])?;

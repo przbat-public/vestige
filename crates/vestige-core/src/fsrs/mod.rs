@@ -19,6 +19,14 @@ mod optimizer;
 mod scheduler;
 
 pub use algorithm::{
+    DEFAULT_DECAY,
+    DEFAULT_RETENTION,
+    // Constants
+    FSRS6_WEIGHTS,
+    MAX_DIFFICULTY,
+    MAX_STABILITY,
+    MIN_DIFFICULTY,
+    MIN_STABILITY,
     apply_sentiment_boost,
     fuzz_interval,
     initial_difficulty,
@@ -38,14 +46,6 @@ pub use algorithm::{
     retrievability_with_decay,
     same_day_stability,
     same_day_stability_with_weights,
-    DEFAULT_DECAY,
-    DEFAULT_RETENTION,
-    // Constants
-    FSRS6_WEIGHTS,
-    MAX_DIFFICULTY,
-    MAX_STABILITY,
-    MIN_DIFFICULTY,
-    MIN_STABILITY,
 };
 
 pub use scheduler::{

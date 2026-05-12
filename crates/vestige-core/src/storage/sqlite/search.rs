@@ -23,10 +23,10 @@ use crate::fts::sanitize_fts5_query;
 use crate::memory::{KnowledgeNode, RecallInput, SearchMode};
 #[cfg(all(feature = "embeddings", feature = "vector-search"))]
 use crate::memory::{MatchType, SearchResult, SimilarityResult};
-#[cfg(feature = "vector-search")]
-use crate::search::reciprocal_rank_fusion;
 #[cfg(all(feature = "embeddings", feature = "vector-search"))]
 use crate::search::hyde;
+#[cfg(feature = "vector-search")]
+use crate::search::reciprocal_rank_fusion;
 
 use super::{Result, Storage, StorageError};
 
@@ -72,7 +72,9 @@ impl Storage {
     ) -> Result<Vec<KnowledgeNode>> {
         let sanitized_query = sanitize_fts5_query(query);
 
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT n.* FROM knowledge_nodes n
@@ -99,7 +101,9 @@ impl Storage {
     fn get_query_embedding(&self, query: &str) -> Result<Vec<f32>> {
         // Check cache first
         {
-            let mut cache = self.query_cache.lock()
+            let mut cache = self
+                .query_cache
+                .lock()
                 .map_err(|_| StorageError::Init("Query cache lock poisoned".to_string()))?;
             if let Some(cached) = cache.get(query) {
                 return Ok(cached.clone());
@@ -107,12 +111,16 @@ impl Storage {
         }
 
         // Not in cache, compute embedding
-        let embedding = self.embedding_service.embed(query)
+        let embedding = self
+            .embedding_service
+            .embed(query)
             .map_err(|e| StorageError::Init(format!("Failed to embed query: {}", e)))?;
 
         // Store in cache
         {
-            let mut cache = self.query_cache.lock()
+            let mut cache = self
+                .query_cache
+                .lock()
                 .map_err(|_| StorageError::Init("Query cache lock poisoned".to_string()))?;
             cache.put(query.to_string(), embedding.vector.clone());
         }
@@ -180,7 +188,8 @@ impl Storage {
         };
 
         // Collect top candidate IDs and scores
-        let top_candidates: Vec<(String, f32)> = combined.into_iter().take(limit as usize).collect();
+        let top_candidates: Vec<(String, f32)> =
+            combined.into_iter().take(limit as usize).collect();
         let top_ids: Vec<String> = top_candidates.iter().map(|(id, _)| id.clone()).collect();
 
         // Bulk-fetch all nodes in one query instead of N get_node calls
@@ -189,10 +198,14 @@ impl Storage {
             bulk_nodes.into_iter().map(|n| (n.id.clone(), n)).collect();
 
         // Build score lookup maps from keyword/semantic results
-        let kw_scores: std::collections::HashMap<&str, f32> =
-            keyword_results.iter().map(|(id, s)| (id.as_str(), *s)).collect();
-        let sem_scores: std::collections::HashMap<&str, f32> =
-            semantic_results.iter().map(|(id, s)| (id.as_str(), *s)).collect();
+        let kw_scores: std::collections::HashMap<&str, f32> = keyword_results
+            .iter()
+            .map(|(id, s)| (id.as_str(), *s))
+            .collect();
+        let sem_scores: std::collections::HashMap<&str, f32> = semantic_results
+            .iter()
+            .map(|(id, s)| (id.as_str(), *s))
+            .collect();
 
         let mut results = Vec::with_capacity(top_candidates.len());
 
@@ -238,8 +251,10 @@ impl Storage {
                     placeholders
                 );
                 let mut stmt = reader.prepare(&sql)?;
-                let params: Vec<&dyn rusqlite::ToSql> =
-                    result_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+                let params: Vec<&dyn rusqlite::ToSql> = result_ids
+                    .iter()
+                    .map(|s| s as &dyn rusqlite::ToSql)
+                    .collect();
                 stmt.query_map(params.as_slice(), |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
                 })?

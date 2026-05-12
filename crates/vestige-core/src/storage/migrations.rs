@@ -21,7 +21,7 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 4,
-        description: "GOD TIER 2026: Temporal knowledge graph, memory scopes, embedding versioning",
+        description: "Temporal knowledge graph, memory scopes, embedding versioning",
         up: MIGRATION_V4_UP,
     },
     Migration {
@@ -56,7 +56,7 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 11,
-        description: "v3.3.0 Tier 4: typed memory (kind, subject, predicate, object, episodic_at, procedural_frequency)",
+        description: "v3.3.0 typed memory (kind, subject, predicate, object, episodic_at, procedural_frequency)",
         up: MIGRATION_V11_UP,
     },
 ];
@@ -319,7 +319,7 @@ CREATE INDEX IF NOT EXISTS idx_transitions_timestamp ON state_transitions(timest
 UPDATE schema_version SET version = 3, applied_at = datetime('now');
 "#;
 
-/// V4: GOD TIER 2026 - Temporal Knowledge Graph, Memory Scopes, Embedding Versioning
+/// V4: Temporal Knowledge Graph, Memory Scopes, Embedding Versioning
 /// Competes with Zep's Graphiti and Mem0's memory scopes
 const MIGRATION_V4_UP: &str = r#"
 -- ============================================================================
@@ -385,8 +385,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
 
 -- Add embedding version to node_embeddings
 ALTER TABLE node_embeddings ADD COLUMN version INTEGER DEFAULT 1;
--- Version 1 = all-MiniLM-L6-v2 (384d, pre-2026)
--- Version 2 = BGE-base-en-v1.5 (768d, GOD TIER 2026)
+-- Version 1 = all-MiniLM-L6-v2 (384d, legacy)
+-- Version 2 = BGE-base-en-v1.5 (768d)
 
 CREATE INDEX IF NOT EXISTS idx_embeddings_version ON node_embeddings(version);
 
@@ -394,7 +394,7 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_version ON node_embeddings(version);
 UPDATE node_embeddings SET version = 1 WHERE version IS NULL;
 
 -- ============================================================================
--- MEMORY COMPRESSION (For old memories - Tier 3 prep)
+-- MEMORY COMPRESSION (For old memories)
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS compressed_memories (
@@ -634,13 +634,13 @@ ALTER TABLE knowledge_nodes ADD COLUMN provenance TEXT DEFAULT '{}';
 UPDATE schema_version SET version = 10, applied_at = datetime('now');
 "#;
 
-/// V11: Tier 4 — typed memory. Adds the memory_kind column plus typed
+/// V11: typed memory. Adds the memory_kind column plus typed
 /// metadata (subject, predicate, object, episodic_at, procedural_frequency).
 /// All existing rows backfill to memory_kind = 'raw' so behaviour is
 /// unchanged unless an extractor sets a more specific kind.
 const MIGRATION_V11_UP: &str = r#"
 -- ============================================================================
--- TYPED MEMORY (Tier 4 — ENGRAM-style)
+-- TYPED MEMORY (ENGRAM-style)
 -- ============================================================================
 
 -- One of: raw | semantic | episodic | procedural | aggregate.
@@ -765,9 +765,8 @@ mod tests {
 
         // Attempt to run a batch with valid + invalid SQL inside a transaction
         conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
-        let result = conn.execute_batch(
-            "CREATE TABLE _test_rollback (id INTEGER); INVALID SQL HERE;"
-        );
+        let result =
+            conn.execute_batch("CREATE TABLE _test_rollback (id INTEGER); INVALID SQL HERE;");
         assert!(result.is_err());
         let _ = conn.execute_batch("ROLLBACK;");
 

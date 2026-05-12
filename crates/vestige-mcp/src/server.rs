@@ -3,19 +3,18 @@
 //! Handles the main MCP server logic, routing requests to appropriate
 //! tool and resource handlers.
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use chrono::Utc;
-use tokio::sync::{broadcast, Mutex};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::{Mutex, broadcast};
 use tracing::{debug, info, warn};
 
 use crate::cognitive::CognitiveEngine;
 use crate::dashboard::events::VestigeEvent;
 use crate::protocol::messages::{
-    CallToolRequest, CallToolResult, InitializeRequest, InitializeResult,
-    ListResourcesResult, ListToolsResult, ReadResourceRequest, ReadResourceResult,
-    ServerCapabilities, ServerInfo,
+    CallToolRequest, CallToolResult, InitializeRequest, InitializeResult, ListResourcesResult,
+    ListToolsResult, ReadResourceRequest, ReadResourceResult, ServerCapabilities, ServerInfo,
 };
 use crate::protocol::types::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, MCP_VERSION};
 use crate::resources;
@@ -75,8 +74,14 @@ impl McpServer {
         debug!("Handling request: {}", request.method);
 
         // Check initialization for non-initialize requests
-        if !self.initialized && request.method != "initialize" && request.method != "notifications/initialized" {
-            warn!("Rejecting request '{}': server not initialized", request.method);
+        if !self.initialized
+            && request.method != "initialize"
+            && request.method != "notifications/initialized"
+        {
+            warn!(
+                "Rejecting request '{}': server not initialized",
+                request.method
+            );
             return Some(JsonRpcResponse::error(
                 request.id,
                 JsonRpcError::server_not_initialized(),
@@ -112,21 +117,28 @@ impl McpServer {
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, JsonRpcError> {
         let request: InitializeRequest = match params {
-            Some(p) => serde_json::from_value(p).map_err(|e| JsonRpcError::invalid_params(&e.to_string()))?,
+            Some(p) => serde_json::from_value(p)
+                .map_err(|e| JsonRpcError::invalid_params(&e.to_string()))?,
             None => InitializeRequest::default(),
         };
 
         // Version negotiation: use client's version if older than server's
         // Claude Desktop rejects servers with newer protocol versions
         let negotiated_version = if request.protocol_version.as_str() < MCP_VERSION {
-            info!("Client requested older protocol version {}, using it", request.protocol_version);
+            info!(
+                "Client requested older protocol version {}, using it",
+                request.protocol_version
+            );
             request.protocol_version.clone()
         } else {
             MCP_VERSION.to_string()
         };
 
         self.initialized = true;
-        info!("MCP session initialized with protocol version {}", negotiated_version);
+        info!(
+            "MCP session initialized with protocol version {}",
+            negotiated_version
+        );
 
         let result = InitializeResult {
             protocol_version: negotiated_version,
@@ -178,7 +190,8 @@ impl McpServer {
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, JsonRpcError> {
         let request: CallToolRequest = match params {
-            Some(p) => serde_json::from_value(p).map_err(|e| JsonRpcError::invalid_params(&e.to_string()))?,
+            Some(p) => serde_json::from_value(p)
+                .map_err(|e| JsonRpcError::invalid_params(&e.to_string()))?,
             None => return Err(JsonRpcError::invalid_params("Missing tool call parameters")),
         };
 
@@ -189,43 +202,68 @@ impl McpServer {
         }
 
         // Save args for event emission (tool dispatch consumes request.arguments)
-        let saved_args = if self.event_tx.is_some() { request.arguments.clone() } else { None };
+        let saved_args = if self.event_tx.is_some() {
+            request.arguments.clone()
+        } else {
+            None
+        };
 
         let result = match request.name.as_str() {
             // ================================================================
             // UNIFIED TOOLS (v1.1+) - Preferred API
             // ================================================================
-            "search" => tools::search_unified::execute(&self.storage, &self.cognitive, request.arguments).await,
-            "memory" => tools::memory_unified::execute(&self.storage, &self.cognitive, request.arguments).await,
-            "codebase" => tools::codebase_unified::execute(&self.storage, &self.cognitive, request.arguments).await,
-            "intention" => tools::intention_unified::execute(&self.storage, &self.cognitive, request.arguments).await,
+            "search" => {
+                tools::search_unified::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
+            }
+            "memory" => {
+                tools::memory_unified::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
+            }
+            "codebase" => {
+                tools::codebase_unified::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
+            }
+            "intention" => {
+                tools::intention_unified::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
+            }
 
             // ================================================================
             // Core memory (v1.7: smart_ingest absorbs ingest + checkpoint)
             // ================================================================
-            "smart_ingest" => tools::smart_ingest::execute(&self.storage, &self.cognitive, request.arguments).await,
+            "smart_ingest" => {
+                tools::smart_ingest::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
+            }
 
             // ================================================================
             // DEPRECATED (v1.7): ingest → smart_ingest
             // ================================================================
             "ingest" => {
                 warn!("Tool 'ingest' is deprecated in v1.7. Use 'smart_ingest' instead.");
-                tools::smart_ingest::execute(&self.storage, &self.cognitive, request.arguments).await
+                tools::smart_ingest::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
             }
 
             // ================================================================
             // DEPRECATED (v1.7): session_checkpoint → smart_ingest (batch mode)
             // ================================================================
             "session_checkpoint" => {
-                warn!("Tool 'session_checkpoint' is deprecated in v1.7. Use 'smart_ingest' with 'items' parameter instead.");
-                tools::smart_ingest::execute(&self.storage, &self.cognitive, request.arguments).await
+                warn!(
+                    "Tool 'session_checkpoint' is deprecated in v1.7. Use 'smart_ingest' with 'items' parameter instead."
+                );
+                tools::smart_ingest::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
             }
 
             // ================================================================
             // DEPRECATED (v1.7): promote_memory → memory(action='promote')
             // ================================================================
             "promote_memory" => {
-                warn!("Tool 'promote_memory' is deprecated in v1.7. Use 'memory' with action='promote' instead.");
+                warn!(
+                    "Tool 'promote_memory' is deprecated in v1.7. Use 'memory' with action='promote' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let mut new_args = args.clone();
@@ -239,7 +277,9 @@ impl McpServer {
                 tools::memory_unified::execute(&self.storage, &self.cognitive, unified_args).await
             }
             "demote_memory" => {
-                warn!("Tool 'demote_memory' is deprecated in v1.7. Use 'memory' with action='demote' instead.");
+                warn!(
+                    "Tool 'demote_memory' is deprecated in v1.7. Use 'memory' with action='demote' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let mut new_args = args.clone();
@@ -258,17 +298,34 @@ impl McpServer {
             // ================================================================
             "health_check" => {
                 warn!("Tool 'health_check' is deprecated in v1.7. Use 'system_status' instead.");
-                tools::maintenance::execute_system_status(&self.storage, &self.cognitive, request.arguments).await
+                tools::maintenance::execute_system_status(
+                    &self.storage,
+                    &self.cognitive,
+                    request.arguments,
+                )
+                .await
             }
             "stats" => {
                 warn!("Tool 'stats' is deprecated in v1.7. Use 'system_status' instead.");
-                tools::maintenance::execute_system_status(&self.storage, &self.cognitive, request.arguments).await
+                tools::maintenance::execute_system_status(
+                    &self.storage,
+                    &self.cognitive,
+                    request.arguments,
+                )
+                .await
             }
 
             // ================================================================
             // SYSTEM STATUS (v1.7: replaces health_check + stats)
             // ================================================================
-            "system_status" => tools::maintenance::execute_system_status(&self.storage, &self.cognitive, request.arguments).await,
+            "system_status" => {
+                tools::maintenance::execute_system_status(
+                    &self.storage,
+                    &self.cognitive,
+                    request.arguments,
+                )
+                .await
+            }
 
             "mark_reviewed" => tools::review::execute(&self.storage, request.arguments).await,
 
@@ -276,15 +333,21 @@ impl McpServer {
             // DEPRECATED: Search tools - redirect to unified 'search'
             // ================================================================
             "recall" | "semantic_search" | "hybrid_search" => {
-                warn!("Tool '{}' is deprecated. Use 'search' instead.", request.name);
-                tools::search_unified::execute(&self.storage, &self.cognitive, request.arguments).await
+                warn!(
+                    "Tool '{}' is deprecated. Use 'search' instead.",
+                    request.name
+                );
+                tools::search_unified::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
             }
 
             // ================================================================
             // DEPRECATED: Memory tools - redirect to unified 'memory'
             // ================================================================
             "get_knowledge" => {
-                warn!("Tool 'get_knowledge' is deprecated. Use 'memory' with action='get' instead.");
+                warn!(
+                    "Tool 'get_knowledge' is deprecated. Use 'memory' with action='get' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let id = args.get("id").cloned().unwrap_or(serde_json::Value::Null);
@@ -298,7 +361,9 @@ impl McpServer {
                 tools::memory_unified::execute(&self.storage, &self.cognitive, unified_args).await
             }
             "delete_knowledge" => {
-                warn!("Tool 'delete_knowledge' is deprecated. Use 'memory' with action='delete' instead.");
+                warn!(
+                    "Tool 'delete_knowledge' is deprecated. Use 'memory' with action='delete' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let id = args.get("id").cloned().unwrap_or(serde_json::Value::Null);
@@ -312,10 +377,15 @@ impl McpServer {
                 tools::memory_unified::execute(&self.storage, &self.cognitive, unified_args).await
             }
             "get_memory_state" => {
-                warn!("Tool 'get_memory_state' is deprecated. Use 'memory' with action='state' instead.");
+                warn!(
+                    "Tool 'get_memory_state' is deprecated. Use 'memory' with action='state' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
-                        let id = args.get("memory_id").cloned().unwrap_or(serde_json::Value::Null);
+                        let id = args
+                            .get("memory_id")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
                         Some(serde_json::json!({
                             "action": "state",
                             "id": id
@@ -330,7 +400,9 @@ impl McpServer {
             // DEPRECATED: Codebase tools - redirect to unified 'codebase'
             // ================================================================
             "remember_pattern" => {
-                warn!("Tool 'remember_pattern' is deprecated. Use 'codebase' with action='remember_pattern' instead.");
+                warn!(
+                    "Tool 'remember_pattern' is deprecated. Use 'codebase' with action='remember_pattern' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let mut new_args = args.clone();
@@ -344,12 +416,17 @@ impl McpServer {
                 tools::codebase_unified::execute(&self.storage, &self.cognitive, unified_args).await
             }
             "remember_decision" => {
-                warn!("Tool 'remember_decision' is deprecated. Use 'codebase' with action='remember_decision' instead.");
+                warn!(
+                    "Tool 'remember_decision' is deprecated. Use 'codebase' with action='remember_decision' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let mut new_args = args.clone();
                         if let Some(obj) = new_args.as_object_mut() {
-                            obj.insert("action".to_string(), serde_json::json!("remember_decision"));
+                            obj.insert(
+                                "action".to_string(),
+                                serde_json::json!("remember_decision"),
+                            );
                         }
                         Some(new_args)
                     }
@@ -358,7 +435,9 @@ impl McpServer {
                 tools::codebase_unified::execute(&self.storage, &self.cognitive, unified_args).await
             }
             "get_codebase_context" => {
-                warn!("Tool 'get_codebase_context' is deprecated. Use 'codebase' with action='get_context' instead.");
+                warn!(
+                    "Tool 'get_codebase_context' is deprecated. Use 'codebase' with action='get_context' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let mut new_args = args.clone();
@@ -376,7 +455,9 @@ impl McpServer {
             // DEPRECATED: Intention tools - redirect to unified 'intention'
             // ================================================================
             "set_intention" => {
-                warn!("Tool 'set_intention' is deprecated. Use 'intention' with action='set' instead.");
+                warn!(
+                    "Tool 'set_intention' is deprecated. Use 'intention' with action='set' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let mut new_args = args.clone();
@@ -387,10 +468,13 @@ impl McpServer {
                     }
                     None => Some(serde_json::json!({"action": "set"})),
                 };
-                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args).await
+                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args)
+                    .await
             }
             "check_intentions" => {
-                warn!("Tool 'check_intentions' is deprecated. Use 'intention' with action='check' instead.");
+                warn!(
+                    "Tool 'check_intentions' is deprecated. Use 'intention' with action='check' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let mut new_args = args.clone();
@@ -401,13 +485,19 @@ impl McpServer {
                     }
                     None => Some(serde_json::json!({"action": "check"})),
                 };
-                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args).await
+                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args)
+                    .await
             }
             "complete_intention" => {
-                warn!("Tool 'complete_intention' is deprecated. Use 'intention' with action='update', status='complete' instead.");
+                warn!(
+                    "Tool 'complete_intention' is deprecated. Use 'intention' with action='update', status='complete' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
-                        let id = args.get("intentionId").cloned().unwrap_or(serde_json::Value::Null);
+                        let id = args
+                            .get("intentionId")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
                         Some(serde_json::json!({
                             "action": "update",
                             "id": id,
@@ -416,14 +506,23 @@ impl McpServer {
                     }
                     None => None,
                 };
-                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args).await
+                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args)
+                    .await
             }
             "snooze_intention" => {
-                warn!("Tool 'snooze_intention' is deprecated. Use 'intention' with action='update', status='snooze' instead.");
+                warn!(
+                    "Tool 'snooze_intention' is deprecated. Use 'intention' with action='update', status='snooze' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
-                        let id = args.get("intentionId").cloned().unwrap_or(serde_json::Value::Null);
-                        let minutes = args.get("minutes").cloned().unwrap_or(serde_json::json!(30));
+                        let id = args
+                            .get("intentionId")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
+                        let minutes = args
+                            .get("minutes")
+                            .cloned()
+                            .unwrap_or(serde_json::json!(30));
                         Some(serde_json::json!({
                             "action": "update",
                             "id": id,
@@ -433,10 +532,13 @@ impl McpServer {
                     }
                     None => None,
                 };
-                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args).await
+                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args)
+                    .await
             }
             "list_intentions" => {
-                warn!("Tool 'list_intentions' is deprecated. Use 'intention' with action='list' instead.");
+                warn!(
+                    "Tool 'list_intentions' is deprecated. Use 'intention' with action='list' instead."
+                );
                 let unified_args = match request.arguments {
                     Some(ref args) => {
                         let mut new_args = args.clone();
@@ -450,7 +552,8 @@ impl McpServer {
                     }
                     None => Some(serde_json::json!({"action": "list"})),
                 };
-                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args).await
+                tools::intention_unified::execute(&self.storage, &self.cognitive, unified_args)
+                    .await
             }
 
             // ================================================================
@@ -471,33 +574,56 @@ impl McpServer {
             "backup" => tools::maintenance::execute_backup(&self.storage, request.arguments).await,
             "export" => tools::maintenance::execute_export(&self.storage, request.arguments).await,
             "gc" => tools::maintenance::execute_gc(&self.storage, request.arguments).await,
-            "split_memories" => tools::maintenance::execute_split_memories(&self.storage, request.arguments).await,
-            "regenerate_embeddings" => tools::maintenance::execute_regenerate_embeddings(&self.storage, request.arguments).await,
+            "split_memories" => {
+                tools::maintenance::execute_split_memories(&self.storage, request.arguments).await
+            }
+            "regenerate_embeddings" => {
+                tools::maintenance::execute_regenerate_embeddings(&self.storage, request.arguments)
+                    .await
+            }
 
             // ================================================================
             // AUTO-SAVE & DEDUP TOOLS (v1.3+)
             // ================================================================
-            "importance_score" => tools::importance::execute(&self.storage, &self.cognitive, request.arguments).await,
+            "importance_score" => {
+                tools::importance::execute(&self.storage, &self.cognitive, request.arguments).await
+            }
             "find_duplicates" => tools::dedup::execute(&self.storage, request.arguments).await,
 
             // ================================================================
             // COGNITIVE TOOLS (v1.5+)
             // ================================================================
             "dream" => {
+                let storage_for_event = self.storage.clone();
+                let memory_count = tokio::task::spawn_blocking(move || {
+                    storage_for_event
+                        .get_stats()
+                        .map(|s| s.total_nodes as usize)
+                        .unwrap_or(0)
+                })
+                .await
+                .unwrap_or(0);
                 self.emit(VestigeEvent::DreamStarted {
-                    memory_count: self.storage.get_stats().map(|s| s.total_nodes as usize).unwrap_or(0),
+                    memory_count,
                     timestamp: chrono::Utc::now(),
                 });
                 tools::dream::execute(&self.storage, &self.cognitive, request.arguments).await
             }
-            "explore_connections" => tools::explore::execute(&self.storage, &self.cognitive, request.arguments).await,
-            "predict" => tools::predict::execute(&self.storage, &self.cognitive, request.arguments).await,
+            "explore_connections" => {
+                tools::explore::execute(&self.storage, &self.cognitive, request.arguments).await
+            }
+            "predict" => {
+                tools::predict::execute(&self.storage, &self.cognitive, request.arguments).await
+            }
             "restore" => tools::restore::execute(&self.storage, request.arguments).await,
 
             // ================================================================
             // CONTEXT PACKETS (v1.8+)
             // ================================================================
-            "session_context" => tools::session_context::execute(&self.storage, &self.cognitive, request.arguments).await,
+            "session_context" => {
+                tools::session_context::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
+            }
 
             // ================================================================
             // AUTONOMIC TOOLS (v1.9+)
@@ -508,14 +634,19 @@ impl McpServer {
             // ================================================================
             // METACOGNITIVE TOOLS (v2.1+)
             // ================================================================
-            "reflect" => tools::reflect::execute(&self.storage, &self.cognitive, request.arguments).await,
+            "reflect" => {
+                tools::reflect::execute(&self.storage, &self.cognitive, request.arguments).await
+            }
             "temporal" => tools::temporal::execute(&self.storage, request.arguments).await,
             "confidence" => tools::confidence::execute(&self.storage, request.arguments).await,
 
             // ================================================================
             // COGNITIVE REASONING (v3.2.1+)
             // ================================================================
-            "deep_reference" | "cross_reference" => tools::cross_reference::execute(&self.storage, &self.cognitive, request.arguments).await,
+            "deep_reference" | "cross_reference" => {
+                tools::cross_reference::execute(&self.storage, &self.cognitive, request.arguments)
+                    .await
+            }
 
             name => {
                 return Err(JsonRpcError::method_not_found_with_message(&format!(
@@ -538,11 +669,13 @@ impl McpServer {
                 let call_result = CallToolResult {
                     content: vec![crate::protocol::messages::ToolResultContent {
                         content_type: "text".to_string(),
-                        text: serde_json::to_string_pretty(&content).unwrap_or_else(|_| content.to_string()),
+                        text: serde_json::to_string_pretty(&content)
+                            .unwrap_or_else(|_| content.to_string()),
                     }],
                     is_error: Some(false),
                 };
-                serde_json::to_value(call_result).map_err(|e| JsonRpcError::internal_error(&e.to_string()))
+                serde_json::to_value(call_result)
+                    .map_err(|e| JsonRpcError::internal_error(&e.to_string()))
             }
             Err(e) => {
                 let call_result = CallToolResult {
@@ -552,13 +685,16 @@ impl McpServer {
                     }],
                     is_error: Some(true),
                 };
-                serde_json::to_value(call_result).map_err(|e| JsonRpcError::internal_error(&e.to_string()))
+                serde_json::to_value(call_result)
+                    .map_err(|e| JsonRpcError::internal_error(&e.to_string()))
             }
         };
 
         // Inline consolidation trigger: uses ConsolidationScheduler instead of fixed count
         let count = self.tool_call_count.fetch_add(1, Ordering::Relaxed) + 1;
-        let should_consolidate = self.cognitive.try_lock()
+        let should_consolidate = self
+            .cognitive
+            .try_lock()
             .ok()
             .map(|cog| cog.consolidation_scheduler.should_consolidate())
             .unwrap_or(count.is_multiple_of(100)); // Fallback to count-based if lock unavailable
@@ -611,7 +747,8 @@ impl McpServer {
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, JsonRpcError> {
         let request: ReadResourceRequest = match params {
-            Some(p) => serde_json::from_value(p).map_err(|e| JsonRpcError::invalid_params(&e.to_string()))?,
+            Some(p) => serde_json::from_value(p)
+                .map_err(|e| JsonRpcError::invalid_params(&e.to_string()))?,
             None => return Err(JsonRpcError::invalid_params("Missing resource URI")),
         };
 
@@ -638,7 +775,8 @@ impl McpServer {
                         blob: None,
                     }],
                 };
-                serde_json::to_value(result).map_err(|e| JsonRpcError::internal_error(&e.to_string()))
+                serde_json::to_value(result)
+                    .map_err(|e| JsonRpcError::internal_error(&e.to_string()))
             }
             Err(e) => Err(JsonRpcError::internal_error(&e)),
         }
@@ -661,25 +799,49 @@ impl McpServer {
             "smart_ingest" | "ingest" | "session_checkpoint" => {
                 // Single mode: result has "decision" (create/update/supersede/reinforce/merge/replace/add_context)
                 if let Some(decision) = result.get("decision").and_then(|a| a.as_str()) {
-                    let id = result.get("nodeId").or(result.get("id"))
-                        .and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let preview = result.get("contentPreview").or(result.get("content"))
-                        .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let id = result
+                        .get("nodeId")
+                        .or(result.get("id"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let preview = result
+                        .get("contentPreview")
+                        .or(result.get("content"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     match decision {
                         "create" => {
-                            let node_type = result.get("nodeType")
-                                .and_then(|v| v.as_str()).unwrap_or("fact").to_string();
-                            let tags = result.get("tags")
+                            let node_type = result
+                                .get("nodeType")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("fact")
+                                .to_string();
+                            let tags = result
+                                .get("tags")
                                 .and_then(|v| v.as_array())
-                                .map(|arr| arr.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|t| t.as_str().map(String::from))
+                                        .collect()
+                                })
                                 .unwrap_or_default();
                             self.emit(VestigeEvent::MemoryCreated {
-                                id, content_preview: preview, node_type, tags, timestamp: now,
+                                id,
+                                content_preview: preview,
+                                node_type,
+                                tags,
+                                timestamp: now,
                             });
                         }
-                        "update" | "supersede" | "reinforce" | "merge" | "replace" | "add_context" => {
+                        "update" | "supersede" | "reinforce" | "merge" | "replace"
+                        | "add_context" => {
                             self.emit(VestigeEvent::MemoryUpdated {
-                                id, content_preview: preview, field: decision.to_string(), timestamp: now,
+                                id,
+                                content_preview: preview,
+                                field: decision.to_string(),
+                                timestamp: now,
                             });
                         }
                         _ => {}
@@ -689,19 +851,31 @@ impl McpServer {
                 if let Some(results) = result.get("results").and_then(|r| r.as_array()) {
                     for item in results {
                         let decision = item.get("decision").and_then(|a| a.as_str()).unwrap_or("");
-                        let id = item.get("nodeId").or(item.get("id"))
-                            .and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let preview = item.get("contentPreview")
-                            .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let id = item
+                            .get("nodeId")
+                            .or(item.get("id"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let preview = item
+                            .get("contentPreview")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         if decision == "create" {
                             self.emit(VestigeEvent::MemoryCreated {
-                                id, content_preview: preview,
-                                node_type: "fact".to_string(), tags: vec![], timestamp: now,
+                                id,
+                                content_preview: preview,
+                                node_type: "fact".to_string(),
+                                tags: vec![],
+                                timestamp: now,
                             });
                         } else if !decision.is_empty() {
                             self.emit(VestigeEvent::MemoryUpdated {
-                                id, content_preview: preview,
-                                field: decision.to_string(), timestamp: now,
+                                id,
+                                content_preview: preview,
+                                field: decision.to_string(),
+                                timestamp: now,
                             });
                         }
                     }
@@ -709,35 +883,53 @@ impl McpServer {
             }
 
             // -- memory: get/delete/promote/demote --
-            "memory" | "promote_memory" | "demote_memory" | "delete_knowledge" | "get_memory_state" => {
-                let action = args.as_ref()
+            "memory" | "promote_memory" | "demote_memory" | "delete_knowledge"
+            | "get_memory_state" => {
+                let action = args
+                    .as_ref()
                     .and_then(|a| a.get("action"))
                     .and_then(|a| a.as_str())
-                    .unwrap_or(if tool_name == "promote_memory" { "promote" }
-                               else if tool_name == "demote_memory" { "demote" }
-                               else if tool_name == "delete_knowledge" { "delete" }
-                               else { "" });
-                let id = args.as_ref()
+                    .unwrap_or(if tool_name == "promote_memory" {
+                        "promote"
+                    } else if tool_name == "demote_memory" {
+                        "demote"
+                    } else if tool_name == "delete_knowledge" {
+                        "delete"
+                    } else {
+                        ""
+                    });
+                let id = args
+                    .as_ref()
                     .and_then(|a| a.get("id"))
-                    .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 match action {
                     "delete" => {
                         self.emit(VestigeEvent::MemoryDeleted { id, timestamp: now });
                     }
                     "promote" => {
-                        let retention = result.get("newRetention")
+                        let retention = result
+                            .get("newRetention")
                             .or(result.get("retrievalStrength"))
-                            .and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
                         self.emit(VestigeEvent::MemoryPromoted {
-                            id, new_retention: retention, timestamp: now,
+                            id,
+                            new_retention: retention,
+                            timestamp: now,
                         });
                     }
                     "demote" => {
-                        let retention = result.get("newRetention")
+                        let retention = result
+                            .get("newRetention")
                             .or(result.get("retrievalStrength"))
-                            .and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
                         self.emit(VestigeEvent::MemoryDemoted {
-                            id, new_retention: retention, timestamp: now,
+                            id,
+                            new_retention: retention,
+                            timestamp: now,
                         });
                     }
                     _ => {}
@@ -746,86 +938,144 @@ impl McpServer {
 
             // -- search --
             "search" | "recall" | "semantic_search" | "hybrid_search" => {
-                let query = args.as_ref()
+                let query = args
+                    .as_ref()
                     .and_then(|a| a.get("query"))
-                    .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let results = result.get("results").and_then(|r| r.as_array());
                 let result_count = results.map(|r| r.len()).unwrap_or(0);
                 let result_ids: Vec<String> = results
-                    .map(|r| r.iter()
-                        .filter_map(|item| item.get("id").and_then(|v| v.as_str()).map(String::from))
-                        .collect())
+                    .map(|r| {
+                        r.iter()
+                            .filter_map(|item| {
+                                item.get("id").and_then(|v| v.as_str()).map(String::from)
+                            })
+                            .collect()
+                    })
                     .unwrap_or_default();
-                let duration_ms = result.get("durationMs")
+                let duration_ms = result
+                    .get("durationMs")
                     .or(result.get("duration_ms"))
-                    .and_then(|v| v.as_u64()).unwrap_or(0);
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 self.emit(VestigeEvent::SearchPerformed {
-                    query, result_count, result_ids, duration_ms, timestamp: now,
+                    query,
+                    result_count,
+                    result_ids,
+                    duration_ms,
+                    timestamp: now,
                 });
             }
 
             // -- dream --
             "dream" => {
-                let replayed = result.get("memoriesReplayed")
+                let replayed = result
+                    .get("memoriesReplayed")
                     .or(result.get("memories_replayed"))
-                    .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let connections = result.get("connectionsFound")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let connections = result
+                    .get("connectionsFound")
                     .or(result.get("connections_found"))
-                    .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let insights = result.get("insightsGenerated")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let insights = result
+                    .get("insightsGenerated")
                     .or(result.get("insights"))
-                    .and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                let duration_ms = result.get("durationMs")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                let duration_ms = result
+                    .get("durationMs")
                     .or(result.get("duration_ms"))
-                    .and_then(|v| v.as_u64()).unwrap_or(0);
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 self.emit(VestigeEvent::DreamCompleted {
-                    memories_replayed: replayed, connections_found: connections,
-                    insights_generated: insights, duration_ms, timestamp: now,
+                    memories_replayed: replayed,
+                    connections_found: connections,
+                    insights_generated: insights,
+                    duration_ms,
+                    timestamp: now,
                 });
             }
 
             // -- consolidate --
             "consolidate" => {
-                let processed = result.get("nodesProcessed")
+                let processed = result
+                    .get("nodesProcessed")
                     .or(result.get("nodes_processed"))
-                    .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let decay = result.get("decayApplied")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let decay = result
+                    .get("decayApplied")
                     .or(result.get("decay_applied"))
-                    .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let embeddings = result.get("embeddingsGenerated")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let embeddings = result
+                    .get("embeddingsGenerated")
                     .or(result.get("embeddings_generated"))
-                    .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let duration_ms = result.get("durationMs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let duration_ms = result
+                    .get("durationMs")
                     .or(result.get("duration_ms"))
-                    .and_then(|v| v.as_u64()).unwrap_or(0);
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 self.emit(VestigeEvent::ConsolidationCompleted {
-                    nodes_processed: processed, decay_applied: decay,
-                    embeddings_generated: embeddings, duration_ms, timestamp: now,
+                    nodes_processed: processed,
+                    decay_applied: decay,
+                    embeddings_generated: embeddings,
+                    duration_ms,
+                    timestamp: now,
                 });
             }
 
             // -- importance_score --
             "importance_score" => {
-                let preview = args.as_ref()
+                let preview = args
+                    .as_ref()
                     .and_then(|a| a.get("content"))
                     .and_then(|v| v.as_str())
-                    .map(|s| if s.len() > 100 { format!("{}...", &s[..s.floor_char_boundary(100)]) } else { s.to_string() })
+                    .map(|s| {
+                        if s.len() > 100 {
+                            format!("{}...", &s[..s.floor_char_boundary(100)])
+                        } else {
+                            s.to_string()
+                        }
+                    })
                     .unwrap_or_default();
-                let composite = result.get("compositeScore")
+                let composite = result
+                    .get("compositeScore")
                     .or(result.get("composite_score"))
-                    .and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
                 let channels = result.get("channels").or(result.get("breakdown"));
-                let novelty = channels.and_then(|c| c.get("novelty"))
-                    .and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let arousal = channels.and_then(|c| c.get("arousal"))
-                    .and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let reward = channels.and_then(|c| c.get("reward"))
-                    .and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let attention = channels.and_then(|c| c.get("attention"))
-                    .and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let novelty = channels
+                    .and_then(|c| c.get("novelty"))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let arousal = channels
+                    .and_then(|c| c.get("arousal"))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let reward = channels
+                    .and_then(|c| c.get("reward"))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let attention = channels
+                    .and_then(|c| c.get("attention"))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
                 self.emit(VestigeEvent::ImportanceScored {
-                    content_preview: preview, composite_score: composite,
-                    novelty, arousal, reward, attention, timestamp: now,
+                    content_preview: preview,
+                    composite_score: composite,
+                    novelty,
+                    arousal,
+                    reward,
+                    attention,
+                    timestamp: now,
                 });
             }
 
@@ -878,14 +1128,17 @@ mod tests {
         let (mut server, _dir) = test_server().await;
         assert!(!server.initialized);
 
-        let request = make_request("initialize", Some(serde_json::json!({
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {
-                "name": "test-client",
-                "version": "1.0.0"
-            }
-        })));
+        let request = make_request(
+            "initialize",
+            Some(serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "test-client",
+                    "version": "1.0.0"
+                }
+            })),
+        );
 
         let response = server.handle_request(request).await;
         assert!(response.is_some());
@@ -999,10 +1252,7 @@ mod tests {
         // the catalog faithfully and asserts a few well-known tool names.
         assert_eq!(tools.len(), 27, "Expected exactly 27 tools in v3.2.1+");
 
-        let tool_names: Vec<&str> = tools
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
         // Unified tools
         assert!(tool_names.contains(&"search"));
@@ -1012,12 +1262,24 @@ mod tests {
 
         // Core memory (smart_ingest absorbs ingest + checkpoint in v1.7)
         assert!(tool_names.contains(&"smart_ingest"));
-        assert!(!tool_names.contains(&"ingest"), "ingest should be removed in v1.7");
-        assert!(!tool_names.contains(&"session_checkpoint"), "session_checkpoint should be removed in v1.7");
+        assert!(
+            !tool_names.contains(&"ingest"),
+            "ingest should be removed in v1.7"
+        );
+        assert!(
+            !tool_names.contains(&"session_checkpoint"),
+            "session_checkpoint should be removed in v1.7"
+        );
 
         // Feedback merged into memory tool (v1.7)
-        assert!(!tool_names.contains(&"promote_memory"), "promote_memory should be removed in v1.7");
-        assert!(!tool_names.contains(&"demote_memory"), "demote_memory should be removed in v1.7");
+        assert!(
+            !tool_names.contains(&"promote_memory"),
+            "promote_memory should be removed in v1.7"
+        );
+        assert!(
+            !tool_names.contains(&"demote_memory"),
+            "demote_memory should be removed in v1.7"
+        );
 
         // Temporal tools (v1.2)
         assert!(tool_names.contains(&"memory_timeline"));
@@ -1025,8 +1287,14 @@ mod tests {
 
         // Maintenance tools (v1.7: system_status replaces health_check + stats)
         assert!(tool_names.contains(&"system_status"));
-        assert!(!tool_names.contains(&"health_check"), "health_check should be removed in v1.7");
-        assert!(!tool_names.contains(&"stats"), "stats should be removed in v1.7");
+        assert!(
+            !tool_names.contains(&"health_check"),
+            "health_check should be removed in v1.7"
+        );
+        assert!(
+            !tool_names.contains(&"stats"),
+            "stats should be removed in v1.7"
+        );
         assert!(tool_names.contains(&"consolidate"));
         assert!(tool_names.contains(&"backup"));
         assert!(tool_names.contains(&"export"));
@@ -1075,8 +1343,14 @@ mod tests {
 
         for tool in tools {
             assert!(tool["name"].is_string(), "Tool should have a name");
-            assert!(tool["description"].is_string(), "Tool should have a description");
-            assert!(tool["inputSchema"].is_object(), "Tool should have an input schema");
+            assert!(
+                tool["description"].is_string(),
+                "Tool should have a description"
+            );
+            assert!(
+                tool["inputSchema"].is_object(),
+                "Tool should have an input schema"
+            );
         }
     }
 
@@ -1129,7 +1403,10 @@ mod tests {
         for resource in resources {
             assert!(resource["uri"].is_string(), "Resource should have a URI");
             assert!(resource["name"].is_string(), "Resource should have a name");
-            assert!(resource["description"].is_string(), "Resource should have a description");
+            assert!(
+                resource["description"].is_string(),
+                "Resource should have a description"
+            );
         }
     }
 
@@ -1161,10 +1438,13 @@ mod tests {
         let init_request = make_request("initialize", None);
         server.handle_request(init_request).await;
 
-        let request = make_request("tools/call", Some(serde_json::json!({
-            "name": "nonexistent_tool",
-            "arguments": {}
-        })));
+        let request = make_request(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "nonexistent_tool",
+                "arguments": {}
+            })),
+        );
 
         let response = server.handle_request(request).await.unwrap();
         assert!(response.error.is_some());
@@ -1215,9 +1495,12 @@ mod tests {
         let init_request = make_request("initialize", None);
         server.handle_request(init_request).await;
 
-        let request = make_request("tools/call", Some(serde_json::json!({
-            "invalid": "params"
-        })));
+        let request = make_request(
+            "tools/call",
+            Some(serde_json::json!({
+                "invalid": "params"
+            })),
+        );
 
         let response = server.handle_request(request).await.unwrap();
         assert!(response.error.is_some());

@@ -155,7 +155,11 @@ async fn execute_remember_pattern(
         ..Default::default()
     };
 
-    let node = storage.ingest(input).map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let node =
+        tokio::task::spawn_blocking(move || storage_clone.ingest(input).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| format!("remember_pattern task panicked: {}", e))??;
     let node_id = node.id.clone();
 
     // ====================================================================
@@ -163,7 +167,8 @@ async fn execute_remember_pattern(
     // ====================================================================
     if let Ok(cog) = cognitive.try_lock() {
         let codebase_name = args.codebase.as_deref().unwrap_or("default");
-        cog.cross_project.record_project_memory(&node_id, codebase_name, None);
+        cog.cross_project
+            .record_project_memory(&node_id, codebase_name, None);
 
         // Also index in hippocampal index for fast retrieval
         let _ = cog.hippocampal_index.index_memory(
@@ -252,7 +257,11 @@ async fn execute_remember_decision(
         ..Default::default()
     };
 
-    let node = storage.ingest(input).map_err(|e| e.to_string())?;
+    let storage_clone = storage.clone();
+    let node =
+        tokio::task::spawn_blocking(move || storage_clone.ingest(input).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| format!("remember_decision task panicked: {}", e))??;
     let node_id = node.id.clone();
 
     // ====================================================================
@@ -260,7 +269,8 @@ async fn execute_remember_decision(
     // ====================================================================
     if let Ok(cog) = cognitive.try_lock() {
         let codebase_name = args.codebase.as_deref().unwrap_or("default");
-        cog.cross_project.record_project_memory(&node_id, codebase_name, None);
+        cog.cross_project
+            .record_project_memory(&node_id, codebase_name, None);
 
         // Index in hippocampal index
         let _ = cog.hippocampal_index.index_memory(
@@ -289,10 +299,7 @@ async fn execute_get_context(
     let limit = args.limit.unwrap_or(10).clamp(1, 50);
 
     // Build tag filter for codebase
-    let tag_filter = args
-        .codebase
-        .as_ref()
-        .map(|cb| format!("codebase:{}", cb));
+    let tag_filter = args.codebase.as_ref().map(|cb| format!("codebase:{}", cb));
 
     // Query patterns by node_type and tag
     let patterns = storage
@@ -381,18 +388,24 @@ mod tests {
 
         // Check action enum values
         let action_enum = &schema["properties"]["action"]["enum"];
-        assert!(action_enum
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("remember_pattern")));
-        assert!(action_enum
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("remember_decision")));
-        assert!(action_enum
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("get_context")));
+        assert!(
+            action_enum
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("remember_pattern"))
+        );
+        assert!(
+            action_enum
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("remember_decision"))
+        );
+        assert!(
+            action_enum
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("get_context"))
+        );
     }
 
     // === INTEGRATION TESTS ===
@@ -488,7 +501,7 @@ mod tests {
             "decision": "Use SQLite for storage",
             "rationale": "Embedded, no separate server needed",
             "alternatives": ["PostgreSQL", "Redis"],
-            "files": ["src/storage.rs"],
+            "files": ["src/storage/sqlite/nodes.rs"],
             "codebase": "vestige"
         });
         let result = execute(&storage, &test_cognitive(), Some(args)).await;

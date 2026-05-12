@@ -3,10 +3,10 @@
 //! Benchmarks for core search operations using Criterion.
 //! Run with: cargo bench -p vestige-core
 
-use criterion::{criterion_group, criterion_main, Criterion, black_box};
-use vestige_core::search::hyde::{classify_intent, expand_query, centroid_embedding};
-use vestige_core::search::{reciprocal_rank_fusion, linear_combination, sanitize_fts5_query};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use vestige_core::embeddings::cosine_similarity;
+use vestige_core::search::hyde::{centroid_embedding, classify_intent, expand_query};
+use vestige_core::search::{linear_combination, reciprocal_rank_fusion, sanitize_fts5_query};
 
 fn bench_classify_intent(c: &mut Criterion) {
     let queries = [
@@ -29,7 +29,9 @@ fn bench_classify_intent(c: &mut Criterion) {
 fn bench_expand_query(c: &mut Criterion) {
     c.bench_function("expand_query", |b| {
         b.iter(|| {
-            black_box(expand_query("What is spaced repetition and how does FSRS work?"));
+            black_box(expand_query(
+                "What is spaced repetition and how does FSRS work?",
+            ));
         })
     });
 }
@@ -37,11 +39,7 @@ fn bench_expand_query(c: &mut Criterion) {
 fn bench_centroid_embedding(c: &mut Criterion) {
     // Simulate 4 embeddings of 256 dimensions
     let embeddings: Vec<Vec<f32>> = (0..4)
-        .map(|i| {
-            (0..256)
-                .map(|j| ((i * 256 + j) as f32).sin())
-                .collect()
-        })
+        .map(|i| (0..256).map(|j| ((i * 256 + j) as f32).sin()).collect())
         .collect();
 
     c.bench_function("centroid_256d_4vecs", |b| {
@@ -61,7 +59,11 @@ fn bench_rrf_fusion(c: &mut Criterion) {
 
     c.bench_function("rrf_50x50", |b| {
         b.iter(|| {
-            black_box(reciprocal_rank_fusion(&keyword_results, &semantic_results, 60.0));
+            black_box(reciprocal_rank_fusion(
+                &keyword_results,
+                &semantic_results,
+                60.0,
+            ));
         })
     });
 }
@@ -76,7 +78,12 @@ fn bench_linear_combination(c: &mut Criterion) {
 
     c.bench_function("linear_combo_50x50", |b| {
         b.iter(|| {
-            black_box(linear_combination(&keyword_results, &semantic_results, 0.3, 0.7));
+            black_box(linear_combination(
+                &keyword_results,
+                &semantic_results,
+                0.3,
+                0.7,
+            ));
         })
     });
 }
@@ -84,7 +91,9 @@ fn bench_linear_combination(c: &mut Criterion) {
 fn bench_sanitize_fts5(c: &mut Criterion) {
     c.bench_function("sanitize_fts5_query", |b| {
         b.iter(|| {
-            black_box(sanitize_fts5_query("hello world \"exact phrase\" OR special-chars!@#"));
+            black_box(sanitize_fts5_query(
+                "hello world \"exact phrase\" OR special-chars!@#",
+            ));
         })
     });
 }

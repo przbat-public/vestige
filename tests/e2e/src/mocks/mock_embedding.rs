@@ -145,7 +145,11 @@ impl MockEmbeddingService {
             // Map word to a sparse set of dimensions
             for i in 0..16 {
                 let dim = ((word_hash >> (i * 4)) as usize) % MOCK_EMBEDDING_DIM;
-                let sign = if (word_hash >> (i + 48)) & 1 == 0 { 1.0 } else { -1.0 };
+                let sign = if (word_hash >> (i + 48)) & 1 == 0 {
+                    1.0
+                } else {
+                    -1.0
+                };
                 let magnitude = ((word_hash >> (i * 2)) as f32 % 100.0) / 100.0 + 0.5;
                 embedding[dim] += sign * magnitude;
             }
@@ -342,9 +346,15 @@ mod tests {
 
         let query = service.embed("programming code");
         let candidates = vec![
-            ("doc1".to_string(), service.embed("python programming language")),
+            (
+                "doc1".to_string(),
+                service.embed("python programming language"),
+            ),
             ("doc2".to_string(), service.embed("cooking recipes")),
-            ("doc3".to_string(), service.embed("software development code")),
+            (
+                "doc3".to_string(),
+                service.embed("software development code"),
+            ),
         ];
 
         let result = service.find_most_similar(&query, &candidates);

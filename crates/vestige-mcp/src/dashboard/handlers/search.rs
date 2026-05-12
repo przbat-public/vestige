@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use super::super::events::VestigeEvent;
 use super::super::state::AppState;
-use super::log_err;
+use super::{log_err, log_join_err};
 
 #[derive(Debug, Deserialize)]
 pub struct SearchParams {
@@ -29,10 +29,17 @@ pub async fn search_memories(
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let start = std::time::Instant::now();
 
-    let results = state
-        .storage
-        .hybrid_search(&params.q, limit, 0.3, 0.7)
-        .map_err(log_err("storage operation"))?;
+    // hybrid_search re-embeds the query (~150–500ms on cold cache) and
+    // touches BM25 + HNSW indices, so it blocks longer than the 10ms
+    // soft-limit Tokio sets for its async reactor threads. Run it on the
+    // blocking pool to keep concurrent dashboard requests responsive.
+    let storage = state.storage.clone();
+    let query = params.q.clone();
+    let results =
+        tokio::task::spawn_blocking(move || storage.hybrid_search(&query, limit, 0.3, 0.7))
+            .await
+            .map_err(log_join_err("hybrid_search task panicked"))?
+            .map_err(log_err("storage operation"))?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
 

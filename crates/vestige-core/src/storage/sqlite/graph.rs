@@ -24,21 +24,30 @@ use super::{ConnectionRecord, Result, Storage, StorageError};
 impl Storage {
     /// Get the memory with the most connections (best center node for graph visualization)
     pub fn get_most_connected_memory(&self) -> Result<Option<String>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT id, COUNT(*) as cnt FROM (
                 SELECT source_id as id FROM memory_connections
                 UNION ALL
                 SELECT target_id as id FROM memory_connections
-            ) GROUP BY id ORDER BY cnt DESC LIMIT 1"
+            ) GROUP BY id ORDER BY cnt DESC LIMIT 1",
         )?;
-        let result = stmt.query_row([], |row| row.get::<_, String>(0)).optional()?;
+        let result = stmt
+            .query_row([], |row| row.get::<_, String>(0))
+            .optional()?;
         Ok(result)
     }
 
     /// Get memories with their connection data for graph visualization
-    pub fn get_memory_subgraph(&self, center_id: &str, depth: u32, max_nodes: usize) -> Result<(Vec<KnowledgeNode>, Vec<ConnectionRecord>)> {
+    pub fn get_memory_subgraph(
+        &self,
+        center_id: &str,
+        depth: u32,
+        max_nodes: usize,
+    ) -> Result<(Vec<KnowledgeNode>, Vec<ConnectionRecord>)> {
         let mut visited_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut frontier = vec![center_id.to_string()];
         visited_ids.insert(center_id.to_string());
@@ -49,7 +58,11 @@ impl Storage {
             for id in &frontier {
                 let connections = self.get_connections_for_memory(id)?;
                 for conn in &connections {
-                    let other_id = if conn.source_id == *id { &conn.target_id } else { &conn.source_id };
+                    let other_id = if conn.source_id == *id {
+                        &conn.target_id
+                    } else {
+                        &conn.source_id
+                    };
                     if visited_ids.insert(other_id.clone()) {
                         next_frontier.push(other_id.clone());
                         if visited_ids.len() >= max_nodes {

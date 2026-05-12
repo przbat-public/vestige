@@ -232,9 +232,10 @@ impl ImportanceTracker {
         // Store context with event
         if let Ok(mut events) = self.recent_events.write()
             && let Some(event) = events.last_mut()
-                && event.memory_id == memory_id {
-                    event.context = Some(context.to_string());
-                }
+            && event.memory_id == memory_id
+        {
+            event.context = Some(context.to_string());
+        }
     }
 
     /// Apply importance decay to all memories
@@ -339,7 +340,11 @@ impl ImportanceTracker {
     /// Get memories sorted by importance
     pub fn get_top_by_importance(&self, limit: usize) -> Vec<ImportanceScore> {
         let mut scores = self.get_all_scores();
-        scores.sort_by(|a, b| b.final_score.partial_cmp(&a.final_score).unwrap_or(std::cmp::Ordering::Equal));
+        scores.sort_by(|a, b| {
+            b.final_score
+                .partial_cmp(&a.final_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scores.truncate(limit);
         scores
     }
@@ -355,7 +360,9 @@ impl ImportanceTracker {
         scores.sort_by(|a, b| {
             let a_neglect = a.base_importance - a.usage_importance;
             let b_neglect = b.base_importance - b.usage_importance;
-            b_neglect.partial_cmp(&a_neglect).unwrap_or(std::cmp::Ordering::Equal)
+            b_neglect
+                .partial_cmp(&a_neglect)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         scores.truncate(limit);
@@ -446,7 +453,10 @@ mod tests {
         assert_eq!(score.retrieval_count, 3);
         assert_eq!(score.helpful_count, 3);
         // 0.1 * 1.15^3 = ~0.152, so should be > initial 0.1
-        assert!(score.usage_importance > 0.1, "Should be boosted from baseline");
+        assert!(
+            score.usage_importance > 0.1,
+            "Should be boosted from baseline"
+        );
     }
 
     #[test]

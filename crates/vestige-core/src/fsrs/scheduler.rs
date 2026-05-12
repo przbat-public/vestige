@@ -7,11 +7,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::algorithm::{
-    apply_sentiment_boost, fuzz_interval, initial_difficulty_with_weights,
-    initial_stability_with_weights, next_difficulty_with_weights,
+    DEFAULT_RETENTION, FSRS6_WEIGHTS, MAX_STABILITY, apply_sentiment_boost, fuzz_interval,
+    initial_difficulty_with_weights, initial_stability_with_weights, next_difficulty_with_weights,
     next_forget_stability_with_weights, next_interval_with_decay,
     next_recall_stability_with_weights, retrievability_with_decay, same_day_stability_with_weights,
-    DEFAULT_RETENTION, FSRS6_WEIGHTS, MAX_STABILITY,
 };
 
 // ============================================================================
@@ -243,13 +242,11 @@ impl FSRSScheduler {
         // Apply sentiment boost
         if self.enable_sentiment_boost
             && let Some(sentiment) = sentiment_boost
-                && sentiment > 0.0 {
-                    new_state.stability = apply_sentiment_boost(
-                        new_state.stability,
-                        sentiment,
-                        self.max_sentiment_boost,
-                    );
-                }
+            && sentiment > 0.0
+        {
+            new_state.stability =
+                apply_sentiment_boost(new_state.stability, sentiment, self.max_sentiment_boost);
+        }
 
         let mut interval =
             next_interval_with_decay(new_state.stability, self.params.desired_retention, w20)
@@ -436,9 +433,11 @@ mod tests {
 
     #[test]
     fn test_custom_parameters() {
-        let mut params = FSRSParameters::default();
-        params.desired_retention = 0.85;
-        params.enable_fuzz = false;
+        let params = FSRSParameters {
+            desired_retention: 0.85,
+            enable_fuzz: false,
+            ..Default::default()
+        };
 
         let scheduler = FSRSScheduler::new(params);
         let card = scheduler.new_card();

@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::super::state::AppState;
-use super::log_err;
+use super::{log_err, log_join_err};
 
 /// Get the per-memory changelog (state transitions audit trail).
 ///
@@ -21,14 +21,22 @@ pub async fn get_memory_changelog(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
-    let node = state.storage
-        .get_node(&id)
-        .map_err(log_err("get_node for changelog"))?
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    let transitions = state.storage
-        .get_state_transitions(&id, 100)
-        .map_err(log_err("get_state_transitions"))?;
+    // get_node + get_state_transitions are two short SELECTs but still
+    // belong on the blocking pool; the inner Option preserves "not found"
+    // so the handler can map it back to 404 cleanly.
+    let storage = state.storage.clone();
+    let id_owned = id.clone();
+    let pair = tokio::task::spawn_blocking(move || -> vestige_core::Result<_> {
+        let Some(node) = storage.get_node(&id_owned)? else {
+            return Ok(None);
+        };
+        let transitions = storage.get_state_transitions(&id_owned, 100)?;
+        Ok(Some((node, transitions)))
+    })
+    .await
+    .map_err(log_join_err("changelog task panicked"))?
+    .map_err(log_err("get_state_transitions"))?;
+    let (node, transitions) = pair.ok_or(StatusCode::NOT_FOUND)?;
 
     let formatted: Vec<Value> = transitions
         .iter()
@@ -66,12 +74,18 @@ pub async fn get_timeline(
     let limit = params.limit.unwrap_or(200).clamp(1, 500);
 
     let start = Utc::now() - Duration::days(days);
-    let nodes = state.storage
-        .query_time_range(Some(start), Some(Utc::now()), limit)
-        .map_err(log_err("storage operation"))?;
+    let now = Utc::now();
+    let storage = state.storage.clone();
+    let nodes = tokio::task::spawn_blocking(move || {
+        storage.query_time_range(Some(start), Some(now), limit)
+    })
+    .await
+    .map_err(log_join_err("query_time_range task panicked"))?
+    .map_err(log_err("storage operation"))?;
 
     // Group by day
-    let mut by_day: std::collections::BTreeMap<String, Vec<Value>> = std::collections::BTreeMap::new();
+    let mut by_day: std::collections::BTreeMap<String, Vec<Value>> =
+        std::collections::BTreeMap::new();
     for node in &nodes {
         let date = node.created_at.format("%Y-%m-%d").to_string();
         let content_preview: String = {

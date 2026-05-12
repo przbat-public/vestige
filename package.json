@@ -1,6 +1,6 @@
 {
   "name": "vestige",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "private": true,
   "description": "Cognitive memory for AI - MCP server with FSRS-6 spaced repetition and content intelligence pipeline",
   "author": "Sam Valladares",

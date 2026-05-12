@@ -21,9 +21,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::params;
 
-use super::{
-    ConsolidationHistoryRecord, DreamHistoryRecord, Result, Storage, StorageError,
-};
+use super::{ConsolidationHistoryRecord, DreamHistoryRecord, Result, Storage, StorageError};
 
 impl Storage {
     // ========================================================================
@@ -32,7 +30,9 @@ impl Storage {
 
     /// Save consolidation history record
     pub fn save_consolidation_history(&self, record: &ConsolidationHistoryRecord) -> Result<i64> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "INSERT INTO consolidation_history (
@@ -54,26 +54,34 @@ impl Storage {
 
     /// Get last consolidation timestamp
     pub fn get_last_consolidation(&self) -> Result<Option<DateTime<Utc>>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let result: Option<String> = reader.query_row(
-            "SELECT MAX(completed_at) FROM consolidation_history",
-            [],
-            |row| row.get(0),
-        ).ok().flatten();
+        let result: Option<String> = reader
+            .query_row(
+                "SELECT MAX(completed_at) FROM consolidation_history",
+                [],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
 
         Ok(result.and_then(|s| {
-            DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
         }))
     }
 
     /// Get consolidation history
     pub fn get_consolidation_history(&self, limit: i32) -> Result<Vec<ConsolidationHistoryRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT * FROM consolidation_history ORDER BY completed_at DESC LIMIT ?1"
-        )?;
+        let mut stmt = reader
+            .prepare("SELECT * FROM consolidation_history ORDER BY completed_at DESC LIMIT ?1")?;
 
         let rows = stmt.query_map(params![limit], |row| {
             Ok(ConsolidationHistoryRecord {
@@ -103,7 +111,9 @@ impl Storage {
 
     /// Save a dream history record
     pub fn save_dream_history(&self, record: &DreamHistoryRecord) -> Result<i64> {
-        let writer = self.writer.lock()
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "INSERT INTO dream_history (
@@ -134,52 +144,61 @@ impl Storage {
 
     /// Get last dream timestamp
     pub fn get_last_dream(&self) -> Result<Option<DateTime<Utc>>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let result: Option<String> = reader.query_row(
-            "SELECT MAX(dreamed_at) FROM dream_history",
-            [],
-            |row| row.get(0),
-        ).ok().flatten();
+        let result: Option<String> = reader
+            .query_row("SELECT MAX(dreamed_at) FROM dream_history", [], |row| {
+                row.get(0)
+            })
+            .ok()
+            .flatten();
 
         Ok(result.and_then(|s| {
-            DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
         }))
     }
 
     /// Get recent dream history records
     pub fn get_dream_history(&self, limit: i32) -> Result<Vec<DreamHistoryRecord>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT dreamed_at, duration_ms, memories_replayed, connections_found,
                     insights_generated, memories_strengthened, memories_compressed,
                     phase_nrem1_ms, phase_nrem3_ms, phase_rem_ms, phase_integration_ms,
                     summaries_generated, emotional_memories_processed, creative_connections_found
-             FROM dream_history ORDER BY dreamed_at DESC LIMIT ?1"
+             FROM dream_history ORDER BY dreamed_at DESC LIMIT ?1",
         )?;
-        let records = stmt.query_map(params![limit], |row| {
-            let dreamed_str: String = row.get(0)?;
-            let dreamed_at = DateTime::parse_from_rfc3339(&dreamed_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
-            Ok(DreamHistoryRecord {
-                dreamed_at,
-                duration_ms: row.get(1)?,
-                memories_replayed: row.get(2)?,
-                connections_found: row.get(3)?,
-                insights_generated: row.get(4)?,
-                memories_strengthened: row.get(5)?,
-                memories_compressed: row.get(6)?,
-                phase_nrem1_ms: row.get(7)?,
-                phase_nrem3_ms: row.get(8)?,
-                phase_rem_ms: row.get(9)?,
-                phase_integration_ms: row.get(10)?,
-                summaries_generated: row.get(11)?,
-                emotional_memories_processed: row.get(12)?,
-                creative_connections_found: row.get(13)?,
-            })
-        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        let records = stmt
+            .query_map(params![limit], |row| {
+                let dreamed_str: String = row.get(0)?;
+                let dreamed_at = DateTime::parse_from_rfc3339(&dreamed_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                Ok(DreamHistoryRecord {
+                    dreamed_at,
+                    duration_ms: row.get(1)?,
+                    memories_replayed: row.get(2)?,
+                    connections_found: row.get(3)?,
+                    insights_generated: row.get(4)?,
+                    memories_strengthened: row.get(5)?,
+                    memories_compressed: row.get(6)?,
+                    phase_nrem1_ms: row.get(7)?,
+                    phase_nrem3_ms: row.get(8)?,
+                    phase_rem_ms: row.get(9)?,
+                    phase_integration_ms: row.get(10)?,
+                    summaries_generated: row.get(11)?,
+                    emotional_memories_processed: row.get(12)?,
+                    creative_connections_found: row.get(13)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(records)
     }
 
@@ -189,7 +208,9 @@ impl Storage {
 
     /// Count memories created since a given timestamp
     pub fn count_memories_since(&self, since: DateTime<Utc>) -> Result<i64> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let count: i64 = reader.query_row(
             "SELECT COUNT(*) FROM knowledge_nodes WHERE created_at >= ?1",
@@ -216,13 +237,17 @@ impl Storage {
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
                 // Parse vestige-YYYYMMDD-HHMMSS.db
-                if let Some(ts_part) = name_str.strip_prefix("vestige-").and_then(|s| s.strip_suffix(".db"))
-                    && let Ok(naive) = chrono::NaiveDateTime::parse_from_str(ts_part, "%Y%m%d-%H%M%S") {
-                        let dt = naive.and_utc();
-                        if latest.as_ref().is_none_or(|l| dt > *l) {
-                            latest = Some(dt);
-                        }
+                if let Some(ts_part) = name_str
+                    .strip_prefix("vestige-")
+                    .and_then(|s| s.strip_suffix(".db"))
+                    && let Ok(naive) =
+                        chrono::NaiveDateTime::parse_from_str(ts_part, "%Y%m%d-%H%M%S")
+                {
+                    let dt = naive.and_utc();
+                    if latest.as_ref().is_none_or(|l| dt > *l) {
+                        latest = Some(dt);
                     }
+                }
             }
         }
 
@@ -231,7 +256,9 @@ impl Storage {
 
     /// Get average retention across all memories
     pub fn get_avg_retention(&self) -> Result<f64> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let avg: f64 = reader.query_row(
             "SELECT COALESCE(AVG(retention_strength), 0.0) FROM knowledge_nodes",
@@ -243,7 +270,9 @@ impl Storage {
 
     /// Get retention distribution in buckets (0-20%, 20-40%, 40-60%, 60-80%, 80-100%)
     pub fn get_retention_distribution(&self) -> Result<Vec<(String, i64)>> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare(
             "SELECT
@@ -257,7 +286,7 @@ impl Storage {
                 COUNT(*) as count
             FROM knowledge_nodes
             GROUP BY bucket
-            ORDER BY bucket"
+            ORDER BY bucket",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -273,12 +302,16 @@ impl Storage {
 
     /// Get retention trend (improving/declining/stable) from retention snapshots
     pub fn get_retention_trend(&self) -> Result<String> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
 
-        let snapshots: Vec<f64> = reader.prepare(
-            "SELECT avg_retention FROM retention_snapshots ORDER BY snapshot_at DESC LIMIT 5"
-        )?.query_map([], |row| row.get(0))?
+        let snapshots: Vec<f64> = reader
+            .prepare(
+                "SELECT avg_retention FROM retention_snapshots ORDER BY snapshot_at DESC LIMIT 5",
+            )?
+            .query_map([], |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -301,8 +334,16 @@ impl Storage {
     }
 
     /// Save a retention snapshot (called during consolidation)
-    pub fn save_retention_snapshot(&self, avg_retention: f64, total: i64, below_target: i64, gc_triggered: bool) -> Result<()> {
-        let writer = self.writer.lock()
+    pub fn save_retention_snapshot(
+        &self,
+        avg_retention: f64,
+        total: i64,
+        below_target: i64,
+        gc_triggered: bool,
+    ) -> Result<()> {
+        let writer = self
+            .writer
+            .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
         writer.execute(
             "INSERT INTO retention_snapshots (snapshot_at, avg_retention, total_memories, memories_below_target, gc_triggered)
@@ -314,7 +355,9 @@ impl Storage {
 
     /// Count memories below a given retention threshold
     pub fn count_memories_below_retention(&self, threshold: f64) -> Result<i64> {
-        let reader = self.reader.lock()
+        let reader = self
+            .reader
+            .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let count: i64 = reader.query_row(
             "SELECT COUNT(*) FROM knowledge_nodes WHERE retention_strength < ?1",

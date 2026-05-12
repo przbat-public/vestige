@@ -348,7 +348,8 @@ mod tests {
     #[test]
     fn test_fsrs6_constants() {
         assert_eq!(FSRS6_WEIGHTS.len(), 21);
-        assert!(FSRS6_WEIGHTS[20] > 0.0 && FSRS6_WEIGHTS[20] < 1.0);
+        let w20 = FSRS6_WEIGHTS[20];
+        assert!(w20 > 0.0 && w20 < 1.0, "w20 out of range: {w20}");
     }
 
     #[test]

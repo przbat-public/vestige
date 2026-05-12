@@ -9,8 +9,8 @@
 //! - Coverage: ratio of unique memories surfaced vs total memory count
 //! - Knowledge gaps: topics with consistently empty or low-confidence results
 
-use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 const HISTORY_CAPACITY: usize = 100;
 
@@ -106,12 +106,17 @@ impl MetacognitionMonitor {
 
         let hits = self.history.iter().filter(|o| o.had_results).count();
         let hit_rate = hits as f64 / total as f64;
-        let avg_results = self.history.iter().map(|o| o.result_count).sum::<usize>() as f64 / total as f64;
+        let avg_results =
+            self.history.iter().map(|o| o.result_count).sum::<usize>() as f64 / total as f64;
         let avg_conf = self.history.iter().map(|o| o.avg_confidence).sum::<f64>() / total as f64;
 
         // Gaps: topics with >50% miss rate and at least 3 queries
-        let gaps: Vec<GapSignal> = self.gap_tracker.iter()
-            .filter(|g| g.total_queries >= 3 && (g.miss_count as f64 / g.total_queries as f64) > 0.5)
+        let gaps: Vec<GapSignal> = self
+            .gap_tracker
+            .iter()
+            .filter(|g| {
+                g.total_queries >= 3 && (g.miss_count as f64 / g.total_queries as f64) > 0.5
+            })
             .cloned()
             .collect();
 
@@ -129,7 +134,8 @@ impl MetacognitionMonitor {
         let report = self.report();
         SearchAdjustments {
             expand_limit: report.hit_rate < 0.7,
-            lower_min_similarity: report.avg_result_count < 2.0 && report.total_queries_tracked >= 5,
+            lower_min_similarity: report.avg_result_count < 2.0
+                && report.total_queries_tracked >= 5,
             use_hyde: report.hit_rate < 0.5 && report.total_queries_tracked >= 10,
         }
     }
@@ -169,7 +175,11 @@ mod tests {
         monitor.record_search(2, 0.7, "python");
 
         let report = monitor.report();
-        assert!((report.hit_rate - 0.6667).abs() < 0.01, "Hit rate: {}", report.hit_rate);
+        assert!(
+            (report.hit_rate - 0.6667).abs() < 0.01,
+            "Hit rate: {}",
+            report.hit_rate
+        );
         assert_eq!(report.total_queries_tracked, 3);
     }
 

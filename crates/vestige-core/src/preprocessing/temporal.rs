@@ -131,7 +131,10 @@ mod tests {
     #[test]
     fn test_deadline_extraction() {
         let result = anchor_temporal("The report is due by next Friday.", None, None);
-        assert!(result.valid_until.is_some(), "Should extract deadline as valid_until");
+        assert!(
+            result.valid_until.is_some(),
+            "Should extract deadline as valid_until"
+        );
         assert!(!result.anchors_found.is_empty());
     }
 
@@ -148,22 +151,33 @@ mod tests {
 
     #[test]
     fn test_from_extraction() {
-        let result = anchor_temporal("Starting from next Monday, the new policy applies.", None, None);
-        assert!(result.valid_from.is_some(), "Should extract 'starting from' as valid_from");
+        let result = anchor_temporal(
+            "Starting from next Monday, the new policy applies.",
+            None,
+            None,
+        );
+        assert!(
+            result.valid_from.is_some(),
+            "Should extract 'starting from' as valid_from"
+        );
     }
 
     #[test]
     fn test_future_standalone() {
         let result = anchor_temporal("We need to deploy tomorrow.", None, None);
-        assert!(result.valid_from.is_some() || !result.anchors_found.is_empty(),
-            "Should detect 'tomorrow' as future temporal anchor");
+        assert!(
+            result.valid_from.is_some() || !result.anchors_found.is_empty(),
+            "Should detect 'tomorrow' as future temporal anchor"
+        );
     }
 
     #[test]
     fn test_past_standalone() {
         let result = anchor_temporal("The server crashed yesterday.", None, None);
-        assert!(result.valid_from.is_some() || !result.anchors_found.is_empty(),
-            "Should detect 'yesterday' as past temporal anchor");
+        assert!(
+            result.valid_from.is_some() || !result.anchors_found.is_empty(),
+            "Should detect 'yesterday' as past temporal anchor"
+        );
     }
 
     #[test]
@@ -175,8 +189,14 @@ mod tests {
             Some(explicit_from),
             Some(explicit_until),
         );
-        assert!(result.valid_from.is_none(), "Should not override explicit valid_from");
-        assert!(result.valid_until.is_none(), "Should not override explicit valid_until");
+        assert!(
+            result.valid_from.is_none(),
+            "Should not override explicit valid_from"
+        );
+        assert!(
+            result.valid_until.is_none(),
+            "Should not override explicit valid_until"
+        );
     }
 
     #[test]

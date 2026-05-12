@@ -174,9 +174,9 @@ impl VectorIndex {
     /// Reserve capacity for a specified number of vectors
     /// This should be called before adding vectors to avoid segmentation faults
     pub fn reserve(&self, capacity: usize) -> Result<(), VectorSearchError> {
-        self.index
-            .reserve(capacity)
-            .map_err(|e| VectorSearchError::IndexCreation(format!("Failed to reserve capacity: {}", e)))
+        self.index.reserve(capacity).map_err(|e| {
+            VectorSearchError::IndexCreation(format!("Failed to reserve capacity: {}", e))
+        })
     }
 
     /// Add a vector with a string key

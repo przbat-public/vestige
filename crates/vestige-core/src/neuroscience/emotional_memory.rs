@@ -216,15 +216,25 @@ impl EmotionalMemory {
 
         // Check negation context (simple window-based)
         let negation_words: Vec<&str> = vec![
-            "not", "no", "never", "don't", "doesn't", "didn't", "won't",
-            "can't", "couldn't", "shouldn't", "without", "hardly",
+            "not",
+            "no",
+            "never",
+            "don't",
+            "doesn't",
+            "didn't",
+            "won't",
+            "can't",
+            "couldn't",
+            "shouldn't",
+            "without",
+            "hardly",
         ];
 
         for (i, word) in words.iter().enumerate() {
             if let Some(&(valence, arousal)) = self.lexicon.get(word.as_str()) {
                 // Check for negation in 3-word window before
-                let negated = (i.saturating_sub(3)..i)
-                    .any(|j| negation_words.contains(&words[j].as_str()));
+                let negated =
+                    (i.saturating_sub(3)..i).any(|j| negation_words.contains(&words[j].as_str()));
 
                 let effective_valence = if negated { -valence * 0.7 } else { valence };
 
@@ -269,9 +279,14 @@ impl EmotionalMemory {
         };
 
         // Flashbulb detection: high novelty proxy (urgency/surprise markers) + high arousal
-        let novelty_proxy = urgency_boost + if category == EmotionCategory::Surprise { 0.4 } else { 0.0 };
-        let is_flashbulb = novelty_proxy >= FLASHBULB_NOVELTY_THRESHOLD
-            && arousal >= FLASHBULB_AROUSAL_THRESHOLD;
+        let novelty_proxy = urgency_boost
+            + if category == EmotionCategory::Surprise {
+                0.4
+            } else {
+                0.0
+            };
+        let is_flashbulb =
+            novelty_proxy >= FLASHBULB_NOVELTY_THRESHOLD && arousal >= FLASHBULB_AROUSAL_THRESHOLD;
 
         if is_flashbulb {
             self.flashbulbs_detected += 1;
@@ -447,66 +462,114 @@ impl EmotionalMemory {
 
         // Positive / Low arousal
         for (word, v, a) in [
-            ("good", 0.6, 0.3), ("nice", 0.5, 0.2), ("clean", 0.4, 0.2),
-            ("simple", 0.3, 0.1), ("smooth", 0.4, 0.2), ("stable", 0.4, 0.1),
-            ("helpful", 0.5, 0.3), ("elegant", 0.6, 0.3), ("solid", 0.4, 0.2),
+            ("good", 0.6, 0.3),
+            ("nice", 0.5, 0.2),
+            ("clean", 0.4, 0.2),
+            ("simple", 0.3, 0.1),
+            ("smooth", 0.4, 0.2),
+            ("stable", 0.4, 0.1),
+            ("helpful", 0.5, 0.3),
+            ("elegant", 0.6, 0.3),
+            ("solid", 0.4, 0.2),
         ] {
             lex.insert(word.to_string(), (v, a));
         }
 
         // Positive / High arousal
         for (word, v, a) in [
-            ("amazing", 0.9, 0.8), ("excellent", 0.8, 0.6), ("perfect", 0.9, 0.7),
-            ("awesome", 0.8, 0.7), ("great", 0.7, 0.5), ("fantastic", 0.9, 0.8),
-            ("brilliant", 0.8, 0.7), ("incredible", 0.9, 0.8), ("love", 0.8, 0.7),
-            ("success", 0.7, 0.6), ("solved", 0.7, 0.6), ("fixed", 0.6, 0.5),
-            ("working", 0.5, 0.4), ("breakthrough", 0.9, 0.9), ("discovered", 0.7, 0.7),
+            ("amazing", 0.9, 0.8),
+            ("excellent", 0.8, 0.6),
+            ("perfect", 0.9, 0.7),
+            ("awesome", 0.8, 0.7),
+            ("great", 0.7, 0.5),
+            ("fantastic", 0.9, 0.8),
+            ("brilliant", 0.8, 0.7),
+            ("incredible", 0.9, 0.8),
+            ("love", 0.8, 0.7),
+            ("success", 0.7, 0.6),
+            ("solved", 0.7, 0.6),
+            ("fixed", 0.6, 0.5),
+            ("working", 0.5, 0.4),
+            ("breakthrough", 0.9, 0.9),
+            ("discovered", 0.7, 0.7),
         ] {
             lex.insert(word.to_string(), (v, a));
         }
 
         // Negative / Low arousal
         for (word, v, a) in [
-            ("bad", -0.5, 0.3), ("wrong", -0.4, 0.3), ("slow", -0.3, 0.2),
-            ("confusing", -0.4, 0.3), ("unclear", -0.3, 0.2), ("messy", -0.4, 0.3),
-            ("annoying", -0.5, 0.4), ("boring", -0.3, 0.1), ("ugly", -0.5, 0.3),
-            ("deprecated", -0.3, 0.2), ("stale", -0.3, 0.1),
+            ("bad", -0.5, 0.3),
+            ("wrong", -0.4, 0.3),
+            ("slow", -0.3, 0.2),
+            ("confusing", -0.4, 0.3),
+            ("unclear", -0.3, 0.2),
+            ("messy", -0.4, 0.3),
+            ("annoying", -0.5, 0.4),
+            ("boring", -0.3, 0.1),
+            ("ugly", -0.5, 0.3),
+            ("deprecated", -0.3, 0.2),
+            ("stale", -0.3, 0.1),
         ] {
             lex.insert(word.to_string(), (v, a));
         }
 
         // Negative / High arousal (bugs, errors, failures)
         for (word, v, a) in [
-            ("error", -0.6, 0.7), ("bug", -0.6, 0.6), ("crash", -0.8, 0.9),
-            ("fail", -0.7, 0.7), ("failed", -0.7, 0.7), ("failure", -0.7, 0.7),
-            ("broken", -0.7, 0.7), ("panic", -0.9, 0.9), ("fatal", -0.9, 0.9),
-            ("critical", -0.5, 0.9), ("severe", -0.6, 0.8), ("urgent", -0.3, 0.9),
-            ("emergency", -0.5, 0.9), ("vulnerability", -0.7, 0.8),
-            ("exploit", -0.7, 0.8), ("leaked", -0.8, 0.9), ("compromised", -0.8, 0.9),
-            ("timeout", -0.5, 0.6), ("deadlock", -0.7, 0.8), ("overflow", -0.6, 0.7),
-            ("corruption", -0.8, 0.8), ("regression", -0.6, 0.7),
-            ("blocker", -0.6, 0.8), ("outage", -0.8, 0.9), ("incident", -0.5, 0.7),
+            ("error", -0.6, 0.7),
+            ("bug", -0.6, 0.6),
+            ("crash", -0.8, 0.9),
+            ("fail", -0.7, 0.7),
+            ("failed", -0.7, 0.7),
+            ("failure", -0.7, 0.7),
+            ("broken", -0.7, 0.7),
+            ("panic", -0.9, 0.9),
+            ("fatal", -0.9, 0.9),
+            ("critical", -0.5, 0.9),
+            ("severe", -0.6, 0.8),
+            ("urgent", -0.3, 0.9),
+            ("emergency", -0.5, 0.9),
+            ("vulnerability", -0.7, 0.8),
+            ("exploit", -0.7, 0.8),
+            ("leaked", -0.8, 0.9),
+            ("compromised", -0.8, 0.9),
+            ("timeout", -0.5, 0.6),
+            ("deadlock", -0.7, 0.8),
+            ("overflow", -0.6, 0.7),
+            ("corruption", -0.8, 0.8),
+            ("regression", -0.6, 0.7),
+            ("blocker", -0.6, 0.8),
+            ("outage", -0.8, 0.9),
+            ("incident", -0.5, 0.7),
         ] {
             lex.insert(word.to_string(), (v, a));
         }
 
         // Surprise / Discovery
         for (word, v, a) in [
-            ("unexpected", 0.0, 0.7), ("surprising", 0.1, 0.7),
-            ("strange", -0.1, 0.6), ("weird", -0.2, 0.5),
-            ("interesting", 0.4, 0.6), ("curious", 0.3, 0.5),
-            ("insight", 0.6, 0.7), ("realized", 0.4, 0.6),
-            ("found", 0.3, 0.5), ("noticed", 0.2, 0.4),
+            ("unexpected", 0.0, 0.7),
+            ("surprising", 0.1, 0.7),
+            ("strange", -0.1, 0.6),
+            ("weird", -0.2, 0.5),
+            ("interesting", 0.4, 0.6),
+            ("curious", 0.3, 0.5),
+            ("insight", 0.6, 0.7),
+            ("realized", 0.4, 0.6),
+            ("found", 0.3, 0.5),
+            ("noticed", 0.2, 0.4),
         ] {
             lex.insert(word.to_string(), (v, a));
         }
 
         // Technical intensity markers
         for (word, v, a) in [
-            ("production", -0.1, 0.7), ("deploy", 0.1, 0.6),
-            ("migration", -0.1, 0.5), ("refactor", 0.1, 0.4),
-            ("security", -0.1, 0.6), ("performance", 0.1, 0.4),
-            ("important", 0.2, 0.6), ("remember", 0.1, 0.5),
+            ("production", -0.1, 0.7),
+            ("deploy", 0.1, 0.6),
+            ("migration", -0.1, 0.5),
+            ("refactor", 0.1, 0.4),
+            ("security", -0.1, 0.6),
+            ("performance", 0.1, 0.4),
+            ("important", 0.2, 0.6),
+            ("remember", 0.1, 0.5),
         ] {
             lex.insert(word.to_string(), (v, a));
         }
@@ -572,16 +635,33 @@ mod tests {
     fn test_positive_content() {
         let mut em = EmotionalMemory::new();
         let eval = em.evaluate_content("Amazing breakthrough! The fix is working perfectly");
-        assert!(eval.valence > 0.3, "Expected positive valence, got {}", eval.valence);
-        assert!(eval.arousal > 0.4, "Expected high arousal, got {}", eval.arousal);
+        assert!(
+            eval.valence > 0.3,
+            "Expected positive valence, got {}",
+            eval.valence
+        );
+        assert!(
+            eval.arousal > 0.4,
+            "Expected high arousal, got {}",
+            eval.arousal
+        );
     }
 
     #[test]
     fn test_negative_content() {
         let mut em = EmotionalMemory::new();
-        let eval = em.evaluate_content("Critical bug: production server crash with data corruption");
-        assert!(eval.valence < -0.3, "Expected negative valence, got {}", eval.valence);
-        assert!(eval.arousal > 0.5, "Expected high arousal, got {}", eval.arousal);
+        let eval =
+            em.evaluate_content("Critical bug: production server crash with data corruption");
+        assert!(
+            eval.valence < -0.3,
+            "Expected negative valence, got {}",
+            eval.valence
+        );
+        assert!(
+            eval.arousal > 0.5,
+            "Expected high arousal, got {}",
+            eval.arousal
+        );
     }
 
     #[test]
@@ -592,7 +672,10 @@ mod tests {
             0.8, // High novelty
             0.9, // High arousal
         );
-        assert!(eval.is_flashbulb, "Should detect flashbulb with high novelty + arousal");
+        assert!(
+            eval.is_flashbulb,
+            "Should detect flashbulb with high novelty + arousal"
+        );
     }
 
     #[test]
@@ -611,7 +694,10 @@ mod tests {
         let mut em = EmotionalMemory::new();
         let positive = em.evaluate_content("This is amazing");
         let negated = em.evaluate_content("This is not amazing");
-        assert!(negated.valence < positive.valence, "Negation should reduce valence");
+        assert!(
+            negated.valence < positive.valence,
+            "Negation should reduce valence"
+        );
     }
 
     #[test]
@@ -632,15 +718,24 @@ mod tests {
             em.evaluate_content("Great amazing perfect success");
         }
         let (mood_v, _) = em.current_mood();
-        assert!(mood_v > 0.3, "Mood should be positive after positive content");
+        assert!(
+            mood_v > 0.3,
+            "Mood should be positive after positive content"
+        );
 
         // Positive memory should get boost
         let boost = em.mood_congruence_boost(0.7);
-        assert!(boost > 0.0, "Positive memory should get mood-congruent boost");
+        assert!(
+            boost > 0.0,
+            "Positive memory should get mood-congruent boost"
+        );
 
         // Negative memory should get less/no boost
         let neg_boost = em.mood_congruence_boost(-0.7);
-        assert!(neg_boost < boost, "Negative memory should get less boost in positive mood");
+        assert!(
+            neg_boost < boost,
+            "Negative memory should get less boost in positive mood"
+        );
     }
 
     #[test]
@@ -674,7 +769,10 @@ mod tests {
         }
         let (v1, a1) = em.current_mood();
         assert!(v1 < 0.0, "Mood should be negative after negative content");
-        assert!(a1 > 0.3, "Arousal should be elevated after negative content");
+        assert!(
+            a1 > 0.3,
+            "Arousal should be elevated after negative content"
+        );
     }
 
     #[test]

@@ -114,23 +114,39 @@ pub async fn execute(
     let include_status = args.include_status.unwrap_or(true);
     let include_intentions = args.include_intentions.unwrap_or(true);
     let include_predictions = args.include_predictions.unwrap_or(true);
-    let queries = args.queries.unwrap_or_else(|| vec!["user preferences".to_string()]);
+    let queries = args
+        .queries
+        .unwrap_or_else(|| vec!["user preferences".to_string()]);
 
     let mut context_parts: Vec<String> = Vec::new();
     let mut expandable_ids: Vec<String> = Vec::new();
     let mut char_count = 0;
 
     // ====================================================================
-    // 1. Search queries — extract first sentence per result, dedup by ID
+    // 1. Search queries — extract first sentence per result, dedup by ID.
+    //    All searches + Testing Effect strengthen run on the blocking pool;
+    //    each hybrid_search bursts FTS5 + embedding similarity (heavy SQL).
     // ====================================================================
     let mut seen_ids = HashSet::new();
     let mut memory_lines: Vec<String> = Vec::new();
 
-    for query in &queries {
-        let results = storage
-            .hybrid_search(query, 5, 0.3, 0.7)
-            .map_err(|e| e.to_string())?;
+    let storage_search = storage.clone();
+    let queries_for_task = queries.clone();
+    let search_results: Vec<Vec<vestige_core::SearchResult>> =
+        tokio::task::spawn_blocking(move || -> Result<_, String> {
+            let mut out = Vec::with_capacity(queries_for_task.len());
+            for query in &queries_for_task {
+                let results = storage_search
+                    .hybrid_search(query, 5, 0.3, 0.7)
+                    .map_err(|e| e.to_string())?;
+                out.push(results);
+            }
+            Ok(out)
+        })
+        .await
+        .map_err(|e| format!("session_context search task panicked: {}", e))??;
 
+    for results in search_results {
         for r in results {
             if seen_ids.contains(&r.node.id) {
                 continue;
@@ -138,7 +154,7 @@ pub async fn execute(
             let summary = first_sentence(&r.node.content);
             let date_str = r.node.updated_at.format("%b %d, %Y").to_string();
             let line = format!("- ({}) {}", date_str, summary);
-            let line_len = line.len() + 1; // +1 for newline
+            let line_len = line.len() + 1;
 
             if char_count + line_len > budget_chars {
                 expandable_ids.push(r.node.id.clone());
@@ -151,8 +167,15 @@ pub async fn execute(
     }
 
     // Auto-strengthen accessed memories (Testing Effect)
-    let accessed_ids: Vec<&str> = seen_ids.iter().map(|s| s.as_str()).collect();
-    let _ = storage.strengthen_batch_on_access(&accessed_ids);
+    let accessed_ids: Vec<String> = seen_ids.iter().cloned().collect();
+    if !accessed_ids.is_empty() {
+        let storage_strengthen = storage.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let refs: Vec<&str> = accessed_ids.iter().map(|s| s.as_str()).collect();
+            storage_strengthen.strengthen_batch_on_access(&refs)
+        })
+        .await;
+    }
 
     if !memory_lines.is_empty() {
         context_parts.push(format!("**Memories:**\n{}", memory_lines.join("\n")));
@@ -162,7 +185,14 @@ pub async fn execute(
     // 2. Intentions — find triggered + pending high-priority
     // ====================================================================
     if include_intentions {
-        let intentions = storage.get_active_intentions().map_err(|e| e.to_string())?;
+        let storage_int = storage.clone();
+        let intentions = tokio::task::spawn_blocking(move || {
+            storage_int
+                .get_active_intentions()
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| format!("get_active_intentions task panicked: {}", e))??;
         let now = Utc::now();
         let mut triggered_lines: Vec<String> = Vec::new();
 
@@ -206,9 +236,23 @@ pub async fn execute(
     }
 
     // ====================================================================
-    // 3. System status — compact one-liner
+    // 3. System status — compact one-liner. Stats + last dream + count of
+    //    saves since last dream all on the blocking pool, one hop.
     // ====================================================================
-    let stats = storage.get_stats().map_err(|e| e.to_string())?;
+    let storage_status = storage.clone();
+    let (stats, last_dream, saves_since_last_dream) = tokio::task::spawn_blocking(
+        move || -> Result<(vestige_core::MemoryStats, Option<DateTime<Utc>>, i64), String> {
+            let stats = storage_status.get_stats().map_err(|e| e.to_string())?;
+            let last_dream = storage_status.get_last_dream().ok().flatten();
+            let saves_since_last_dream = match &last_dream {
+                Some(dt) => storage_status.count_memories_since(*dt).unwrap_or(0),
+                None => stats.total_nodes,
+            };
+            Ok((stats, last_dream, saves_since_last_dream))
+        },
+    )
+    .await
+    .map_err(|e| format!("session_context status task panicked: {}", e))??;
     let status = if stats.total_nodes == 0 {
         "empty"
     } else if stats.average_retention < 0.3 {
@@ -219,12 +263,6 @@ pub async fn execute(
         "healthy"
     };
 
-    // Automation triggers
-    let last_dream = storage.get_last_dream().ok().flatten();
-    let saves_since_last_dream = match &last_dream {
-        Some(dt) => storage.count_memories_since(*dt).unwrap_or(0),
-        None => stats.total_nodes,
-    };
     let last_backup = Storage::get_last_backup_timestamp();
     let now = Utc::now();
 
@@ -279,34 +317,33 @@ pub async fn execute(
     if include_predictions {
         let cog = cognitive.lock().await;
 
-        let session_ctx = vestige_core::neuroscience::predictive_retrieval::SessionContext {
-            started_at: Utc::now(),
-            current_focus: args
-                .context
-                .as_ref()
-                .and_then(|c| c.topics.as_ref())
-                .and_then(|t| t.first())
-                .cloned(),
-            active_files: args
-                .context
-                .as_ref()
-                .and_then(|c| c.file.as_ref())
-                .map(|f| vec![f.clone()])
-                .unwrap_or_default(),
-            accessed_memories: Vec::new(),
-            recent_queries: Vec::new(),
-            detected_intent: None,
-            project_context: args
-                .context
-                .as_ref()
-                .and_then(|c| c.codebase.as_ref())
-                .map(|name| vestige_core::neuroscience::predictive_retrieval::ProjectContext {
-                    name: name.to_string(),
-                    path: String::new(),
-                    technologies: Vec::new(),
-                    primary_language: None,
-                }),
-        };
+        let session_ctx =
+            vestige_core::neuroscience::predictive_retrieval::SessionContext {
+                started_at: Utc::now(),
+                current_focus: args
+                    .context
+                    .as_ref()
+                    .and_then(|c| c.topics.as_ref())
+                    .and_then(|t| t.first())
+                    .cloned(),
+                active_files: args
+                    .context
+                    .as_ref()
+                    .and_then(|c| c.file.as_ref())
+                    .map(|f| vec![f.clone()])
+                    .unwrap_or_default(),
+                accessed_memories: Vec::new(),
+                recent_queries: Vec::new(),
+                detected_intent: None,
+                project_context: args.context.as_ref().and_then(|c| c.codebase.as_ref()).map(
+                    |name| vestige_core::neuroscience::predictive_retrieval::ProjectContext {
+                        name: name.to_string(),
+                        path: String::new(),
+                        technologies: Vec::new(),
+                        primary_language: None,
+                    },
+                ),
+            };
 
         let predictions = cog
             .predictive_memory
@@ -339,40 +376,51 @@ pub async fn execute(
     // 5. Codebase patterns/decisions (if codebase specified)
     // ====================================================================
     if let Some(ref ctx) = args.context
-        && let Some(ref codebase) = ctx.codebase {
-            let codebase_tag = format!("codebase:{}", codebase);
-            let mut cb_lines: Vec<String> = Vec::new();
+        && let Some(ref codebase) = ctx.codebase
+    {
+        let codebase_tag = format!("codebase:{}", codebase);
+        let mut cb_lines: Vec<String> = Vec::new();
 
-            // Get patterns
-            if let Ok(patterns) = storage.get_nodes_by_type_and_tag("pattern", Some(&codebase_tag), 3) {
-                for p in &patterns {
-                    let line = format!("- [pattern] {}", first_sentence(&p.content));
-                    let line_len = line.len() + 1;
-                    if char_count + line_len <= budget_chars {
-                        cb_lines.push(line);
-                        char_count += line_len;
-                    }
-                }
-            }
+        // Fetch patterns + decisions in a single blocking hop.
+        let storage_cb = storage.clone();
+        let codebase_tag_owned = codebase_tag.clone();
+        let (patterns, decisions) = tokio::task::spawn_blocking(move || {
+            let patterns = storage_cb
+                .get_nodes_by_type_and_tag("pattern", Some(&codebase_tag_owned), 3)
+                .unwrap_or_default();
+            let decisions = storage_cb
+                .get_nodes_by_type_and_tag("decision", Some(&codebase_tag_owned), 3)
+                .unwrap_or_default();
+            (patterns, decisions)
+        })
+        .await
+        .map_err(|e| format!("session_context codebase task panicked: {}", e))?;
 
-            // Get decisions
-            if let Ok(decisions) =
-                storage.get_nodes_by_type_and_tag("decision", Some(&codebase_tag), 3)
-            {
-                for d in &decisions {
-                    let line = format!("- [decision] {}", first_sentence(&d.content));
-                    let line_len = line.len() + 1;
-                    if char_count + line_len <= budget_chars {
-                        cb_lines.push(line);
-                        char_count += line_len;
-                    }
-                }
-            }
-
-            if !cb_lines.is_empty() {
-                context_parts.push(format!("**Codebase ({}):**\n{}", codebase, cb_lines.join("\n")));
+        for p in &patterns {
+            let line = format!("- [pattern] {}", first_sentence(&p.content));
+            let line_len = line.len() + 1;
+            if char_count + line_len <= budget_chars {
+                cb_lines.push(line);
+                char_count += line_len;
             }
         }
+        for d in &decisions {
+            let line = format!("- [decision] {}", first_sentence(&d.content));
+            let line_len = line.len() + 1;
+            if char_count + line_len <= budget_chars {
+                cb_lines.push(line);
+                char_count += line_len;
+            }
+        }
+
+        if !cb_lines.is_empty() {
+            context_parts.push(format!(
+                "**Codebase ({}):**\n{}",
+                codebase,
+                cb_lines.join("\n")
+            ));
+        }
+    }
 
     // ====================================================================
     // 6. Assemble final response
@@ -409,9 +457,10 @@ fn check_intention_triggered(
     match trigger.trigger_type.as_deref() {
         Some("time") => {
             if let Some(ref at) = trigger.at
-                && let Ok(trigger_time) = DateTime::parse_from_rfc3339(at) {
-                    return trigger_time.with_timezone(&Utc) <= now;
-                }
+                && let Ok(trigger_time) = DateTime::parse_from_rfc3339(at)
+            {
+                return trigger_time.with_timezone(&Utc) <= now;
+            }
             if let Some(mins) = trigger.in_minutes {
                 let trigger_time = intention.created_at + Duration::minutes(mins);
                 return trigger_time <= now;
@@ -424,22 +473,23 @@ fn check_intention_triggered(
                 && current_cb
                     .to_lowercase()
                     .contains(&trigger_cb.to_lowercase())
-                {
-                    return true;
-                }
+            {
+                return true;
+            }
             // Check file pattern match
             if let (Some(pattern), Some(file)) = (&trigger.file_pattern, &ctx.file)
-                && file.contains(pattern.as_str()) {
-                    return true;
-                }
+                && file.contains(pattern.as_str())
+            {
+                return true;
+            }
             // Check topic match
             if let (Some(topic), Some(topics)) = (&trigger.topic, &ctx.topics)
                 && topics
                     .iter()
                     .any(|t| t.to_lowercase().contains(&topic.to_lowercase()))
-                {
-                    return true;
-                }
+            {
+                return true;
+            }
             false
         }
         _ => false,
@@ -545,7 +595,12 @@ mod tests {
     #[tokio::test]
     async fn test_with_queries() {
         let (storage, _dir) = test_storage().await;
-        ingest_test_content(&storage, "Sam prefers Rust and TypeScript for all projects.", vec![]).await;
+        ingest_test_content(
+            &storage,
+            "Sam prefers Rust and TypeScript for all projects.",
+            vec![],
+        )
+        .await;
 
         let args = serde_json::json!({
             "queries": ["Sam preferences", "project context"]
@@ -587,7 +642,11 @@ mod tests {
         // The actual char count of context should be reasonable
         let tokens_used = value["tokensUsed"].as_u64().unwrap();
         // Allow some overhead for the header
-        assert!(tokens_used <= 300, "tokens_used {} should be near budget 200", tokens_used);
+        assert!(
+            tokens_used <= 300,
+            "tokens_used {} should be near budget 200",
+            tokens_used
+        );
     }
 
     #[tokio::test]
@@ -657,7 +716,8 @@ mod tests {
         let (storage, _dir) = test_storage().await;
         // Ingest a pattern with codebase tag
         let input = IngestInput {
-            content: "Code pattern: Use Arc<Mutex<>> for shared state in async contexts.".to_string(),
+            content: "Code pattern: Use Arc<Mutex<>> for shared state in async contexts."
+                .to_string(),
             node_type: "pattern".to_string(),
             source: None,
             sentiment_score: 0.0,
@@ -691,7 +751,10 @@ mod tests {
 
     #[test]
     fn test_first_sentence_period() {
-        assert_eq!(first_sentence("Hello world. More text here."), "Hello world.");
+        assert_eq!(
+            first_sentence("Hello world. More text here."),
+            "Hello world."
+        );
     }
 
     #[test]

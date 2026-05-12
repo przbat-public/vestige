@@ -88,10 +88,54 @@ impl std::fmt::Display for QueryIntent {
 fn classify_intent(query: &str) -> QueryIntent {
     let q = query.to_lowercase();
     let patterns: &[(QueryIntent, &[&str])] = &[
-        (QueryIntent::RootCause, &["why did", "root cause", "what caused", "because of", "reason for", "why is", "why was"]),
-        (QueryIntent::Timeline, &["when did", "timeline", "history of", "over time", "how has", "evolution of", "sequence of"]),
-        (QueryIntent::Comparison, &["differ", "compare", "versus", " vs ", "difference between", "changed from"]),
-        (QueryIntent::FactCheck, &["is it true", "did i", "was there", "verify", "confirm", "is this correct", "should i use", "should we"]),
+        (
+            QueryIntent::RootCause,
+            &[
+                "why did",
+                "root cause",
+                "what caused",
+                "because of",
+                "reason for",
+                "why is",
+                "why was",
+            ],
+        ),
+        (
+            QueryIntent::Timeline,
+            &[
+                "when did",
+                "timeline",
+                "history of",
+                "over time",
+                "how has",
+                "evolution of",
+                "sequence of",
+            ],
+        ),
+        (
+            QueryIntent::Comparison,
+            &[
+                "differ",
+                "compare",
+                "versus",
+                " vs ",
+                "difference between",
+                "changed from",
+            ],
+        ),
+        (
+            QueryIntent::FactCheck,
+            &[
+                "is it true",
+                "did i",
+                "was there",
+                "verify",
+                "confirm",
+                "is this correct",
+                "should i use",
+                "should we",
+            ],
+        ),
     ];
     for (intent, keywords) in patterns {
         if keywords.iter().any(|kw| q.contains(kw)) {
@@ -125,20 +169,21 @@ impl std::fmt::Display for Relation {
 }
 
 const STOP_WORDS: &[&str] = &[
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "shall", "can", "to", "of", "in", "for",
-    "on", "with", "at", "by", "from", "as", "into", "about", "that",
-    "this", "it", "its", "and", "or", "but", "if", "so", "no", "not",
-    "we", "i", "my", "our", "he", "she", "they", "them", "his", "her",
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might", "shall", "can", "to",
+    "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "about", "that", "this",
+    "it", "its", "and", "or", "but", "if", "so", "no", "not", "we", "i", "my", "our", "he", "she",
+    "they", "them", "his", "her",
 ];
 
 fn shared_topic_words(a: &str, b: &str) -> usize {
-    let words_a: std::collections::HashSet<String> = a.split_whitespace()
+    let words_a: std::collections::HashSet<String> = a
+        .split_whitespace()
         .map(|w| w.to_lowercase())
         .filter(|w| w.len() > 2 && !STOP_WORDS.contains(&w.as_str()))
         .collect();
-    let words_b: std::collections::HashSet<String> = b.split_whitespace()
+    let words_b: std::collections::HashSet<String> = b
+        .split_whitespace()
         .map(|w| w.to_lowercase())
         .filter(|w| w.len() > 2 && !STOP_WORDS.contains(&w.as_str()))
         .collect();
@@ -152,12 +197,21 @@ fn contains_word(text: &str, word: &str) -> bool {
 
 fn has_negation_signal(a: &str, b: &str) -> bool {
     let negation_pairs: &[(&str, &str)] = &[
-        ("don't", "do"), ("doesn't", "does"),
-        ("didn't", "did"), ("isn't", "is"), ("aren't", "are"),
-        ("won't", "will"), ("can't", "can"), ("shouldn't", "should"),
-        ("never", "always"), ("false", "true"), ("incorrect", "correct"),
-        ("wrong", "right"), ("deprecated", "recommended"),
-        ("removed", "added"), ("disabled", "enabled"),
+        ("don't", "do"),
+        ("doesn't", "does"),
+        ("didn't", "did"),
+        ("isn't", "is"),
+        ("aren't", "are"),
+        ("won't", "will"),
+        ("can't", "can"),
+        ("shouldn't", "should"),
+        ("never", "always"),
+        ("false", "true"),
+        ("incorrect", "correct"),
+        ("wrong", "right"),
+        ("deprecated", "recommended"),
+        ("removed", "added"),
+        ("disabled", "enabled"),
     ];
     let al = a.to_lowercase();
     let bl = b.to_lowercase();
@@ -178,7 +232,13 @@ fn has_negation_signal(a: &str, b: &str) -> bool {
         }
     }
 
-    let correction_signals = ["correction:", "no longer", "instead of", "replaced by", "superseded by"];
+    let correction_signals = [
+        "correction:",
+        "no longer",
+        "instead of",
+        "replaced by",
+        "superseded by",
+    ];
     for sig in &correction_signals {
         if al.contains(sig) || bl.contains(sig) {
             return true;
@@ -188,8 +248,12 @@ fn has_negation_signal(a: &str, b: &str) -> bool {
 }
 
 fn assess_relation(
-    a_content: &str, a_trust: f64, a_time: chrono::DateTime<Utc>,
-    b_content: &str, b_trust: f64, b_time: chrono::DateTime<Utc>,
+    a_content: &str,
+    a_trust: f64,
+    a_time: chrono::DateTime<Utc>,
+    b_content: &str,
+    b_trust: f64,
+    b_time: chrono::DateTime<Utc>,
 ) -> Relation {
     let shared = shared_topic_words(a_content, b_content);
     if shared < 2 {
@@ -226,11 +290,18 @@ pub async fn execute(
     let depth = args.depth.unwrap_or(20).clamp(5, 50) as usize;
     let intent = classify_intent(&args.query);
 
-    // STAGE 1: Broad retrieval with overfetch
+    // STAGE 1: Broad retrieval with overfetch. Hybrid search fires FTS5 +
+    // embedding similarity — always blocking, move to the thread pool.
     let overfetch = (depth * 3).min(150);
-    let results = storage
-        .hybrid_search(&args.query, overfetch as i32, 0.3, 0.7)
-        .map_err(|e| format!("Search failed: {}", e))?;
+    let storage_search = storage.clone();
+    let query_owned = args.query.clone();
+    let results = tokio::task::spawn_blocking(move || {
+        storage_search
+            .hybrid_search(&query_owned, overfetch as i32, 0.3, 0.7)
+            .map_err(|e| format!("Search failed: {}", e))
+    })
+    .await
+    .map_err(|e| format!("cross_reference search task panicked: {}", e))??;
 
     if results.is_empty() {
         return Ok(serde_json::json!({
@@ -301,10 +372,25 @@ pub async fn execute(
         false
     };
     let mut related_insights: Vec<Value> = Vec::new();
-    for aid in &activation_ids {
-        if let Ok(Some(node)) = storage.get_node(aid) {
+    if !activation_ids.is_empty() {
+        // Batch all activation-id node lookups in one blocking task — each
+        // get_node is a separate SELECT, easy to chain on the same thread.
+        let storage_act = storage.clone();
+        let ids_owned = activation_ids.clone();
+        let nodes = tokio::task::spawn_blocking(move || {
+            ids_owned
+                .iter()
+                .filter_map(|aid| storage_act.get_node(aid).ok().flatten())
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| format!("cross_reference activation task panicked: {}", e))?;
+        for node in nodes {
             let trust = compute_trust(
-                node.retention_strength, node.stability, node.reps, node.lapses,
+                node.retention_strength,
+                node.stability,
+                node.reps,
+                node.lapses,
             );
             related_insights.push(serde_json::json!({
                 "id": node.id,
@@ -355,7 +441,11 @@ pub async fn execute(
                     }));
                 }
                 Relation::Supersedes if !superseded.iter().any(|s| s["supersededId"] == *id_b) => {
-                    let (newer_id, older_id) = if time_a > time_b { (id_a, id_b) } else { (id_b, id_a) };
+                    let (newer_id, older_id) = if time_a > time_b {
+                        (id_a, id_b)
+                    } else {
+                        (id_b, id_a)
+                    };
                     superseded.push(serde_json::json!({
                         "supersededId": older_id,
                         "supersededBy": newer_id,
@@ -367,10 +457,15 @@ pub async fn execute(
         }
     }
 
-    // STAGE 6: Dream insight integration
-    let (dream_insights, dream_available): (Vec<Value>, bool) = match storage.get_insights(10) {
+    // STAGE 6: Dream insight integration — blocking SQL on the threadpool.
+    let storage_dream = storage.clone();
+    let dream_query = tokio::task::spawn_blocking(move || storage_dream.get_insights(10))
+        .await
+        .map_err(|e| format!("cross_reference dream task panicked: {}", e))?;
+    let (dream_insights, dream_available): (Vec<Value>, bool) = match dream_query {
         Ok(insights) => {
-            let filtered: Vec<Value> = insights.iter()
+            let filtered: Vec<Value> = insights
+                .iter()
                 .filter(|i| {
                     let il = i.insight.to_lowercase();
                     let ql = args.query.to_lowercase();
@@ -379,11 +474,13 @@ pub async fn execute(
                         .any(|w| il.contains(w))
                 })
                 .take(3)
-                .map(|i| serde_json::json!({
-                    "insight": i.insight,
-                    "confidence": i.confidence,
-                    "source": "dream",
-                }))
+                .map(|i| {
+                    serde_json::json!({
+                        "insight": i.insight,
+                        "confidence": i.confidence,
+                        "source": "dream",
+                    })
+                })
                 .collect();
             (filtered, true)
         }
@@ -395,7 +492,8 @@ pub async fn execute(
 
     // STAGE 7: Synthesis
     let recommended = evidence.first().cloned();
-    let top_trust = recommended.as_ref()
+    let top_trust = recommended
+        .as_ref()
         .and_then(|r| r["trust"].as_f64())
         .unwrap_or(0.0);
     let contradiction_penalty = (contradictions.len() as f64 * 0.1).min(0.3);
@@ -404,14 +502,17 @@ pub async fn execute(
     let reasoning = build_reasoning(&intent, &evidence, &contradictions, &superseded, confidence);
 
     // Evolution timeline (for timeline intent or always useful)
-    let mut evolution: Vec<Value> = trust_scores.iter().map(|(id, trust, content, time)| {
-        serde_json::json!({
-            "id": id,
-            "content": first_sentence(content),
-            "trust": (trust * 100.0).round() / 100.0,
-            "timestamp": time.to_rfc3339(),
+    let mut evolution: Vec<Value> = trust_scores
+        .iter()
+        .map(|(id, trust, content, time)| {
+            serde_json::json!({
+                "id": id,
+                "content": first_sentence(content),
+                "trust": (trust * 100.0).round() / 100.0,
+                "timestamp": time.to_rfc3339(),
+            })
         })
-    }).collect();
+        .collect();
     evolution.sort_by(|a, b| {
         let ta = a["timestamp"].as_str().unwrap_or("");
         let tb = b["timestamp"].as_str().unwrap_or("");
@@ -450,10 +551,16 @@ fn build_reasoning(
 
     match intent {
         QueryIntent::FactCheck => parts.push("Intent: Verifying a factual claim.".to_string()),
-        QueryIntent::Timeline => parts.push("Intent: Reconstructing temporal sequence.".to_string()),
+        QueryIntent::Timeline => {
+            parts.push("Intent: Reconstructing temporal sequence.".to_string())
+        }
         QueryIntent::RootCause => parts.push("Intent: Tracing causal chain backward.".to_string()),
-        QueryIntent::Comparison => parts.push("Intent: Comparing two concepts or states.".to_string()),
-        QueryIntent::Synthesis => parts.push("Intent: Synthesizing knowledge on a topic.".to_string()),
+        QueryIntent::Comparison => {
+            parts.push("Intent: Comparing two concepts or states.".to_string())
+        }
+        QueryIntent::Synthesis => {
+            parts.push("Intent: Synthesizing knowledge on a topic.".to_string())
+        }
     }
 
     parts.push(format!("Found {} relevant memories.", evidence.len()));
@@ -483,7 +590,9 @@ fn build_reasoning(
     }
 
     if confidence < 0.3 {
-        parts.push("Low confidence — consider saving more context or verifying externally.".to_string());
+        parts.push(
+            "Low confidence — consider saving more context or verifying externally.".to_string(),
+        );
     }
 
     parts.join(" ")
@@ -514,27 +623,42 @@ mod tests {
 
     #[test]
     fn test_classify_intent_synthesis() {
-        assert_eq!(classify_intent("What do I know about Rust?"), QueryIntent::Synthesis);
+        assert_eq!(
+            classify_intent("What do I know about Rust?"),
+            QueryIntent::Synthesis
+        );
     }
 
     #[test]
     fn test_classify_intent_fact_check() {
-        assert_eq!(classify_intent("Is it true that we use PostgreSQL?"), QueryIntent::FactCheck);
+        assert_eq!(
+            classify_intent("Is it true that we use PostgreSQL?"),
+            QueryIntent::FactCheck
+        );
     }
 
     #[test]
     fn test_classify_intent_timeline() {
-        assert_eq!(classify_intent("When did we switch to React?"), QueryIntent::Timeline);
+        assert_eq!(
+            classify_intent("When did we switch to React?"),
+            QueryIntent::Timeline
+        );
     }
 
     #[test]
     fn test_classify_intent_root_cause() {
-        assert_eq!(classify_intent("Why did the deployment fail?"), QueryIntent::RootCause);
+        assert_eq!(
+            classify_intent("Why did the deployment fail?"),
+            QueryIntent::RootCause
+        );
     }
 
     #[test]
     fn test_classify_intent_comparison() {
-        assert_eq!(classify_intent("How does Redis differ from Memcached?"), QueryIntent::Comparison);
+        assert_eq!(
+            classify_intent("How does Redis differ from Memcached?"),
+            QueryIntent::Comparison
+        );
     }
 
     #[test]
@@ -551,7 +675,12 @@ mod tests {
 
     #[test]
     fn test_shared_topic_words() {
-        assert!(shared_topic_words("Rust borrow checker prevents data races", "Rust ownership prevents memory issues") >= 2);
+        assert!(
+            shared_topic_words(
+                "Rust borrow checker prevents data races",
+                "Rust ownership prevents memory issues"
+            ) >= 2
+        );
         assert_eq!(shared_topic_words("hello world", "goodbye moon"), 0);
     }
 
@@ -564,7 +693,10 @@ mod tests {
 
     #[test]
     fn test_negation_signal() {
-        assert!(has_negation_signal("We should not use Redis", "We should use Redis for caching"));
+        assert!(has_negation_signal(
+            "We should not use Redis",
+            "We should use Redis for caching"
+        ));
         assert!(!has_negation_signal("Rust is fast", "Rust is safe"));
     }
 
@@ -582,8 +714,14 @@ mod tests {
 
     #[test]
     fn test_negation_signal_contraction_pairs() {
-        assert!(has_negation_signal("We don't deploy on Fridays", "We do deploy on Mondays"));
-        assert!(has_negation_signal("Feature is disabled in prod", "Feature is enabled in staging"));
+        assert!(has_negation_signal(
+            "We don't deploy on Fridays",
+            "We do deploy on Mondays"
+        ));
+        assert!(has_negation_signal(
+            "Feature is disabled in prod",
+            "Feature is enabled in staging"
+        ));
     }
 
     #[test]

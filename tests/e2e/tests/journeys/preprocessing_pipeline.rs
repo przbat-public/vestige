@@ -10,13 +10,13 @@
 mod preprocessing_tests {
     use vestige_core::preprocessing::{
         self, PreprocessingConfig, PreprocessingResult,
-        entities::{EntityType, extract_entities},
         coref::resolve_coreferences,
-        temporal::anchor_temporal,
-        relations::extract_relations,
+        entities::{EntityType, extract_entities},
         provenance::ProvenanceMetadata,
+        relations::extract_relations,
+        temporal::anchor_temporal,
     };
-    use vestige_core::search::decompose::{decompose_query, merge_results, HasIdAndScore};
+    use vestige_core::search::decompose::{HasIdAndScore, decompose_query, merge_results};
 
     // ========================================================================
     // JOURNEY 1: Full preprocessing pipeline on realistic content
@@ -39,25 +39,41 @@ mod preprocessing_tests {
         let result = preprocessing::preprocess(content, &config);
 
         // Entity extraction should find multiple types
-        assert!(!result.entities.is_empty(), "Should extract entities from rich content");
+        assert!(
+            !result.entities.is_empty(),
+            "Should extract entities from rich content"
+        );
         let entity_types: Vec<EntityType> = result.entities.iter().map(|e| e.entity_type).collect();
         assert!(entity_types.contains(&EntityType::Url), "Should detect URL");
-        assert!(entity_types.contains(&EntityType::Email), "Should detect email");
-        assert!(entity_types.contains(&EntityType::Monetary), "Should detect monetary value");
+        assert!(
+            entity_types.contains(&EntityType::Email),
+            "Should detect email"
+        );
+        assert!(
+            entity_types.contains(&EntityType::Monetary),
+            "Should detect monetary value"
+        );
 
         // Auto-tags should be generated
         assert!(!result.auto_tags.is_empty(), "Should generate auto-tags");
-        assert!(result.auto_tags.iter().all(|t| t.starts_with("entity:")),
-            "All auto-tags should have entity: prefix");
+        assert!(
+            result.auto_tags.iter().all(|t| t.starts_with("entity:")),
+            "All auto-tags should have entity: prefix"
+        );
 
         // Coreference rewriting should resolve "She" → "Alice"
         if result.coref_rewrites > 0 {
-            assert!(result.content.contains("Alice deployed") || result.content.contains("Alice"),
-                "Coreference should replace 'She' with the person entity");
+            assert!(
+                result.content.contains("Alice deployed") || result.content.contains("Alice"),
+                "Coreference should replace 'She' with the person entity"
+            );
         }
 
         // Provenance should capture session context
-        assert_eq!(result.provenance.session_id.as_deref(), Some("journey-test-session"));
+        assert_eq!(
+            result.provenance.session_id.as_deref(),
+            Some("journey-test-session")
+        );
         assert_eq!(result.provenance.agent.as_deref(), Some("integration-test"));
         assert!(!result.provenance.auto_entities.is_empty());
     }
@@ -93,8 +109,14 @@ mod preprocessing_tests {
 
         // Step 1: Extract entities
         let entities = extract_entities(content, 20);
-        let proper_nouns: Vec<&str> = entities.iter()
-            .filter(|e| matches!(e.entity_type, EntityType::ProperNoun | EntityType::Organization))
+        let proper_nouns: Vec<&str> = entities
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.entity_type,
+                    EntityType::ProperNoun | EntityType::Organization
+                )
+            })
             .map(|e| e.text.as_str())
             .collect();
         assert!(!proper_nouns.is_empty(), "Should find at least Vestige");
@@ -103,7 +125,10 @@ mod preprocessing_tests {
         let coref = resolve_coreferences(content, &entities);
         // With exactly one proper noun, "It" should resolve
         if proper_nouns.len() == 1 {
-            assert!(coref.rewrites > 0, "Single proper noun → 'It' should resolve");
+            assert!(
+                coref.rewrites > 0,
+                "Single proper noun → 'It' should resolve"
+            );
         }
 
         // Step 3: Relation extraction on the (possibly rewritten) content
@@ -111,8 +136,11 @@ mod preprocessing_tests {
         // "uses" is in our verb list, so we should get at least one relation
         if !relations.is_empty() {
             let verbs: Vec<&str> = relations.iter().map(|r| r.predicate.as_str()).collect();
-            assert!(verbs.contains(&"uses") || verbs.contains(&"implements"),
-                "Expected 'uses' or 'implements' verb, got: {:?}", verbs);
+            assert!(
+                verbs.contains(&"uses") || verbs.contains(&"implements"),
+                "Expected 'uses' or 'implements' verb, got: {:?}",
+                verbs
+            );
         }
     }
 
@@ -124,18 +152,24 @@ mod preprocessing_tests {
     fn journey_temporal_anchoring_various_expressions() {
         // Future deadline → valid_until
         let r1 = anchor_temporal("Deploy before tomorrow.", None, None);
-        assert!(r1.valid_until.is_some() || !r1.anchors_found.is_empty(),
-            "Should detect 'before tomorrow' as deadline");
+        assert!(
+            r1.valid_until.is_some() || !r1.anchors_found.is_empty(),
+            "Should detect 'before tomorrow' as deadline"
+        );
 
         // Past event → valid_from
         let r2 = anchor_temporal("The bug was introduced yesterday.", None, None);
-        assert!(r2.valid_from.is_some() || !r2.anchors_found.is_empty(),
-            "Should detect 'yesterday' as past anchor");
+        assert!(
+            r2.valid_from.is_some() || !r2.anchors_found.is_empty(),
+            "Should detect 'yesterday' as past anchor"
+        );
 
         // Starting from → valid_from
         let r3 = anchor_temporal("Starting from next Monday the new rules apply.", None, None);
-        assert!(r3.valid_from.is_some() || !r3.anchors_found.is_empty(),
-            "Should detect 'starting from' pattern");
+        assert!(
+            r3.valid_from.is_some() || !r3.anchors_found.is_empty(),
+            "Should detect 'starting from' pattern"
+        );
 
         // No temporal → nothing
         let r4 = anchor_temporal("The function returns a boolean.", None, None);
@@ -170,7 +204,10 @@ mod preprocessing_tests {
         assert_eq!(restored.session_id.as_deref(), Some("lifecycle-test"));
         assert_eq!(restored.agent.as_deref(), Some("cursor-agent"));
         assert_eq!(restored.coref_rewrites, result.coref_rewrites);
-        assert_eq!(restored.auto_entities.len(), result.provenance.auto_entities.len());
+        assert_eq!(
+            restored.auto_entities.len(),
+            result.provenance.auto_entities.len()
+        );
     }
 
     // ========================================================================
@@ -183,7 +220,10 @@ mod preprocessing_tests {
         let d1 = decompose_query("user preferences; project architecture; deployment process");
         assert!(d1.is_compound);
         assert_eq!(d1.sub_queries.len(), 3);
-        assert_eq!(d1.original, "user preferences; project architecture; deployment process");
+        assert_eq!(
+            d1.original,
+            "user preferences; project architecture; deployment process"
+        );
 
         // Question chain
         let d2 = decompose_query("How does auth work? And what about the search pipeline?");
@@ -197,23 +237,48 @@ mod preprocessing_tests {
 
         // Merge results from sub-queries
         #[derive(Debug)]
-        struct MockResult { id: String, score: f64 }
+        struct MockResult {
+            id: String,
+            score: f64,
+        }
         impl HasIdAndScore for MockResult {
-            fn id(&self) -> &str { &self.id }
-            fn score(&self) -> f64 { self.score }
+            fn id(&self) -> &str {
+                &self.id
+            }
+            fn score(&self) -> f64 {
+                self.score
+            }
         }
 
         let batch_a = vec![
-            MockResult { id: "mem-1".into(), score: 0.9 },
-            MockResult { id: "mem-2".into(), score: 0.7 },
+            MockResult {
+                id: "mem-1".into(),
+                score: 0.9,
+            },
+            MockResult {
+                id: "mem-2".into(),
+                score: 0.7,
+            },
         ];
         let batch_b = vec![
-            MockResult { id: "mem-2".into(), score: 0.8 },
-            MockResult { id: "mem-3".into(), score: 0.85 },
+            MockResult {
+                id: "mem-2".into(),
+                score: 0.8,
+            },
+            MockResult {
+                id: "mem-3".into(),
+                score: 0.85,
+            },
         ];
         let batch_c = vec![
-            MockResult { id: "mem-1".into(), score: 0.6 },
-            MockResult { id: "mem-4".into(), score: 0.5 },
+            MockResult {
+                id: "mem-1".into(),
+                score: 0.6,
+            },
+            MockResult {
+                id: "mem-4".into(),
+                score: 0.5,
+            },
         ];
 
         let merged = merge_results(vec![batch_a, batch_b, batch_c]);
@@ -227,8 +292,12 @@ mod preprocessing_tests {
         assert!((mem2.score() - 0.8).abs() < 0.001);
         // Results should be sorted by score descending
         for i in 1..merged.len() {
-            assert!(merged[i - 1].score() >= merged[i].score(),
-                "Results should be sorted descending: {} >= {}", merged[i-1].score(), merged[i].score());
+            assert!(
+                merged[i - 1].score() >= merged[i].score(),
+                "Results should be sorted descending: {} >= {}",
+                merged[i - 1].score(),
+                merged[i].score()
+            );
         }
     }
 
@@ -238,7 +307,7 @@ mod preprocessing_tests {
 
     #[test]
     fn journey_pipeline_batch_performance() {
-        let contents = vec![
+        let contents = [
             "Alice manages the Auth Team since January. Deploy by next Friday.",
             "Bob created the search service. It uses FSRS-6. Contact bob@example.com.",
             "The $50,000 budget for Vestige was approved. Vestige depends on SQLite.",
@@ -247,20 +316,26 @@ mod preprocessing_tests {
         ];
 
         let start = std::time::Instant::now();
-        let results: Vec<PreprocessingResult> = contents.iter()
+        let results: Vec<PreprocessingResult> = contents
+            .iter()
             .map(|c| preprocessing::preprocess(c, &PreprocessingConfig::default()))
             .collect();
         let elapsed = start.elapsed();
 
         assert_eq!(results.len(), 5);
         for r in &results {
-            assert!(!r.entities.is_empty() || r.content.len() < 20,
-                "Non-trivial content should produce entities");
+            assert!(
+                !r.entities.is_empty() || r.content.len() < 20,
+                "Non-trivial content should produce entities"
+            );
         }
 
         let per_call = elapsed / 5;
-        assert!(per_call.as_millis() < 10,
-            "Each preprocessing call should be < 10ms, got {}ms", per_call.as_millis());
+        assert!(
+            per_call.as_millis() < 10,
+            "Each preprocessing call should be < 10ms, got {}ms",
+            per_call.as_millis()
+        );
     }
 
     // ========================================================================
@@ -285,11 +360,14 @@ mod preprocessing_tests {
             "Józef Piłsudski napisał raport. He was influential.",
             &PreprocessingConfig::default(),
         );
-        assert!(r3.content.len() > 0);
+        assert!(!r3.content.is_empty());
 
         // Very long content
         let long = "Alice manages the team. ".repeat(100);
         let r4 = preprocessing::preprocess(&long, &PreprocessingConfig::default());
-        assert!(r4.entities.len() <= 20, "Should cap entities at MAX_ENTITIES");
+        assert!(
+            r4.entities.len() <= 20,
+            "Should cap entities at MAX_ENTITIES"
+        );
     }
 }

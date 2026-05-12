@@ -12,13 +12,14 @@ use serde_json::Value;
 
 use super::super::events::VestigeEvent;
 use super::super::state::AppState;
-use super::log_err;
+use super::{log_err, log_join_err};
 
 /// Trigger a dream cycle — delegates to the DreamEngine in `tools::dream`
-pub async fn trigger_dream(
-    State(state): State<AppState>,
-) -> Result<Json<Value>, StatusCode> {
-    let cognitive = state.cognitive.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+pub async fn trigger_dream(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+    let cognitive = state
+        .cognitive
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     state.emit(VestigeEvent::DreamStarted {
         memory_count: 50,
@@ -50,13 +51,15 @@ pub async fn trigger_dream(
 }
 
 /// Predict which memories will be needed
-pub async fn predict_memories(
-    State(state): State<AppState>,
-) -> Result<Json<Value>, StatusCode> {
-    // Get recent memories as predictions based on activity
-    let recent = state
-        .storage
-        .get_all_nodes(10, 0)
+pub async fn predict_memories(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+    // Get recent memories as predictions based on activity. Bounded to 10
+    // rows, so the latency hit is small — but on a 100k-node DB the
+    // ORDER BY scan still pushes us above 10ms, so spawn_blocking is the
+    // safe default.
+    let storage = state.storage.clone();
+    let recent = tokio::task::spawn_blocking(move || storage.get_all_nodes(10, 0))
+        .await
+        .map_err(log_join_err("get_all_nodes task panicked"))?
         .map_err(log_err("storage operation"))?;
 
     let predictions: Vec<Value> = recent
@@ -91,7 +94,9 @@ pub async fn score_importance(
     if let Some(ref cognitive) = state.cognitive {
         let context = vestige_core::ImportanceContext::current();
         let cog = cognitive.lock().await;
-        let score = cog.importance_signals.compute_importance(&req.content, &context);
+        let score = cog
+            .importance_signals
+            .compute_importance(&req.content, &context);
         drop(cog);
 
         let composite = score.composite;
@@ -124,7 +129,11 @@ pub async fn score_importance(
         // Fallback: basic heuristic scoring
         let word_count = req.content.split_whitespace().count();
         let has_code = req.content.contains("```") || req.content.contains("fn ");
-        let composite = if has_code { 0.7 } else { (word_count as f64 / 100.0).min(0.8) };
+        let composite = if has_code {
+            0.7
+        } else {
+            (word_count as f64 / 100.0).min(0.8)
+        };
 
         Ok(Json(serde_json::json!({
             "composite": composite,

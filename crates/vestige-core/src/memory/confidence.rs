@@ -41,7 +41,8 @@ impl ConfidenceEstimate {
 
         let (lower, upper) = if alpha + beta_param >= 5.0 {
             // Normal approximation to Beta distribution (Wilson interval variant)
-            let var = (alpha * beta_param) / ((alpha + beta_param).powi(2) * (alpha + beta_param + 1.0));
+            let var =
+                (alpha * beta_param) / ((alpha + beta_param).powi(2) * (alpha + beta_param + 1.0));
             let se = var.sqrt();
             ((point - 1.96 * se).max(0.0), (point + 1.96 * se).min(1.0))
         } else {
@@ -76,7 +77,10 @@ mod tests {
     #[test]
     fn uninformative_prior_is_uniform() {
         let c = ConfidenceEstimate::uninformative();
-        assert!((c.point - 0.5).abs() < 0.01, "Uninformative prior should be ~0.5");
+        assert!(
+            (c.point - 0.5).abs() < 0.01,
+            "Uninformative prior should be ~0.5"
+        );
         assert_eq!(c.lower_95, 0.0);
         assert_eq!(c.upper_95, 1.0);
     }
@@ -84,15 +88,31 @@ mod tests {
     #[test]
     fn high_usefulness_yields_high_confidence() {
         let c = ConfidenceEstimate::from_counts(20, 18);
-        assert!(c.point > 0.8, "18/20 useful should give high confidence: {}", c.point);
-        assert!(c.lower_95 > 0.6, "Lower bound should be meaningful: {}", c.lower_95);
+        assert!(
+            c.point > 0.8,
+            "18/20 useful should give high confidence: {}",
+            c.point
+        );
+        assert!(
+            c.lower_95 > 0.6,
+            "Lower bound should be meaningful: {}",
+            c.lower_95
+        );
     }
 
     #[test]
     fn low_usefulness_yields_low_confidence() {
         let c = ConfidenceEstimate::from_counts(20, 2);
-        assert!(c.point < 0.25, "2/20 useful should give low confidence: {}", c.point);
-        assert!(c.upper_95 < 0.4, "Upper bound should cap low: {}", c.upper_95);
+        assert!(
+            c.point < 0.25,
+            "2/20 useful should give low confidence: {}",
+            c.point
+        );
+        assert!(
+            c.upper_95 < 0.4,
+            "Upper bound should cap low: {}",
+            c.upper_95
+        );
     }
 
     #[test]
@@ -119,7 +139,8 @@ mod tests {
         assert!(
             many_width < few_width,
             "More observations should narrow CI: few={:.3}, many={:.3}",
-            few_width, many_width
+            few_width,
+            many_width
         );
     }
 
@@ -132,7 +153,8 @@ mod tests {
         assert!(
             (big.point - small.point).abs() < 0.05,
             "Same ratio should give similar point estimate: {} vs {}",
-            big.point, small.point
+            big.point,
+            small.point
         );
         assert!(
             (big.upper_95 - big.lower_95) < (small.upper_95 - small.lower_95),

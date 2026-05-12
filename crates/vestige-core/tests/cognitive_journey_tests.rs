@@ -16,10 +16,10 @@
 //! - Nelson & Narens (1990): Metamemory monitoring
 //! - Cepeda et al. (2006): Spacing effect
 
+use chrono::{Duration, Utc};
 use vestige_core::memory::{DualStrength, KnowledgeNode, StrengthDecay};
 use vestige_core::neuroscience::memory_states::{MemoryLifecycle, MemoryState, StateUpdateService};
 use vestige_core::neuroscience::spreading_activation::{ActivationNetwork, LinkType};
-use chrono::{Duration, Utc};
 
 // ====================================================================
 // JOURNEY 1: Memory Lifecycle — Birth, Strengthening, Decay, Revival
@@ -51,7 +51,8 @@ fn j1_retrieval_practice_strengthens_memory() {
     assert!(
         dual.storage > initial_storage,
         "Successful retrieval increases storage: {:.3} > {:.3}",
-        dual.storage, initial_storage
+        dual.storage,
+        initial_storage
     );
     assert!(
         (dual.retrieval - 1.0).abs() < f64::EPSILON,
@@ -79,12 +80,17 @@ fn j1_lapse_still_strengthens_storage() {
 
 #[test]
 fn j2_episodic_events_carry_temporal_context() {
-    let mut episode = KnowledgeNode::default();
-    episode.node_type = "event".to_string();
-    episode.content = "Deployed v2.0 to production, caused 502 errors".to_string();
-    episode.valid_from = Some(Utc::now());
+    let episode = KnowledgeNode {
+        node_type: "event".to_string(),
+        content: "Deployed v2.0 to production, caused 502 errors".to_string(),
+        valid_from: Some(Utc::now()),
+        ..Default::default()
+    };
 
-    assert!(episode.valid_from.is_some(), "Episodes must have temporal context");
+    assert!(
+        episode.valid_from.is_some(),
+        "Episodes must have temporal context"
+    );
     assert_eq!(episode.node_type, "event");
 }
 
@@ -113,7 +119,8 @@ fn j3_multiple_recalls_compound_storage() {
     assert!(
         dual.storage > initial + 0.3,
         "5 successful recalls should significantly increase storage: {:.3} vs {:.3}",
-        dual.storage, initial
+        dual.storage,
+        initial
     );
 }
 
@@ -141,12 +148,14 @@ fn j4_activation_spreads_to_associated_nodes() {
 
     let activated = network.activate("rust_borrow", 1.0);
 
-    let lifetime_act = activated.iter()
+    let lifetime_act = activated
+        .iter()
         .find(|a| a.memory_id == "rust_lifetime")
         .map(|a| a.activation)
         .unwrap_or(0.0);
 
-    let python_act = activated.iter()
+    let python_act = activated
+        .iter()
         .find(|a| a.memory_id == "python_gc")
         .map(|a| a.activation)
         .unwrap_or(0.0);
@@ -154,7 +163,8 @@ fn j4_activation_spreads_to_associated_nodes() {
     assert!(
         lifetime_act > python_act,
         "Strong association ({:.3}) should activate more than weak ({:.3})",
-        lifetime_act, python_act
+        lifetime_act,
+        python_act
     );
 }
 
@@ -167,15 +177,22 @@ fn j4_activation_decays_with_graph_distance() {
 
     let activated = network.activate("A", 1.0);
 
-    let b_act = activated.iter().find(|a| a.memory_id == "B")
-        .map(|a| a.activation).unwrap_or(0.0);
-    let c_act = activated.iter().find(|a| a.memory_id == "C")
-        .map(|a| a.activation).unwrap_or(0.0);
+    let b_act = activated
+        .iter()
+        .find(|a| a.memory_id == "B")
+        .map(|a| a.activation)
+        .unwrap_or(0.0);
+    let c_act = activated
+        .iter()
+        .find(|a| a.memory_id == "C")
+        .map(|a| a.activation)
+        .unwrap_or(0.0);
 
     assert!(
         b_act > c_act,
         "Activation decays with distance: B={:.3} > C={:.3}",
-        b_act, c_act
+        b_act,
+        c_act
     );
 }
 
@@ -201,8 +218,11 @@ fn j5_state_transitions_tracked_by_service() {
     let mut lifecycles = vec![active_lc, stale_lc];
     let result = service.batch_update(&mut lifecycles);
 
-    assert_eq!(lifecycles[0].state, MemoryState::Active,
-        "Recently accessed memory stays Active");
+    assert_eq!(
+        lifecycles[0].state,
+        MemoryState::Active,
+        "Recently accessed memory stays Active"
+    );
 
     let _ = result.total_transitions;
 }
@@ -230,7 +250,10 @@ fn j6_fsrs_intervals_increase_with_successful_reviews() {
         assert!(
             intervals[i] >= intervals[i - 1],
             "FSRS intervals must grow: [{}]={} < [{}]={}",
-            i, intervals[i], i - 1, intervals[i - 1]
+            i,
+            intervals[i],
+            i - 1,
+            intervals[i - 1]
         );
     }
 }
@@ -244,21 +267,37 @@ fn j6_lapse_reduces_stability() {
     let mut lapsed_state = scheduler.new_card();
 
     for _ in 0..3 {
-        let r = scheduler.review(&good_state, Rating::Good, good_state.scheduled_days as f64, None);
+        let r = scheduler.review(
+            &good_state,
+            Rating::Good,
+            good_state.scheduled_days as f64,
+            None,
+        );
         good_state = r.state;
     }
 
     for _ in 0..2 {
-        let r = scheduler.review(&lapsed_state, Rating::Good, lapsed_state.scheduled_days as f64, None);
+        let r = scheduler.review(
+            &lapsed_state,
+            Rating::Good,
+            lapsed_state.scheduled_days as f64,
+            None,
+        );
         lapsed_state = r.state;
     }
-    let r = scheduler.review(&lapsed_state, Rating::Again, lapsed_state.scheduled_days as f64, None);
+    let r = scheduler.review(
+        &lapsed_state,
+        Rating::Again,
+        lapsed_state.scheduled_days as f64,
+        None,
+    );
     lapsed_state = r.state;
 
     assert!(
         good_state.stability >= lapsed_state.stability,
         "Lapse reduces stability: good={:.2} vs lapsed={:.2}",
-        good_state.stability, lapsed_state.stability
+        good_state.stability,
+        lapsed_state.stability
     );
 }
 
@@ -269,9 +308,11 @@ fn j6_lapse_reduces_stability() {
 
 #[test]
 fn j7_superseded_fact_has_valid_until() {
-    let mut old = KnowledgeNode::default();
-    old.content = "React class components are the standard".to_string();
-    old.valid_until = Some(Utc::now() - Duration::days(100));
+    let old = KnowledgeNode {
+        content: "React class components are the standard".to_string(),
+        valid_until: Some(Utc::now() - Duration::days(100)),
+        ..Default::default()
+    };
 
     let new = KnowledgeNode::default();
     assert!(old.valid_until.is_some(), "Superseded knowledge has expiry");
@@ -331,7 +372,8 @@ fn j9_emotional_memories_resist_decay() {
     assert!(
         e_30d >= n_30d,
         "Emotional memories resist decay: emotional={:.3} >= neutral={:.3}",
-        e_30d, n_30d
+        e_30d,
+        n_30d
     );
 }
 
@@ -373,7 +415,8 @@ fn j11_high_stability_survives_long_gaps() {
     assert!(
         well_60d > poor_60d,
         "S=30 more retrievable at 60d than S=2: {:.3} vs {:.3}",
-        well_60d, poor_60d
+        well_60d,
+        poor_60d
     );
 
     assert!(
@@ -412,6 +455,7 @@ fn j12_retrieval_weight_dominates() {
         r > s,
         "Retrieval strength (70% weight) should dominate over storage (30%): \
          high-R={:.3} vs high-S={:.3}",
-        r, s
+        r,
+        s
     );
 }

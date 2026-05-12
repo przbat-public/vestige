@@ -14,18 +14,18 @@
 //! - Synaptic Tagging: Frey & Morris (1997), Redondo & Morris (2011)
 //! - Hippocampal Indexing: Teyler & Rudy (2007)
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use std::collections::{HashMap, HashSet};
 
-use vestige_core::neuroscience::spreading_activation::{
-    ActivatedMemory, ActivationConfig, ActivationNetwork, LinkType,
-};
 use vestige_core::neuroscience::hippocampal_index::{
     BarcodeGenerator, ContentPointer, ContentType, HippocampalIndex, HippocampalIndexConfig,
-    IndexQuery, MemoryBarcode, MemoryIndex, INDEX_EMBEDDING_DIM,
+    INDEX_EMBEDDING_DIM, IndexQuery, MemoryBarcode,
+};
+use vestige_core::neuroscience::spreading_activation::{
+    ActivationConfig, ActivationNetwork, LinkType,
 };
 use vestige_core::neuroscience::synaptic_tagging::{
-    CaptureWindow, DecayFunction, ImportanceEvent, ImportanceEventType, SynapticTaggingConfig,
+    CaptureWindow, ImportanceEvent, ImportanceEventType, SynapticTaggingConfig,
     SynapticTaggingSystem,
 };
 
@@ -36,9 +36,9 @@ use vestige_core::neuroscience::synaptic_tagging::{
 /// SM-2 state for a card
 #[derive(Debug, Clone)]
 struct SM2State {
-    easiness_factor: f64,  // EF, starts at 2.5
-    interval: i32,         // Days until next review
-    repetitions: i32,      // Number of successful reviews
+    easiness_factor: f64, // EF, starts at 2.5
+    interval: i32,        // Days until next review
+    repetitions: i32,     // Number of successful reviews
 }
 
 impl Default for SM2State {
@@ -53,6 +53,7 @@ impl Default for SM2State {
 
 /// SM-2 grade (0-5)
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 enum SM2Grade {
     CompleteBlackout = 0,
     Incorrect = 1,
@@ -73,8 +74,9 @@ fn sm2_review(state: &SM2State, grade: SM2Grade) -> SM2State {
     let q = grade.as_i32();
 
     // Update easiness factor
-    let mut new_ef = state.easiness_factor + (0.1 - (5 - q) as f64 * (0.08 + (5 - q) as f64 * 0.02));
-    new_ef = new_ef.max(1.3);  // EF never goes below 1.3
+    let mut new_ef =
+        state.easiness_factor + (0.1 - (5 - q) as f64 * (0.08 + (5 - q) as f64 * 0.02));
+    new_ef = new_ef.max(1.3); // EF never goes below 1.3
 
     if q < 3 {
         // Failed - restart learning
@@ -117,9 +119,8 @@ fn sm2_retention(interval: i32, elapsed_days: i32) -> f64 {
 
 /// FSRS-6 default weights
 const FSRS6_WEIGHTS: [f64; 21] = [
-    0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001,
-    1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014,
-    1.8729, 0.5425, 0.0912, 0.0658, 0.1542,
+    0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835,
+    0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542,
 ];
 
 /// FSRS-6 state
@@ -142,6 +143,7 @@ impl Default for FSRS6State {
 
 /// FSRS-6 grade (1-4)
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 enum FSRS6Grade {
     Again = 1,
     Hard = 2,
@@ -160,7 +162,9 @@ fn fsrs6_retrievability(stability: f64, elapsed_days: f64, w20: f64) -> f64 {
         return 1.0;
     }
     let factor = fsrs6_factor(w20);
-    (1.0 + factor * elapsed_days / stability).powf(-w20).clamp(0.0, 1.0)
+    (1.0 + factor * elapsed_days / stability)
+        .powf(-w20)
+        .clamp(0.0, 1.0)
 }
 
 /// FSRS-6 interval calculation
@@ -183,24 +187,32 @@ fn fsrs6_review(state: &FSRS6State, grade: FSRS6Grade, elapsed_days: f64) -> FSR
     let new_stability = match grade {
         FSRS6Grade::Again => {
             // Lapse formula
-            w[11] * state.difficulty.powf(-w[12])
+            w[11]
+                * state.difficulty.powf(-w[12])
                 * ((state.stability + 1.0).powf(w[13]) - 1.0)
                 * (w[14] * (1.0 - r)).exp()
         }
         _ => {
             // Recall formula
-            let hard_penalty = if matches!(grade, FSRS6Grade::Hard) { w[15] } else { 1.0 };
-            let easy_bonus = if matches!(grade, FSRS6Grade::Easy) { w[16] } else { 1.0 };
+            let hard_penalty = if matches!(grade, FSRS6Grade::Hard) {
+                w[15]
+            } else {
+                1.0
+            };
+            let easy_bonus = if matches!(grade, FSRS6Grade::Easy) {
+                w[16]
+            } else {
+                1.0
+            };
 
-            state.stability * (
-                w[8].exp()
-                * (11.0 - state.difficulty)
-                * state.stability.powf(-w[9])
-                * ((w[10] * (1.0 - r)).exp() - 1.0)
-                * hard_penalty
-                * easy_bonus
-                + 1.0
-            )
+            state.stability
+                * (w[8].exp()
+                    * (11.0 - state.difficulty)
+                    * state.stability.powf(-w[9])
+                    * ((w[10] * (1.0 - r)).exp() - 1.0)
+                    * hard_penalty
+                    * easy_bonus
+                    + 1.0)
         }
     };
 
@@ -209,8 +221,8 @@ fn fsrs6_review(state: &FSRS6State, grade: FSRS6Grade, elapsed_days: f64) -> FSR
     let delta = -w[6] * (g - 3.0);
     let mean_reversion = (10.0 - state.difficulty) / 9.0;
     let d0 = w[4] - (w[5] * 2.0).exp() + 1.0;
-    let new_difficulty = (w[7] * d0 + (1.0 - w[7]) * (state.difficulty + delta * mean_reversion))
-        .clamp(1.0, 10.0);
+    let new_difficulty =
+        (w[7] * d0 + (1.0 - w[7]) * (state.difficulty + delta * mean_reversion)).clamp(1.0, 10.0);
 
     FSRS6State {
         difficulty: new_difficulty,
@@ -226,7 +238,7 @@ fn fsrs6_review(state: &FSRS6State, grade: FSRS6Grade, elapsed_days: f64) -> FSR
 /// Leitner box state
 #[derive(Debug, Clone)]
 struct LeitnerState {
-    box_number: i32,  // 1-5
+    box_number: i32, // 1-5
 }
 
 impl Default for LeitnerState {
@@ -263,6 +275,7 @@ fn leitner_review(state: &LeitnerState, correct: bool) -> LeitnerState {
 // ============================================================================
 
 /// Fixed interval - always reviews at same interval
+#[allow(dead_code)]
 fn fixed_interval_schedule(_correct: bool) -> i32 {
     7 // Always 7 days
 }
@@ -288,7 +301,9 @@ impl SimilaritySearch {
     }
 
     fn search(&self, query_embedding: &[f32], top_k: usize) -> Vec<(String, f64)> {
-        let mut results: Vec<(String, f64)> = self.embeddings.iter()
+        let mut results: Vec<(String, f64)> = self
+            .embeddings
+            .iter()
             .map(|(id, emb)| {
                 let sim = cosine_similarity(query_embedding, emb);
                 (id.clone(), sim)
@@ -331,9 +346,8 @@ fn test_fsrs6_vs_sm2_efficiency() {
 
     // Simulate SM-2
     let mut sm2_reviews = 0;
-    let mut sm2_states: Vec<(SM2State, i32)> = (0..NUM_CARDS)
-        .map(|_| (SM2State::default(), 0))
-        .collect();
+    let mut sm2_states: Vec<(SM2State, i32)> =
+        (0..NUM_CARDS).map(|_| (SM2State::default(), 0)).collect();
 
     for day in 1..=DAYS {
         for (state, next_review) in sm2_states.iter_mut() {
@@ -349,9 +363,8 @@ fn test_fsrs6_vs_sm2_efficiency() {
 
     // Simulate FSRS-6
     let mut fsrs_reviews = 0;
-    let mut fsrs_states: Vec<(FSRS6State, i32)> = (0..NUM_CARDS)
-        .map(|_| (FSRS6State::default(), 0))
-        .collect();
+    let mut fsrs_states: Vec<(FSRS6State, i32)> =
+        (0..NUM_CARDS).map(|_| (FSRS6State::default(), 0)).collect();
 
     for day in 1..=DAYS {
         for (state, next_review) in fsrs_states.iter_mut() {
@@ -394,14 +407,14 @@ fn test_fsrs6_vs_sm2_retention_same_reviews() {
     for _ in 0..TOTAL_REVIEWS {
         sm2_state = sm2_review(&sm2_state, SM2Grade::CorrectHesitation);
     }
-    let sm2_retention = sm2_retention(sm2_state.interval, sm2_state.interval);
+    let _sm2_retention = sm2_retention(sm2_state.interval, sm2_state.interval);
 
     // FSRS-6: Same number of reviews
     let mut fsrs_state = FSRS6State::default();
-    let mut total_elapsed = 0.0;
-    for i in 0..TOTAL_REVIEWS {
+    let mut _total_elapsed = 0.0;
+    for _ in 0..TOTAL_REVIEWS {
         let interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]).max(1);
-        total_elapsed += interval as f64;
+        _total_elapsed += interval as f64;
         fsrs_state = fsrs6_review(&fsrs_state, FSRS6Grade::Good, interval as f64);
     }
     let fsrs_retention = fsrs6_retrievability(
@@ -432,7 +445,7 @@ fn test_fsrs6_vs_sm2_reviews_same_retention() {
 
     // SM-2: Interval growth is linear with EF
     // After n successful reviews: interval ≈ previous * 2.5
-    let sm2_intervals = vec![1, 6, 15, 38, 95];  // Approximate SM-2 progression
+    let _sm2_intervals = [1, 6, 15, 38, 95]; // Approximate SM-2 progression
 
     // FSRS-6: Stability grows based on forgetting curve parameters
     // This allows for more nuanced interval optimization
@@ -469,13 +482,13 @@ fn test_fsrs6_vs_sm2_reviews_same_retention() {
     // Test the core FSRS-6 innovation: difficulty modulation
     // Create a "hard" card and compare stability growth
     let mut hard_state = FSRS6State {
-        difficulty: 8.0,  // Hard card
+        difficulty: 8.0, // Hard card
         stability: FSRS6State::default().stability,
         reps: 0,
     };
 
     let mut easy_state = FSRS6State {
-        difficulty: 2.0,  // Easy card
+        difficulty: 2.0, // Easy card
         stability: FSRS6State::default().stability,
         reps: 0,
     };
@@ -508,16 +521,16 @@ fn test_fsrs6_vs_fixed_interval() {
     const FIXED_INTERVAL: i32 = 7;
 
     // Fixed interval: reviews every 7 days
-    let fixed_reviews = SIMULATION_DAYS / FIXED_INTERVAL + 1;
+    let _fixed_reviews = SIMULATION_DAYS / FIXED_INTERVAL + 1;
 
     // FSRS-6: Adaptive intervals
-    let mut fsrs_reviews = 0;
+    let mut _fsrs_reviews = 0;
     let mut fsrs_state = FSRS6State::default();
     let mut next_review = 1;
 
     for day in 1..=SIMULATION_DAYS {
         if day >= next_review {
-            fsrs_reviews += 1;
+            _fsrs_reviews += 1;
             let elapsed = (day - next_review + 1) as f64;
             fsrs_state = fsrs6_review(&fsrs_state, FSRS6Grade::Good, elapsed);
             let interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]);
@@ -543,26 +556,26 @@ fn test_fsrs6_vs_leitner() {
     const SIMULATION_DAYS: i32 = 30;
 
     // Leitner: Box-based intervals
-    let mut leitner_reviews = 0;
+    let mut _leitner_reviews = 0;
     let mut leitner_state = LeitnerState::default();
     let mut leitner_next = 1;
 
     for day in 1..=SIMULATION_DAYS {
         if day >= leitner_next {
-            leitner_reviews += 1;
+            _leitner_reviews += 1;
             leitner_state = leitner_review(&leitner_state, true);
             leitner_next = day + leitner_interval(leitner_state.box_number);
         }
     }
 
     // FSRS-6: Continuous stability-based
-    let mut fsrs_reviews = 0;
+    let mut _fsrs_reviews = 0;
     let mut fsrs_state = FSRS6State::default();
     let mut fsrs_next = 1;
 
     for day in 1..=SIMULATION_DAYS {
         if day >= fsrs_next {
-            fsrs_reviews += 1;
+            _fsrs_reviews += 1;
             let elapsed = (day - fsrs_next + 1) as f64;
             fsrs_state = fsrs6_review(&fsrs_state, FSRS6Grade::Good, elapsed);
             let interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]);
@@ -593,7 +606,7 @@ fn test_fsrs6_vs_leitner() {
 /// get shorter intervals, and users with flatter curves (lower w20) get longer.
 #[test]
 fn test_fsrs6_personalization_improvement() {
-    let default_w20 = FSRS6_WEIGHTS[20];  // 0.1542
+    let default_w20 = FSRS6_WEIGHTS[20]; // 0.1542
 
     // User with faster forgetting (higher w20 = steeper curve)
     let fast_forgetter_w20 = 0.35;
@@ -629,7 +642,7 @@ fn test_fsrs6_personalization_improvement() {
 
     // The key insight: w20 affects optimal interval calculation
     // For same desired_retention (0.9), different w20 gives different intervals
-    let desired_retention = 0.85;  // Target 85% to see interval differences
+    let desired_retention = 0.85; // Target 85% to see interval differences
     let default_interval = fsrs6_interval(stability, desired_retention, default_w20);
     let fast_interval = fsrs6_interval(stability, desired_retention, fast_forgetter_w20);
     let slow_interval = fsrs6_interval(stability, desired_retention, slow_forgetter_w20);
@@ -638,7 +651,9 @@ fn test_fsrs6_personalization_improvement() {
     assert!(
         default_interval > 0 && fast_interval > 0 && slow_interval > 0,
         "All intervals should be positive: default={}, fast={}, slow={}",
-        default_interval, fast_interval, slow_interval
+        default_interval,
+        fast_interval,
+        slow_interval
     );
 
     // The total range of intervals demonstrates personalization value
@@ -747,34 +762,55 @@ fn test_fsrs6_hard_penalty_effectiveness() {
 fn test_spreading_vs_similarity_1_hop() {
     // Setup spreading activation network
     let mut network = ActivationNetwork::new();
-    network.add_edge("rust".to_string(), "cargo".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("rust".to_string(), "ownership".to_string(), LinkType::Semantic, 0.85);
+    network.add_edge(
+        "rust".to_string(),
+        "cargo".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "rust".to_string(),
+        "ownership".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     // Setup similarity search with similar embeddings
     let mut sim_search = SimilaritySearch::new();
     sim_search.add("rust", vec![1.0, 0.0, 0.0]);
-    sim_search.add("cargo", vec![0.9, 0.1, 0.0]);  // Similar to rust
-    sim_search.add("ownership", vec![0.85, 0.15, 0.0]);  // Similar to rust
-    sim_search.add("python", vec![0.0, 1.0, 0.0]);  // Unrelated
+    sim_search.add("cargo", vec![0.9, 0.1, 0.0]); // Similar to rust
+    sim_search.add("ownership", vec![0.85, 0.15, 0.0]); // Similar to rust
+    sim_search.add("python", vec![0.0, 1.0, 0.0]); // Unrelated
 
     // Spreading activation
     let spreading_results = network.activate("rust", 1.0);
-    let spreading_found: HashSet<_> = spreading_results.iter()
+    let spreading_found: HashSet<_> = spreading_results
+        .iter()
         .map(|r| r.memory_id.as_str())
         .collect();
 
     // Similarity search
     let sim_results = sim_search.search(&[1.0, 0.0, 0.0], 3);
-    let sim_found: HashSet<_> = sim_results.iter()
+    let sim_found: HashSet<_> = sim_results
+        .iter()
         .filter(|(_, score)| *score > 0.8)
         .map(|(id, _)| id.as_str())
         .collect();
 
     // At 1-hop, both should find the direct connections
-    assert!(spreading_found.contains("cargo"), "Spreading should find cargo");
-    assert!(spreading_found.contains("ownership"), "Spreading should find ownership");
+    assert!(
+        spreading_found.contains("cargo"),
+        "Spreading should find cargo"
+    );
+    assert!(
+        spreading_found.contains("ownership"),
+        "Spreading should find ownership"
+    );
     assert!(sim_found.contains("cargo"), "Similarity should find cargo");
-    assert!(sim_found.contains("ownership"), "Similarity should find ownership");
+    assert!(
+        sim_found.contains("ownership"),
+        "Similarity should find ownership"
+    );
 }
 
 /// Test 2-hop: Spreading activation finds indirect connections.
@@ -790,23 +826,35 @@ fn test_spreading_vs_similarity_2_hop() {
 
     // Create a chain: rust -> tokio -> async_runtime
     // rust and async_runtime have NO direct similarity
-    network.add_edge("rust".to_string(), "tokio".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("tokio".to_string(), "async_runtime".to_string(), LinkType::Semantic, 0.85);
+    network.add_edge(
+        "rust".to_string(),
+        "tokio".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "tokio".to_string(),
+        "async_runtime".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
 
     // Similarity search - embeddings show NO similarity between rust and async_runtime
     let mut sim_search = SimilaritySearch::new();
     sim_search.add("rust", vec![1.0, 0.0, 0.0, 0.0]);
-    sim_search.add("tokio", vec![0.7, 0.7, 0.0, 0.0]);  // Bridge
-    sim_search.add("async_runtime", vec![0.0, 1.0, 0.0, 0.0]);  // No similarity to rust
+    sim_search.add("tokio", vec![0.7, 0.7, 0.0, 0.0]); // Bridge
+    sim_search.add("async_runtime", vec![0.0, 1.0, 0.0, 0.0]); // No similarity to rust
 
     // Spreading finds async_runtime through the chain
     let spreading_results = network.activate("rust", 1.0);
-    let spreading_found_async = spreading_results.iter()
+    let spreading_found_async = spreading_results
+        .iter()
         .any(|r| r.memory_id == "async_runtime");
 
     // Similarity from "rust" does NOT find async_runtime
     let sim_results = sim_search.search(&[1.0, 0.0, 0.0, 0.0], 5);
-    let sim_found_async = sim_results.iter()
+    let sim_found_async = sim_results
+        .iter()
         .any(|(id, score)| id == "async_runtime" && *score > 0.5);
 
     assert!(
@@ -832,27 +880,52 @@ fn test_spreading_vs_similarity_3_hop() {
 
     // Create 3-hop chain: A -> B -> C -> D
     // Each step has semantic connection, but A and D have ZERO direct similarity
-    network.add_edge("concept_a".to_string(), "concept_b".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("concept_b".to_string(), "concept_c".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("concept_c".to_string(), "concept_d".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "concept_a".to_string(),
+        "concept_b".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "concept_b".to_string(),
+        "concept_c".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "concept_c".to_string(),
+        "concept_d".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     // Embeddings: A and D are orthogonal (zero similarity)
     let mut sim_search = SimilaritySearch::new();
     sim_search.add("concept_a", vec![1.0, 0.0, 0.0, 0.0]);
     sim_search.add("concept_b", vec![0.7, 0.7, 0.0, 0.0]);
     sim_search.add("concept_c", vec![0.0, 0.7, 0.7, 0.0]);
-    sim_search.add("concept_d", vec![0.0, 0.0, 0.0, 1.0]);  // Orthogonal to A
+    sim_search.add("concept_d", vec![0.0, 0.0, 0.0, 1.0]); // Orthogonal to A
 
     // Spreading finds D
     let spreading_results = network.activate("concept_a", 1.0);
-    let d_result = spreading_results.iter().find(|r| r.memory_id == "concept_d");
+    let d_result = spreading_results
+        .iter()
+        .find(|r| r.memory_id == "concept_d");
 
-    assert!(d_result.is_some(), "Spreading MUST find concept_d at 3 hops");
-    assert_eq!(d_result.unwrap().distance, 3, "Should be exactly 3 hops away");
+    assert!(
+        d_result.is_some(),
+        "Spreading MUST find concept_d at 3 hops"
+    );
+    assert_eq!(
+        d_result.unwrap().distance,
+        3,
+        "Should be exactly 3 hops away"
+    );
 
     // Similarity CANNOT find D from A
     let sim_results = sim_search.search(&[1.0, 0.0, 0.0, 0.0], 10);
-    let sim_d_score = sim_results.iter()
+    let sim_d_score = sim_results
+        .iter()
         .find(|(id, _)| id == "concept_d")
         .map(|(_, score)| *score)
         .unwrap_or(0.0);
@@ -873,9 +946,24 @@ fn test_spreading_finds_chains_similarity_misses() {
     // Chain: "memory_leak" -> "reference_counting" -> "Arc_Weak" -> "cyclic_references"
     // The solution (cyclic_references) is NOT semantically similar to "memory_leak"
 
-    network.add_edge("memory_leak".to_string(), "reference_counting".to_string(), LinkType::Causal, 0.9);
-    network.add_edge("reference_counting".to_string(), "arc_weak".to_string(), LinkType::Semantic, 0.85);
-    network.add_edge("arc_weak".to_string(), "cyclic_references".to_string(), LinkType::Semantic, 0.9);
+    network.add_edge(
+        "memory_leak".to_string(),
+        "reference_counting".to_string(),
+        LinkType::Causal,
+        0.9,
+    );
+    network.add_edge(
+        "reference_counting".to_string(),
+        "arc_weak".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
+    network.add_edge(
+        "arc_weak".to_string(),
+        "cyclic_references".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
 
     // The problem: "cyclic_references" has zero direct similarity to "memory_leak"
     // (they use completely different vocabulary)
@@ -883,16 +971,18 @@ fn test_spreading_finds_chains_similarity_misses() {
     sim_search.add("memory_leak", vec![1.0, 0.0, 0.0, 0.0]);
     sim_search.add("reference_counting", vec![0.5, 0.5, 0.0, 0.0]);
     sim_search.add("arc_weak", vec![0.0, 0.7, 0.3, 0.0]);
-    sim_search.add("cyclic_references", vec![0.0, 0.0, 0.0, 1.0]);  // Totally different!
+    sim_search.add("cyclic_references", vec![0.0, 0.0, 0.0, 1.0]); // Totally different!
 
     // Spreading activation finds the solution
     let spreading_results = network.activate("memory_leak", 1.0);
-    let found_solution = spreading_results.iter()
+    let found_solution = spreading_results
+        .iter()
         .any(|r| r.memory_id == "cyclic_references");
 
     // Similarity search cannot find it
     let sim_results = sim_search.search(&[1.0, 0.0, 0.0, 0.0], 10);
-    let sim_found = sim_results.iter()
+    let sim_found = sim_results
+        .iter()
         .any(|(id, score)| id == "cyclic_references" && *score > 0.3);
 
     assert!(
@@ -911,26 +1001,47 @@ fn test_spreading_path_quality() {
     let mut network = ActivationNetwork::new();
 
     // Create a knowledge graph about Rust error handling
-    network.add_edge("error_handling".to_string(), "result_type".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("result_type".to_string(), "question_mark_operator".to_string(), LinkType::Semantic, 0.85);
-    network.add_edge("question_mark_operator".to_string(), "early_return".to_string(), LinkType::Semantic, 0.8);
+    network.add_edge(
+        "error_handling".to_string(),
+        "result_type".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "result_type".to_string(),
+        "question_mark_operator".to_string(),
+        LinkType::Semantic,
+        0.85,
+    );
+    network.add_edge(
+        "question_mark_operator".to_string(),
+        "early_return".to_string(),
+        LinkType::Semantic,
+        0.8,
+    );
 
     let results = network.activate("error_handling", 1.0);
 
     // Find the path to early_return
-    let early_return_result = results.iter()
+    let early_return_result = results
+        .iter()
         .find(|r| r.memory_id == "early_return")
         .expect("Should find early_return");
 
     // Verify the path makes sense
-    assert_eq!(early_return_result.path.len(), 4, "Path should have 4 nodes");
+    assert_eq!(
+        early_return_result.path.len(),
+        4,
+        "Path should have 4 nodes"
+    );
     assert_eq!(early_return_result.path[0], "error_handling");
     assert_eq!(early_return_result.path[1], "result_type");
     assert_eq!(early_return_result.path[2], "question_mark_operator");
     assert_eq!(early_return_result.path[3], "early_return");
 
     // Activation should decay along the path
-    let result_type_activation = results.iter()
+    let result_type_activation = results
+        .iter()
         .find(|r| r.memory_id == "result_type")
         .map(|r| r.activation)
         .unwrap_or(0.0);
@@ -1056,20 +1167,52 @@ fn test_spreading_mixed_link_types() {
     let mut network = ActivationNetwork::new();
 
     // Create edges with different link types
-    network.add_edge("event".to_string(), "semantic_relation".to_string(), LinkType::Semantic, 0.9);
-    network.add_edge("event".to_string(), "temporal_relation".to_string(), LinkType::Temporal, 0.9);
-    network.add_edge("event".to_string(), "causal_relation".to_string(), LinkType::Causal, 0.9);
-    network.add_edge("event".to_string(), "spatial_relation".to_string(), LinkType::Spatial, 0.9);
+    network.add_edge(
+        "event".to_string(),
+        "semantic_relation".to_string(),
+        LinkType::Semantic,
+        0.9,
+    );
+    network.add_edge(
+        "event".to_string(),
+        "temporal_relation".to_string(),
+        LinkType::Temporal,
+        0.9,
+    );
+    network.add_edge(
+        "event".to_string(),
+        "causal_relation".to_string(),
+        LinkType::Causal,
+        0.9,
+    );
+    network.add_edge(
+        "event".to_string(),
+        "spatial_relation".to_string(),
+        LinkType::Spatial,
+        0.9,
+    );
 
     let results = network.activate("event", 1.0);
 
     // Should find all related nodes
     let found_ids: HashSet<_> = results.iter().map(|r| r.memory_id.as_str()).collect();
 
-    assert!(found_ids.contains("semantic_relation"), "Should find semantic relation");
-    assert!(found_ids.contains("temporal_relation"), "Should find temporal relation");
-    assert!(found_ids.contains("causal_relation"), "Should find causal relation");
-    assert!(found_ids.contains("spatial_relation"), "Should find spatial relation");
+    assert!(
+        found_ids.contains("semantic_relation"),
+        "Should find semantic relation"
+    );
+    assert!(
+        found_ids.contains("temporal_relation"),
+        "Should find temporal relation"
+    );
+    assert!(
+        found_ids.contains("causal_relation"),
+        "Should find causal relation"
+    );
+    assert!(
+        found_ids.contains("spatial_relation"),
+        "Should find spatial relation"
+    );
 
     // Verify link types are preserved
     for result in &results {
@@ -1094,7 +1237,7 @@ fn test_spreading_mixed_link_types() {
 #[test]
 fn test_retroactive_vs_timestamp_importance() {
     let config = SynapticTaggingConfig {
-        capture_window: CaptureWindow::new(9.0, 2.0),  // 9 hours back, 2 hours forward
+        capture_window: CaptureWindow::new(9.0, 2.0), // 9 hours back, 2 hours forward
         prp_threshold: 0.7,
         tag_lifetime_hours: 12.0,
         min_tag_strength: 0.3,
@@ -1130,7 +1273,8 @@ fn test_retroactive_vs_timestamp_importance() {
     // (In tests, tag_memory() uses Utc::now(), so temporal_distance ~= 0)
     for captured in &result.captured_memories {
         assert!(
-            captured.temporal_distance_hours >= 0.0 || captured.temporal_distance_hours.abs() < 0.01,
+            captured.temporal_distance_hours >= 0.0
+                || captured.temporal_distance_hours.abs() < 0.01,
             "Captured memory {} should be encoded at or before event (distance: {:.4}h)",
             captured.memory_id,
             captured.temporal_distance_hours
@@ -1166,7 +1310,10 @@ fn test_retroactive_captures_related_memories() {
     );
 
     // Verify cluster properties
-    assert!(cluster.average_importance > 0.0, "Cluster should have positive importance");
+    assert!(
+        cluster.average_importance > 0.0,
+        "Cluster should have positive importance"
+    );
     assert_eq!(
         cluster.trigger_event_type,
         ImportanceEventType::EmotionalContent
@@ -1184,7 +1331,11 @@ fn test_retroactive_window_effectiveness() {
         (Duration::hours(1), true, "1 hour before"),
         (Duration::hours(4), true, "4 hours before"),
         (Duration::hours(8), true, "8 hours before"),
-        (Duration::hours(10), false, "10 hours before (outside window)"),
+        (
+            Duration::hours(10),
+            false,
+            "10 hours before (outside window)",
+        ),
         (Duration::minutes(-30), true, "30 minutes after"),
         (Duration::hours(-3), false, "3 hours after (outside window)"),
     ];
@@ -1201,7 +1352,11 @@ fn test_retroactive_window_effectiveness() {
 
         if should_capture {
             let prob = window.capture_probability(memory_time, event_time);
-            assert!(prob.is_some(), "{} should have capture probability", description);
+            assert!(
+                prob.is_some(),
+                "{} should have capture probability",
+                description
+            );
             assert!(
                 prob.unwrap() > 0.0,
                 "{} should have positive capture probability",
@@ -1218,7 +1373,7 @@ fn test_retroactive_semantic_filtering() {
         capture_window: CaptureWindow::new(9.0, 2.0),
         prp_threshold: 0.7,
         tag_lifetime_hours: 12.0,
-        min_tag_strength: 0.1,  // Low threshold to test strength effects
+        min_tag_strength: 0.1, // Low threshold to test strength effects
         max_cluster_size: 100,
         enable_clustering: true,
         auto_decay: true,
@@ -1232,14 +1387,16 @@ fn test_retroactive_semantic_filtering() {
     stc.tag_memory_with_strength("highly_relevant", 0.95);
     stc.tag_memory_with_strength("moderately_relevant", 0.6);
     stc.tag_memory_with_strength("barely_relevant", 0.35);
-    stc.tag_memory_with_strength("irrelevant", 0.05);  // Below threshold
+    stc.tag_memory_with_strength("irrelevant", 0.05); // Below threshold
 
     // Trigger importance event
     let event = ImportanceEvent::user_flag("trigger", None);
     let result = stc.trigger_prp(event);
 
     // Higher strength memories should be captured with higher consolidated importance
-    let captured_ids: HashSet<_> = result.captured_memories.iter()
+    let captured_ids: HashSet<_> = result
+        .captured_memories
+        .iter()
         .map(|c| c.memory_id.as_str())
         .collect();
 
@@ -1253,12 +1410,16 @@ fn test_retroactive_semantic_filtering() {
     );
 
     // Find consolidated importance values
-    let highly_relevant_importance = result.captured_memories.iter()
+    let highly_relevant_importance = result
+        .captured_memories
+        .iter()
         .find(|c| c.memory_id == "highly_relevant")
         .map(|c| c.consolidated_importance)
         .unwrap_or(0.0);
 
-    let moderately_relevant_importance = result.captured_memories.iter()
+    let moderately_relevant_importance = result
+        .captured_memories
+        .iter()
         .find(|c| c.memory_id == "moderately_relevant")
         .map(|c| c.consolidated_importance)
         .unwrap_or(0.0);
@@ -1285,10 +1446,8 @@ fn test_proof_unique_to_vestige() {
     let mut stc = SynapticTaggingSystem::new();
 
     // Memory 1: Ordinary conversation about vacation (time T)
-    let _vacation_memory = stc.tag_memory_with_context(
-        "vacation_mention",
-        "User mentioned Bob's vacation plans"
-    );
+    let _vacation_memory =
+        stc.tag_memory_with_context("vacation_mention", "User mentioned Bob's vacation plans");
 
     // Memory 2: Some other ordinary memories
     stc.tag_memory("unrelated_memory_1");
@@ -1300,14 +1459,16 @@ fn test_proof_unique_to_vestige() {
         event_type: ImportanceEventType::UserFlag,
         memory_id: Some("departure_announcement".to_string()),
         timestamp: Utc::now(),
-        strength: 1.0,  // Maximum importance
+        strength: 1.0, // Maximum importance
         context: Some("Bob is leaving - this makes prior context important".to_string()),
     };
 
     let result = stc.trigger_prp(event);
 
     // The vacation memory should be captured!
-    let vacation_captured = result.captured_memories.iter()
+    let vacation_captured = result
+        .captured_memories
+        .iter()
         .any(|c| c.memory_id == "vacation_mention");
 
     assert!(
@@ -1316,7 +1477,9 @@ fn test_proof_unique_to_vestige() {
     );
 
     // Verify the capture details
-    let vacation_capture = result.captured_memories.iter()
+    let vacation_capture = result
+        .captured_memories
+        .iter()
         .find(|c| c.memory_id == "vacation_mention")
         .unwrap();
 
@@ -1324,7 +1487,8 @@ fn test_proof_unique_to_vestige() {
     // so temporal_distance is ~0 (but conceptually it's a "backward" capture
     // since the memory existed BEFORE it became important)
     assert!(
-        vacation_capture.temporal_distance_hours >= 0.0 || vacation_capture.temporal_distance_hours.abs() < 0.01,
+        vacation_capture.temporal_distance_hours >= 0.0
+            || vacation_capture.temporal_distance_hours.abs() < 0.01,
         "Memory should be encoded at or before the importance event (distance: {:.4}h)",
         vacation_capture.temporal_distance_hours
     );
@@ -1406,7 +1570,7 @@ fn test_index_compression_ratio() {
     let full_embedding_dim = 384;
 
     // Index embedding size
-    let index_embedding_dim = config.summary_dimensions;  // 128 by default
+    let index_embedding_dim = config.summary_dimensions; // 128 by default
 
     // Compression ratio
     let compression_ratio = full_embedding_dim as f64 / index_embedding_dim as f64;
@@ -1425,7 +1589,7 @@ fn test_index_compression_ratio() {
     );
 
     // Memory savings per memory
-    let full_size_bytes = full_embedding_dim * 4;  // f32 = 4 bytes
+    let full_size_bytes = full_embedding_dim * 4; // f32 = 4 bytes
     let index_size_bytes = index_embedding_dim * 4;
     let savings_per_memory = full_size_bytes - index_size_bytes;
 
@@ -1522,8 +1686,7 @@ fn test_content_pointer_accuracy() {
     assert_eq!(chunked_ptr.size_bytes, Some(100));
 
     // Test with hash
-    let hashed_ptr = ContentPointer::sqlite("data", 1, ContentType::Text)
-        .with_hash(0xDEADBEEF);
+    let hashed_ptr = ContentPointer::sqlite("data", 1, ContentType::Text).with_hash(0xDEADBEEF);
 
     assert_eq!(hashed_ptr.content_hash, Some(0xDEADBEEF));
 
@@ -1531,19 +1694,24 @@ fn test_content_pointer_accuracy() {
     let index = HippocampalIndex::new();
     let now = Utc::now();
 
-    let barcode = index.index_memory(
-        "test_memory",
-        "Test content for pointer verification",
-        "fact",
-        now,
-        None,
-    ).unwrap();
+    let barcode = index
+        .index_memory(
+            "test_memory",
+            "Test content for pointer verification",
+            "fact",
+            now,
+            None,
+        )
+        .unwrap();
 
     // Retrieve and verify
     let retrieved = index.get_index("test_memory").unwrap().unwrap();
 
     assert_eq!(retrieved.barcode, barcode);
-    assert!(!retrieved.content_pointers.is_empty(), "Should have content pointer");
+    assert!(
+        !retrieved.content_pointers.is_empty(),
+        "Should have content pointer"
+    );
 
     // Verify the default pointer is SQLite
     let default_ptr = &retrieved.content_pointers[0];

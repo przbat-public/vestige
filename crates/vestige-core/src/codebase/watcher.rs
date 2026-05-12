@@ -10,13 +10,13 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 
 use super::patterns::PatternDetector;
 use super::relationships::RelationshipTracker;
@@ -576,11 +576,12 @@ impl ManualEventHandler {
 
         // Detect patterns
         if self.config.detect_patterns
-            && let Ok(content) = std::fs::read_to_string(path) {
-                let language = CodebaseWatcher::detect_language(path);
-                let detector = self.detector.read().await;
-                let _ = detector.detect_patterns(&content, &language);
-            }
+            && let Ok(content) = std::fs::read_to_string(path)
+        {
+            let language = CodebaseWatcher::detect_language(path);
+            let detector = self.detector.read().await;
+            let _ = detector.detect_patterns(&content, &language);
+        }
 
         Ok(())
     }
