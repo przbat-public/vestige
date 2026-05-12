@@ -130,12 +130,9 @@ pub mod preprocessing;
 /// - Spreading activation networks
 pub mod neuroscience;
 
-#[cfg(test)]
-mod scientific_validation;
-#[cfg(test)]
-mod benchmark_eval;
-#[cfg(test)]
-mod cognitive_journey_tests;
+// Integration tests live in `tests/` (scientific_validation, benchmark_eval,
+// cognitive_journey_tests). They exercise the crate through its public API
+// and are not part of the library surface.
 
 // ============================================================================
 // PUBLIC API RE-EXPORTS

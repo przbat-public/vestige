@@ -159,7 +159,11 @@ impl std::fmt::Display for MemoryKind {
 /// - FSRS-6 for optimal review scheduling
 /// - Bjork dual-strength for realistic forgetting
 /// - Temporal validity for time-sensitive knowledge
-#[non_exhaustive]
+///
+/// **API stability:** This struct is exhaustively constructible while
+/// `vestige-core` is pre-1.0. When stabilising we may reintroduce
+/// `#[non_exhaustive]`; until then tests, fixtures and downstream crates may
+/// build instances with `KnowledgeNode { ..Default::default() }`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KnowledgeNode {
