@@ -57,6 +57,32 @@
 //! - Collins, A. M., & Loftus, E. F. (1975). A spreading-activation theory of semantic
 //!   processing. Psychological Review.
 
+// ============================================================================
+// Submodule layout — grouped by cognitive role
+// ----------------------------------------------------------------------------
+// All submodules stay at this level for backward-compatible `use` paths.
+// The grouping below documents *why* each file exists, so future readers can
+// find what they need without re-running grep:
+//
+//   ENCODING (write-time signals that shape what gets stored and how strongly)
+//     - synaptic_tagging      : Synaptic Tagging & Capture (retroactive importance)
+//     - importance_signals    : 4-channel encoding (novelty / arousal / reward / attention)
+//     - emotional_memory      : Emotion-modulated encoding & slower decay
+//     - context_memory        : Encoding Specificity Principle (also used at recall)
+//
+//   RETRIEVAL (read-time mechanisms that surface memories on demand)
+//     - hippocampal_index     : Two-phase recall via compact index pointers
+//     - spreading_activation  : Associative semantic-network activation
+//     - predictive_retrieval  : Predict needed memories before they're asked for
+//     - prospective_memory    : Future-oriented intentions and trigger checking
+//
+//   STATE (lifecycle of an individual memory across time)
+//     - memory_states         : Active/Dormant/Silent/Unavailable + competition
+//
+//   META (the system's awareness of its own memory quality)
+//     - metacognition         : Confidence / contradictions / known-unknowns
+// ============================================================================
+
 pub mod context_memory;
 pub mod emotional_memory;
 pub mod hippocampal_index;
