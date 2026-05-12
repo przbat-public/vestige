@@ -39,6 +39,14 @@ const SESSION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const REAPER_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 /// Concurrency limit for the tower middleware.
+///
+/// Bounds the number of *in-flight* requests, which already protects the
+/// process from request floods. A separate request-rate limit
+/// (`tower::limit::RateLimitLayer`) is intentionally NOT applied here:
+/// in tower 0.5 it does not implement `Clone`, which axum requires on every
+/// router layer, and `tower_governor` would add a new dependency. If
+/// `VESTIGE_HTTP_BIND` is non-localhost you should put a reverse proxy
+/// (nginx, Caddy, Cloudflare) in front and rate-limit there per IP.
 const CONCURRENCY_LIMIT: usize = 50;
 
 /// Maximum request body size (256 KB — JSON-RPC requests should be small).

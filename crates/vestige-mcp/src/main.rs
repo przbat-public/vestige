@@ -204,32 +204,52 @@ async fn main() {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(6);
+            let interval = std::time::Duration::from_secs(interval_hours * 3600);
+            // Cap waits so we always re-check at least once an hour. This keeps
+            // the loop responsive to wall-clock drift (e.g. laptop suspend/
+            // resume) and lets us pick up a manually-triggered consolidation
+            // recorded by another path without sleeping a full interval first.
+            let max_wait = std::time::Duration::from_secs(3600);
 
             // Small delay so we don't block server startup / stdio handshake
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
             loop {
-                // Check whether consolidation is actually needed
-                let should_run = match storage_clone.get_last_consolidation() {
+                // Decide whether to run now and how long to sleep before the
+                // next check, based on time-since-last-consolidation rather
+                // than a fixed wall clock tick. Pre-v3.2.1 this loop always
+                // slept `interval_hours` after a skip, which made the auto-
+                // consolidation schedule drift by up to one interval on every
+                // restart that landed within the window. (See AGENTS.md
+                // changelog.)
+                let (should_run, sleep_for) = match storage_clone.get_last_consolidation() {
                     Ok(Some(last)) => {
-                        let elapsed = chrono::Utc::now() - last;
-                        let stale = elapsed > chrono::Duration::hours(interval_hours as i64);
-                        if !stale {
+                        let now = chrono::Utc::now();
+                        let elapsed = now - last;
+                        let interval_chrono = chrono::Duration::seconds(interval.as_secs() as i64);
+                        if elapsed >= interval_chrono {
+                            (true, interval)
+                        } else {
+                            let remaining = interval_chrono - elapsed;
+                            // Saturating conversion: remaining is always >0 here.
+                            let secs = remaining.num_seconds().max(60) as u64;
+                            let sleep = std::time::Duration::from_secs(secs).min(max_wait);
                             info!(
                                 last_consolidation = %last,
+                                next_check_in_secs = sleep.as_secs(),
                                 "Skipping auto-consolidation (last run was < {} hours ago)",
                                 interval_hours
                             );
+                            (false, sleep)
                         }
-                        stale
                     }
                     Ok(None) => {
                         info!("No previous consolidation found — running first auto-consolidation");
-                        true
+                        (true, interval)
                     }
                     Err(e) => {
                         warn!("Could not read consolidation history: {} — running anyway", e);
-                        true
+                        (true, interval)
                     }
                 };
 
@@ -256,8 +276,7 @@ async fn main() {
                     }
                 }
 
-                // Sleep until next check
-                tokio::time::sleep(std::time::Duration::from_secs(interval_hours * 3600)).await;
+                tokio::time::sleep(sleep_for).await;
             }
         });
     }

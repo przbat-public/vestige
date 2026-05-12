@@ -490,7 +490,7 @@ fn build_reasoning(
 }
 
 fn first_sentence(text: &str) -> String {
-    text.split(|c: char| c == '.' || c == '\n')
+    text.split(['.', '\n'])
         .next()
         .unwrap_or(text)
         .trim()

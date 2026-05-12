@@ -167,15 +167,33 @@ pub async fn execute(
 
     // ====================================================================
     // COGNITIVE PRE-INGEST: importance scoring + intent detection + content analysis
+    //
+    // NOTE on signal routing (fixed in v3.2.1):
+    //   - `sentiment_magnitude` on IngestInput is EMOTIONAL arousal (0..1).
+    //     Used downstream for emotional sentiment boost in FSRS, hippocampal
+    //     index, synaptic tagging — must reflect real emotional content.
+    //   - `importance_composite` is a 4-channel composite (novelty + arousal
+    //     + reward + attention). It governs CREATE vs UPDATE vs SUPERSEDE in
+    //     prediction error gating and is preserved in provenance for audit.
+    //   - Pre v3.2.1 the composite was stored as sentiment_magnitude, which
+    //     overdrove emotional boosts for any high-importance memory regardless
+    //     of actual emotion. Now we split them.
     // ====================================================================
-    let mut importance_composite = 0.0_f64;
     let mut tags = args.tags.unwrap_or_default();
 
-    if let Ok(cog) = cognitive.try_lock() {
-        // 4A. Full 4-channel importance scoring
+    // We block on the cognitive lock for pre-ingest. Pre v3.2.1 this used
+    // try_lock and silently dropped importance scoring + intent detection
+    // when another async task held the engine — producing memories whose
+    // quality signals defaulted to zero. The ingest itself is going to
+    // serialize on Storage anyway; serializing on the cognitive engine for
+    // a few hundred microseconds of CPU work is a strictly worse trade-off
+    // than silently corrupting the quality channels.
+    let (importance_composite, emotional_arousal) = {
+        let cog = cognitive.lock().await;
+        // 4A. Full 4-channel importance scoring (Anderson 1983, Yonelinas 2002,
+        //     LaBar & Cabeza 2006).
         let context = ImportanceContext::current();
         let importance = cog.importance_signals.compute_importance(&content, &context);
-        importance_composite = importance.composite;
 
         // 4B. Intent detection → auto-tag
         let intent_result = cog.intent_detector.detect_intent();
@@ -192,7 +210,9 @@ pub async fn execute(
 
         // 4D. Adaptive embedding — detect content type for logging
         let _content_type = ContentType::detect(&content);
-    }
+
+        (importance.composite, importance.arousal)
+    };
 
     // ====================================================================
     // PREPROCESSING PIPELINE: coreference, entities, temporal, relations, provenance
@@ -224,16 +244,28 @@ pub async fn execute(
     // Merge auto-tags from preprocessing with user-provided tags
     tags.extend(pp_tags);
 
+    // Inject importance_composite into provenance for audit/observability.
+    // sentiment_magnitude carries emotional arousal (its proper semantics).
+    let provenance_with_importance = pp_provenance.map(|mut p| {
+        if let Some(obj) = p.as_object_mut() {
+            obj.insert(
+                "importance_composite".to_string(),
+                serde_json::Value::from(importance_composite),
+            );
+        }
+        p
+    });
+
     let input = IngestInput {
         content: content.clone(),
         node_type: args.node_type.unwrap_or_else(|| "fact".to_string()),
         source: args.source,
         sentiment_score: 0.0,
-        sentiment_magnitude: importance_composite,
+        sentiment_magnitude: emotional_arousal,
         tags,
         valid_from: pp_valid_from,
         valid_until: pp_valid_until,
-        provenance: pp_provenance,
+        provenance: provenance_with_importance,
         ..Default::default()
     };
 
@@ -277,14 +309,13 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
-        if let Some(sim) = nearest_sim {
-            if sim > 0.9 {
+        if let Some(sim) = nearest_sim
+            && sim > 0.9 {
                 response["near_duplicate_warning"] = serde_json::json!(format!(
                     "Content is {:.0}% similar to an existing memory. This was created because force_create=true, but consider using memory(action='edit') instead.",
                     sim * 100.0
                 ));
             }
-        }
         return Ok(response);
     }
 
@@ -340,14 +371,23 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
-        if let Some(sim) = result.similarity {
-            if sim > 0.9 && result.decision == "create" {
+        // Near-duplicate advisory threshold.
+        //
+        // The prediction-error gate routes anything with cosine >= 0.75 to
+        // Update/Reinforce/Supersede/Merge under the default config
+        // (prefer_updates=true). So a `decision == "create"` outcome with
+        // sim > 0.9 is effectively impossible — the old `> 0.9` check was
+        // dead code. Lower the bar to 0.6 (still high enough to surface
+        // "you almost hit Update territory but the gate landed on Create"
+        // cases that warrant a manual look).
+        const NEAR_DUPLICATE_ADVISORY_THRESHOLD: f32 = 0.6;
+        if let Some(sim) = result.similarity
+            && sim >= NEAR_DUPLICATE_ADVISORY_THRESHOLD && result.decision == "create" {
                 response["near_duplicate_warning"] = serde_json::json!(format!(
-                    "Content is {:.0}% similar to an existing memory. Consider using memory(action='edit') to update the existing memory instead of creating a near-duplicate.",
+                    "Content is {:.0}% similar to an existing memory but was created as new. Consider using memory(action='edit') if you intended to update an existing memory.",
                     sim * 100.0
                 ));
             }
-        }
         Ok(response)
     }
 
@@ -428,15 +468,17 @@ async fn execute_batch(
         let item_force_create = item.force_create.unwrap_or(false);
 
         // ================================================================
-        // COGNITIVE PRE-INGEST (per item)
+        // COGNITIVE PRE-INGEST (per item) — see signal-routing note on the
+        // single-mode path above. emotional_arousal vs importance_composite
+        // must stay separate. Uses blocking lock for the same reason as the
+        // single-mode path.
         // ================================================================
-        let mut importance_composite = 0.0_f64;
         let mut tags = item.tags.unwrap_or_default();
 
-        if let Ok(cog) = cognitive.try_lock() {
+        let (importance_composite, emotional_arousal) = {
+            let cog = cognitive.lock().await;
             let context = ImportanceContext::current();
             let importance = cog.importance_signals.compute_importance(&item.content, &context);
-            importance_composite = importance.composite;
 
             let intent_result = cog.intent_detector.detect_intent();
             if intent_result.confidence > 0.5 {
@@ -450,7 +492,9 @@ async fn execute_batch(
             }
 
             let _content_type = ContentType::detect(&item.content);
-        }
+
+            (importance.composite, importance.arousal)
+        };
 
         // ============================================================
         // PREPROCESSING PIPELINE (per batch item)
@@ -467,16 +511,26 @@ async fn execute_batch(
 
         tags.extend(batch_pp_tags);
 
+        let provenance_with_importance = batch_pp_prov.map(|mut p| {
+            if let Some(obj) = p.as_object_mut() {
+                obj.insert(
+                    "importance_composite".to_string(),
+                    serde_json::Value::from(importance_composite),
+                );
+            }
+            p
+        });
+
         let input = IngestInput {
             content: item_content,
             node_type: item.node_type.unwrap_or_else(|| "fact".to_string()),
             source: item.source,
             sentiment_score: 0.0,
-            sentiment_magnitude: importance_composite,
+            sentiment_magnitude: emotional_arousal,
             tags,
             valid_from: batch_pp_from,
             valid_until: batch_pp_until,
-            provenance: batch_pp_prov,
+            provenance: provenance_with_importance,
             ..Default::default()
         };
 
@@ -640,7 +694,7 @@ fn detect_compound_content(content: &str) -> Option<String> {
         .filter(|l| {
             let t = l.trim();
             t.starts_with("- ") || t.starts_with("* ") || t.starts_with("• ")
-                || (t.len() > 3 && t.chars().next().map_or(false, |c| c.is_ascii_digit())
+                || (t.len() > 3 && t.chars().next().is_some_and(|c| c.is_ascii_digit())
                     && (t.contains(". ") || t.contains(") ")))
         })
         .count();

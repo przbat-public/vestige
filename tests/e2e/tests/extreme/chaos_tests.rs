@@ -447,13 +447,7 @@ fn test_chaos_ancient_memories() {
 
     // Trigger importance - should capture recent memories
     let event = ImportanceEvent::user_flag("trigger", Some("Ancient memory test"));
-    let result = stc.trigger_prp(event);
-
-    // System should handle this gracefully
-    assert!(
-        result.captured_count() >= 0,
-        "System should handle importance triggering"
-    );
+    let _result = stc.trigger_prp(event);
 
     // All memories should be accessible
     let stats = stc.stats();

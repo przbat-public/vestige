@@ -439,12 +439,12 @@ mod tests {
 
         // Test Dormant state
         let accessibility = compute_accessibility(0.5, 0.5, 0.5);
-        assert!(accessibility >= ACCESSIBILITY_DORMANT && accessibility < ACCESSIBILITY_ACTIVE);
+        assert!((ACCESSIBILITY_DORMANT..ACCESSIBILITY_ACTIVE).contains(&accessibility));
         assert!(matches!(state_from_accessibility(accessibility), MemoryState::Dormant));
 
         // Test Silent state
         let accessibility = compute_accessibility(0.2, 0.2, 0.2);
-        assert!(accessibility >= ACCESSIBILITY_SILENT && accessibility < ACCESSIBILITY_DORMANT);
+        assert!((ACCESSIBILITY_SILENT..ACCESSIBILITY_DORMANT).contains(&accessibility));
         assert!(matches!(state_from_accessibility(accessibility), MemoryState::Silent));
 
         // Test Unavailable state
@@ -493,6 +493,7 @@ mod tests {
                 valid_from: None,
                 valid_until: None,
                 provenance: None,
+                ..Default::default()
             })
             .unwrap();
         node.id

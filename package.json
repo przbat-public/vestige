@@ -1,13 +1,13 @@
 {
   "name": "vestige",
-  "version": "2.0.3",
+  "version": "3.2.1",
   "private": true,
-  "description": "Cognitive memory for AI - MCP server with FSRS-6 spaced repetition",
+  "description": "Cognitive memory for AI - MCP server with FSRS-6 spaced repetition and content intelligence pipeline",
   "author": "Sam Valladares",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/samvallad33/vestige"
+    "url": "git+https://github.com/samvallad33/vestige.git"
   },
   "scripts": {
     "build:mcp": "cargo build --release --package vestige-mcp",

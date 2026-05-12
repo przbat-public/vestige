@@ -303,6 +303,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         }).unwrap();
 
         let args = serde_json::json!({ "center_id": node.id });
@@ -329,6 +330,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         }).unwrap();
 
         let args = serde_json::json!({ "query": "quantum" });
@@ -351,6 +353,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         }).unwrap();
 
         let args = serde_json::json!({ "center_id": node.id });

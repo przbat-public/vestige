@@ -12,7 +12,7 @@
 
 Built on 130 years of memory research — FSRS-6 spaced repetition, prediction error gating, synaptic tagging, spreading activation, memory dreaming — all running in a single Rust binary with a 3D neural visualization dashboard. 100% local. Zero cloud.
 
-[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-26-mcp-tools) | [Docs](docs/)
+[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-27-mcp-tools) | [Docs](docs/)
 
 </div>
 
@@ -85,12 +85,20 @@ Use `detail_level: "full"` to see the full provenance trail — which agent crea
 
 ## Quick Start
 
-```bash
-# 1. Install (macOS Apple Silicon)
-curl -L https://github.com/samvallad33/vestige/releases/latest/download/vestige-mcp-aarch64-apple-darwin.tar.gz | tar -xz
-sudo mv vestige-mcp vestige vestige-restore /usr/local/bin/
+> **Pre-built binaries for this fork are not yet published.** Use "Build from source" below. Pre-built `samvallad33/vestige` releases are upstream v2.0.3 — they do **not** contain the v3.x cognitive expansion, content intelligence pipeline, or the React dashboard. Use them only if you want to try the upstream baseline.
 
-# 2. Connect to Claude Code
+```bash
+# 1. Build from source (requires Rust 1.91+)
+
+cd vestige
+cargo build --release -p vestige-mcp
+# Optional: enable Metal GPU acceleration on Apple Silicon
+cargo build --release -p vestige-mcp --features metal
+
+# Install built binaries
+install -m 0755 target/release/{vestige-mcp,vestige,vestige-restore} /usr/local/bin/
+
+# 2. Connect to your AI assistant (Claude Code shown; see "Works Everywhere" below)
 claude mcp add vestige vestige-mcp -s user
 
 # 3. Test it
@@ -101,7 +109,15 @@ claude mcp add vestige vestige-mcp -s user
 ```
 
 <details>
-<summary>Other platforms & install methods</summary>
+<summary>Upstream pre-built binaries (v2.0.3 baseline only)</summary>
+
+> These are the upstream releases. They do not include any v3.x features from this fork. Use only if you specifically want the upstream baseline.
+
+**macOS (Apple Silicon):**
+```bash
+curl -L https://github.com/samvallad33/vestige/releases/latest/download/vestige-mcp-aarch64-apple-darwin.tar.gz | tar -xz
+sudo mv vestige-mcp vestige vestige-restore /usr/local/bin/
+```
 
 **macOS (Intel):**
 ```bash
@@ -115,20 +131,7 @@ curl -L https://github.com/samvallad33/vestige/releases/latest/download/vestige-
 sudo mv vestige-mcp vestige vestige-restore /usr/local/bin/
 ```
 
-**Windows:** Download from [Releases](https://github.com/samvallad33/vestige/releases/latest)
-
-**npm:**
-```bash
-npm install -g vestige-mcp-server
-```
-
-**Build from source (requires Rust 1.91+):**
-```bash
-git clone https://github.com/samvallad33/vestige && cd vestige
-cargo build --release -p vestige-mcp
-# Optional: enable Metal GPU acceleration on Apple Silicon
-cargo build --release -p vestige-mcp --features metal
-```
+**Windows / npm:** see upstream [releases](https://github.com/samvallad33/vestige/releases/latest) and the `vestige-mcp-server` npm package.
 </details>
 
 ---
@@ -177,10 +180,10 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 │  Light/Dark Mode · a11y · EN/PL · WebSocket         │
 ├─────────────────────────────────────────────────────┤
 │  Axum HTTP + WebSocket Server (port 3927)           │
-│  18 REST endpoints · WS event broadcast             │
+│  28 REST operations · WS event broadcast            │
 ├─────────────────────────────────────────────────────┤
-│  MCP Server (stdio JSON-RPC)                        │
-│  24 tools · 29 cognitive modules                    │
+│  MCP Server (stdio JSON-RPC + HTTP on :3928)        │
+│  27 tools · 29 cognitive modules                    │
 ├─────────────────────────────────────────────────────┤
 │  Cognitive Engine                                   │
 │  ┌──────────┐ ┌────────────┐ ┌───────────────┐      │
@@ -211,7 +214,7 @@ RAG is a dumb bucket. Vestige is an active organ.
 | | RAG / Vector Store | Vestige |
 |---|---|---|
 | **Storage** | Store everything | **Prediction Error Gating** — only stores what's surprising or new |
-| **Retrieval** | Nearest-neighbor | **7-stage pipeline** — triple hybrid (BM25 + semantic + RRF) + Jina v2 reranking + spreading activation |
+| **Retrieval** | Nearest-neighbor | **8-stage pipeline** — compound-query decomposition + triple hybrid (BM25 + semantic + RRF) + Jina v2 reranking + spreading activation |
 | **Decay** | Nothing expires | **FSRS-6** — memories fade naturally, context stays lean |
 | **Duplicates** | Manual dedup | **Self-healing** — auto-merges "likes dark mode" + "prefers dark themes" |
 | **Importance** | All equal | **4-channel scoring** — novelty, arousal, reward, attention |
@@ -238,7 +241,7 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 
 **Dual-Strength Model** — Every memory has storage strength (encoding quality) and retrieval strength (accessibility). A deeply stored memory can be temporarily hard to retrieve — just like real forgetting. Based on [Bjork & Bjork, 1992](https://doi.org/10.1016/S0079-7421(08)60016-9).
 
-**Memory Dreaming** — Like sleep consolidation. Replays recent memories to discover hidden connections, strengthen important patterns, and synthesize insights. Dream-discovered connections persist to a graph database. Based on the [Active Dreaming Memory](https://engrxiv.org/preprint/download/5919/9826/8234) framework.
+**Memory Dreaming** — Like sleep consolidation. Replays recent memories to discover hidden connections, strengthen important patterns, and synthesize insights. Dream-discovered connections persist to a graph database. Inspired by [Diekelmann & Born 2010](https://doi.org/10.1038/nrn2762) (memory consolidation during sleep) and an [Active Dreaming Memory preprint on engrXiv](https://engrxiv.org/preprint/download/5919/9826/8234) — note that the preprint is not peer-reviewed, treat as a design reference rather than a citation of established result.
 
 **Waking SWR Tagging** — Promoted memories get sharp-wave ripple tags for preferential replay during dream consolidation. 70/30 tagged-to-random ratio. Based on [Buzsaki, 2015](https://doi.org/10.1038/nn.3963).
 
@@ -248,7 +251,7 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 
 ---
 
-## 🛠 26 MCP Tools
+## 🛠 27 MCP Tools
 
 ### Context Packets
 | Tool | What It Does |
@@ -258,9 +261,9 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 ### Core Memory
 | Tool | What It Does |
 |------|-------------|
-| `search` | 7-stage cognitive search — triple hybrid (BM25 + semantic + RRF) + Jina v2 reranking + temporal + competition + spreading activation |
-| `smart_ingest` | Intelligent storage with CREATE/UPDATE/SUPERSEDE via Prediction Error Gating. Batch mode for session-end saves |
-| `memory` | Get, delete, check state, promote (thumbs up), demote (thumbs down) |
+| `search` | 8-stage cognitive search — compound query decomposition + triple hybrid (BM25 + semantic + RRF) + Jina v2 reranking + temporal + competition + spreading activation |
+| `smart_ingest` | Intelligent storage with CREATE/UPDATE/SUPERSEDE via Prediction Error Gating. Runs the Content Intelligence Pipeline (entity extraction, coreference, temporal anchoring, relation extraction, provenance). Batch mode for session-end saves |
+| `memory` | Get, edit, delete, check state, promote (thumbs up), demote (thumbs down) |
 | `codebase` | Remember code patterns and architectural decisions per-project |
 | `intention` | Prospective memory — "remind me to X when Y happens" |
 
@@ -270,6 +273,11 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 | `dream` | Memory consolidation — replays memories, discovers connections, synthesizes insights, persists graph |
 | `explore_connections` | Graph traversal — reasoning chains, associations, bridges between memories |
 | `predict` | Proactive retrieval — predicts what you'll need next based on context and activity |
+
+### Cognitive Reasoning (v3.2)
+| Tool | What It Does |
+|------|-------------|
+| `deep_reference` | Reasoning engine across memories: hybrid retrieval, FSRS-6 trust scoring, intent classification, temporal supersession, contradiction analysis, dream-insight integration, structured synthesis. `cross_reference` is a backward-compatible alias. |
 
 ### Metacognitive (v3.1)
 | Tool | What It Does |
@@ -297,6 +305,8 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 | `consolidate` | Run FSRS-6 decay cycle (also auto-runs every 6 hours) |
 | `memory_timeline` | Browse chronologically, grouped by day |
 | `memory_changelog` | Audit trail of state transitions |
+| `split_memories` | Find compound/multi-topic memories that should be split into atomic pieces |
+| `regenerate_embeddings` | Backfill or rebuild embeddings (e.g. after a model upgrade or a long offline stretch) |
 | `backup` / `export` / `gc` | Database backup, JSON export, garbage collection |
 | `restore` | Restore from JSON backup |
 
@@ -304,15 +314,16 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 
 ## Make Your AI Use Vestige Automatically
 
-Add this to your `CLAUDE.md`:
+Add this to your agent instructions file — `CLAUDE.md` for Claude Code, `.cursor/rules/*.mdc` for Cursor, `.github/copilot-instructions.md` for VS Code Copilot, `AGENTS.md` for any tool that supports it:
 
 ```markdown
 ## Memory
 
 At the start of every session:
-1. Search Vestige for user preferences and project context
-2. Save bug fixes, decisions, and patterns without being asked
-3. Create reminders when the user mentions deadlines
+1. Call `session_context` with topic keywords (one MCP call replaces 5)
+2. Save bug fixes, decisions, and patterns proactively via `smart_ingest`
+3. Create reminders via `intention` when the user mentions deadlines
+4. Promote memories that turned out useful, demote ones that misled
 ```
 
 | You Say | AI Does |
@@ -322,7 +333,7 @@ At the start of every session:
 | "Remind me..." | Creates a future trigger |
 | "This is important" | Saves + promotes |
 
-[Full CLAUDE.md templates ->](docs/CLAUDE-SETUP.md)
+[Full agent-instructions templates ->](docs/CLAUDE-SETUP.md)
 
 ---
 
@@ -341,8 +352,8 @@ At the start of every session:
 | **Dashboard** | React 19 + Vite 6 + React Router 7 + Three.js + Tailwind CSS 4 + i18next |
 | **Locales** | English, Polish (extensible) |
 | **Themes** | Light + Dark (oklch design tokens, `prefers-color-scheme` aware) |
-| **Transport** | MCP stdio (JSON-RPC 2.0) + WebSocket |
-| **MCP tools** | 26 (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference) |
+| **Transport** | MCP stdio (JSON-RPC 2.0) + optional HTTP MCP (port 3928) + WebSocket |
+| **MCP tools** | 27 (4 unified + smart_ingest + 2 temporal + 7 maintenance + 2 dedup + 3 cognitive + restore + session_context + 2 autonomic + 3 metacognitive + deep_reference) |
 | **Cognitive modules** | 29 stateful + metacognition + Bayesian confidence + epistemic separation |
 | **First run** | Downloads embedding + reranker models (~1.3GB), then fully offline |
 | **Platforms** | macOS (ARM/Intel), Linux (x86_64), Windows |
@@ -437,6 +448,5 @@ AGPL-3.0 — free to use, modify, and self-host. If you offer Vestige as a netwo
 
 <p align="center">
   <i>Originally built by <a href="https://github.com/samvallad33">@samvallad33</a></i><br>
-  <i>Extended by <a href="https://github.com/przemyslawbatte">@przemyslawbatte</a></i><br>
-  <sub>24 tools · 29 cognitive modules · scientific validation · i18n · light/dark mode · one binary</sub>
+  <sub>27 tools · 29 cognitive modules · content intelligence pipeline · scientific validation · i18n · light/dark mode · one binary</sub>
 </p>

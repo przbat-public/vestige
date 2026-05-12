@@ -15,12 +15,15 @@ use crate::dashboard::events::VestigeEvent;
 use crate::protocol::messages::{
     CallToolRequest, CallToolResult, InitializeRequest, InitializeResult,
     ListResourcesResult, ListToolsResult, ReadResourceRequest, ReadResourceResult,
-    ResourceDescription, ServerCapabilities, ServerInfo, ToolDescription,
+    ServerCapabilities, ServerInfo,
 };
 use crate::protocol::types::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, MCP_VERSION};
 use crate::resources;
 use crate::tools;
 use vestige_core::Storage;
+
+/// Tool/resource catalog (b15 split — see `server/catalog.rs`).
+mod catalog;
 
 /// MCP Server implementation
 pub struct McpServer {
@@ -157,181 +160,15 @@ impl McpServer {
         serde_json::to_value(result).map_err(|e| JsonRpcError::internal_error(&e.to_string()))
     }
 
-    /// Handle tools/list request
+    /// Handle tools/list request.
+    ///
+    /// The full 27-tool catalog lives in `server::catalog` (b15 split). When
+    /// adding a tool there also update `scripts/check-version-and-tools.sh`
+    /// (CI guard) and the inventory comment at the top of `catalog.rs`.
     async fn handle_tools_list(&self) -> Result<serde_json::Value, JsonRpcError> {
-        // v3.2.1: 25 tools (+deep_reference). Deprecated tools still work via redirects in handle_tools_call.
-        let tools = vec![
-            // ================================================================
-            // UNIFIED TOOLS (v1.1+)
-            // ================================================================
-            ToolDescription {
-                name: "search".to_string(),
-                description: Some("Unified search tool. Uses hybrid search (keyword + semantic + convex combination fusion) internally. Auto-strengthens memories on access (Testing Effect).".to_string()),
-                input_schema: tools::search_unified::schema(),
-            },
-            ToolDescription {
-                name: "memory".to_string(),
-                description: Some("Unified memory management tool. Actions: 'get' (retrieve full node), 'delete' (remove memory), 'state' (get accessibility state), 'promote' (thumbs up — increases retrieval strength), 'demote' (thumbs down — decreases retrieval strength, does NOT delete), 'edit' (update content in-place, preserves FSRS state).".to_string()),
-                input_schema: tools::memory_unified::schema(),
-            },
-            ToolDescription {
-                name: "codebase".to_string(),
-                description: Some("Unified codebase tool. Actions: 'remember_pattern' (store code pattern), 'remember_decision' (store architectural decision), 'get_context' (retrieve patterns and decisions).".to_string()),
-                input_schema: tools::codebase_unified::schema(),
-            },
-            ToolDescription {
-                name: "intention".to_string(),
-                description: Some("Unified intention management tool. Actions: 'set' (create), 'check' (find triggered), 'update' (complete/snooze/cancel), 'list' (show intentions).".to_string()),
-                input_schema: tools::intention_unified::schema(),
-            },
-            // ================================================================
-            // CORE MEMORY (v1.7: smart_ingest absorbs ingest + checkpoint)
-            // ================================================================
-            ToolDescription {
-                name: "smart_ingest".to_string(),
-                description: Some("INTELLIGENT memory ingestion with Prediction Error Gating. Single mode: provide 'content' to auto-decide CREATE/UPDATE/SUPERSEDE. Batch mode: provide 'items' array (max 20) for session-end saves — each item runs the full cognitive pipeline (importance scoring, intent detection, synaptic tagging).".to_string()),
-                input_schema: tools::smart_ingest::schema(),
-            },
-            // ================================================================
-            // TEMPORAL TOOLS (v1.2+)
-            // ================================================================
-            ToolDescription {
-                name: "memory_timeline".to_string(),
-                description: Some("Browse memories chronologically. Returns memories in a time range, grouped by day. Defaults to last 7 days.".to_string()),
-                input_schema: tools::timeline::schema(),
-            },
-            ToolDescription {
-                name: "memory_changelog".to_string(),
-                description: Some("View audit trail of memory changes. Per-memory: state transitions. System-wide: consolidations + recent state changes.".to_string()),
-                input_schema: tools::changelog::schema(),
-            },
-            // ================================================================
-            // MAINTENANCE TOOLS (v1.7: system_status replaces health_check + stats)
-            // ================================================================
-            ToolDescription {
-                name: "system_status".to_string(),
-                description: Some("Combined system health and statistics. Returns status (healthy/degraded/critical/empty), full stats, FSRS preview, cognitive module health, state distribution, warnings, and recommendations.".to_string()),
-                input_schema: tools::maintenance::system_status_schema(),
-            },
-            ToolDescription {
-                name: "consolidate".to_string(),
-                description: Some("Run FSRS-6 memory consolidation cycle. Applies decay, generates embeddings, and performs maintenance. Use when memories seem stale.".to_string()),
-                input_schema: tools::maintenance::consolidate_schema(),
-            },
-            ToolDescription {
-                name: "backup".to_string(),
-                description: Some("Create a SQLite database backup. Returns the backup file path.".to_string()),
-                input_schema: tools::maintenance::backup_schema(),
-            },
-            ToolDescription {
-                name: "export".to_string(),
-                description: Some("Export memories as JSON or JSONL. Supports tag and date filters.".to_string()),
-                input_schema: tools::maintenance::export_schema(),
-            },
-            ToolDescription {
-                name: "gc".to_string(),
-                description: Some("Garbage collect stale memories below retention threshold. Defaults to dry_run=true for safety.".to_string()),
-                input_schema: tools::maintenance::gc_schema(),
-            },
-            ToolDescription {
-                name: "split_memories".to_string(),
-                description: Some("Find compound/multi-topic memories that should be split into atomic pieces. Returns memories with splitting suggestions. Use dry_run=false to auto-delete compounds after reading them. Then re-ingest each as separate atomic items via smart_ingest batch mode.".to_string()),
-                input_schema: tools::maintenance::split_memories_schema(),
-            },
-            ToolDescription {
-                name: "regenerate_embeddings".to_string(),
-                description: Some("Backfill or rebuild memory embeddings without the per-call cap that consolidate has. Use force=false (default) to fill missing embeddings (has_embedding=0/NULL); force=true to rebuild all. Optional node_ids to scope to specific memories. Use after upgrading the embedding model, after a long stretch where the model was unavailable at ingest time, or to recover from silent-skip situations.".to_string()),
-                input_schema: tools::maintenance::regenerate_embeddings_schema(),
-            },
-            // ================================================================
-            // AUTO-SAVE & DEDUP TOOLS (v1.3+)
-            // ================================================================
-            ToolDescription {
-                name: "importance_score".to_string(),
-                description: Some("Score content importance using 4-channel neuroscience model (novelty/arousal/reward/attention). Returns composite score, channel breakdown, encoding boost, and explanations.".to_string()),
-                input_schema: tools::importance::schema(),
-            },
-            ToolDescription {
-                name: "find_duplicates".to_string(),
-                description: Some("Find duplicate and near-duplicate memory clusters using cosine similarity on embeddings. Returns clusters with suggested actions (merge/review). Use to clean up redundant memories.".to_string()),
-                input_schema: tools::dedup::schema(),
-            },
-            // ================================================================
-            // COGNITIVE TOOLS (v1.5+)
-            // ================================================================
-            ToolDescription {
-                name: "dream".to_string(),
-                description: Some("Trigger memory dreaming — replays recent memories to discover hidden connections, synthesize insights, and strengthen important patterns. Returns insights, connections, and dream stats.".to_string()),
-                input_schema: tools::dream::schema(),
-            },
-            ToolDescription {
-                name: "explore_connections".to_string(),
-                description: Some("Graph exploration tool for memory connections. Actions: 'chain' (build reasoning path between memories), 'associations' (find related memories via spreading activation + hippocampal index), 'bridges' (find connecting memories between two nodes).".to_string()),
-                input_schema: tools::explore::schema(),
-            },
-            ToolDescription {
-                name: "predict".to_string(),
-                description: Some("Proactive memory prediction — predicts what memories you'll need next based on context, recent activity, and learned patterns. Returns predictions, suggestions, and speculative retrievals.".to_string()),
-                input_schema: tools::predict::schema(),
-            },
-            // ================================================================
-            // RESTORE TOOL (v1.5+)
-            // ================================================================
-            ToolDescription {
-                name: "restore".to_string(),
-                description: Some("Restore memories from a JSON backup file. Supports MCP wrapper format, RecallResult format, and direct memory array format.".to_string()),
-                input_schema: tools::restore::schema(),
-            },
-            // ================================================================
-            // CONTEXT PACKETS (v1.8+)
-            // ================================================================
-            ToolDescription {
-                name: "session_context".to_string(),
-                description: Some("One-call session initialization. Combines search, intentions, status, predictions, and codebase context into a single token-budgeted response. Replaces 5 separate calls at session start.".to_string()),
-                input_schema: tools::session_context::schema(),
-            },
-            // ================================================================
-            // AUTONOMIC TOOLS (v1.9+)
-            // ================================================================
-            ToolDescription {
-                name: "memory_health".to_string(),
-                description: Some("Retention dashboard. Returns avg retention, retention distribution (buckets: 0-20%, 20-40%, etc.), trend (improving/declining/stable), and recommendation. Lightweight alternative to full system_status focused on memory quality.".to_string()),
-                input_schema: tools::health::schema(),
-            },
-            ToolDescription {
-                name: "memory_graph".to_string(),
-                description: Some("Subgraph export for visualization. Input: center_id or query, depth (1-3), max_nodes. Returns nodes with force-directed layout positions and edges with weights. Powers memory graph visualization.".to_string()),
-                input_schema: tools::graph::schema(),
-            },
-            // ================================================================
-            // METACOGNITIVE TOOLS (v2.1+)
-            // ================================================================
-            ToolDescription {
-                name: "reflect".to_string(),
-                description: Some("Deliberate metacognitive reflection — analyzes memories for contradictions, knowledge gaps, stale decisions, overconfident memories, and pattern clusters. Unlike 'dream' (unconscious consolidation), 'reflect' is active self-examination. Returns actionable insights.".to_string()),
-                input_schema: tools::reflect::schema(),
-            },
-            ToolDescription {
-                name: "temporal".to_string(),
-                description: Some("Temporal fact versioning — query time-sensitive knowledge. Actions: 'current' (valid-now facts), 'expired' (no-longer-valid), 'history' (evolution of a topic over time), 'invalidate' (mark a fact as no longer valid).".to_string()),
-                input_schema: tools::temporal::schema(),
-            },
-            ToolDescription {
-                name: "confidence".to_string(),
-                description: Some("Confidence scoring for opinions and beliefs. Actions: 'score' (evaluate a single memory), 'audit' (find poorly-calibrated memories), 'calibrate' (compare opinions vs facts retention).".to_string()),
-                input_schema: tools::confidence::schema(),
-            },
-            // ================================================================
-            // COGNITIVE REASONING (v3.2.1+)
-            // ================================================================
-            ToolDescription {
-                name: "deep_reference".to_string(),
-                description: Some("Cognitive reasoning engine across memories. Combines hybrid search, FSRS-6 trust scoring, intent classification, temporal supersession, contradiction analysis, dream insight integration, and structured synthesis. Use for factual questions, fact-checking, timelines, root-cause analysis, comparisons, and topic synthesis. 'cross_reference' is a backward-compatible alias.".to_string()),
-                input_schema: tools::cross_reference::schema(),
-            },
-        ];
-
-        let result = ListToolsResult { tools };
+        let result = ListToolsResult {
+            tools: catalog::build_tools_list(),
+        };
         serde_json::to_value(result).map_err(|e| JsonRpcError::internal_error(&e.to_string()))
     }
 
@@ -773,82 +610,13 @@ impl McpServer {
         response
     }
 
-    /// Handle resources/list request
+    /// Handle resources/list request.
+    ///
+    /// The full 11-resource catalog lives in `server::catalog` (b15 split).
     async fn handle_resources_list(&self) -> Result<serde_json::Value, JsonRpcError> {
-        let resources = vec![
-            // Memory resources
-            ResourceDescription {
-                uri: "memory://stats".to_string(),
-                name: "Memory Statistics".to_string(),
-                description: Some("Current memory system statistics and health status".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            ResourceDescription {
-                uri: "memory://recent".to_string(),
-                name: "Recent Memories".to_string(),
-                description: Some("Recently added memories (last 10)".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            ResourceDescription {
-                uri: "memory://decaying".to_string(),
-                name: "Decaying Memories".to_string(),
-                description: Some("Memories with low retention that need review".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            ResourceDescription {
-                uri: "memory://due".to_string(),
-                name: "Due for Review".to_string(),
-                description: Some("Memories scheduled for review today".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            // Codebase resources
-            ResourceDescription {
-                uri: "codebase://structure".to_string(),
-                name: "Codebase Structure".to_string(),
-                description: Some("Remembered project structure and organization".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            ResourceDescription {
-                uri: "codebase://patterns".to_string(),
-                name: "Code Patterns".to_string(),
-                description: Some("Remembered code patterns and conventions".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            ResourceDescription {
-                uri: "codebase://decisions".to_string(),
-                name: "Architectural Decisions".to_string(),
-                description: Some("Remembered architectural and design decisions".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            // Consolidation resources
-            ResourceDescription {
-                uri: "memory://insights".to_string(),
-                name: "Consolidation Insights".to_string(),
-                description: Some("Insights generated during memory consolidation".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            ResourceDescription {
-                uri: "memory://consolidation-log".to_string(),
-                name: "Consolidation Log".to_string(),
-                description: Some("History of memory consolidation runs".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            // Prospective memory resources
-            ResourceDescription {
-                uri: "memory://intentions".to_string(),
-                name: "Active Intentions".to_string(),
-                description: Some("Future intentions (prospective memory) waiting to be triggered".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-            ResourceDescription {
-                uri: "memory://intentions/due".to_string(),
-                name: "Triggered Intentions".to_string(),
-                description: Some("Intentions that have been triggered or are overdue".to_string()),
-                mime_type: Some("application/json".to_string()),
-            },
-        ];
-
-        let result = ListResourcesResult { resources };
+        let result = ListResourcesResult {
+            resources: catalog::build_resources_list(),
+        };
         serde_json::to_value(result).map_err(|e| JsonRpcError::internal_error(&e.to_string()))
     }
 
@@ -1239,8 +1007,12 @@ mod tests {
         let result = response.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
 
-        // v3.2.1: 26 tools (4 unified + 1 core + 2 temporal + 6 maintenance + 2 auto-save + 3 cognitive + 1 restore + 1 session_context + 2 autonomic + 3 metacognitive + 1 deep_reference)
-        assert_eq!(tools.len(), 26, "Expected exactly 26 tools in v3.2.1+");
+        // v3.2.1: 27 tools advertised. Authoritative list lives in
+        // `server::catalog::build_tools_list` (see b15 split). The
+        // `tools_list_has_exactly_27_entries` test there catches drift first
+        // — this end-to-end test only verifies the JSON-RPC plumbing forwards
+        // the catalog faithfully and asserts a few well-known tool names.
+        assert_eq!(tools.len(), 27, "Expected exactly 27 tools in v3.2.1+");
 
         let tool_names: Vec<&str> = tools
             .iter()
@@ -1275,6 +1047,7 @@ mod tests {
         assert!(tool_names.contains(&"export"));
         assert!(tool_names.contains(&"gc"));
         assert!(tool_names.contains(&"split_memories"));
+        assert!(tool_names.contains(&"regenerate_embeddings"));
 
         // Auto-save & dedup tools (v1.3)
         assert!(tool_names.contains(&"importance_score"));
@@ -1292,6 +1065,14 @@ mod tests {
         // Autonomic tools (v1.9)
         assert!(tool_names.contains(&"memory_health"));
         assert!(tool_names.contains(&"memory_graph"));
+
+        // Metacognitive tools (v2.1)
+        assert!(tool_names.contains(&"reflect"));
+        assert!(tool_names.contains(&"temporal"));
+        assert!(tool_names.contains(&"confidence"));
+
+        // Cognitive reasoning (v3.2.1)
+        assert!(tool_names.contains(&"deep_reference"));
     }
 
     #[tokio::test]

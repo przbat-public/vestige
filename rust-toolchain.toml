@@ -1,0 +1,7 @@
+[toolchain]
+# Minimum supported Rust version is declared in [workspace.package].rust-version = "1.91".
+# Pinning here ensures every contributor and CI uses the same compiler.
+# Update in tandem with rust-version in Cargo.toml.
+channel = "1.91.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

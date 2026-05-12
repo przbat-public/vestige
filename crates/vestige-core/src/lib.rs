@@ -70,6 +70,24 @@
 //! - `vector-search` (default): Enable HNSW vector search with USearch
 //! - `full`: All features including MCP protocol support
 //! - `mcp`: Model Context Protocol for Claude integration
+//!
+//! ## API Stability
+//!
+//! Vestige is pre-1.0 and the workspace lives behind `vestige-mcp`. Treat the
+//! `vestige_core` surface accordingly (b18 audit):
+//!
+//! - **Stable**: items exported through [`prelude`]. `Storage`, `IngestInput`,
+//!   `KnowledgeNode`, `SearchMode`, `Rating`, `FSRSScheduler`, the prediction
+//!   error gate, hippocampal index, and the dream/reflect/metacognition types.
+//!   We add to this list eagerly but rarely remove things.
+//! - **Public but unstable**: every other `pub use` from this `lib.rs`. These
+//!   are surfaced for power users (custom MCP shells, evals) but can change
+//!   between patch releases. New helpers may join the prelude later.
+//! - **Internal**: items behind `pub(crate)` or only used inside their module.
+//!   Don't add them to `lib.rs` unless they are about to graduate to stable.
+//!
+//! Bump the workspace `version` in `Cargo.toml` when removing items from
+//! either tier and call it out in `CHANGELOG.md`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Only warn about missing docs for public items exported from the crate root

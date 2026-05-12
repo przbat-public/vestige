@@ -373,15 +373,11 @@ fn test_connection_graph_decay_and_pruning() {
     graph.apply_decay(0.5);
 
     // Prune weak connections
-    let pruned = graph.prune_weak(0.2);
+    let _pruned = graph.prune_weak(0.2);
 
     // Weak connection (0.3 * 0.5 = 0.15) should be pruned
     // The pruned count depends on implementation details
-    let stats = graph.get_stats();
-    assert!(
-        stats.total_connections >= 0,
-        "Should have non-negative connections after pruning"
-    );
+    let _stats = graph.get_stats();
 }
 
 /// Test consolidation run tracking.

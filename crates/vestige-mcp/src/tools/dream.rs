@@ -212,8 +212,8 @@ pub async fn execute(
                 id: uuid::Uuid::new_v4().to_string(),
                 insight: insight.insight.clone(),
                 source_memories: insight.source_memory_ids.clone(),
-                confidence: insight.confidence as f64,
-                novelty_score: insight.novelty as f64,
+                confidence: insight.confidence,
+                novelty_score: insight.novelty,
                 insight_type: insight.insight_type.clone(),
                 generated_at: now,
                 tags: vec!["dream".to_string()],
@@ -333,6 +333,7 @@ mod tests {
                 valid_from: None,
                 valid_until: None,
                 provenance: None,
+                ..Default::default()
             })
             .unwrap();
         }
@@ -460,6 +461,7 @@ mod tests {
                 valid_from: None,
                 valid_until: None,
                 provenance: None,
+                ..Default::default()
             }).unwrap();
         }
 
@@ -519,6 +521,7 @@ mod tests {
                 valid_from: None,
                 valid_until: None,
                 provenance: None,
+                ..Default::default()
             }).unwrap();
             ids.push(result.id);
         }
@@ -601,6 +604,7 @@ mod tests {
                 valid_from: None,
                 valid_until: None,
                 provenance: None,
+                ..Default::default()
             }).unwrap();
         }
 

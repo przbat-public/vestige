@@ -1,3 +1,11 @@
+//! Vestige Restore — lightweight CLI to import memories from a JSON backup.
+//!
+//! This binary is intentionally minimal: it depends on `vestige-core` with the
+//! `embeddings` and `vector-search` features turned **off** so the
+//! single-purpose restore tool doesn't drag in fastembed (ONNX runtime) or
+//! USearch. Embeddings can be regenerated after restore via the
+//! `regenerate_embeddings` MCP tool.
+
 use std::path::PathBuf;
 use vestige_core::{IngestInput, Storage};
 
@@ -23,17 +31,19 @@ struct MemoryBackup {
 }
 
 fn main() -> anyhow::Result<()> {
-    // Parse args
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: vestige-restore <backup.json>");
+        eprintln!();
+        eprintln!("After restore completes, run the `regenerate_embeddings` MCP");
+        eprintln!("tool (or call `vestige-mcp consolidate`) to rebuild vector");
+        eprintln!("search indices for the imported memories.");
         std::process::exit(1);
     }
 
     let backup_path = PathBuf::from(&args[1]);
     println!("Loading backup from: {}", backup_path.display());
 
-    // Read and parse backup
     let backup_content = std::fs::read_to_string(&backup_path)?;
     let wrapper: Vec<BackupWrapper> = serde_json::from_str(&backup_content)?;
     let recall_result: RecallResult = serde_json::from_str(&wrapper[0].text)?;
@@ -41,11 +51,10 @@ fn main() -> anyhow::Result<()> {
 
     println!("Found {} memories to restore", memories.len());
 
-    // Initialize storage (uses default path)
     println!("Initializing storage...");
     let storage = Storage::new(None)?;
 
-    println!("Generating embeddings and ingesting memories...\n");
+    println!("Ingesting memories (embeddings will be backfilled later)...\n");
 
     let total = memories.len();
     let mut success_count = 0;
@@ -75,23 +84,21 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    println!("\nRestore complete: {}/{} memories restored", success_count, total);
-
-    // Show stats
-    let stats = storage.get_stats()?;
-    println!("Total nodes: {}", stats.total_nodes);
-    println!("With embeddings: {}", stats.nodes_with_embeddings);
+    println!(
+        "\nRestore complete: {}/{} memories restored",
+        success_count, total
+    );
+    println!(
+        "Next: call the `regenerate_embeddings` MCP tool to rebuild semantic indices."
+    );
 
     Ok(())
 }
 
-/// Truncate a string for display (UTF-8 safe)
-fn truncate(s: &str, max_chars: usize) -> String {
-    let s = s.replace('\n', " ");
-    if s.chars().count() <= max_chars {
-        s
+fn truncate(s: &str, n: usize) -> String {
+    if s.len() <= n {
+        s.to_string()
     } else {
-        let truncated: String = s.chars().take(max_chars).collect();
-        format!("{}...", truncated)
+        format!("{}...", &s[..n])
     }
 }

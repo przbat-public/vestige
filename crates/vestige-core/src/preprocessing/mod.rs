@@ -52,6 +52,7 @@ pub struct PreprocessingResult {
 
 /// Configuration for the preprocessing pipeline.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct PreprocessingConfig {
     /// Session identifier for provenance
     pub session_id: Option<String>,
@@ -63,16 +64,6 @@ pub struct PreprocessingConfig {
     pub existing_valid_until: Option<DateTime<Utc>>,
 }
 
-impl Default for PreprocessingConfig {
-    fn default() -> Self {
-        Self {
-            session_id: None,
-            agent: None,
-            existing_valid_from: None,
-            existing_valid_until: None,
-        }
-    }
-}
 
 /// Run the full preprocessing pipeline on content.
 ///

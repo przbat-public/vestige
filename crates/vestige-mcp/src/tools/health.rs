@@ -114,6 +114,7 @@ mod tests {
                 valid_from: None,
                 valid_until: None,
                 provenance: None,
+                ..Default::default()
             }).unwrap();
         }
 
@@ -138,6 +139,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         }).unwrap();
 
         let result = execute(&storage, None).await.unwrap();

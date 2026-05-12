@@ -17,7 +17,7 @@ Vestige is a single Rust binary (`vestige-mcp`) that runs three concurrent subsy
 │  JSON-RPC     │  JSON-RPC     │  Axum REST + WS + SPA     │
 │  stdin/stdout │  POST /mcp    │  React 19 + Three.js      │
 ├───────────────┴───────────────┴───────────────────────────┤
-│  McpServer — 24 tools, event emission                     │
+│  McpServer — 27 tools, event emission                     │
 ├───────────────────────────────────────────────────────────┤
 │  CognitiveEngine (Arc<Mutex<_>>)                          │
 │  29 modules: FSRS-6, spreading activation, dreaming, ...  │
@@ -70,7 +70,7 @@ vestige/
 │           ├── protocol/      # stdio.rs, http.rs, messages.rs, types.rs, auth.rs
 │           ├── dashboard/     # mod.rs (Axum router), handlers.rs, websocket.rs,
 │           │                  # events.rs, state.rs, static_files.rs
-│           ├── tools/         # One file per MCP tool (24 tools)
+│           ├── tools/         # One file per MCP tool (27 tools)
 │           ├── resources/     # MCP resources (memory.rs, codebase.rs)
 │           └── bin/           # CLI (cli.rs), restore (restore.rs)
 ├── apps/
@@ -94,7 +94,7 @@ vestige/
 └── .github/                   # CI workflows (test.yml, release.yml)
 ```
 
-> **Legacy cleanup note:** `apps/dashboard/src/lib/` contains the old SvelteKit layout (`.svelte` components, `lib/graph/` with shaders and tests, `lib/stores/`). The active React build uses `src/graph/`, `src/components/`, and `src/stores/`. The `lib/` tree can be removed.
+> **Dashboard layout note:** `apps/dashboard/src/lib/` holds framework-agnostic TypeScript helpers (`utils.ts`, `i18n.ts`, `concurrency.ts`) shared across pages and components. React-specific code lives in `src/graph/`, `src/components/`, and `src/stores/`. Do not remove `src/lib/` — it is actively imported via the `@/lib/...` alias.
 
 ---
 
@@ -189,27 +189,36 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 
 **Port 3927** (configurable via `VESTIGE_DASHBOARD_PORT`). Built with Axum.
 
-### REST API Endpoints (18)
+### REST API Endpoints (28 operations across 26 paths)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/memories` | List memories (paginated) |
 | GET | `/api/memories/{id}` | Get single memory |
 | DELETE | `/api/memories/{id}` | Delete memory |
-| POST | `/api/memories/{id}/promote` | Promote memory |
-| POST | `/api/memories/{id}/demote` | Demote memory |
+| PATCH | `/api/memories/{id}` | Update memory content/tags (preserves FSRS state) |
+| POST | `/api/memories/{id}/promote` | Promote memory (thumbs up) |
+| POST | `/api/memories/{id}/demote` | Demote memory (thumbs down, no delete) |
+| GET | `/api/memories/{id}/changelog` | Per-memory state-transition audit trail |
+| POST | `/api/memories/{id}/review` | Record an FSRS review rating |
+| GET | `/api/review/queue` | Items due for review |
+| POST | `/api/maintenance/regenerate-embeddings` | Backfill/rebuild embeddings |
+| POST | `/api/maintenance/find-duplicates` | Cluster near-duplicates by cosine |
+| POST | `/api/maintenance/gc` | Garbage-collect low-retention memories |
+| POST | `/api/maintenance/backup` | SQLite backup (WAL checkpoint + copy) |
 | GET | `/api/search?q=...` | Search memories |
 | GET | `/api/stats` | System statistics |
 | GET | `/api/health` | Health check |
 | GET | `/api/timeline` | Timeline data |
 | GET | `/api/graph` | Graph data (nodes + edges) |
-| GET | `/api/retention-distribution` | FSRS retention buckets |
-| GET | `/api/intentions` | List intentions |
 | POST | `/api/dream` | Trigger dream consolidation |
 | POST | `/api/explore` | Explore connections |
 | POST | `/api/predict` | Proactive prediction |
 | POST | `/api/importance` | Score importance |
 | POST | `/api/consolidate` | Run FSRS consolidation |
+| GET | `/api/retention-distribution` | FSRS retention buckets |
+| GET | `/api/intentions` | List intentions |
+| POST | `/api/intentions` | Create intention |
 | POST | `/api/reflect` | Metacognitive self-reflection (v3.1) |
 | POST | `/api/temporal` | Temporal fact versioning (v3.1) |
 | POST | `/api/confidence` | Confidence scoring and audit (v3.1) |

@@ -94,8 +94,7 @@ fn normalize_tags(tags: &[String]) -> Vec<String> {
         let normalized = tag
             .trim()
             .to_lowercase()
-            .replace(' ', "-")
-            .replace('_', "-");
+            .replace([' ', '_'], "-");
         if !normalized.is_empty() && seen.insert(normalized.clone()) {
             result.push(normalized);
         }
@@ -1062,8 +1061,12 @@ impl Storage {
         Ok(nodes)
     }
 
-    /// Keyword search with FTS5
-    fn keyword_search(
+    /// Keyword search via FTS5 (public API).
+    ///
+    /// Returns nodes matching `query` after FTS5 sanitization, filtered by
+    /// `min_retention` (0.0 disables filtering). Used by Content Intelligence
+    /// Pipeline relation-edge builder (see `vestige-mcp::smart_ingest`).
+    pub fn keyword_search(
         &self,
         query: &str,
         limit: i32,
@@ -1598,11 +1601,10 @@ impl Storage {
         erased += node_deleted as i64;
 
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-        if node_deleted > 0 {
-            if let Ok(mut index) = self.vector_index.lock() {
+        if node_deleted > 0
+            && let Ok(mut index) = self.vector_index.lock() {
                 let _ = index.remove(id);
             }
-        }
 
         Ok(erased)
     }

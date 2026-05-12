@@ -307,6 +307,7 @@ mod tests {
                 valid_from: None,
                 valid_until: None,
                 provenance: None,
+                ..Default::default()
             })
             .unwrap();
         node.id
@@ -548,6 +549,7 @@ mod tests {
                 valid_from: None,
                 valid_until: None,
                 provenance: None,
+                ..Default::default()
             })
             .unwrap();
         let node_id = node.id.clone();

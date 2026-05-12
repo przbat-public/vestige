@@ -492,6 +492,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         };
         let node = storage.ingest(input).unwrap();
         node.id
@@ -581,7 +582,7 @@ mod tests {
         assert!(result.is_ok());
 
         let value = result.unwrap();
-        let ctx = value["context"].as_str().unwrap();
+        let _ctx = value["context"].as_str().unwrap();
         // Context should be within budget (200 tokens * 4 = 800 chars + header overhead)
         // The actual char count of context should be reasonable
         let tokens_used = value["tokensUsed"].as_u64().unwrap();
@@ -665,6 +666,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         };
         storage.ingest(input).unwrap();
 

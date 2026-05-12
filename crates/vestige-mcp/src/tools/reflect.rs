@@ -87,7 +87,7 @@ pub async fn execute(
         m
     };
 
-    for (_tag, indices) in &tags_map {
+    for indices in tags_map.values() {
         if indices.len() < 2 { continue; }
         for i in 0..indices.len().min(10) {
             for j in (i + 1)..indices.len().min(10) {

@@ -800,11 +800,7 @@ async fn test_consolidation_connection_strengthening() {
         let _ = conn_stats.total_memories;
     }
 
-    // Both cycles should complete successfully - verify duration is tracked
-    assert!(
-        first_report.duration_ms > 0 || second_report.duration_ms > 0 || true,
-        "Both consolidation cycles should complete"
-    );
+    let _ = (first_report.duration_ms, second_report.duration_ms);
 }
 
 /// Test that weak memories are removed during consolidation.

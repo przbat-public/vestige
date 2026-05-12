@@ -57,7 +57,7 @@ pub fn resolve_coreferences(content: &str, entities: &[ExtractedEntity]) -> Core
         for pronoun in PERSON_PRONOUNS {
             let replacement = match *pronoun {
                 "his" | "His" => format!("{}'s", person),
-                "her" if content.contains(&format!("her ")) => format!("{}'s", person),
+                "her" if content.contains(&"her ".to_string()) => format!("{}'s", person),
                 "hers" | "Hers" => format!("{}'s", person),
                 "him" | "Him" | "her" | "Her" => person.clone(),
                 _ => person.clone(),

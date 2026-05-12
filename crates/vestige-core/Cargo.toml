@@ -1,12 +1,12 @@
 [package]
 name = "vestige-core"
-version = "3.1.0"
-edition = "2024"
-rust-version = "1.91"
-authors = ["Vestige Team"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Cognitive memory engine - FSRS-6 spaced repetition, semantic embeddings, and temporal memory"
-license = "AGPL-3.0-only"
-repository = "https://github.com/samvallad33/vestige"
 keywords = ["memory", "spaced-repetition", "fsrs", "embeddings", "knowledge-graph"]
 categories = ["science", "database"]
 
@@ -43,31 +43,17 @@ metal = ["fastembed/metal"]
 
 
 [dependencies]
-# Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# Date/Time with full timezone support
-chrono = { version = "0.4", features = ["serde"] }
-
-# UUID v4 generation
-uuid = { version = "1", features = ["v4", "serde"] }
-
-# Error handling
-thiserror = "2"
-
-# Database - SQLite with FTS5 full-text search and JSON
-# Note: "bundled" or "bundled-sqlcipher" added via feature flags above
-rusqlite = { version = "0.39", features = ["chrono", "serde_json"] }
-
-# Platform-specific directories
-directories = "6"
-
+# Workspace-shared deps (kept in [workspace.dependencies] for version unity)
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+directories.workspace = true
+rusqlite.workspace = true
 # Async runtime (required for codebase module)
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
-
-# Tracing for structured logging
-tracing = "0.1"
+tokio = { workspace = true }
 
 # Git integration for codebase memory
 # vendored-openssl: Compile OpenSSL from source for cross-compilation support
@@ -98,10 +84,10 @@ lru = "0.16"
 natural-date-rs = { version = "0.3", optional = true }
 
 # Regex for entity extraction & temporal pattern matching
-regex = { version = "1", optional = true }
+regex = { workspace = true, optional = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]

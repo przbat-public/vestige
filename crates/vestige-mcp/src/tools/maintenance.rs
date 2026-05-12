@@ -764,11 +764,10 @@ pub async fn execute_split_memories(
     let mut deleted_ids: Vec<String> = Vec::new();
     if !dry_run {
         for mem in &compound_memories {
-            if let Some(id) = mem["id"].as_str() {
-                if storage.delete_node(id).is_ok() {
+            if let Some(id) = mem["id"].as_str()
+                && storage.delete_node(id).is_ok() {
                     deleted_ids.push(id.to_string());
                 }
-            }
         }
     }
 
@@ -917,6 +916,7 @@ mod tests {
                 valid_from: None,
                 valid_until: None,
                 provenance: None,
+                ..Default::default()
             }).unwrap();
         }
         let result = execute_system_status(&storage, &test_cognitive(), None).await;
@@ -967,6 +967,7 @@ mod tests {
                     valid_from: None,
                     valid_until: None,
                     provenance: None,
+                    ..Default::default()
                 }).unwrap();
             }
         }
@@ -1007,6 +1008,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         }).unwrap();
         storage.ingest(vestige_core::IngestInput {
             content: "Single atomic fact about Rust.".to_string(),
@@ -1018,6 +1020,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         }).unwrap();
 
         let result = execute_split_memories(&storage, None).await;

@@ -170,11 +170,7 @@ fn test_refactoring_intent_detection() {
             assert!(!goal.is_empty(), "Should identify refactoring goal");
         }
         DetectedIntent::NewFeature { related_components, .. } => {
-            // Multiple edits could also suggest new feature
-            assert!(
-                related_components.len() >= 0,
-                "Should track related components"
-            );
+            let _ = related_components;
         }
         _ => {
             // Pattern may match differently

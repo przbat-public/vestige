@@ -205,6 +205,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         })
         .unwrap();
     }

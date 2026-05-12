@@ -27,6 +27,9 @@ struct SearchOutcome {
     had_results: bool,
     result_count: usize,
     avg_confidence: f64,
+    // Topic of the originating query; not read today but kept for diagnostics
+    // and the upcoming per-topic gap analysis (see knowledge_gaps()).
+    #[allow(dead_code)]
     query_topic: String,
 }
 

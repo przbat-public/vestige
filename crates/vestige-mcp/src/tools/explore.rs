@@ -72,8 +72,8 @@ pub async fn execute(
                     drop(cog);
                     // Fallback: check persisted graph for direct connection
                     let mut steps = Vec::new();
-                    if let Ok(connections) = storage.get_connections_for_memory(from) {
-                        if let Some(conn) = connections.iter().find(|c| c.source_id == to_id || c.target_id == to_id) {
+                    if let Ok(connections) = storage.get_connections_for_memory(from)
+                        && let Some(conn) = connections.iter().find(|c| c.source_id == to_id || c.target_id == to_id) {
                             steps.push(serde_json::json!({
                                 "memory_id": to_id,
                                 "connection_type": conn.link_type,
@@ -82,7 +82,6 @@ pub async fn execute(
                                 "source": "persistent_graph",
                             }));
                         }
-                    }
                     let msg = if steps.is_empty() { "No chain found between these memories" } else { "Chain found via persistent graph fallback" };
                     Ok(serde_json::json!({
                         "action": "chain",
@@ -360,6 +359,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         }).unwrap().id;
 
         let id2 = storage.ingest(vestige_core::IngestInput {
@@ -372,6 +372,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         }).unwrap().id;
 
         // Save connection directly to storage (bypassing cognitive engine)

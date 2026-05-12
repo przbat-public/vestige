@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/vestige-core",
     "crates/vestige-mcp",
+    "crates/vestige-restore",
     "tests/e2e",
     "benchmarks/locomo",
 ]
@@ -13,26 +14,43 @@ exclude = [
 [workspace.package]
 version = "3.2.1"
 edition = "2024"
+rust-version = "1.91"
 license = "AGPL-3.0-only"
-repository = "https://github.com/samvallad33/vestige"
 authors = ["Sam Valladares"]
+repository = "https://github.com/samvallad33/vestige"
 
 [workspace.dependencies]
-# Share deps across workspace
+# Share deps across workspace. Crates opt-in via `<dep>.workspace = true`.
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+directories = "6"
+rusqlite = { version = "0.39", features = ["chrono", "serde_json"] }
+regex = "1"
+tempfile = "3"
 
 [profile.release]
+# opt-level = 3: maximize runtime speed (search, embeddings, RRF, BM25 are hot).
+# Earlier "z" optimised binary size at the cost of ~5–15% throughput on the
+# hot path — wrong trade-off for a long-running MCP server.
 lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+opt-level = 3
+
+# Use `cargo build --profile=dist` when you specifically need the smallest
+# possible binary (e.g. a curl-piped download) and accept slower runtime.
+[profile.dist]
+inherits = "release"
 opt-level = "z"
+lto = "fat"
 
 [profile.dev]
 opt-level = 1

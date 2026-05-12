@@ -2,9 +2,13 @@
 //!
 //! Tool implementations for the Vestige MCP server.
 //!
-//! The unified tools (codebase_unified, intention_unified, memory_unified, search_unified)
-//! are the primary API. The granular tools below are kept for backwards compatibility
-//! but are not exposed in the MCP tool list.
+//! The unified tools (`codebase_unified`, `intention_unified`, `memory_unified`,
+//! `search_unified`) plus `smart_ingest` and the metacognitive/maintenance set
+//! make up the 27 tools advertised in `tools/list`. The granular tools listed
+//! under "Internal tools" below are kept for backwards-compatible dispatch in
+//! `server.rs::handle_tools_call` — they're called when a deprecated tool name
+//! is received but are NOT exposed in `tools/list`. New code should use the
+//! unified APIs.
 
 // Active unified tools
 pub mod codebase_unified;

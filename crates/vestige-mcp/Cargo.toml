@@ -1,26 +1,35 @@
 [package]
 name = "vestige-mcp"
-version = "3.1.0"
-edition = "2024"
-description = "Cognitive memory MCP server for Claude - FSRS-6, spreading activation, synaptic tagging, 3D dashboard, and 130 years of memory research"
-authors = ["samvallad33"]
-license = "AGPL-3.0-only"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cognitive memory MCP server for AI assistants - FSRS-6, spreading activation, synaptic tagging, 3D dashboard, content intelligence pipeline"
 keywords = ["mcp", "ai", "memory", "fsrs", "neuroscience", "cognitive-science", "spaced-repetition"]
 categories = ["command-line-utilities", "database"]
-repository = "https://github.com/samvallad33/vestige"
 
 [features]
-default = ["embeddings", "vector-search"]
+default = ["embeddings", "vector-search", "preprocessing"]
 embeddings = ["vestige-core/embeddings"]
 vector-search = ["vestige-core/vector-search"]
+# Content Intelligence Pipeline (entity extraction, coreference, temporal anchoring,
+# relation extraction, provenance). Without this feature, smart_ingest skips
+# enrichment and provenance fields are not populated. v3.2+
+preprocessing = ["vestige-core/preprocessing"]
+# Mutually exclusive with bundled-sqlite — see vestige-core for usage.
+encryption = ["vestige-core/encryption"]
+# Apple Silicon Metal GPU acceleration for embeddings (fastembed)
+metal = ["vestige-core/metal"]
 
 [[bin]]
 name = "vestige-mcp"
 path = "src/main.rs"
 
-[[bin]]
-name = "vestige-restore"
-path = "src/bin/restore.rs"
+# a13: `vestige-restore` lives in its own crate (`crates/vestige-restore`) so
+# it can be built without fastembed/USearch. The old bin path stayed here
+# briefly during the audit; do not re-add it.
 
 [[bin]]
 name = "vestige"
@@ -29,58 +38,50 @@ path = "src/bin/cli.rs"
 [dependencies]
 # ============================================================================
 # VESTIGE CORE - The cognitive science engine
-# ============================================================================
 # Includes: FSRS-6, spreading activation, synaptic tagging, hippocampal indexing,
-# memory states, context memory, importance signals, dreams, and more
-vestige-core = { version = "3.1.0", path = "../vestige-core", default-features = false, features = ["bundled-sqlite"] }
+# memory states, context memory, importance signals, dreams, preprocessing
+# ============================================================================
+vestige-core = { path = "../vestige-core", default-features = false, features = ["bundled-sqlite"] }
 
 # ============================================================================
-# MCP Server Dependencies
+# Workspace-shared deps
 # ============================================================================
-# Async runtime
-tokio = { version = "1", features = ["full", "io-std"] }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+directories.workspace = true
 
-# Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Async runtime with io-std for stdio MCP transport
+tokio = { workspace = true, features = ["full", "io-std"] }
 
-# Date/Time
-chrono = { version = "0.4", features = ["serde"] }
+# SQLite for WAL checkpoint helper at shutdown
+rusqlite = { workspace = true, features = ["bundled"] }
 
-# UUID
-uuid = { version = "1", features = ["v4", "serde"] }
-
+# ============================================================================
+# MCP-specific deps
+# ============================================================================
 # Constant-time comparison for auth tokens (prevents timing side-channels)
 subtle = "2"
-
-# Error handling
-thiserror = "2"
-anyhow = "1"
-
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-
-# Platform directories
-directories = "6"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
 colored = "3"
 
-# SQLite (for backup WAL checkpoint)
-rusqlite = { version = "0.39", features = ["bundled"] }
-
-# Dashboard (v2.0) - HTTP server + WebSocket + embedded SvelteKit
+# Dashboard (v3.0+) — Axum HTTP/WS + React SPA embedded via include_dir!
 axum = { version = "0.8", default-features = false, features = ["json", "query", "tokio", "http1", "ws"] }
 tower = { version = "0.5", features = ["limit"] }
-tower-http = { version = "0.6", features = ["cors", "set-header"] }
+tower-http = { version = "0.6", features = ["cors", "set-header", "limit"] }
 futures-util = "0.3"
 open = "5"
 
-# Embedded SvelteKit dashboard (v2.0)
+# Embedded dashboard build (apps/dashboard/build → React SPA)
 include_dir = "0.7"
 mime_guess = "2"
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true

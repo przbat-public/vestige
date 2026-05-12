@@ -119,6 +119,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         };
         let node = storage.ingest(input).unwrap();
         node.id

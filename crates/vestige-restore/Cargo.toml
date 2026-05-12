@@ -1,0 +1,26 @@
+[package]
+name = "vestige-restore"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Restore Vestige memories from a JSON backup (lightweight binary without embedding/HNSW deps)."
+
+# a13: this crate exists so the `vestige-restore` binary can be built without
+# pulling in fastembed (≈ 200 MB of ONNX runtime + tokenizers) or USearch.
+# Embeddings are intentionally rebuilt after restore via the
+# `regenerate_embeddings` MCP tool, so dropping them here is safe.
+[[bin]]
+name = "vestige-restore"
+path = "src/main.rs"
+
+[dependencies]
+# Use vestige-core WITHOUT the heavy features. Storage::new() degrades
+# gracefully when embeddings/vector-search are absent and restores plain rows.
+vestige-core = { path = "../vestige-core", default-features = false, features = ["bundled-sqlite"] }
+
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true

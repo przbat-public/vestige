@@ -279,7 +279,7 @@ fn parse_sessions(conversation: &serde_json::Value) -> Vec<SessionChunk> {
     let mut session_keys: Vec<String> = obj
         .keys()
         .filter(|k| k.starts_with("session_") && !k.contains("date_time") && !k.contains("summary") && !k.contains("observation"))
-        .filter(|k| obj.get(k.as_str()).map_or(false, |v| v.is_array()))
+        .filter(|k| obj.get(k.as_str()).is_some_and(|v| v.is_array()))
         .cloned()
         .collect();
 
@@ -478,7 +478,7 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("benchmarks/locomo/retrieval_results.json"));
 
     let use_reranker = std::env::var("LOCOMO_USE_RERANKER")
-        .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
     let overfetch: i32 = std::env::var("LOCOMO_OVERFETCH")
         .ok()
@@ -490,7 +490,7 @@ fn main() {
         .unwrap_or(DEFAULT_TOPK);
     let chunk_level = ChunkLevel::from_env();
     let hierarchical = std::env::var("LOCOMO_HIERARCHICAL")
-        .map(|v| v == "1" || v.to_ascii_lowercase() == "true")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
     let hier_sessions: usize = std::env::var("LOCOMO_HIER_SESSIONS")
         .ok()

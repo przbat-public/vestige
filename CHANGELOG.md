@@ -5,6 +5,53 @@ All notable changes to Vestige will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.1] - 2026-05-12 — "Workspace Cleanup"
+
+Internal release. Audits and tightens the workspace: synchronises version metadata, activates the previously-inert Content Intelligence Pipeline in production binaries, fixes several latent correctness bugs in `smart_ingest` and the consolidation scheduler, hydrates cognitive state from storage on restart, removes ~96 KB of unreferenced legacy tool code, splits `server.rs` and `vestige-restore` into focused modules/crates, and adds CI guards against future metadata drift. No behaviour changes for downstream consumers using the default feature set.
+
+### Fixed
+- `vestige-mcp` defaults now include the `preprocessing` feature so the Content Intelligence Pipeline shipped in v3.2.0 is actually compiled into the production binary. Previously the entire pipeline (entity extraction, coreference, temporal anchoring, relation extraction, provenance) was dead code in any binary built without explicit feature flags.
+- `Storage::keyword_search` widened from `fn` to `pub fn` — relation-edge ingestion in `smart_ingest` could not see the private method, which prevented the preprocessing path from compiling.
+- `[workspace.package]` is now inherited by `vestige-core` and `vestige-mcp` (`version.workspace = true`) instead of being silently overridden by per-crate `version = "3.1.0"`.
+- `smart_ingest` no longer conflates `importance_composite` (4-channel novelty/arousal/reward/attention) with `sentiment_magnitude`. The arousal channel feeds `sentiment_magnitude` (its semantic intent); the composite score now lives in `provenance.importance_composite`. The previous conflation caused incorrect emotional boosting and synaptic tagging.
+- `smart_ingest` and the legacy `ingest` tool no longer skip cognitive scoring when the engine mutex is contended. They block on the lock (`lock().await`) so importance, intent detection, and adaptive embedding selection are deterministic.
+- Activity tracking in `server.rs` no longer silently drops updates under contention. The activity record is now spawned onto a tokio task that awaits the lock, eliminating wrong-and-confidently-stale results from `is_idle()` and `should_consolidate()`.
+- `near_duplicate_warning` in `smart_ingest` is now actually reachable. Previously the threshold (0.9) was higher than the prediction-error update routing threshold (0.75), so the warning was dead code; the threshold is lowered to 0.6 with a clearer wording.
+- Auto-consolidation no longer drifts on every restart. The main loop now sleeps for the time remaining until the next due consolidation (capped at 1h for wall-clock-drift safety) instead of always sleeping a full interval.
+
+### Added
+- `rust-toolchain.toml` pinning the channel to 1.91.0 so contributors and CI use the same compiler as the `rust-version` field declares.
+- `CognitiveEngine::hydrate` now also rebuilds `HippocampalIndex` from persisted memories (paged in batches of 500, embeddings reattached when present). Previously only the `ActivationNetwork` survived restarts, so `explore_connections` associations and barcode lookups silently returned nothing.
+- `scripts/check-version-and-tools.sh` and a `metadata` CI job that fails when version inheritance breaks, when crates carry hardcoded versions, when the advertised tool count diverges from the catalog module, or when README/ARCHITECTURE tool counts drift.
+- `scripts/audit-deps.sh` — local dependency audit (duplicates, outdated, advisories, geiger, top-10 tree size) for use before bumping `fastembed`/`tokenizers`/`axum`.
+- Release profile `dist` (inherits release, `opt-level = "z"` + `lto = "fat"`) for size-optimised builds; default `[profile.release]` switches from `opt-level = "z"` to `opt-level = 3` to recover the throughput lost on the hot path (search, BM25, RRF, embeddings).
+- `..Default::default()` on all `IngestInput` test literals — without it, adding new Tier-4 fields (`memory_kind`, `subject`, `predicate`, `object`, `episodic_at`, `procedural_frequency`) would silently break the lib-test build.
+- New crate `vestige-restore` (`crates/vestige-restore/`) housing the JSON-backup importer. It depends on `vestige-core` with `default-features = false`, so the binary builds without fastembed or USearch. The release workflow now builds it explicitly; embeddings can be backfilled afterwards via the `regenerate_embeddings` MCP tool.
+- `server/catalog.rs` exposes `build_tools_list` / `build_resources_list` so the 27-tool and 11-resource catalogs live in one focused module instead of being inlined in `server.rs`. Five accompanying tests (`tools_list_has_exactly_27_entries`, `tool_names_are_unique`, `tool_names_are_snake_case`, `every_tool_schema_has_object_type_and_consistent_required`, `every_resource_uri_has_scheme`) catch drift before the CI guard runs.
+- `vestige-core` `lib.rs` documents the API stability tiers (prelude is stable; other re-exports may shift; `pub(crate)` is internal) so future audits have a clear contract.
+- `CognitiveEngine` doc-comments now describe the concurrency model — always `lock().await` from request paths, drop the guard before unrelated awaits, and a note that splitting into per-module locks is the planned next step (b14).
+
+### Documentation
+- README, ARCHITECTURE.md, server.rs and tools/mod.rs comments all report the same numbers: 27 MCP tools and 28 REST operations across 26 paths.
+- README install instructions point at the fork's source-build path; upstream pre-builts are documented separately and clearly marked as v2.0.3 baseline.
+- Misleading "Legacy cleanup note" about `apps/dashboard/src/lib/` replaced — the directory holds active TypeScript helpers, not legacy Svelte code.
+- Active Dreaming Memory citation marked as a non-peer-reviewed preprint.
+- `protocol/http.rs` now documents why a `RateLimitLayer` is intentionally NOT applied (tower 0.5 layer is not `Clone`, axum requires it) and recommends a reverse proxy for non-localhost binds.
+
+### Removed
+- `crates/vestige-mcp/src/dashboard.html` (45 KB) and `crates/vestige-mcp/src/graph.html` (54 KB) — orphaned remnants of the pre-React dashboard, not embedded by any code path.
+- 8 unreferenced files in `crates/vestige-mcp/src/tools/` totalling ~96 KB: `ingest.rs`, `checkpoint.rs`, `codebase.rs`, `consolidate.rs`, `intentions.rs`, `knowledge.rs`, `recall.rs`, `stats.rs`. None of them were declared in `tools/mod.rs` and none were referenced from `server.rs`, so they were dead-on-disk despite appearing in the source tree.
+- `crates/vestige-mcp/src/bin/restore.rs` — moved to `crates/vestige-restore/src/main.rs` as a standalone crate (see *Added*).
+- The 705-line inline `tools/list` + `resources/list` payloads inside `server.rs` are gone; `server.rs` is down from ~1460 to ~1230 lines.
+
+### Tests
+- `test_tools_list_returns_all_tools` now asserts 27 tools and verifies presence of `regenerate_embeddings`, `reflect`, `temporal`, `confidence`, `deep_reference` — previously these were only counted by comment.
+- New `test_hydrate_indexes_persisted_memories_into_hippocampal_index` verifies the restart-preservation path for the hippocampal index.
+- Clippy sweep on `--workspace --all-targets`: fixed 20 lints (collapsible `if`, manual char comparisons, useless `format!`, derivable `impl`, `manual_range_contains`) and four `cargo test --no-run` errors (absurd `len() >= 0` comparisons, `expr || true` logic bug). Workspace now builds clippy-clean for the default lint set.
+- Full workspace test sweep stays green: 528 (vestige-core) + 33 (e2e helpers) + 344 (vestige-mcp, +8 catalog tests) + new `vestige-restore` build target.
+
+---
+
 ## [3.2.0] - 2026-04-09 — "Content Intelligence"
 
 Adds a 5-stage Content Intelligence Pipeline that enriches memories at ingest time, compound query decomposition for improved search recall, and provenance tracking for memory lineage.

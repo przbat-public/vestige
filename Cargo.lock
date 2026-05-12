@@ -4224,6 +4224,7 @@ dependencies = [
  "futures-util",
  "http",
  "http-body",
+ "http-body-util",
  "iri-string",
  "pin-project-lite",
  "tower",
@@ -4577,7 +4578,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vestige-core"
-version = "3.1.0"
+version = "3.2.1"
 dependencies = [
  "chrono",
  "criterion",
@@ -4627,7 +4628,7 @@ dependencies = [
 
 [[package]]
 name = "vestige-mcp"
-version = "3.1.0"
+version = "3.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -4651,6 +4652,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vestige-core",
+]
+
+[[package]]
+name = "vestige-restore"
+version = "3.2.1"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
  "vestige-core",
 ]
 

@@ -12,9 +12,18 @@ env:
   VESTIGE_TEST_MOCK_EMBEDDINGS: "1"
 
 jobs:
+  metadata:
+    name: Metadata Consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-version-and-tools.sh
+
   check:
     name: Check & Clippy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: [metadata]
     strategy:
       fail-fast: false
       matrix:
@@ -117,8 +126,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - name: Build release
-        run: cargo build --release --target ${{ matrix.target }} -p vestige-mcp ${{ matrix.cargo_flags }}
+      - name: Build release (mcp + restore)
+        run: |
+          cargo build --release --target ${{ matrix.target }} -p vestige-mcp ${{ matrix.cargo_flags }}
+          cargo build --release --target ${{ matrix.target }} -p vestige-restore ${{ matrix.cargo_flags }}
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release

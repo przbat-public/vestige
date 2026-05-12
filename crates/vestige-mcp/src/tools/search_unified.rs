@@ -263,11 +263,10 @@ pub async fn execute(
         .into_iter()
         .filter(|r| {
             // Exclude superseded memories (Graphiti temporal invalidation)
-            if let Some(valid_until) = r.node.valid_until {
-                if valid_until < now {
+            if let Some(valid_until) = r.node.valid_until
+                && valid_until < now {
                     return false;
                 }
-            }
             if r.node.retention_strength < min_retention {
                 return false;
             }
@@ -617,14 +616,12 @@ pub async fn execute(
     // Only prunes when we have at least 3 results (don't over-prune small sets).
     // ====================================================================
     let pre_prune_count = filtered_results.len();
-    if filtered_results.len() >= 3 {
-        if let Some(top_score) = filtered_results.first().map(|r| r.combined_score) {
-            if top_score > 0.0 {
+    if filtered_results.len() >= 3
+        && let Some(top_score) = filtered_results.first().map(|r| r.combined_score)
+            && top_score > 0.0 {
                 let threshold = top_score * 0.30;
                 filtered_results.retain(|r| r.combined_score >= threshold);
             }
-        }
-    }
     let prune_removed = pre_prune_count - filtered_results.len();
 
     // ====================================================================
@@ -990,7 +987,7 @@ const TRIVIAL_PHRASES: &[&str] = &[
 /// like "BUG", "DECISION", "because", "root cause".
 fn compress_content(content: &str, ratio: f64) -> String {
     let sentences: Vec<&str> = content
-        .split(|c: char| c == '.' || c == '\n')
+        .split(['.', '\n'])
         .map(|s| s.trim())
         .filter(|s| s.len() > 5)
         .collect();
@@ -1111,6 +1108,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         };
         let node = storage.ingest(input).unwrap();
         node.id

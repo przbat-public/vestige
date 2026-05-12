@@ -49,8 +49,13 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Build
+      - name: Build vestige-mcp + vestige CLI
         run: cargo build --package vestige-mcp --release --target ${{ matrix.target }} ${{ matrix.cargo_flags }}
+
+      # a13: vestige-restore lives in its own crate and is built without
+      # fastembed/USearch so its release tarball stays small.
+      - name: Build vestige-restore (no embeddings)
+        run: cargo build --package vestige-restore --release --target ${{ matrix.target }} ${{ matrix.cargo_flags }}
 
       - name: Package (Unix)
         if: matrix.os != 'windows-latest'

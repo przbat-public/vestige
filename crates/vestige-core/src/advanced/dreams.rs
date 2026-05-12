@@ -2316,10 +2316,9 @@ mod tests {
             .unwrap();
         let result = rt.block_on(dreamer.dream(&[mem1, mem2]));
 
-        // DreamResult should now carry contradiction and demotion info
-        assert!(
-            result.contradictions_found.len() + result.memories_demoted.len() >= 0,
-            "contradictions_found and memories_demoted fields must exist"
+        let _ = (
+            result.contradictions_found.len(),
+            result.memories_demoted.len(),
         );
     }
 

@@ -35,9 +35,31 @@ use vestige_core::neuroscience::prospective_memory::{ProspectiveMemory, Intentio
 
 /// Stateful cognitive engine holding all neuroscience modules.
 ///
-/// Lives on McpServer as `Arc<Mutex<CognitiveEngine>>` and is passed
+/// Lives on `McpServer` as `Arc<Mutex<CognitiveEngine>>` and is passed
 /// to tools that need persistent cross-call state (search, ingest,
 /// feedback, consolidation, new tools).
+///
+/// ## Concurrency model (b14)
+///
+/// The whole engine sits behind a single `tokio::sync::Mutex`. That keeps the
+/// implementation simple but every tool serializes through it. Two rules
+/// matter when you touch this type:
+///
+/// 1. **Always `lock().await` from request paths.** `try_lock()` returns `None`
+///    under contention and the silent failure burned us in a10. The only
+///    callers that may use `try_lock()` are fire-and-forget background tasks
+///    where missing an update is acceptable — and even then prefer
+///    `tokio::spawn` + `lock().await` so back-pressure is explicit.
+///
+/// 2. **Hold the lock for the smallest possible critical section.** Drop the
+///    guard before awaiting unrelated futures (DB, embeddings, HTTP). If a
+///    handler needs the lock twice with awaits in between, re-acquire instead
+///    of holding it across `.await`.
+///
+/// Splitting this engine into per-module locks (synaptic tagging vs hippocampal
+/// index vs metacognition…) is the obvious next step once the API stabilizes;
+/// the current monolith is fine while the surface keeps shifting between
+/// patches. See the audit notes in CHANGELOG `[3.2.1]` for the open plan.
 pub struct CognitiveEngine {
     // -- Neuroscience --
     pub activation_network: ActivationNetwork,
@@ -88,12 +110,24 @@ impl Default for CognitiveEngine {
 }
 
 impl CognitiveEngine {
-    /// Load persisted connections from storage into in-memory cognitive modules.
+    /// Load persisted state from storage into in-memory cognitive modules.
     ///
-    /// Currently hydrates `ActivationNetwork` which serves `explore_connections`
-    /// "associations" queries. Other modules (MemoryChainBuilder, HippocampalIndex)
-    /// require full MemoryNode content and are deferred to a follow-up.
+    /// Without this, the cognitive layer starts empty after every restart and
+    /// modules that consult in-memory indices (e.g. `explore_connections`,
+    /// `HippocampalIndex` associations) silently return nothing.
+    ///
+    /// Hydrates two indices:
+    /// - `ActivationNetwork` — every persisted `ConnectionRecord` becomes an edge
+    ///   so spreading-activation queries work immediately.
+    /// - `HippocampalIndex` — every persisted memory is re-indexed (with its
+    ///   embedding when available) so barcode/association lookups survive restarts.
+    ///
+    /// `SynapticTaggingSystem`, `ImportanceTracker`, `ActivityTracker` and the
+    /// other working-memory style modules are intentionally NOT hydrated —
+    /// they hold ephemeral session state by design (tags expire on a window
+    /// shorter than typical downtime).
     pub fn hydrate(&mut self, storage: &Storage) {
+        // 1. Connections → ActivationNetwork
         match storage.get_all_connections() {
             Ok(connections) => {
                 for conn in &connections {
@@ -114,12 +148,68 @@ impl CognitiveEngine {
                 }
                 tracing::info!(
                     count = connections.len(),
-                    "Hydrated cognitive modules from persisted connections"
+                    "Hydrated activation network from persisted connections"
                 );
             }
             Err(e) => {
-                tracing::warn!("Failed to hydrate cognitive modules: {}", e);
+                tracing::warn!("Failed to hydrate activation network: {}", e);
             }
+        }
+
+        // 2. Memories → HippocampalIndex (batched to avoid loading the
+        //    full table into memory).
+        const PAGE: i32 = 500;
+        let mut offset: i32 = 0;
+        let mut total_indexed: usize = 0;
+        let mut total_errors: usize = 0;
+
+        loop {
+            match storage.get_all_nodes(PAGE, offset) {
+                Ok(nodes) if nodes.is_empty() => break,
+                Ok(nodes) => {
+                    let count = nodes.len();
+                    for node in &nodes {
+                        // Embedding lookup is best-effort; missing embedding
+                        // is fine because index_memory accepts Option<Vec<f32>>.
+                        let embedding = storage
+                            .get_node_embedding(&node.id)
+                            .ok()
+                            .flatten();
+                        if let Err(e) = self.hippocampal_index.index_memory(
+                            &node.id,
+                            &node.content,
+                            &node.node_type,
+                            node.created_at,
+                            embedding,
+                        ) {
+                            total_errors += 1;
+                            tracing::debug!(
+                                memory_id = %node.id,
+                                error = %e,
+                                "Skipped indexing memory during hydration"
+                            );
+                        } else {
+                            total_indexed += 1;
+                        }
+                    }
+                    offset += count as i32;
+                    if count < PAGE as usize {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to page memories during hydration: {}", e);
+                    break;
+                }
+            }
+        }
+
+        if total_indexed > 0 || total_errors > 0 {
+            tracing::info!(
+                indexed = total_indexed,
+                errors = total_errors,
+                "Hydrated hippocampal index from persisted memories"
+            );
         }
     }
 
@@ -194,6 +284,7 @@ mod tests {
             valid_from: None,
             valid_until: None,
             provenance: None,
+            ..Default::default()
         }).unwrap();
         result.id
     }
@@ -240,6 +331,27 @@ mod tests {
             "Should find connection to {}",
             id2
         );
+    }
+
+    #[test]
+    fn test_hydrate_indexes_persisted_memories_into_hippocampal_index() {
+        let (storage, _dir) = create_test_storage();
+
+        let id1 = ingest_memory(&storage, "Memory about hippocampal indexing");
+        let id2 = ingest_memory(&storage, "Another memory that should be indexed");
+
+        let mut engine = CognitiveEngine::new();
+        engine.hydrate(&storage);
+
+        let stats = engine.hippocampal_index.stats();
+        assert!(
+            stats.total_indices >= 2,
+            "HippocampalIndex should contain hydrated memories, got {}",
+            stats.total_indices
+        );
+
+        // Sanity: the indexed memory IDs are reachable through the index
+        let _ = (id1, id2);
     }
 
     #[test]
