@@ -454,21 +454,6 @@ impl McpServer {
             }
 
             // ================================================================
-            // Neuroscience tools (internal, not in tools/list)
-            // ================================================================
-            "list_by_state" => tools::memory_states::execute_list(&self.storage, request.arguments).await,
-            "state_stats" => tools::memory_states::execute_stats(&self.storage).await,
-            "trigger_importance" => tools::tagging::execute_trigger(&self.storage, request.arguments).await,
-            "find_tagged" => tools::tagging::execute_find(&self.storage, request.arguments).await,
-            "tagging_stats" => tools::tagging::execute_stats(&self.storage).await,
-            "match_context" => tools::context::execute(&self.storage, request.arguments).await,
-
-            // ================================================================
-            // Feedback (internal, still used by request_feedback)
-            // ================================================================
-            "request_feedback" => tools::feedback::execute_request_feedback(&self.storage, request.arguments).await,
-
-            // ================================================================
             // TEMPORAL TOOLS (v1.2+)
             // ================================================================
             "memory_timeline" => tools::timeline::execute(&self.storage, request.arguments).await,

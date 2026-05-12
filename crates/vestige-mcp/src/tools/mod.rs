@@ -4,11 +4,9 @@
 //!
 //! The unified tools (`codebase_unified`, `intention_unified`, `memory_unified`,
 //! `search_unified`) plus `smart_ingest` and the metacognitive/maintenance set
-//! make up the 27 tools advertised in `tools/list`. The granular tools listed
-//! under "Internal tools" below are kept for backwards-compatible dispatch in
-//! `server.rs::handle_tools_call` — they're called when a deprecated tool name
-//! is received but are NOT exposed in `tools/list`. New code should use the
-//! unified APIs.
+//! make up the 27 tools advertised in `tools/list`. `review` is internal —
+//! used by the `mark_reviewed` dispatch in `server.rs::handle_tools_call` and
+//! exercised by e2e tests, but is not advertised in `tools/list`.
 
 // Active unified tools
 pub mod codebase_unified;
@@ -49,15 +47,6 @@ pub mod confidence;
 // v3.2.1: Deep Reference (cognitive reasoning engine)
 pub mod cross_reference;
 
-// Internal tools — not advertised in MCP tools/list but actively dispatched
-// for backwards-compatible operations in server.rs.
-#[allow(dead_code)]
-pub mod context;
-#[allow(dead_code)]
-pub mod feedback;
-#[allow(dead_code)]
-pub mod memory_states;
+// Internal tool — used by `mark_reviewed` dispatch and e2e tests.
 #[allow(dead_code)]
 pub mod review;
-#[allow(dead_code)]
-pub mod tagging;
