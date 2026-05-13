@@ -143,13 +143,18 @@ impl Reranker {
 
         match TextRerank::try_new(options) {
             Ok(model) => {
-                eprintln!(
-                    "[vestige] Cross-encoder reranker loaded (Jina Reranker v2 Base Multilingual, 278M params)"
+                tracing::info!(
+                    model = "Jina Reranker v2 Base Multilingual",
+                    params = "278M",
+                    "cross-encoder reranker loaded"
                 );
                 self.cross_encoder = Some(model);
             }
             Err(e) => {
-                eprintln!("[vestige] Cross-encoder unavailable, using BM25 fallback: {e}");
+                tracing::warn!(
+                    error = %e,
+                    "cross-encoder unavailable, falling back to BM25 term-overlap scoring"
+                );
             }
         }
     }

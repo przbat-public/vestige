@@ -285,13 +285,21 @@ impl CodebaseWatcher {
             ) {
                 Ok(w) => w,
                 Err(e) => {
-                    eprintln!("Failed to create watcher: {}", e);
+                    tracing::error!(
+                        error = %e,
+                        path = %watch_path.display(),
+                        "failed to create filesystem watcher; codebase auto-learning disabled for this session"
+                    );
                     return;
                 }
             };
 
             if let Err(e) = watcher.watch(&watch_path, RecursiveMode::Recursive) {
-                eprintln!("Failed to watch path: {}", e);
+                tracing::error!(
+                    error = %e,
+                    path = %watch_path.display(),
+                    "failed to start watching path; codebase auto-learning disabled for this session"
+                );
                 return;
             }
 

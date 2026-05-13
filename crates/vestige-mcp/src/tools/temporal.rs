@@ -64,10 +64,13 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
                             .into_iter()
                             .filter_map(|r| storage_clone.get_node(&r.node.id).ok().flatten())
                             .filter(|n| {
-                                let from_ok =
-                                    n.valid_from.is_none() || n.valid_from.unwrap() <= now;
-                                let until_ok =
-                                    n.valid_until.is_none() || n.valid_until.unwrap() > now;
+                                // is_none_or: true when the bound is open OR the bound holds.
+                                // Replaces the older `is_none() || .unwrap() <op> bound` idiom
+                                // (stable in Rust 1.82) and removes the latent panic surface
+                                // even though the surrounding `is_none()` short-circuits in
+                                // practice.
+                                let from_ok = n.valid_from.is_none_or(|t| t <= now);
+                                let until_ok = n.valid_until.is_none_or(|t| t > now);
                                 from_ok && until_ok
                             })
                             .collect())
@@ -76,7 +79,7 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
                             .query_time_range(None, Some(now), limit)
                             .map_err(|e| e.to_string())?
                             .into_iter()
-                            .filter(|n| n.valid_until.is_none() || n.valid_until.unwrap() > now)
+                            .filter(|n| n.valid_until.is_none_or(|t| t > now))
                             .collect())
                     }
                 })
@@ -123,7 +126,7 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
 
             let expired: Vec<_> = all
                 .into_iter()
-                .filter(|n| n.valid_until.is_some() && n.valid_until.unwrap() <= now)
+                .filter(|n| n.valid_until.is_some_and(|t| t <= now))
                 .take(limit as usize)
                 .collect();
 
@@ -167,7 +170,7 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
                 "topic": query,
                 "count": memories.len(),
                 "timeline": memories.iter().map(|m| {
-                    let is_current = m.valid_until.is_none() || m.valid_until.unwrap() > now;
+                    let is_current = m.valid_until.is_none_or(|t| t > now);
                     serde_json::json!({
                         "id": m.id,
                         "content": truncate(&m.content, 200),
@@ -200,7 +203,7 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
 
             let now = Utc::now();
 
-            if node.valid_until.is_some() && node.valid_until.unwrap() <= now {
+            if node.valid_until.is_some_and(|t| t <= now) {
                 return Ok(serde_json::json!({
                     "action": "invalidate",
                     "status": "already_expired",

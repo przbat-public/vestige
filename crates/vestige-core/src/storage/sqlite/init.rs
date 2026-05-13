@@ -196,19 +196,24 @@ impl Storage {
 
         if !needs_reembed.is_empty() {
             let count = needs_reembed.len();
-            eprintln!(
-                "[vestige] Dimension migration: re-embedding {} memories ({} → {} dims)…",
+            let from_dims = embeddings
+                .first()
+                .and_then(|(_, b)| Embedding::from_bytes(b))
+                .map(|e| e.dimensions)
+                .unwrap_or(0);
+            tracing::info!(
                 count,
-                embeddings
-                    .first()
-                    .and_then(|(_, b)| Embedding::from_bytes(b))
-                    .map(|e| e.dimensions)
-                    .unwrap_or(0),
+                from_dims,
+                to_dims = EMBEDDING_DIMENSIONS,
+                "dimension migration starting: re-embedding {} memories ({} → {} dims)",
+                count,
+                from_dims,
                 EMBEDDING_DIMENSIONS,
             );
             self.migrate_embeddings(&needs_reembed)?;
-            eprintln!(
-                "[vestige] Dimension migration complete ({} memories re-embedded)",
+            tracing::info!(
+                count,
+                "dimension migration complete ({} memories re-embedded)",
                 count
             );
         }
