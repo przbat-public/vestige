@@ -20,24 +20,32 @@ pub struct TemporalResult {
     pub anchors_found: Vec<String>,
 }
 
-// Patterns that indicate an expiry/deadline (→ valid_until)
+// All four regex literals below are vetted by the test module at the bottom
+// of this file. `expect()` over `unwrap()` so the failure name points at the
+// specific pattern when somebody breaks one of them during edits.
+
+// Patterns that indicate an expiry/deadline (→ valid_until).
 static UNTIL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(?:until|by|before|deadline(?:\s+is)?|expires?(?:\s+on)?|due(?:\s+by)?|no later than|valid until|ends?(?:\s+on)?)\s+(.+?)(?:[.!,;]|$)").unwrap()
+    Regex::new(r"(?i)(?:until|by|before|deadline(?:\s+is)?|expires?(?:\s+on)?|due(?:\s+by)?|no later than|valid until|ends?(?:\s+on)?)\s+(.+?)(?:[.!,;]|$)")
+        .expect("temporal.rs UNTIL_PATTERN regex literal")
 });
 
-// Patterns that indicate a start time (→ valid_from)
+// Patterns that indicate a start time (→ valid_from).
 static FROM_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(?:starting(?:\s+from)?|from|since|after|beginning|as of|effective)\s+(.+?)(?:[.!,;]|$)").unwrap()
+    Regex::new(r"(?i)(?:starting(?:\s+from)?|from|since|after|beginning|as of|effective)\s+(.+?)(?:[.!,;]|$)")
+        .expect("temporal.rs FROM_PATTERN regex literal")
 });
 
-// Standalone temporal expressions that indicate future (→ valid_from in the future)
+// Standalone temporal expressions that indicate future (→ valid_from in the future).
 static FUTURE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(tomorrow|next\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|in\s+\d+\s+(?:days?|weeks?|months?|hours?))\b").unwrap()
+    Regex::new(r"(?i)\b(tomorrow|next\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|in\s+\d+\s+(?:days?|weeks?|months?|hours?))\b")
+        .expect("temporal.rs FUTURE_PATTERN regex literal")
 });
 
-// Standalone temporal expressions that indicate past (→ valid_from in the past)
+// Standalone temporal expressions that indicate past (→ valid_from in the past).
 static PAST_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(yesterday|\d+\s+(?:days?|weeks?|months?|hours?)\s+ago|last\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b").unwrap()
+    Regex::new(r"(?i)\b(yesterday|\d+\s+(?:days?|weeks?|months?|hours?)\s+ago|last\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b")
+        .expect("temporal.rs PAST_PATTERN regex literal")
 });
 
 /// Extract temporal anchors from content and resolve to absolute dates.

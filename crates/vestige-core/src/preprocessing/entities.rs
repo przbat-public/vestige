@@ -43,24 +43,34 @@ impl EntityType {
     }
 }
 
-static URL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://[^\s)<>\]]+").unwrap());
+// Each `expect()` below documents WHY the regex can't fail at runtime — the
+// pattern is a compile-time string literal vetted by tests. If any of these
+// ever panics, the developer who edited the literal needs to know which one
+// they broke; an explicit message beats `unwrap()`'s "called Option::unwrap on
+// a None value" trace.
+static URL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"https?://[^\s)<>\]]+").expect("entities.rs URL regex literal"));
 
-static EMAIL_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap());
+static EMAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+        .expect("entities.rs EMAIL regex literal")
+});
 
 static FILE_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:^|[\s(])(/[a-zA-Z0-9_.\-]+(?:/[a-zA-Z0-9_.\-]+)+|[a-zA-Z]:\\[^\s]+|[a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_.\-]+){2,})").unwrap()
+    Regex::new(r"(?:^|[\s(])(/[a-zA-Z0-9_.\-]+(?:/[a-zA-Z0-9_.\-]+)+|[a-zA-Z]:\\[^\s]+|[a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_.\-]+){2,})")
+        .expect("entities.rs FILE_PATH regex literal")
 });
 
 static MONETARY_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"[\$€£¥]\s?\d[\d,]*(?:\.\d{1,2})?|\d[\d,]*(?:\.\d{1,2})?\s?(?:USD|EUR|GBP|PLN|JPY)")
-        .unwrap()
+        .expect("entities.rs MONETARY regex literal")
 });
 
 // Capitalized multi-word sequence (proper noun detection).
 // Matches 1-4 capitalized words in a row, excluding sentence starts.
 static PROPER_NOUN_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:^|[.!?]\s+|,\s+|;\s+|\b(?:is|was|by|at|in|on|to|for|with|from|and|or|the|a|an)\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})").unwrap()
+    Regex::new(r"(?:^|[.!?]\s+|,\s+|;\s+|\b(?:is|was|by|at|in|on|to|for|with|from|and|or|the|a|an)\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})")
+        .expect("entities.rs PROPER_NOUN regex literal")
 });
 
 /// Common words that look like proper nouns but aren't, when appearing at sentence boundaries.

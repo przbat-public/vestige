@@ -19,9 +19,12 @@ pub struct ExtractedRelation {
     pub object: String,
 }
 
-// Common relationship verbs that connect entities
+// Common relationship verbs that connect entities. The literal is constant
+// so `expect()` documents that this can only fail if a future edit breaks
+// the regex syntax — never on user input.
 static RELATION_VERBS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(manages|leads|owns|created|designed|built|maintains|uses|depends on|implements|extends|replaces|causes|requires|enables|contains|includes|belongs to|works on|reports to|wrote|authored|developed|runs|deploys|hosts|serves|handles|processes|stores|connects to|integrates with|is part of|is responsible for)\b").unwrap()
+    Regex::new(r"(?i)\b(manages|leads|owns|created|designed|built|maintains|uses|depends on|implements|extends|replaces|causes|requires|enables|contains|includes|belongs to|works on|reports to|wrote|authored|developed|runs|deploys|hosts|serves|handles|processes|stores|connects to|integrates with|is part of|is responsible for)\b")
+        .expect("relations.rs RELATION_VERBS regex literal")
 });
 
 /// Extract relation triples from content using the extracted entities.
@@ -144,8 +147,9 @@ fn extract_noun_phrase(text: &str) -> String {
 }
 
 fn split_sentences(text: &str) -> Vec<&str> {
-    static SENTENCE_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"[.!?]+\s+|[.!?]+$|\n+").unwrap());
+    static SENTENCE_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"[.!?]+\s+|[.!?]+$|\n+").expect("relations.rs SENTENCE_RE regex literal")
+    });
 
     SENTENCE_RE
         .split(text)
