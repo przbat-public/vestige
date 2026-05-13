@@ -29,10 +29,12 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 ignore = [
-    # Add advisory IDs here with a justification, e.g.
-    # { id = "RUSTSEC-2024-XXXX", reason = "fastembed pulls in vulnerable
-    #   transitive crate; upstream tracking issue: https://...",
-    #   expiration = "2026-12-31" }
+    # `paste` (proc-macro) is unmaintained but not vulnerable. It comes in
+    # transitively via `tokenizers → macro_rules_attribute → paste` (and
+    # `tokenizers → paste`). Tokenizers tracks the migration to `pastey` in
+    # huggingface/tokenizers#1707; nothing actionable on our side until
+    # upstream releases. Re-check on the expiration date.
+    { id = "RUSTSEC-2024-0436", reason = "Transitive via tokenizers → paste. Unmaintained-not-vulnerable. Upstream: huggingface/tokenizers#1707. Re-check after 2026-12-31." },
 ]
 
 # ---------------------------------------------------------------------------

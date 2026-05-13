@@ -331,9 +331,9 @@ restore: { "path": "/path/to/backup.json" }
 
 ## Development
 
-- **Crate:** `vestige-mcp` v3.2.1, Rust 2024 edition, MSRV 1.91
+- **Crate:** `vestige-mcp` v3.3.0, Rust 2024 edition, MSRV 1.91
 - **Tools:** 27 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference). Canonical list lives in `vestige-mcp/src/server/catalog.rs::build_tools_list`.
-- **Tests:** 1,080+ (unit + E2E + cognitive + journey + extreme) + 18 cognitive journey + 10 scientific validation
+- **Tests:** 1,389 passing (workspace `cargo test`) — unit + E2E + cognitive + journey + extreme + MCP protocol + scientific validation
 - **Build:** `cargo build --release -p vestige-mcp` (features: `embeddings` + `vector-search` + `preprocessing`)
 - **Build (no embeddings):** `cargo build --release -p vestige-mcp --no-default-features`
 - **Preprocessing:** entity extraction, coreference rewriting, temporal anchoring, relation extraction — all local regex/heuristic, zero model downloads. Feature-gated under `preprocessing` (default on).

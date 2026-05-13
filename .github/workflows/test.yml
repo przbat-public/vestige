@@ -188,6 +188,11 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             cargo_flags: ""
+          # Catch ARM Linux build regressions on every push to main, not just
+          # at release time (release.yml ships the matching archive).
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            cargo_flags: ""
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1

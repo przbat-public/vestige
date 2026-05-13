@@ -27,6 +27,15 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz
             cargo_flags: ""
+          # ARM Linux for AWS Graviton, Raspberry Pi 4+, and Apple-Silicon
+          # Linux VMs (UTM/Lima/OrbStack). `packages/vestige-mcp-npm`
+          # postinstall.js maps `linux+arm64` → this archive name, so without
+          # it ARM Linux users hit HTTP 404 on `npm install`. Uses GitHub's
+          # native ARM runner (GA, October 2025) — no cross-compile or QEMU.
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            archive: tar.gz
+            cargo_flags: ""
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
