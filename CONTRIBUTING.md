@@ -184,7 +184,7 @@ Look for issues labeled `good first issue`. These are scoped, well-defined tasks
 2. Implement `pub fn schema() -> Tool` and `pub fn execute(...) -> Result<CallToolResult>`
 3. Register in `crates/vestige-mcp/src/tools/mod.rs`
 4. Add tests in the same file
-5. Update tool count in README and CLAUDE.md
+5. Update tool count in README and AGENTS.md (CLAUDE.md/GEMINI.md are symlinks, no separate edit needed)
 
 ## Adding a New Cognitive Module
 

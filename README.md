@@ -314,7 +314,7 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 
 ## Make Your AI Use Vestige Automatically
 
-Add this to your agent instructions file — `CLAUDE.md` for Claude Code, `.cursor/rules/*.mdc` for Cursor, `.github/copilot-instructions.md` for VS Code Copilot, `AGENTS.md` for any tool that supports it:
+Add this to your agent instructions file — `AGENTS.md` (the canonical cross-tool standard, picked up by Codex, Cursor, Copilot, Claude Code, Cline, Gemini CLI, Continue, Zed, JetBrains Junie, Devin, and others), or the tool-specific equivalent (`CLAUDE.md`, `GEMINI.md`, `.cursor/rules/*.mdc`, `.github/copilot-instructions.md`):
 
 ```markdown
 ## Memory
@@ -391,7 +391,8 @@ vestige dashboard                # Open 3D dashboard in browser
 | [FAQ](docs/FAQ.md) | 30+ common questions answered |
 | [Science](docs/SCIENCE.md) | The neuroscience behind every feature |
 | [Storage Modes](docs/STORAGE.md) | Global, per-project, multi-instance |
-| [CLAUDE.md Setup](docs/CLAUDE-SETUP.md) | Templates for proactive memory |
+| [Agent Instructions](AGENTS.md) | Canonical operational policy for AI coding agents (CLAUDE.md and GEMINI.md are symlinks) |
+| [Setup Templates](docs/CLAUDE-SETUP.md) | User-side templates for proactive memory (Claude Code, Cursor, etc.) |
 | [Configuration](docs/CONFIGURATION.md) | CLI commands, environment variables |
 | [Integrations](docs/integrations/) | Xcode, Cursor, VS Code, JetBrains, Windsurf |
 | [Changelog](CHANGELOG.md) | Version history |

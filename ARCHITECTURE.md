@@ -1,6 +1,6 @@
 # Vestige — Architecture Reference
 
-Complete technical reference for Vestige's system architecture. For operational tool usage, see [CLAUDE.md](CLAUDE.md).
+Complete technical reference for Vestige's system architecture. For operational tool usage, see [AGENTS.md](AGENTS.md) (the canonical agent instructions; `CLAUDE.md` and `GEMINI.md` are symlinks to the same file).
 
 ---
 
