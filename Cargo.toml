@@ -47,6 +47,16 @@ tempfile = "3"
 # justification are caught by this lint.
 field_scoped_visibility_modifiers = "warn"
 
+# Catch debugging leftovers and unfinished work before they reach main.
+# `dbg!()` is fine in REPL exploration but should never land in committed code.
+# `todo!()` and `unimplemented!()` panic at runtime — they signal "I'll come
+# back to this" intent that needs an explicit plan, not a silent panic in
+# production. Suppress with `#[allow(clippy::todo, reason = "tracked in #NNN")]`
+# when you genuinely want to ship a TODO marker.
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+
 [profile.release]
 # opt-level = 3: maximize runtime speed (search, embeddings, RRF, BM25 are hot).
 # Earlier "z" optimised binary size at the cost of ~5–15% throughput on the

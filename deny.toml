@@ -1,0 +1,101 @@
+# cargo-deny configuration for the Vestige workspace.
+#
+# Run locally:
+#   cargo install cargo-deny
+#   cargo deny check
+#
+# In CI: see .github/workflows/test.yml — `deny` job.
+#
+# The four checks are independent; CI runs all of them but only fails on
+# `advisories` (security) and `bans` (forbidden crates) — `licenses` and
+# `sources` warn but do not block, because legitimate dependency churn
+# upstream often introduces transient mismatches that aren't worth
+# blocking PRs over.
+
+[graph]
+# Skip dev-only deps — they don't ship in release binaries.
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+# ---------------------------------------------------------------------------
+# Security advisories (RustSec)
+# ---------------------------------------------------------------------------
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "warn"
+ignore = [
+    # Add advisory IDs here with a justification, e.g.
+    # { id = "RUSTSEC-2024-XXXX", reason = "fastembed pulls in vulnerable
+    #   transitive crate; upstream tracking issue: https://...",
+    #   expiration = "2026-12-31" }
+]
+
+# ---------------------------------------------------------------------------
+# Licenses
+# ---------------------------------------------------------------------------
+[licenses]
+version = 2
+# Vestige is AGPL-3.0-only, so we can accept any open-source license.
+# This list is the SPDX OSI-approved set minus the few exotic ones we
+# actually never want (because they impose extra obligations we don't
+# want to inherit transitively).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "Zlib",
+    "CC0-1.0",
+    "0BSD",
+    "AGPL-3.0-only",        # our own license — vestige-* crates
+    "BSL-1.0",              # Boost — git2 transitive
+    "OpenSSL",              # vendored-openssl in git2
+    "CDLA-Permissive-2.0",  # webpki
+]
+confidence-threshold = 0.93
+
+# ---------------------------------------------------------------------------
+# Crate bans
+# ---------------------------------------------------------------------------
+[bans]
+multiple-versions = "warn"     # noisy in practice (fastembed pulls a lot of duplicates)
+wildcards = "deny"             # block `version = "*"` — we always want explicit ranges
+highlight = "all"
+allow = []
+deny = [
+    # Block crates we know are abandoned, replaced, or actively harmful.
+    # Format: { name = "<crate>", reason = "<why>", use-instead = "<alt>" }
+    { name = "openssl", reason = "We use rustls or vendored-openssl; bare openssl pulls system libs." },
+]
+# Skip duplicate-version warning for these crates — they come from upstream
+# and we don't control the version unification.
+skip-tree = [
+    { name = "windows-sys" },
+    { name = "windows_x86_64_msvc" },
+    { name = "syn" },
+    { name = "base64" },
+    { name = "hashbrown" },
+    { name = "regex-syntax" },
+    { name = "thiserror" },
+    { name = "thiserror-impl" },
+]
+
+# ---------------------------------------------------------------------------
+# Allowed sources
+# ---------------------------------------------------------------------------
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Add any forks we depend on here:
+allow-git = []

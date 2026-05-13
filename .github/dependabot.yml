@@ -1,0 +1,89 @@
+# Dependabot configuration for the Vestige workspace.
+#
+# - Cargo: weekly check across the whole workspace (Dependabot resolves the
+#   workspace root automatically; per-crate manifests inherit via [workspace.dependencies]).
+# - GitHub Actions: weekly check across all workflow files.
+# - npm: dashboard (apps/dashboard) and root pnpm workspace.
+#
+# Updates are grouped by ecosystem so we get one PR per week per group instead
+# of dozens of single-crate bumps. Major bumps still come as their own PR
+# because they need closer review.
+version: 2
+updates:
+  # Rust dependencies (workspace root)
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Warsaw"
+    open-pull-requests-limit: 10
+    labels:
+      - "deps"
+      - "rust"
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
+    groups:
+      # Patch + minor updates batched together — usually safe, low-noise PR.
+      cargo-minor-and-patch:
+        applies-to: "version-updates"
+        update-types:
+          - "minor"
+          - "patch"
+        # Heavyweight crates that often need manual verification stay
+        # out of the group so we see the full diff for them.
+        exclude-patterns:
+          - "fastembed"
+          - "usearch"
+          - "tokenizers"
+          - "candle*"
+          - "git2"
+          - "rusqlite"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Warsaw"
+    open-pull-requests-limit: 5
+    labels:
+      - "deps"
+      - "ci"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    groups:
+      gh-actions:
+        applies-to: "version-updates"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Dashboard (React SPA shipped inside the binary via include_dir!)
+  - package-ecosystem: "npm"
+    directory: "/apps/dashboard"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Warsaw"
+    open-pull-requests-limit: 5
+    labels:
+      - "deps"
+      - "dashboard"
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
+    groups:
+      dashboard-minor-and-patch:
+        applies-to: "version-updates"
+        update-types:
+          - "minor"
+          - "patch"
