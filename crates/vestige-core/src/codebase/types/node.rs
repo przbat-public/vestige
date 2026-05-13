@@ -1,8 +1,8 @@
 //! `CodebaseNode` enum and dispatcher impls.
 
-use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use super::architectural_decision::ArchitecturalDecision;
 use super::bug_fix::BugFix;

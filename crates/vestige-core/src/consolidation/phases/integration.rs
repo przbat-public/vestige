@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use super::engine::DreamEngine;
 use super::types::{
-    CreativeConnection, CreativeConnectionType, DreamInsight, DreamPhase, PhaseResult, TriagedMemory,
+    CreativeConnection, CreativeConnectionType, DreamInsight, DreamPhase, PhaseResult,
+    TriagedMemory,
 };
 
 impl DreamEngine {

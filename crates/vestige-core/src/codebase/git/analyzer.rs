@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, TimeZone, Utc};
 use git2::{Commit, Repository, Sort};
 
-use crate::codebase::types::{BugFix, BugSeverity, FileRelationship, RelationType, RelationshipSource};
+use crate::codebase::types::{
+    BugFix, BugSeverity, FileRelationship, RelationType, RelationshipSource,
+};
 
 use super::analysis::HistoryAnalysis;
 use super::context::{CommitInfo, GitContext};

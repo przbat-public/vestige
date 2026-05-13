@@ -1,8 +1,8 @@
 //! `CodeEntity` and `EntityType`.
 
-use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Knowledge about a specific code entity (function, type, module, etc.)
 #[derive(Debug, Clone, Serialize, Deserialize)]

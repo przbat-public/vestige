@@ -133,4 +133,3 @@ pub(super) fn run_health() -> anyhow::Result<()> {
 
     Ok(())
 }
-

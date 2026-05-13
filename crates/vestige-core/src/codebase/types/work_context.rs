@@ -1,8 +1,8 @@
 //! `WorkContext` and `WorkStatus`.
 
-use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Tracks the current work context for continuity across sessions.
 ///

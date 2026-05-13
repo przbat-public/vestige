@@ -267,8 +267,7 @@ fn test_rem_emotional_processing() {
         is_flashbulb: false,
     }];
 
-    let (_connections, emotional_processed, _phase) =
-        engine.phase_rem(&triaged, &mut emotional);
+    let (_connections, emotional_processed, _phase) = engine.phase_rem(&triaged, &mut emotional);
 
     assert_eq!(
         emotional_processed, 1,

@@ -1,8 +1,8 @@
 //! `BugFix` and `BugSeverity`.
 
-use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Records a bug fix with root cause analysis.
 ///

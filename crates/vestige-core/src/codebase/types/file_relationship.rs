@@ -1,8 +1,8 @@
 //! `FileRelationship`, `RelationType`, `RelationshipSource`.
 
-use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Tracks relationships between files in the codebase.
 ///

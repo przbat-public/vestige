@@ -1,6 +1,5 @@
 //! Ingest command — write a memory through the prediction-error gating pipeline.
 
-
 use colored::Colorize;
 use vestige_core::{IngestInput, Storage};
 
@@ -83,4 +82,3 @@ pub(super) fn run_ingest(
 
     Ok(())
 }
-

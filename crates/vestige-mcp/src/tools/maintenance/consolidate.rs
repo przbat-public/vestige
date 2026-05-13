@@ -40,4 +40,3 @@ pub async fn execute_consolidate(
         "durationMs": result.duration_ms,
     }))
 }
-

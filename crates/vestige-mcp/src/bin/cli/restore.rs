@@ -103,4 +103,3 @@ pub(super) fn run_restore(backup_path: PathBuf) -> anyhow::Result<()> {
 
     Ok(())
 }
-

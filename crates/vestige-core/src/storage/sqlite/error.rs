@@ -2,7 +2,6 @@
 
 use crate::memory::KnowledgeNode;
 
-
 /// Storage error type
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]

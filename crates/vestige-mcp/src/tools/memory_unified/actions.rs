@@ -67,7 +67,10 @@ pub(super) async fn execute_get(storage: &Arc<Storage>, id: &str) -> Result<Valu
 }
 
 /// Batch-retrieve multiple memory nodes by IDs
-pub(super) async fn execute_get_batch(storage: &Arc<Storage>, ids: &[String]) -> Result<Value, String> {
+pub(super) async fn execute_get_batch(
+    storage: &Arc<Storage>,
+    ids: &[String],
+) -> Result<Value, String> {
     // Many tiny SELECTs in a row — never on the reactor. One spawn_blocking
     // hop runs the whole loop on the SQLite-blocking thread pool.
     let storage_clone = storage.clone();

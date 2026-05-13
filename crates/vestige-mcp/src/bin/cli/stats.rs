@@ -180,4 +180,3 @@ fn print_distribution_bar(label: &str, count: usize, total: usize, color: &str) 
         label, colored_bar, count, percentage
     );
 }
-

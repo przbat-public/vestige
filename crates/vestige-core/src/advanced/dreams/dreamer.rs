@@ -28,7 +28,6 @@ pub struct MemoryDreamer {
     connections: Arc<RwLock<Vec<DiscoveredConnection>>>,
 }
 
-
 impl MemoryDreamer {
     /// Create a new memory dreamer with default config
     pub fn new() -> Self {

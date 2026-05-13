@@ -189,4 +189,3 @@ pub enum DiscoveredConnectionType {
     /// Contradictory information (active forgetting candidate)
     Contradiction,
 }
-

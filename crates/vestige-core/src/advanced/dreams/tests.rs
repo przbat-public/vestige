@@ -24,12 +24,7 @@ fn make_memory(id: &str, content: &str, tags: Vec<&str>) -> DreamMemory {
     }
 }
 
-fn make_memory_with_time(
-    id: &str,
-    content: &str,
-    tags: Vec<&str>,
-    hours_ago: i64,
-) -> DreamMemory {
+fn make_memory_with_time(id: &str, content: &str, tags: Vec<&str>, hours_ago: i64) -> DreamMemory {
     DreamMemory {
         id: id.to_string(),
         content: content.to_string(),
@@ -373,8 +368,7 @@ fn test_contradiction_detected_in_dream() {
 
     let mem_old = DreamMemory {
         id: "old".to_string(),
-        content: "The function does not handle errors and cannot recover from failures"
-            .to_string(),
+        content: "The function does not handle errors and cannot recover from failures".to_string(),
         embedding: Some(vec![1.0, 0.0, 0.0]),
         tags: vec!["error-handling".to_string()],
         created_at: Utc::now() - Duration::days(30),
@@ -382,8 +376,7 @@ fn test_contradiction_detected_in_dream() {
     };
     let mem_new = DreamMemory {
         id: "new".to_string(),
-        content: "The function handles errors gracefully and recovers from failures"
-            .to_string(),
+        content: "The function handles errors gracefully and recovers from failures".to_string(),
         embedding: Some(vec![0.95, 0.1, 0.0]),
         tags: vec!["error-handling".to_string()],
         created_at: Utc::now(),
@@ -410,8 +403,7 @@ fn test_contradiction_demotes_older_less_accessed_memory() {
 
     let mem_old = DreamMemory {
         id: "old".to_string(),
-        content: "The service does not support authentication and cannot verify users"
-            .to_string(),
+        content: "The service does not support authentication and cannot verify users".to_string(),
         embedding: Some(vec![1.0, 0.0, 0.0]),
         tags: vec!["auth".to_string()],
         created_at: Utc::now() - Duration::days(60),
@@ -419,8 +411,7 @@ fn test_contradiction_demotes_older_less_accessed_memory() {
     };
     let mem_new = DreamMemory {
         id: "new".to_string(),
-        content: "The service supports JWT authentication and verifies users properly"
-            .to_string(),
+        content: "The service supports JWT authentication and verifies users properly".to_string(),
         embedding: Some(vec![0.95, 0.1, 0.0]),
         tags: vec!["auth".to_string()],
         created_at: Utc::now(),

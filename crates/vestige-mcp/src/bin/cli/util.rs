@@ -11,7 +11,9 @@ pub(super) fn get_default_db_path() -> anyhow::Result<PathBuf> {
     Ok(proj_dirs.data_dir().join("vestige.db"))
 }
 
-pub(super) fn fetch_all_nodes(storage: &Storage) -> anyhow::Result<Vec<vestige_core::KnowledgeNode>> {
+pub(super) fn fetch_all_nodes(
+    storage: &Storage,
+) -> anyhow::Result<Vec<vestige_core::KnowledgeNode>> {
     let mut all_nodes = Vec::new();
     let page_size = 500;
     let mut offset = 0;

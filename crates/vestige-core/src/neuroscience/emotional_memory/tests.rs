@@ -39,8 +39,7 @@ fn test_positive_content() {
 #[test]
 fn test_negative_content() {
     let mut em = EmotionalMemory::new();
-    let eval =
-        em.evaluate_content("Critical bug: production server crash with data corruption");
+    let eval = em.evaluate_content("Critical bug: production server crash with data corruption");
     assert!(
         eval.valence < -0.3,
         "Expected negative valence, got {}",

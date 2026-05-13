@@ -6,7 +6,6 @@ use colored::Colorize;
 use vestige_core::Storage;
 use vestige_mcp::cognitive::CognitiveEngine;
 
-
 pub(super) fn run_dashboard(port: u16, open_browser: bool) -> anyhow::Result<()> {
     println!("{}", "=== Vestige Dashboard ===".cyan().bold());
     println!();
@@ -40,8 +39,11 @@ pub(super) fn run_dashboard(port: u16, open_browser: bool) -> anyhow::Result<()>
 }
 
 /// Start standalone HTTP MCP server (no stdio transport)
-pub(super) fn run_serve(port: u16, with_dashboard: bool, dashboard_port: u16) -> anyhow::Result<()> {
-
+pub(super) fn run_serve(
+    port: u16,
+    with_dashboard: bool,
+    dashboard_port: u16,
+) -> anyhow::Result<()> {
     println!("{}", "=== Vestige HTTP Server ===".cyan().bold());
     println!();
 

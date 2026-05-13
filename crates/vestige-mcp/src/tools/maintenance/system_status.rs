@@ -16,7 +16,6 @@ pub fn system_status_schema() -> Value {
     })
 }
 
-
 /// Combined system status tool (merges health_check + stats, v1.7.0)
 ///
 /// Returns system health status, full statistics, FSRS preview,

@@ -160,4 +160,3 @@ pub(super) fn run_gc(
 
     Ok(())
 }
-

@@ -5,7 +5,6 @@ use super::decision::{CreateReason, GateDecision, UpdateType};
 use super::gate::{EvaluationIntent, PredictionErrorGate};
 use super::similarity::cosine_similarity;
 
-
 fn make_embedding(seed: f32) -> Vec<f32> {
     // Create embeddings with controlled similarity based on seed
     // Seeds close to each other = similar vectors

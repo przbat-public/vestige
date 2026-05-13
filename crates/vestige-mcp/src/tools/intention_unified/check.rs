@@ -137,4 +137,3 @@ pub(super) async fn execute_check(
         "checkedAt": now.to_rfc3339(),
     }))
 }
-

@@ -20,8 +20,8 @@ use tracing::{debug, info, warn};
 use crate::cognitive::CognitiveEngine;
 use crate::dashboard::events::VestigeEvent;
 use crate::protocol::messages::{
-    InitializeRequest, InitializeResult, ListResourcesResult, ListToolsResult,
-    ReadResourceRequest, ReadResourceResult, ServerCapabilities, ServerInfo,
+    InitializeRequest, InitializeResult, ListResourcesResult, ListToolsResult, ReadResourceRequest,
+    ReadResourceResult, ServerCapabilities, ServerInfo,
 };
 use crate::protocol::types::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, MCP_VERSION};
 use crate::resources;

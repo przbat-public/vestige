@@ -47,4 +47,3 @@ pub(super) fn run_consolidate() -> anyhow::Result<()> {
 
     Ok(())
 }
-

@@ -44,7 +44,6 @@ struct ExportArgs {
     path: Option<String>,
 }
 
-
 pub async fn execute_export(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
     let args: ExportArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
