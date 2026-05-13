@@ -21,6 +21,7 @@ mod args;
 mod execute;
 mod format;
 mod helpers;
+mod pipeline;
 mod schema;
 
 #[cfg(test)]
