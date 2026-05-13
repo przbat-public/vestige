@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { GraphEdge } from '@/types';
-import { getGraphTheme, type GraphThemeConfig } from '@/graph/theme';
 import type { EdgeParticleSystem } from '@/graph/edge-particles';
+import { type GraphThemeConfig, getGraphTheme } from '@/graph/theme';
+import type { GraphEdge } from '@/types';
 
 const SEGMENTS = 16;
 
@@ -187,7 +187,10 @@ export class EdgeManager {
 
       let isGrowing = false;
       for (const g of this.growingEdges) {
-        if (g.entry === entry) { isGrowing = true; break; }
+        if (g.entry === entry) {
+          isGrowing = true;
+          break;
+        }
       }
       if (isGrowing) continue;
 

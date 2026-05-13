@@ -94,10 +94,9 @@ describe('useMultiSelect', () => {
   });
 
   it('handles items list changes — selectAll uses the latest list', () => {
-    const { result, rerender } = renderHook(
-      ({ list }: { list: Item[] }) => useMultiSelect(list, getId),
-      { initialProps: { list: items.slice(0, 2) } },
-    );
+    const { result, rerender } = renderHook(({ list }: { list: Item[] }) => useMultiSelect(list, getId), {
+      initialProps: { list: items.slice(0, 2) },
+    });
     act(() => result.current.selectAll());
     expect(result.current.count).toBe(2);
 

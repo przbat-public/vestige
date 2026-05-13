@@ -1,6 +1,6 @@
-import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
-import { SUPPORTED_LOCALES, LOCALE_LABELS } from '@/lib/i18n';
+import { useTranslation } from 'react-i18next';
+import { LOCALE_LABELS, SUPPORTED_LOCALES } from '@/lib/i18n';
 
 export function LanguageSwitcher() {
   const { i18n } = useTranslation();

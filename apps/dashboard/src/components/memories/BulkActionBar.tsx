@@ -27,58 +27,33 @@ interface BulkActionBarProps {
  * - aria-live="polite" so screen readers announce "5 selected" when the
  *   count changes without stealing focus away from the active row.
  */
-export function BulkActionBar({
-  count,
-  busy,
-  onPromote,
-  onDemote,
-  onDelete,
-  onClear,
-}: BulkActionBarProps) {
+export function BulkActionBar({ count, busy, onPromote, onDemote, onDelete, onClear }: BulkActionBarProps) {
   const { t } = useTranslation();
   if (count === 0) return null;
 
   return (
-    <div
-      role="region"
+    <section
       aria-label={t('bulk.toolbarAriaLabel')}
       className="absolute left-1/2 -translate-x-1/2 bottom-4 z-20 flex flex-wrap items-center gap-2 bg-card/95 backdrop-blur-sm border border-border rounded-xl shadow-xl px-3 py-2"
     >
       <span aria-live="polite" className="text-xs font-medium text-foreground tabular-nums">
         {t('bulk.selectedCount', { count })}
       </span>
-      <span aria-hidden="true" className="text-muted-foreground">·</span>
-      <Button
-        type="button"
-        variant="success"
-        size="sm"
-        onClick={onPromote}
-        disabled={busy}
-        className="text-xs"
-      >
+      <span aria-hidden="true" className="text-muted-foreground">
+        ·
+      </span>
+      <Button type="button" variant="success" size="sm" onClick={onPromote} disabled={busy} className="text-xs">
         ↑ {t('memories.promote')}
       </Button>
-      <Button
-        type="button"
-        variant="danger"
-        size="sm"
-        onClick={onDemote}
-        disabled={busy}
-        className="text-xs"
-      >
+      <Button type="button" variant="danger" size="sm" onClick={onDemote} disabled={busy} className="text-xs">
         ↓ {t('memories.demote')}
       </Button>
-      <Button
-        type="button"
-        variant="danger"
-        size="sm"
-        onClick={onDelete}
-        disabled={busy}
-        className="text-xs"
-      >
+      <Button type="button" variant="danger" size="sm" onClick={onDelete} disabled={busy} className="text-xs">
         ✕ {t('common.delete')}
       </Button>
-      <span aria-hidden="true" className="text-muted-foreground">·</span>
+      <span aria-hidden="true" className="text-muted-foreground">
+        ·
+      </span>
       <Button
         type="button"
         variant="ghost"
@@ -90,11 +65,7 @@ export function BulkActionBar({
       >
         {t('bulk.clear')}
       </Button>
-      {busy && (
-        <span className="text-[10px] text-muted-foreground italic">
-          {t('common.loading')}
-        </span>
-      )}
-    </div>
+      {busy && <span className="text-[10px] text-muted-foreground italic">{t('common.loading')}</span>}
+    </section>
   );
 }

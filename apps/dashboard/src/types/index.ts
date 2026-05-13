@@ -365,4 +365,3 @@ export const MEMORY_SYSTEM_COLORS: Record<string, string> = {
   semantic: '#00A8FF',
   procedural: '#00FFD1',
 };
-

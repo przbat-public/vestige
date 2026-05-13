@@ -58,9 +58,7 @@ describe('processWebSocketMessage', () => {
 
   it('appends events newest-first and caps at MAX_EVENTS', () => {
     for (let i = 0; i < 205; i++) {
-      processWebSocketMessage(
-        JSON.stringify({ type: 'MemoryCreated', data: { seq: i } }),
-      );
+      processWebSocketMessage(JSON.stringify({ type: 'MemoryCreated', data: { seq: i } }));
     }
 
     const events = useWebSocket.getState().events;
@@ -71,7 +69,7 @@ describe('processWebSocketMessage', () => {
   });
 
   it('returns false and does not throw on malformed JSON', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const ok = processWebSocketMessage('not-json{');
     expect(ok).toBe(false);
     expect(useWebSocket.getState().events).toEqual([]);

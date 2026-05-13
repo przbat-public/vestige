@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { useMemoryMutations } from '@/hooks/useMemoryMutations';
 import type { ConfidenceResult } from '@/types';
 
@@ -50,11 +49,7 @@ export function DoubtList({ results, limit = 5 }: DoubtListProps) {
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span
                 className={`tabular-nums text-[11px] ${
-                  item.confidence > 0.7
-                    ? 'text-emerald-500'
-                    : item.confidence > 0.4
-                      ? 'text-amber-500'
-                      : 'text-red-500'
+                  item.confidence > 0.7 ? 'text-emerald-500' : item.confidence > 0.4 ? 'text-amber-500' : 'text-red-500'
                 }`}
               >
                 {(item.confidence * 100).toFixed(0)}%

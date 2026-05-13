@@ -229,11 +229,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             aria-expanded="true"
             aria-autocomplete="list"
           />
-          <ul
-            id="command-palette-list"
-            className="space-y-1 max-h-[50vh] overflow-y-auto"
-            role="listbox"
-          >
+          {/* biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: WAI-ARIA combobox+listbox pattern requires role="listbox" on the option container */}
+          <ul id="command-palette-list" className="space-y-1 max-h-[50vh] overflow-y-auto" role="listbox">
             {filtered.length === 0 && (
               <li className="text-xs text-muted-foreground px-3 py-2">{t('common.noResults')}</li>
             )}
@@ -242,12 +239,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
               const isRunning = cmd.kind === 'action' && runningId === cmd.id;
               const disabled = runningId !== null && !isRunning;
               return (
-                <li
-                  key={cmd.id}
-                  id={cmd.id}
-                  role="option"
-                  aria-selected={isActive}
-                >
+                // biome-ignore lint/a11y/useFocusableInteractive: combobox keeps focus on the input and routes selection through aria-activedescendant; options must not be tabbable
+                // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: WAI-ARIA listbox children must use role="option"
+                <li key={cmd.id} id={cmd.id} role="option" aria-selected={isActive}>
                   <button
                     type="button"
                     onClick={() => runCommand(cmd)}
@@ -262,10 +256,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     <span aria-hidden="true">{cmd.icon}</span>
                     <span className="flex-1 text-left">{t(cmd.labelKey)}</span>
                     {cmd.kind === 'action' && (
-                      <span
-                        className="text-[10px] uppercase tracking-wider opacity-60"
-                        aria-hidden="true"
-                      >
+                      <span className="text-[10px] uppercase tracking-wider opacity-60" aria-hidden="true">
                         {isRunning ? t('common.loading') : t('commands.actionBadge')}
                       </span>
                     )}

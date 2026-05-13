@@ -56,8 +56,7 @@ export function ReviewPage() {
   });
 
   const review = useMutation({
-    mutationFn: (input: { id: string; rating: FsrsRating }) =>
-      api.memories.review(input.id, input.rating),
+    mutationFn: (input: { id: string; rating: FsrsRating }) => api.memories.review(input.id, input.rating),
     onSuccess: () => {
       setReviewedCount((c) => c + 1);
       setIndex((i) => i + 1);
@@ -149,10 +148,7 @@ export function ReviewPage() {
   const remaining = queue.length - index;
 
   return (
-    <main
-      className="h-full flex flex-col items-center px-4 py-6 gap-4"
-      aria-label={t('review.title')}
-    >
+    <main className="h-full flex flex-col items-center px-4 py-6 gap-4" aria-label={t('review.title')}>
       <header className="w-full max-w-2xl flex items-center justify-between text-xs text-muted-foreground">
         <h2 className="text-sm font-semibold text-foreground">{t('review.title')}</h2>
         <div className="flex items-center gap-3 tabular-nums">
@@ -180,6 +176,7 @@ export function ReviewPage() {
             {t(`nodeTypes.${current.nodeType}`, { defaultValue: current.nodeType })}
           </Badge>
           <span
+            role="img"
             className="text-xs tabular-nums"
             style={{ color: retentionColor(current.retentionStrength) }}
             aria-label={t('review.currentRetention', {
@@ -191,9 +188,7 @@ export function ReviewPage() {
         </div>
 
         {revealed ? (
-          <p className="text-sm text-foreground leading-relaxed break-words whitespace-pre-wrap">
-            {current.content}
-          </p>
+          <p className="text-sm text-foreground leading-relaxed break-words whitespace-pre-wrap">{current.content}</p>
         ) : (
           <button
             type="button"
@@ -231,9 +226,7 @@ export function ReviewPage() {
           ))}
         </div>
 
-        <p className="text-[11px] text-muted-foreground text-center">
-          {t('review.shortcutHint')}
-        </p>
+        <p className="text-[11px] text-muted-foreground text-center">{t('review.shortcutHint')}</p>
       </Card>
     </main>
   );

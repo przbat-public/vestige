@@ -113,9 +113,15 @@ export class EdgeParticleSystem {
 
   setCurve(
     idx: number,
-    sx: number, sy: number, sz: number,
-    cx: number, cy: number, cz: number,
-    tx: number, ty: number, tz: number,
+    sx: number,
+    sy: number,
+    sz: number,
+    cx: number,
+    cy: number,
+    cz: number,
+    tx: number,
+    ty: number,
+    tz: number,
   ) {
     const o = idx * 9;
     this.curveData[o] = sx;

@@ -55,9 +55,7 @@ export function TagLegend({ nodes, limit = 10 }: TagLegendProps) {
     >
       <summary className="cursor-pointer select-none px-3 py-2 font-medium text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg">
         {t('graph.tagLegendTitle')}
-        <span className="ml-1.5 text-[10px] tabular-nums opacity-70">
-          ({entries.sorted.length})
-        </span>
+        <span className="ml-1.5 text-[10px] tabular-nums opacity-70">({entries.sorted.length})</span>
       </summary>
       <ul className="px-3 pb-3 pt-1 space-y-1 max-h-60 overflow-y-auto">
         {entries.sorted.map(([tag, count]) => {
@@ -84,24 +82,15 @@ export function TagLegend({ nodes, limit = 10 }: TagLegendProps) {
               <span className="text-muted-foreground truncate flex-1" title={tag}>
                 {tag}
               </span>
-              <span className="text-foreground tabular-nums text-[10px] opacity-70">
-                {count}
-              </span>
+              <span className="text-foreground tabular-nums text-[10px] opacity-70">{count}</span>
             </li>
           );
         })}
         {entries.untagged > 0 && (
           <li className="flex items-center gap-2 border-t border-border pt-1.5 mt-1.5">
-            <span
-              className="inline-block w-3 h-3 rounded-full flex-shrink-0 bg-[#8B95A5]"
-              aria-hidden="true"
-            />
-            <span className="text-muted-foreground italic flex-1">
-              {t('graph.tagLegendUntagged')}
-            </span>
-            <span className="text-foreground tabular-nums text-[10px] opacity-70">
-              {entries.untagged}
-            </span>
+            <span className="inline-block w-3 h-3 rounded-full flex-shrink-0 bg-[#8B95A5]" aria-hidden="true" />
+            <span className="text-muted-foreground italic flex-1">{t('graph.tagLegendUntagged')}</span>
+            <span className="text-foreground tabular-nums text-[10px] opacity-70">{entries.untagged}</span>
           </li>
         )}
       </ul>

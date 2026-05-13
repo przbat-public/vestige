@@ -244,7 +244,10 @@ export function ExplorePage() {
             </h2>
             <div className="space-y-2">
               {results.map((assoc, i) => (
-                <Card key={`${String(assoc.content ?? '')}|${i}`} className="flex items-start gap-3">
+                <Card
+                  key={`${String(assoc.nodeType ?? 'unknown')}|${String(assoc.content ?? '')}|${assoc.score ?? ''}`}
+                  className="flex items-start gap-3"
+                >
                   <div className="w-6 h-6 rounded-full bg-primary/15 text-primary text-xs flex items-center justify-center flex-shrink-0 mt-0.5 tabular-nums">
                     {i + 1}
                   </div>

@@ -1,5 +1,5 @@
-import { NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
+import { NavLink } from 'react-router';
 import { useWebSocket } from '@/stores/websocket';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { ThemeToggle } from './ThemeToggle';
@@ -33,9 +33,7 @@ export function Sidebar({ onNavigate, onOpenCommandPalette }: SidebarProps) {
       aria-label={t('a11y.mainNavigation')}
     >
       <div className="px-4 mb-6">
-        <h1 className="text-lg font-bold text-foreground">
-          {t('app.name')}
-        </h1>
+        <h1 className="text-lg font-bold text-foreground">{t('app.name')}</h1>
         <p className="text-xs text-muted-foreground mt-0.5">{t('app.tagline')}</p>
       </div>
 

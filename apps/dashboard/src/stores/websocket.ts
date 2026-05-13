@@ -77,6 +77,7 @@ export function processWebSocketMessage(rawData: string): boolean {
     }));
     return true;
   } catch {
+    // biome-ignore lint/suspicious/noConsole: surfacing malformed wire payloads is a debugging affordance
     console.warn('[vestige] Malformed WebSocket message:', rawData);
     return false;
   }

@@ -88,8 +88,7 @@ export const api = {
       }),
   },
   review: {
-    queue: (limit = 50) =>
-      fetcher<ReviewQueueResponse>(`/review/queue?limit=${limit}`),
+    queue: (limit = 50) => fetcher<ReviewQueueResponse>(`/review/queue?limit=${limit}`),
   },
   maintenance: {
     regenerateEmbeddings: (body?: { force?: boolean; node_ids?: string[] }) =>

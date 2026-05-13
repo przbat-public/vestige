@@ -76,6 +76,7 @@ export function useMultiSelect<T>(items: T[], getId: (item: T) => string): Multi
 
   const toggle = useCallback(
     (id: string, opts: { shift?: boolean; ctrl?: boolean } = {}) => {
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: range/shift/ctrl semantics intentionally live in one place to keep the selection state machine atomic
       setSelected((prev) => {
         const next = new Set(prev);
 
@@ -101,10 +102,7 @@ export function useMultiSelect<T>(items: T[], getId: (item: T) => string): Multi
     [indexById, visibleIds],
   );
 
-  const selectRange = useCallback(
-    (id: string) => toggle(id, { shift: true }),
-    [toggle],
-  );
+  const selectRange = useCallback((id: string) => toggle(id, { shift: true }), [toggle]);
 
   const selectAll = useCallback(() => {
     setSelected(new Set(visibleIds));
@@ -117,10 +115,7 @@ export function useMultiSelect<T>(items: T[], getId: (item: T) => string): Multi
 
   const isSelected = useCallback((id: string) => selected.has(id), [selected]);
 
-  const selectedItems = useMemo(
-    () => items.filter((item) => selected.has(getId(item))),
-    [items, selected, getId],
-  );
+  const selectedItems = useMemo(() => items.filter((item) => selected.has(getId(item))), [items, selected, getId]);
 
   const visibleSet = useMemo(() => new Set(visibleIds), [visibleIds]);
   const visibleSelectedCount = useMemo(() => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/graph': 'nav.graph',

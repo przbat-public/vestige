@@ -106,10 +106,7 @@ describe('SettingsPage Doubt Mode', () => {
         },
       ],
     } as ConfidenceResult);
-    const promoteSpy = vi
-      .spyOn(api.memories, 'promote')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockResolvedValue({ id: 'aaa' } as any);
+    const promoteSpy = vi.spyOn(api.memories, 'promote').mockResolvedValue({ id: 'aaa' } as never);
 
     const user = userEvent.setup();
     renderPage();
@@ -120,9 +117,7 @@ describe('SettingsPage Doubt Mode', () => {
 
     await waitFor(() => expect(promoteSpy).toHaveBeenCalledWith('aaa'));
     // Row hidden after action.
-    await waitFor(() =>
-      expect(screen.queryByText(/Doubtful memory/i)).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByText(/Doubtful memory/i)).not.toBeInTheDocument());
   });
 
   it('Demote button calls demote API and hides the row', async () => {
@@ -136,10 +131,7 @@ describe('SettingsPage Doubt Mode', () => {
         },
       ],
     } as ConfidenceResult);
-    const demoteSpy = vi
-      .spyOn(api.memories, 'demote')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockResolvedValue({ id: 'bbb' } as any);
+    const demoteSpy = vi.spyOn(api.memories, 'demote').mockResolvedValue({ id: 'bbb' } as never);
 
     const user = userEvent.setup();
     renderPage();
@@ -149,8 +141,6 @@ describe('SettingsPage Doubt Mode', () => {
     await user.click(screen.getByRole('button', { name: /demote/i }));
 
     await waitFor(() => expect(demoteSpy).toHaveBeenCalledWith('bbb'));
-    await waitFor(() =>
-      expect(screen.queryByText(/Another doubtful/i)).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByText(/Another doubtful/i)).not.toBeInTheDocument());
   });
 });

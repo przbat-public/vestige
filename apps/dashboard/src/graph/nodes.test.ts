@@ -1,5 +1,5 @@
-import { getNodeColor } from './nodes';
 import type { GraphNode } from '@/types';
+import { getNodeColor } from './nodes';
 
 function makeNode(overrides: Partial<GraphNode> = {}): GraphNode {
   return {

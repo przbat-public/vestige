@@ -16,6 +16,7 @@ import { toast } from '@/stores/toast';
 import { useWebSocket } from '@/stores/websocket';
 import type { ConfidenceResult, ConsolidationResult, DreamResult, ReflectResult } from '@/types';
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: settings page composes seven independent maintenance actions whose results live in local state; splitting them would force a context just to share toasts
 export function SettingsPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -221,8 +222,11 @@ export function SettingsPage() {
             {reflectResult && (
               <Card className="space-y-2 text-xs">
                 <div className="text-foreground font-medium">{reflectResult.summary}</div>
-                {reflectResult.insights?.map((ins, i) => (
-                  <div key={`${ins.type}-${i}`} className="flex gap-2 items-start border-t border-border pt-2">
+                {reflectResult.insights?.map((ins) => (
+                  <div
+                    key={`${ins.type}|${ins.severity}|${ins.description}`}
+                    className="flex gap-2 items-start border-t border-border pt-2"
+                  >
                     <Badge
                       variant={ins.severity === 'high' ? 'danger' : ins.severity === 'medium' ? 'warning' : 'default'}
                     >
@@ -260,18 +264,14 @@ export function SettingsPage() {
                       className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 border-b border-border pb-2 last:border-0"
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="text-muted-foreground line-clamp-2 break-words">
-                          {item.content}
-                        </p>
+                        <p className="text-muted-foreground line-clamp-2 break-words">{item.content}</p>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <span
                             className={`tabular-nums text-[11px] ${item.confidence > 0.7 ? 'text-emerald-500' : item.confidence > 0.4 ? 'text-amber-500' : 'text-red-500'}`}
                           >
                             {(item.confidence * 100).toFixed(0)}%
                           </span>
-                          <span className="text-muted-foreground text-[11px]">
-                            {item.classification}
-                          </span>
+                          <span className="text-muted-foreground text-[11px]">{item.classification}</span>
                         </div>
                       </div>
                       <div className="flex gap-1 flex-shrink-0 self-end sm:self-start">

@@ -109,19 +109,10 @@ export function MaintenancePanel() {
         {/* Regenerate Embeddings */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex-1 min-w-[12rem]">
-            <div className="text-sm text-foreground font-medium">
-              {t('maintenance.regenTitle')}
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {t('maintenance.regenDesc')}
-            </p>
+            <div className="text-sm text-foreground font-medium">{t('maintenance.regenTitle')}</div>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('maintenance.regenDesc')}</p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => regen.mutate()}
-            disabled={regen.isPending}
-          >
+          <Button variant="outline" size="sm" onClick={() => regen.mutate()} disabled={regen.isPending}>
             {regen.isPending ? t('common.loading') : t('maintenance.regenBtn')}
           </Button>
         </div>
@@ -139,27 +130,16 @@ export function MaintenancePanel() {
         {/* Find Duplicates */}
         <div className="flex flex-wrap items-start justify-between gap-3 border-t border-border pt-4">
           <div className="flex-1 min-w-[12rem]">
-            <div className="text-sm text-foreground font-medium">
-              {t('maintenance.dupTitle')}
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {t('maintenance.dupDesc')}
-            </p>
+            <div className="text-sm text-foreground font-medium">{t('maintenance.dupTitle')}</div>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('maintenance.dupDesc')}</p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => dup.mutate()}
-            disabled={dup.isPending}
-          >
+          <Button variant="outline" size="sm" onClick={() => dup.mutate()} disabled={dup.isPending}>
             {dup.isPending ? t('common.loading') : t('maintenance.dupBtn')}
           </Button>
         </div>
         {dupResult && (
           <div className="text-xs space-y-1.5">
-            {dupResult.warning && (
-              <p className="text-amber-500">{dupResult.warning}</p>
-            )}
+            {dupResult.warning && <p className="text-amber-500">{dupResult.warning}</p>}
             <p className="text-muted-foreground tabular-nums">
               {t('maintenance.dupResult', {
                 clusters: dupResult.totalClusters,
@@ -169,18 +149,12 @@ export function MaintenancePanel() {
             {dupResult.clusters?.slice(0, 3).map((c) => (
               <Card key={c.clusterId} className="text-xs space-y-1">
                 <div className="flex items-center gap-2">
-                  <Badge variant="warning">
-                    {t('maintenance.dupClusterLabel', { size: c.size })}
-                  </Badge>
+                  <Badge variant="warning">{t('maintenance.dupClusterLabel', { size: c.size })}</Badge>
                   <span className="text-muted-foreground">{c.suggestedAction}</span>
                 </div>
                 <ul className="space-y-0.5 ml-1">
                   {c.members.slice(0, 3).map((m) => (
-                    <li
-                      key={m.id}
-                      className="text-muted-foreground line-clamp-1"
-                      title={m.contentPreview}
-                    >
+                    <li key={m.id} className="text-muted-foreground line-clamp-1" title={m.contentPreview}>
                       {m.contentPreview}
                     </li>
                   ))}
@@ -205,13 +179,8 @@ export function MaintenancePanel() {
             >
               {gcPreview.isPending ? t('common.loading') : t('maintenance.gcPreviewBtn')}
             </Button>
-            {gcResult && gcResult.dryRun && gcResult.candidateCount > 0 && (
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={onConfirmDelete}
-                disabled={gcDelete.isPending}
-              >
+            {gcResult?.dryRun && gcResult.candidateCount > 0 && (
+              <Button variant="danger" size="sm" onClick={onConfirmDelete} disabled={gcDelete.isPending}>
                 {gcDelete.isPending
                   ? t('common.loading')
                   : t('maintenance.gcDeleteBtn', { count: gcResult.candidateCount })}
@@ -222,13 +191,9 @@ export function MaintenancePanel() {
         {gcResult && (
           <div className="text-xs text-muted-foreground space-y-1">
             {gcResult.dryRun ? (
-              <p className="tabular-nums">
-                {t('maintenance.gcPreviewResult', { count: gcResult.candidateCount })}
-              </p>
+              <p className="tabular-nums">{t('maintenance.gcPreviewResult', { count: gcResult.candidateCount })}</p>
             ) : (
-              <p className="tabular-nums">
-                {t('maintenance.gcDeleteResult', { count: gcResult.deleted ?? 0 })}
-              </p>
+              <p className="tabular-nums">{t('maintenance.gcDeleteResult', { count: gcResult.deleted ?? 0 })}</p>
             )}
           </div>
         )}
@@ -239,12 +204,7 @@ export function MaintenancePanel() {
             <div className="text-sm text-foreground font-medium">{t('maintenance.backupTitle')}</div>
             <p className="text-xs text-muted-foreground mt-0.5">{t('maintenance.backupDesc')}</p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => backup.mutate()}
-            disabled={backup.isPending}
-          >
+          <Button variant="outline" size="sm" onClick={() => backup.mutate()} disabled={backup.isPending}>
             {backup.isPending ? t('common.loading') : t('maintenance.backupBtn')}
           </Button>
         </div>

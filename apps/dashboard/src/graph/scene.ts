@@ -4,7 +4,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { detectGPU } from '@/graph/gpu';
-import { getGraphTheme, type GraphThemeConfig } from '@/graph/theme';
+import { type GraphThemeConfig, getGraphTheme } from '@/graph/theme';
 
 detectGPU().then((caps) => {
   if (caps.webgpu && import.meta.env.DEV) {

@@ -17,7 +17,13 @@ type DayOption = (typeof DAY_OPTIONS)[number];
 export function TimelinePage() {
   const { t, i18n } = useTranslation();
   const [days, setDays] = useState<DayOption>(7);
-  const { data, isLoading: loading, isError, error, refetch } = useQuery({
+  const {
+    data,
+    isLoading: loading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: queryKeys.timeline(days, 500),
     queryFn: () => api.timeline(days, 500),
   });

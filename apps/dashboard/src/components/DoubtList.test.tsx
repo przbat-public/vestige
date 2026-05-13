@@ -61,9 +61,7 @@ describe('DoubtList', () => {
   });
 
   it('limit caps the number of rendered rows', () => {
-    const rows = Array.from({ length: 10 }, (_, i) =>
-      makeRow({ id: `id-${i}`, content: `Doubt ${i}` }),
-    );
+    const rows = Array.from({ length: 10 }, (_, i) => makeRow({ id: `id-${i}`, content: `Doubt ${i}` }));
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
     });
@@ -83,39 +81,26 @@ describe('DoubtList', () => {
 
   it('Verify calls promote API and hides that row', async () => {
     const user = userEvent.setup();
-    const promoteSpy = vi
-      .spyOn(api.memories, 'promote')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockResolvedValue({ id: 'aaa' } as any);
+    const promoteSpy = vi.spyOn(api.memories, 'promote').mockResolvedValue({ id: 'aaa' } as never);
 
-    renderList([
-      makeRow({ id: 'aaa', content: 'First doubtful' }),
-      makeRow({ id: 'bbb', content: 'Second doubtful' }),
-    ]);
+    renderList([makeRow({ id: 'aaa', content: 'First doubtful' }), makeRow({ id: 'bbb', content: 'Second doubtful' })]);
 
     await user.click(screen.getAllByRole('button', { name: /verify/i })[0]);
 
     await waitFor(() => expect(promoteSpy).toHaveBeenCalledWith('aaa'));
-    await waitFor(() =>
-      expect(screen.queryByText('First doubtful')).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByText('First doubtful')).not.toBeInTheDocument());
     expect(screen.getByText('Second doubtful')).toBeInTheDocument();
   });
 
   it('Demote calls demote API and hides that row', async () => {
     const user = userEvent.setup();
-    const demoteSpy = vi
-      .spyOn(api.memories, 'demote')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockResolvedValue({ id: 'bbb' } as any);
+    const demoteSpy = vi.spyOn(api.memories, 'demote').mockResolvedValue({ id: 'bbb' } as never);
 
     renderList([makeRow({ id: 'bbb', content: 'Will be demoted' })]);
 
     await user.click(screen.getByRole('button', { name: /demote/i }));
 
     await waitFor(() => expect(demoteSpy).toHaveBeenCalledWith('bbb'));
-    await waitFor(() =>
-      expect(screen.queryByText('Will be demoted')).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByText('Will be demoted')).not.toBeInTheDocument());
   });
 });

@@ -62,9 +62,8 @@ describe('QueryErrorPanel', () => {
   });
 
   it('has no a11y violations', async () => {
-    const { container } = renderWithI18n(
-      <QueryErrorPanel error={new Error('boom')} onRetry={() => {}} />,
-    );
+    const noop = () => undefined;
+    const { container } = renderWithI18n(<QueryErrorPanel error={new Error('boom')} onRetry={noop} />);
     const results = await axe(container);
     expect(results).toHaveNoViolations();
   });
@@ -73,7 +72,8 @@ describe('QueryErrorPanel', () => {
     await act(async () => {
       await i18n.changeLanguage('pl');
     });
-    renderWithI18n(<QueryErrorPanel error={new Error('Awaria sieci')} onRetry={() => {}} />);
+    const noop = () => undefined;
+    renderWithI18n(<QueryErrorPanel error={new Error('Awaria sieci')} onRetry={noop} />);
 
     expect(screen.getByRole('button', { name: /spróbuj ponownie/i })).toBeInTheDocument();
     expect(screen.getByText(/pokaż szczegóły techniczne/i)).toBeInTheDocument();

@@ -40,15 +40,13 @@ describe('MaintenancePanel', () => {
   });
 
   it('regenerate-embeddings button calls api with force=false and shows the result', async () => {
-    const spy = vi
-      .spyOn(api.maintenance, 'regenerateEmbeddings')
-      .mockResolvedValue({
-        successful: 12,
-        failed: 0,
-        skipped: 100,
-        errors: [],
-        durationMs: 350,
-      });
+    const spy = vi.spyOn(api.maintenance, 'regenerateEmbeddings').mockResolvedValue({
+      successful: 12,
+      failed: 0,
+      skipped: 100,
+      errors: [],
+      durationMs: 350,
+    });
 
     const user = userEvent.setup();
     renderPanel();
@@ -65,9 +63,30 @@ describe('MaintenancePanel', () => {
           clusterId: 0,
           size: 3,
           members: [
-            { id: 'a', contentPreview: 'Card alpha…', similarityToAnchor: '1.000', retention: 0.7, createdAt: '', tags: [] },
-            { id: 'b', contentPreview: 'Card alpha-prime…', similarityToAnchor: '0.91', retention: 0.6, createdAt: '', tags: [] },
-            { id: 'c', contentPreview: 'Card alpha-beta…', similarityToAnchor: '0.88', retention: 0.5, createdAt: '', tags: [] },
+            {
+              id: 'a',
+              contentPreview: 'Card alpha…',
+              similarityToAnchor: '1.000',
+              retention: 0.7,
+              createdAt: '',
+              tags: [],
+            },
+            {
+              id: 'b',
+              contentPreview: 'Card alpha-prime…',
+              similarityToAnchor: '0.91',
+              retention: 0.6,
+              createdAt: '',
+              tags: [],
+            },
+            {
+              id: 'c',
+              contentPreview: 'Card alpha-beta…',
+              similarityToAnchor: '0.88',
+              retention: 0.5,
+              createdAt: '',
+              tags: [],
+            },
           ],
           suggestedAction: 'merge',
         },
@@ -91,9 +110,7 @@ describe('MaintenancePanel', () => {
     vi.spyOn(api.maintenance, 'gc').mockResolvedValue({
       dryRun: true,
       candidateCount: 5,
-      sample: [
-        { id: 'aaaaaaaa', retention: 0.05, ageDays: 90, contentPreview: 'old memory…' },
-      ],
+      sample: [{ id: 'aaaaaaaa', retention: 0.05, ageDays: 90, contentPreview: 'old memory…' }],
     });
 
     const user = userEvent.setup();

@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DoubtList } from '@/components/DoubtList';
 import { DreamResultPanel } from '@/components/DreamResultPanel';
@@ -10,7 +11,6 @@ import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { api } from '@/stores/api';
 import { toast } from '@/stores/toast';
 import type { DreamResult } from '@/types';
-import { useState } from 'react';
 
 /**
  * Morning briefing — what your memory engine wants you to look at today.
@@ -47,8 +47,7 @@ export function BriefingPage() {
       setDreamResult(res);
       toast(t('briefing.dreamCompletedToast'), 'success');
     },
-    onError: (err) =>
-      toast(err instanceof Error ? err.message : t('common.error'), 'error'),
+    onError: (err) => toast(err instanceof Error ? err.message : t('common.error'), 'error'),
   });
 
   return (
@@ -66,27 +65,19 @@ export function BriefingPage() {
         </CardHeader>
         <CardContent>
           {reflect.isLoading && <LoadingSpinner label={t('common.loading')} />}
-          {reflect.isError && (
-            <QueryErrorPanel error={reflect.error} onRetry={reflect.refetch} />
-          )}
+          {reflect.isError && <QueryErrorPanel error={reflect.error} onRetry={reflect.refetch} />}
           {reflect.data && (
             <div className="space-y-3 text-xs">
               <p className="text-foreground font-medium">{reflect.data.summary}</p>
               {reflect.data.insights && reflect.data.insights.length > 0 ? (
                 <ul className="space-y-2">
-                  {reflect.data.insights.slice(0, 6).map((ins, i) => (
+                  {reflect.data.insights.slice(0, 6).map((ins) => (
                     <li
-                      key={`${ins.type}-${i}`}
+                      key={`${ins.type}|${ins.severity}|${ins.description}`}
                       className="flex gap-2 items-start border-t border-border pt-2"
                     >
                       <Badge
-                        variant={
-                          ins.severity === 'high'
-                            ? 'danger'
-                            : ins.severity === 'medium'
-                              ? 'warning'
-                              : 'default'
-                        }
+                        variant={ins.severity === 'high' ? 'danger' : ins.severity === 'medium' ? 'warning' : 'default'}
                       >
                         {ins.type}
                       </Badge>
@@ -110,9 +101,7 @@ export function BriefingPage() {
         </CardHeader>
         <CardContent>
           {confidence.isLoading && <LoadingSpinner label={t('common.loading')} />}
-          {confidence.isError && (
-            <QueryErrorPanel error={confidence.error} onRetry={confidence.refetch} />
-          )}
+          {confidence.isError && <QueryErrorPanel error={confidence.error} onRetry={confidence.refetch} />}
           {confidence.data?.results && confidence.data.results.length > 0 ? (
             <DoubtList results={confidence.data.results} limit={5} />
           ) : confidence.data ? (
@@ -129,15 +118,8 @@ export function BriefingPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground flex-1">
-              {t('briefing.dreamHint')}
-            </p>
-            <Button
-              variant="dream"
-              size="sm"
-              onClick={() => dreamMutation.mutate()}
-              disabled={dreamMutation.isPending}
-            >
+            <p className="text-xs text-muted-foreground flex-1">{t('briefing.dreamHint')}</p>
+            <Button variant="dream" size="sm" onClick={() => dreamMutation.mutate()} disabled={dreamMutation.isPending}>
               {dreamMutation.isPending ? t('common.loading') : t('briefing.dreamRun')}
             </Button>
           </div>

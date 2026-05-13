@@ -58,7 +58,7 @@ type MinimalCtx2D = Pick<
 };
 
 function createMockContext2D(canvas: HTMLCanvasElement): MinimalCtx2D {
-  const noop = () => {};
+  const noop = () => undefined;
   return {
     canvas,
     fillStyle: '#000',

@@ -101,9 +101,7 @@ describe('MemoriesPage — bulk selection', () => {
 
   it('promote bulk action calls api.memories.promote per id and toasts the success count', async () => {
     const user = userEvent.setup();
-    const promoteSpy = vi
-      .spyOn(api.memories, 'promote')
-      .mockResolvedValue(makeMemory({ id: 'aaa' }));
+    const promoteSpy = vi.spyOn(api.memories, 'promote').mockResolvedValue(makeMemory({ id: 'aaa' }));
 
     renderPage();
     await screen.findByText('Alpha memory');
@@ -155,11 +153,7 @@ describe('MemoriesPage — bulk selection', () => {
     // ignores Escape while inside an input — that's the desired UX, not a bug).
     document.body.focus();
     await user.keyboard('{Escape}');
-    await waitFor(() =>
-      expect(
-        screen.queryByRole('region', { name: /bulk action toolbar/i }),
-      ).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByRole('region', { name: /bulk action toolbar/i })).not.toBeInTheDocument());
   });
 
   it('Cmd+A selects every visible row', async () => {

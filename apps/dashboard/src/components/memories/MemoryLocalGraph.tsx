@@ -30,12 +30,7 @@ interface MemoryLocalGraphProps {
  * settings cache separately. The backend uses `most_connected_memory` as
  * a fallback if no center is provided — we always pass `center_id`.
  */
-export function MemoryLocalGraph({
-  memoryId,
-  depth = 1,
-  maxNodes = 30,
-  className = 'h-64',
-}: MemoryLocalGraphProps) {
+export function MemoryLocalGraph({ memoryId, depth = 1, maxNodes = 30, className = 'h-64' }: MemoryLocalGraphProps) {
   const { t } = useTranslation();
   const events = useWebSocket((s) => s.events);
   const isDreaming = useWebSocket((s) => s.isDreaming);
@@ -62,11 +57,7 @@ export function MemoryLocalGraph({
   }
 
   if (!data || data.nodes.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground italic px-2 py-3">
-        {t('memories.localGraph.empty')}
-      </p>
-    );
+    return <p className="text-xs text-muted-foreground italic px-2 py-3">{t('memories.localGraph.empty')}</p>;
   }
 
   return (
@@ -80,8 +71,7 @@ export function MemoryLocalGraph({
         reducedMotion={reducedMotion}
       />
       <div className="absolute bottom-1 right-2 text-[10px] text-muted-foreground/80 tabular-nums pointer-events-none">
-        {t('graph.nodesCount', { nodes: data.nodes.length })} ·{' '}
-        {t('graph.edgesCount', { edges: data.edges.length })}
+        {t('graph.nodesCount', { nodes: data.nodes.length })} · {t('graph.edgesCount', { edges: data.edges.length })}
       </div>
     </div>
   );

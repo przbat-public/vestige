@@ -27,10 +27,7 @@ function renderLegend(nodes: GraphNode[], limit?: number) {
 
 describe('TagLegend', () => {
   it('renders nothing when there are no tagged nodes', () => {
-    const { container } = renderLegend([
-      makeNode('a', []),
-      makeNode('b', []),
-    ]);
+    const { container } = renderLegend([makeNode('a', []), makeNode('b', [])]);
     expect(container.firstChild).toBeNull();
   });
 
@@ -75,21 +72,14 @@ describe('TagLegend', () => {
   });
 
   it('shows the untagged row when there are tagged AND untagged nodes', () => {
-    renderLegend([
-      makeNode('a', ['acme']),
-      makeNode('b', []),
-      makeNode('c', []),
-    ]);
+    renderLegend([makeNode('a', ['acme']), makeNode('b', []), makeNode('c', [])]);
     expect(screen.getByText(/untagged/i)).toBeInTheDocument();
     const untaggedRow = screen.getByText(/untagged/i).closest('li');
     expect(untaggedRow).toHaveTextContent('2');
   });
 
   it('omits the untagged row when every node is tagged', () => {
-    renderLegend([
-      makeNode('a', ['acme']),
-      makeNode('b', ['personal']),
-    ]);
+    renderLegend([makeNode('a', ['acme']), makeNode('b', ['personal'])]);
     expect(screen.queryByText(/untagged/i)).not.toBeInTheDocument();
   });
 });

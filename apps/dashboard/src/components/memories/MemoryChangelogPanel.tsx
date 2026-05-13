@@ -55,34 +55,28 @@ export function MemoryChangelogPanel({ memoryId }: MemoryChangelogPanelProps) {
         {isLoading && <LoadingSpinner label={t('common.loading')} />}
         {isError && <QueryErrorPanel error={error} onRetry={refetch} />}
         {data && data.transitions.length === 0 && (
-          <p className="text-xs text-muted-foreground italic">
-            {t('memories.changelog.empty')}
-          </p>
+          <p className="text-xs text-muted-foreground italic">{t('memories.changelog.empty')}</p>
         )}
         {data && data.transitions.length > 0 && (
           <ol className="space-y-1.5 text-xs">
-            {data.transitions.map((entry, idx) => (
+            {data.transitions.map((entry) => (
               <li
-                key={`${entry.timestamp}-${idx}`}
+                key={`${entry.timestamp}|${entry.fromState}->${entry.toState}|${entry.reasonType}`}
                 className="flex flex-col gap-0.5 border-l-2 border-border pl-3 py-1"
               >
                 <div className="flex items-center gap-2 text-muted-foreground tabular-nums">
-                  <time dateTime={entry.timestamp}>
-                    {formatter.format(new Date(entry.timestamp))}
-                  </time>
+                  <time dateTime={entry.timestamp}>{formatter.format(new Date(entry.timestamp))}</time>
                   <span aria-hidden="true">·</span>
                   <span className="text-foreground font-medium">{entry.reasonType}</span>
                 </div>
                 <div className="text-foreground/80">
                   <span className="opacity-60">{entry.fromState}</span>
-                  <span aria-label="changed to" className="mx-1.5">→</span>
+                  <span role="img" aria-label="changed to" className="mx-1.5">
+                    →
+                  </span>
                   <span>{entry.toState}</span>
                 </div>
-                {entry.reasonData && (
-                  <div className="text-muted-foreground italic break-words">
-                    {entry.reasonData}
-                  </div>
-                )}
+                {entry.reasonData && <div className="text-muted-foreground italic break-words">{entry.reasonData}</div>}
               </li>
             ))}
           </ol>

@@ -56,4 +56,3 @@ export async function detectGPU(): Promise<GPUCapabilities> {
   cached = { webgpu, webgl2, maxTextureSize, renderer };
   return cached;
 }
-

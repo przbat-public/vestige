@@ -125,7 +125,11 @@ export function TimeSlider({ nodes, onDateChange, onToggle }: Props) {
             </select>
           </div>
           <span className="text-xs text-foreground font-medium">{formatDate(currentDate, locale)}</span>
-          <button type="button" onClick={toggle} className="text-xs text-muted-foreground hover:text-foreground transition">
+          <button
+            type="button"
+            onClick={toggle}
+            className="text-xs text-muted-foreground hover:text-foreground transition"
+          >
             {t('timeSlider.close')}
           </button>
         </div>

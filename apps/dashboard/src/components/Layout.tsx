@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Outlet } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Sidebar } from '@/components/layout/Sidebar';
+import { Outlet } from 'react-router';
 import { CommandPalette } from '@/components/layout/CommandPalette';
+import { Sidebar } from '@/components/layout/Sidebar';
 import { RouteAnnouncer } from '@/components/RouteAnnouncer';
 
 export function Layout() {
@@ -75,7 +75,15 @@ export function Layout() {
             className="text-muted-foreground hover:text-foreground p-1"
             aria-label={t('a11y.openNavigation')}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
               <path d="M3 12h18M3 6h18M3 18h18" />
             </svg>
           </button>

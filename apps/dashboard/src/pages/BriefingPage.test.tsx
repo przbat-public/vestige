@@ -18,9 +18,7 @@ const REFLECT: ReflectResult = {
 } as ReflectResult;
 
 const CONFIDENCE: ConfidenceResult = {
-  results: [
-    { id: 'aaa', content: 'Doubtful memory', confidence: 0.3, classification: 'opinion' },
-  ],
+  results: [{ id: 'aaa', content: 'Doubtful memory', confidence: 0.3, classification: 'opinion' }],
 } as ConfidenceResult;
 
 function renderPage() {

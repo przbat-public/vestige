@@ -1,7 +1,7 @@
 import * as THREE from 'three';
+import { type GraphThemeConfig, getGraphTheme, isDarkMode } from '@/graph/theme';
 import type { GraphNode } from '@/types';
 import { NODE_TYPE_COLORS } from '@/types';
-import { getGraphTheme, isDarkMode, type GraphThemeConfig } from '@/graph/theme';
 
 /** How to colour graph nodes: by node-type palette, or by primary tag (for cluster discovery). */
 export type NodeColorMode = 'type' | 'tag';
@@ -344,7 +344,12 @@ export class NodeManager {
   }
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestrates materialization, dissolution, growth, breathing, and label visibility per frame
-  animate(time: number, nodeById: Map<string, GraphNode>, camera: THREE.PerspectiveCamera, nodeOpacities?: Map<string, number>) {
+  animate(
+    time: number,
+    nodeById: Map<string, GraphNode>,
+    camera: THREE.PerspectiveCamera,
+    nodeOpacities?: Map<string, number>,
+  ) {
     this.animateMaterializing();
     this.animateDissolving();
     this.animateGrowing();

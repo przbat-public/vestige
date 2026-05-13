@@ -66,20 +66,18 @@ describe('ReviewPage', () => {
       total: 2,
       memories: [a, b],
     } as ReviewQueueResponse);
-    const reviewSpy = vi
-      .spyOn(api.memories, 'review')
-      .mockResolvedValue({
-        id: a.id,
-        rating: 'good',
-        previousRetention: 0.6,
-        newRetention: 0.85,
-        previousStability: 1.5,
-        newStability: 4.0,
-        difficulty: 5.0,
-        reps: 2,
-        lapses: 0,
-        nextReviewAt: '2026-05-12T10:00:00Z',
-      } satisfies ReviewResult);
+    const reviewSpy = vi.spyOn(api.memories, 'review').mockResolvedValue({
+      id: a.id,
+      rating: 'good',
+      previousRetention: 0.6,
+      newRetention: 0.85,
+      previousStability: 1.5,
+      newStability: 4.0,
+      difficulty: 5.0,
+      reps: 2,
+      lapses: 0,
+      nextReviewAt: '2026-05-12T10:00:00Z',
+    } satisfies ReviewResult);
 
     renderPage();
     expect(await screen.findByText('Card A')).toBeInTheDocument();
@@ -97,20 +95,18 @@ describe('ReviewPage', () => {
       total: 1,
       memories: [card],
     } as ReviewQueueResponse);
-    const reviewSpy = vi
-      .spyOn(api.memories, 'review')
-      .mockResolvedValue({
-        id: card.id,
-        rating: 'easy',
-        previousRetention: 0.6,
-        newRetention: 0.95,
-        previousStability: 1.5,
-        newStability: 8.0,
-        difficulty: 4.0,
-        reps: 2,
-        lapses: 0,
-        nextReviewAt: null,
-      } satisfies ReviewResult);
+    const reviewSpy = vi.spyOn(api.memories, 'review').mockResolvedValue({
+      id: card.id,
+      rating: 'easy',
+      previousRetention: 0.6,
+      newRetention: 0.95,
+      previousStability: 1.5,
+      newStability: 8.0,
+      difficulty: 4.0,
+      reps: 2,
+      lapses: 0,
+      nextReviewAt: null,
+    } satisfies ReviewResult);
 
     renderPage();
     await screen.findByText(card.content);

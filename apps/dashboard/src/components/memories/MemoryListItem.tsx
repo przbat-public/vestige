@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
-import { ProgressBar } from '@/components/ui/progress-bar';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ProgressBar } from '@/components/ui/progress-bar';
 import type { Memory } from '@/types';
 import { EPISTEMIC_STATUS_COLORS, NODE_TYPE_COLORS, retentionColor } from '@/types';
 
@@ -74,19 +74,14 @@ export function MemoryListItem({
             : 'hover:bg-accent border border-transparent'
       }`}
     >
+      {/* biome-ignore lint/a11y/noLabelWithoutControl: <Checkbox/> renders a real <input type="checkbox"> that the label implicitly associates with */}
       <label
         className={`flex items-center justify-center pl-2 pr-1 cursor-pointer ${
           selectionMode || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
         } transition-opacity`}
       >
-        <span className="sr-only">
-          {t('bulk.toggleAriaLabel', { content: memory.content.slice(0, 40) })}
-        </span>
-        <Checkbox
-          checked={isSelected}
-          onChange={handleCheckboxChange}
-          onClick={(e) => e.stopPropagation()}
-        />
+        <span className="sr-only">{t('bulk.toggleAriaLabel', { content: memory.content.slice(0, 40) })}</span>
+        <Checkbox checked={isSelected} onChange={handleCheckboxChange} onClick={(e) => e.stopPropagation()} />
       </label>
       <button
         type="button"
@@ -107,10 +102,7 @@ export function MemoryListItem({
             {t(`nodeTypes.${memory.nodeType}`, { defaultValue: memory.nodeType })}
           </span>
           {memory.epistemicStatus && (
-            <span
-              className="text-xs"
-              style={{ color: EPISTEMIC_STATUS_COLORS[memory.epistemicStatus] || '#8B95A5' }}
-            >
+            <span className="text-xs" style={{ color: EPISTEMIC_STATUS_COLORS[memory.epistemicStatus] || '#8B95A5' }}>
               {t(`epistemic.${memory.epistemicStatus}`)}
             </span>
           )}

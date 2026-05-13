@@ -198,13 +198,13 @@
   },
   "briefing": {
     "title": "Poranny briefing",
-    "subtitle": "Co Twój silnik pamięci chce, byś dziś zobaczył.",
+    "subtitle": "Co twój silnik pamięci chce, byś dziś zobaczył.",
     "reflectionTitle": "Dzisiejsza refleksja",
     "reflectionDesc": "Sprzeczności, luki wiedzy i przedawnione decyzje wykryte od ostatniej refleksji.",
     "reflectionEmpty": "Brak wniosków z refleksji — baza jest spójna lub za mała.",
     "doubtTitle": "Zweryfikuj wątpliwości",
     "doubtDesc": "Wspomnienia o niskiej pewności — zweryfikuj (promuj) prawdziwe, osłab fałszywe.",
-    "doubtEmpty": "Brak wspomnień o niskiej pewności — Twoja baza jest dobrze skalibrowana.",
+    "doubtEmpty": "Brak wspomnień o niskiej pewności — twoja baza jest dobrze skalibrowana.",
     "dreamTitle": "Odkryj połączenia",
     "dreamDesc": "Uruchom cykl snu, by ujawnić wzorce między domenami i ukryte powiązania.",
     "dreamHint": "Zajmie kilka sekund. Zachowuje nowe połączenia w grafie.",
@@ -445,7 +445,7 @@
     "whatIs": {
       "title": "Czym jest Vestige?",
       "p1": "Vestige to system pamięci dla asystentów AI. Pomyśl o nim jak o drugim mózgu — zapamiętuje rzeczy, żeby twój AI nie musiał zaczynać każdej rozmowy od zera. Gdy porozmawiasz z AI jutro, będzie pamiętał, o czym mówiliście dzisiaj.",
-      "p2": "Ale to nie jest zwykły notatnik. Twój mózg naturalnie zapomina — i to jest przydatne, bo dzięki temu ważne rzeczy są na wierzchu. Vestige działa tak samo: wspomnienia, których często używasz, pozostają silne. Te, których nie ruszasz, powoli blakną w tle.",
+      "p2": "Ale to nie jest zwykły notatnik. Twój mózg naturalnie zapomina — i to jest przydatne, bo dzięki temu na wierzchu są rzeczy ważne. Vestige działa tak samo: wspomnienia, których często używasz, pozostają silne. Te, których nie ruszasz, powoli blakną w tle.",
       "p3": "To nie science fiction. Vestige opiera się na recenzowanych badaniach naukowych z ostatnich 50 lat — tych samych, które naukowcy wykorzystują do zrozumienia ludzkiej pamięci. Tyle że tutaj stosujemy je do AI."
     },
     "analogiesTitle": "Pomyśl o tym jak o...",
@@ -467,7 +467,7 @@
       "title": "Jak żyje i umiera wspomnienie",
       "subtitle": "Cykl życia jednego wspomnienia — od stworzenia do potencjalnego zapomnienia",
       "s1": {
-        "title": "Narodziny — Twój AI zapisuje coś ważnego",
+        "title": "Narodziny — twój AI zapisuje coś ważnego",
         "desc": "Gdy twój AI nauczy się czegoś istotnego (naprawiony bug, podjęta decyzja, imię osoby), wysyła to do Vestige. Vestige analizuje treść, rozumie jej znaczenie i zapisuje z pełną siłą."
       },
       "s2": {
@@ -483,7 +483,7 @@
         "desc": "Jeśli nikt nie sięga po to wspomnienie przez tygodnie, zaczyna blaknąć. Dzieje się to według formuły zwanej prawem potęgowym — szybko na początku, potem coraz wolniej. Dobrze nauczone wspomnienia (wysoka stabilność) blakną dużo wolniej niż nowe."
       },
       "s5": {
-        "title": "Odrodzenie albo zgaśnięcie — Twój wybór",
+        "title": "Odrodzenie albo zgaśnięcie — twój wybór",
         "desc": "Możesz ręcznie \"Wzmocnić\" blaknące wspomnienie z dashboardu albo pozwolić mu dalej spadać. Jeśli spadnie poniżej progu, staje się kandydatem do posprzątania. Nic nie jest usuwane automatycznie — zawsze masz kontrolę."
       }
     },
@@ -588,7 +588,7 @@
       "q1": "Czy Vestige może usunąć moje wspomnienia bez pytania?",
       "a1": "Nie. Vestige nigdy nie usuwa niczego automatycznie. Wspomnienia mogą blaknąć (ich zapamiętanie spada), ale pozostają w bazie danych. Tylko ty możesz usunąć wspomnienie — ze strony Wspomnień lub z panelu szczegółów w Grafie.",
       "q2": "Co się dzieje, jeśli Vestige padnie?",
-      "a2": "Twój AI działa dalej normalnie — po prostu nie będzie miał pamięci długoterminowej, dopóki Vestige nie wróci. Wszystkie zapisane wspomnienia są bezpieczne w lokalnej bazie SQLite na twoim komputerze. Nic nie ginie.",
+      "a2": "Twój AI działa dalej normalnie — po prostu nie będzie miał pamięci długoterminowej, dopóki Vestige nie wróci. Wszystkie zapisane wspomnienia leżą bezpiecznie w lokalnej bazie SQLite na twoim komputerze. Nic nie ginie.",
       "q3": "Czy moje dane są gdzieś wysyłane?",
       "a3": "Nie. Wszystko działa lokalnie na twojej maszynie. Model embeddingów (nomic-embed-text) uruchamia się na twoim CPU, baza danych to lokalny plik SQLite, reranker też działa lokalnie. Zero zapytań do API, zero chmury, zero śledzenia.",
       "q4": "Jaka jest różnica między Snem a Konsolidacją?",

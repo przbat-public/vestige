@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { BulkActionBar } from '@/components/memories/BulkActionBar';
 import { MemoryDetail } from '@/components/memories/MemoryDetail';
 import { MemoryListItem } from '@/components/memories/MemoryListItem';
-import { BulkActionBar } from '@/components/memories/BulkActionBar';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -21,6 +21,7 @@ import { NODE_TYPE_COLORS } from '@/types';
 
 const memoryId = (m: Memory): string => m.id;
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: top-level page wires search, filters, multi-select, drawer, and CRUD; breaking it up further would scatter related state without clarifying flow
 export function MemoriesPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -204,6 +205,7 @@ export function MemoriesPage() {
             />
             <span className="text-xs text-muted-foreground">{t('common.total', { count: total })}</span>
             {memories.length > 0 && (
+              // biome-ignore lint/a11y/noLabelWithoutControl: <Checkbox/> renders a real <input type="checkbox"> that the label implicitly associates with
               <label className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
                 <Checkbox
                   checked={multi.allSelected}

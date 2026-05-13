@@ -77,7 +77,16 @@ export function Graph3D({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<SceneState | null>(null);
-  const propsRef = useRef({ edges, events, isDreaming, reducedMotion, colorMode, nodeOpacities, onSelect, onGraphMutation });
+  const propsRef = useRef({
+    edges,
+    events,
+    isDreaming,
+    reducedMotion,
+    colorMode,
+    nodeOpacities,
+    onSelect,
+    onGraphMutation,
+  });
   propsRef.current = { edges, events, isDreaming, reducedMotion, colorMode, nodeOpacities, onSelect, onGraphMutation };
   const dataRef = useRef({ nodes, edges });
   dataRef.current = { nodes, edges };
@@ -216,6 +225,7 @@ export function Graph3D({
 
     let frameCount = 0;
     let lastTime = performance.now() * 0.001;
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: WebGL render loop coordinates camera, easing, hover state, and pulsing mutations; splitting it would force shared mutable state through props
     function animate() {
       if (state.paused) return;
       state.animationId = requestAnimationFrame(animate);
@@ -378,11 +388,7 @@ export function Graph3D({
     // because that's the constructor state, but the user may have switched
     // to 'tag' mode before this rebuild (e.g. on tag filter change).
     if (propsRef.current.colorMode && propsRef.current.colorMode !== 'type') {
-      freshNodeManager.setColorMode(
-        propsRef.current.colorMode,
-        s.nodeById,
-        isDarkMode(),
-      );
+      freshNodeManager.setColorMode(propsRef.current.colorMode, s.nodeById, isDarkMode());
     }
   }, [nodes, edges]);
 
