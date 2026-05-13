@@ -120,7 +120,7 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
         tool(
             "search",
             "Search memories",
-            "Unified search tool. Uses hybrid search (keyword + semantic + convex combination fusion) internally. Auto-strengthens memories on access (Testing Effect).",
+            "Unified search tool. Hybrid search (BM25 keyword + semantic embedding) fused with Reciprocal Rank Fusion (RRF), then run through the 8-stage cognitive pipeline (gating, dedup, scoring, spreading activation, token budget). Auto-strengthens memories on access (Testing Effect).",
             tools::search_unified::schema(),
             // Search performs FSRS strengthening on hits, but the user-visible
             // contract is "read"; clients can auto-call without prompting.
@@ -129,9 +129,9 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
         tool(
             "memory",
             "Memory CRUD",
-            "Unified memory management tool. Actions: 'get' (retrieve full node), 'delete' (remove memory), 'state' (get accessibility state), 'promote' (thumbs up — increases retrieval strength), 'demote' (thumbs down — decreases retrieval strength, does NOT delete), 'edit' (update content in-place, preserves FSRS state).",
+            "Unified memory management tool. Actions: 'get' (retrieve full node by id), 'get_batch' (retrieve up to 20 nodes in one call via 'ids' array — useful for expanding search results), 'delete' (remove memory), 'state' (get accessibility state), 'promote' (thumbs up — increases retrieval strength), 'demote' (thumbs down — decreases retrieval strength, does NOT delete), 'edit' (update content in-place, preserves FSRS state).",
             tools::memory_unified::schema(),
-            // Routes 'delete' and 'edit' alongside read-only 'get'/'state' —
+            // Routes 'delete' and 'edit' alongside read-only 'get'/'get_batch'/'state' —
             // worst-case wins, so this is a destructive tool.
             destructive("Memory CRUD", false),
         ),
