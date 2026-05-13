@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.3.0] — post-v3.2.1 work
 
-Aggregates the post-v3.2.1 refactor wave (Storage God Object decomposition, MCP tool polish, preprocessing/neuroscience tightening, expanded test coverage) plus the LoCoMo benchmark harness improvements that lifted full N=1540 from 41.00% to 66.17% (+25.17 pp, surpassing LangMem and within 0.71 pp of Mem0). Includes the typed-memory schema/type foundation needed for the upcoming typed-memory work. No public-API removals; all changes default-on but additive at the data layer.
+Aggregates the post-v3.2.1 refactor wave (Storage God Object decomposition, MCP tool polish, preprocessing/neuroscience tightening, expanded test coverage) plus the LoCoMo benchmark harness improvements that lifted full N=1540 from 41.00% to 66.17% (+25.17 pp, surpassing LangMem and within 0.71 pp of Mem0). Includes the typed-memory schema/type foundation needed for the upcoming typed-memory work. Closes the supply-chain and metadata-drift gaps surfaced by the bird's-eye sweep on 2026-05-13. No public-API removals; all changes default-on but additive at the data layer.
 
 ### Added
 
@@ -54,6 +54,18 @@ Aggregates the post-v3.2.1 refactor wave (Storage God Object decomposition, MCP 
 ### Removed
 - **Dead deprecated tool dispatch and implementations** (`refactor(mcp)`, commit `e9026d6f9e6`) — see commit body for the full list. None were declared in the public catalog.
 - **`crates/vestige-core/src/bin/`** test/bench shims moved into the proper `tests/` directory tree (commit `ba4df157790`).
+
+### Security & Supply Chain
+- **Eliminated bare `openssl` from the dependency graph** by switching `fastembed` to `default-features = false` and explicitly enabling `hf-hub-rustls-tls` + `ort-download-binaries-rustls-tls`. Previously native-tls pulled in `openssl 0.10` (which `deny.toml` bans, but the workspace never actually reached the `bans` gate before because licenses failed first). Also drops the unused `image-models` feature — Vestige is text-only, so the entire `image`/`tiff`/`zune-jpeg` stack is now gone.
+- **Patched 4 RustSec advisories in `rustls-webpki`** (RUSTSEC-2026-0049/0098/0099/0104) by bumping the transitive lock entry from 0.103.9 → 0.103.13. Zero remaining `vulnerabilities.found` on `cargo audit`; only the 5 `unmaintained`/`unsound` warnings from `fastembed`/`candle` transitives remain, which CI does not block on.
+- **Eliminated all 4 `wildcard` dependency errors** that `cargo deny` was raising on `vestige-mcp`, `vestige-restore`, `vestige-e2e-tests`, and `vestige-locomo-bench`. Now declared once as `vestige-core = { version = "3.3.0", path = "crates/vestige-core" }` in `[workspace.dependencies]` and inherited via `workspace = true`. Aligns with cargo's recommended `path + version` form.
+- **License field added to `vestige-e2e-tests` and `vestige-locomo-bench`** — both internal crates were unlicensed in their Cargo.toml; `cargo deny check licenses` now passes.
+
+### CI / Tooling
+- **Fixed metadata-drift CI guard** (`scripts/check-version-and-tools.sh`): the awk-based tool-count parser only knew the legacy literal-struct format and stopped working after the Wave 6 `tool(...)` helper refactor. Updated to count `tool(` calls inside `build_tools_list`. Also added a license-consistency check that verifies every package manifest (`packages/vestige-init`, `packages/vestige-mcp-npm`, `packages/vestige-mcpb`) matches the workspace license — added because `packages/vestige-mcpb/manifest.json` had drifted to `"MIT"` despite the codebase being AGPL-3.0-only.
+- **Fixed dashboard CI job silently doing nothing**: `pnpm --filter dashboard` matched zero workspaces because the package is named `vestige-dashboard`, not `dashboard`. The filter resolved to "No projects matched", exit 0 — so the job had been green-but-inert. Updated to `--filter vestige-dashboard`.
+- **Synchronised workspace version to 3.3.0** across `Cargo.toml` and `apps/dashboard/package.json`. Previously the root `package.json` had been bumped to 3.3.0 in commit `674a710` without updating the other two, leaving the `metadata` CI job failing on every push for 5 days.
+- **Fixed `packages/vestige-mcpb/manifest.json` license** from the incorrect `"MIT"` to `"AGPL-3.0-only"` (the rest of the repository — root, npm packages, every crate — was already AGPL-3.0-only).
 
 ### Documentation
 - `crates/vestige-core/src/neuroscience/mod.rs` and submodules now document the cognitive-role grouping (encoding vs retrieval vs consolidation) instead of the prior alphabetical layout (commit `c9069fd50fc`).

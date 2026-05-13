@@ -12,7 +12,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "3.2.1"
+version = "3.3.0"
 edition = "2024"
 rust-version = "1.91"
 license = "AGPL-3.0-only"
@@ -34,6 +34,11 @@ directories = "6"
 rusqlite = { version = "0.39", features = ["chrono", "serde_json"] }
 regex = "1"
 tempfile = "3"
+
+# Internal crates — declared here with `version + path` so consumers don't
+# emit a wildcard dependency (cargo deny rejects `path = "..."` alone because
+# it implicitly resolves to `version = "*"`).
+vestige-core = { version = "3.3.0", path = "crates/vestige-core", default-features = false }
 
 [workspace.lints.clippy]
 # Restriction lint added in clippy 1.81 (2024-09): scoped visibility modifiers

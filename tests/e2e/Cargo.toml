@@ -2,18 +2,19 @@
 name = "vestige-e2e-tests"
 version = "0.1.0"
 edition = "2024"
+license = "AGPL-3.0-only"
 publish = false
 
 [dependencies]
-vestige-core = { path = "../../crates/vestige-core", features = ["embeddings", "vector-search", "preprocessing"] }
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "serde"] }
-tempfile = "3"
-serde_json = "1"
-serde = { version = "1", features = ["derive"] }
+vestige-core = { workspace = true, features = ["embeddings", "vector-search", "preprocessing"] }
+chrono.workspace = true
+uuid.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio.workspace = true
 
 [[test]]
 name = "cognitive_tests"

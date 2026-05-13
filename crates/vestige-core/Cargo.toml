@@ -67,7 +67,16 @@ notify = "8"
 # ============================================================================
 # nomic-embed-text-v1.5: 768 dimensions, 8192 token context, Matryoshka support
 # v5.11: Adds Nomic v2 MoE (nomic-v2-moe feature) + Qwen3 reranker (qwen3 feature)
-fastembed = { version = "5.13", optional = true }
+#
+# We disable fastembed's defaults to:
+#   1. Swap native-tls → rustls (eliminates bare `openssl` from the dep graph,
+#      which `cargo deny` bans in favour of rustls or vendored-openssl).
+#   2. Drop `image-models` — Vestige only does text embeddings, so the entire
+#      image crate stack is dead weight.
+fastembed = { version = "5.13", default-features = false, features = [
+    "hf-hub-rustls-tls",
+    "ort-download-binaries-rustls-tls",
+], optional = true }
 
 # ============================================================================
 # OPTIONAL: Vector Search (USearch - HNSW, 20x faster than FAISS)

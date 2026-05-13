@@ -41,7 +41,7 @@ path = "src/bin/cli/main.rs"
 # Includes: FSRS-6, spreading activation, synaptic tagging, hippocampal indexing,
 # memory states, context memory, importance signals, dreams, preprocessing
 # ============================================================================
-vestige-core = { path = "../vestige-core", default-features = false, features = ["bundled-sqlite"] }
+vestige-core = { workspace = true, features = ["bundled-sqlite"] }
 
 # ============================================================================
 # Workspace-shared deps

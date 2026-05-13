@@ -19,7 +19,7 @@ path = "src/main.rs"
 [dependencies]
 # Use vestige-core WITHOUT the heavy features. Storage::new() degrades
 # gracefully when embeddings/vector-search are absent and restores plain rows.
-vestige-core = { path = "../vestige-core", default-features = false, features = ["bundled-sqlite"] }
+vestige-core = { workspace = true, features = ["bundled-sqlite"] }
 
 serde.workspace = true
 serde_json.workspace = true

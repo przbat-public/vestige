@@ -51,9 +51,13 @@ note "All crates inherit version from workspace"
 # ----------------------------------------------------------------------------
 # Counts the ToolDescription entries in build_tools_list — the canonical list
 # of MCP tools exposed to clients (post-b15 split, lives in server/catalog.rs).
+# Each entry is constructed via the `tool(name, title, ...)` helper, so we
+# count occurrences of `tool(` at the start of a (whitespace-indented) line
+# inside the function. This survives both the legacy literal-struct format
+# and the post-Wave-6 helper-based format.
 TOOL_COUNT="$(awk '
-  /fn build_tools_list/{capture=1}
-  capture && /name: "[a-z_]+"\.to_string\(\)/{count++}
+  /fn build_tools_list/{capture=1; next}
+  capture && /^[[:space:]]+tool\(/{count++}
   capture && /^\}[[:space:]]*$/ && count > 0 {print count; exit}
 ' crates/vestige-mcp/src/server/catalog.rs)"
 
@@ -79,7 +83,29 @@ fi
 note "ARCHITECTURE.md advertises ${EXPECTED_TOOL_COUNT} tools"
 
 # ----------------------------------------------------------------------------
-# 3. Rust toolchain
+# 3. License consistency
+# ----------------------------------------------------------------------------
+# All packages that declare a license must declare the SAME license string as
+# the workspace. The MCPB manifest historically drifted to "MIT" even though
+# the codebase is AGPL-3.0-only; this check stops that from happening again.
+WS_LICENSE="$(awk -F'"' '/^license[[:space:]]*=/{print $2; exit}' Cargo.toml)"
+[[ -n "${WS_LICENSE:-}" ]] || fail "Could not read [workspace.package].license from Cargo.toml"
+note "Workspace license: ${WS_LICENSE}"
+
+declare -a license_files=(
+  "packages/vestige-init/package.json"
+  "packages/vestige-mcp-npm/package.json"
+  "packages/vestige-mcpb/manifest.json"
+)
+for f in "${license_files[@]}"; do
+  pkg_license="$(awk -F'"' '/"license"/{print $4; exit}' "$f")"
+  [[ "$pkg_license" == "$WS_LICENSE" ]] || fail \
+    "$f license ($pkg_license) ≠ workspace license ($WS_LICENSE)"
+done
+note "All package manifests match workspace license"
+
+# ----------------------------------------------------------------------------
+# 4. Rust toolchain
 # ----------------------------------------------------------------------------
 if [[ -f rust-toolchain.toml ]]; then
   TOOLCHAIN_CHANNEL="$(awk -F'"' '/^channel/{print $2; exit}' rust-toolchain.toml)"

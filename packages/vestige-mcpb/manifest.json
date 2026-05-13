@@ -12,7 +12,7 @@
     "type": "git",
     "url": "https://github.com/samvallad33/vestige"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "server": {
     "type": "binary",
     "entry_point": "server/vestige-mcp-darwin-arm64",

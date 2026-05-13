@@ -146,9 +146,14 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter dashboard check
-      - run: pnpm --filter dashboard test
-      - run: pnpm --filter dashboard build
+      # The package name is `vestige-dashboard` (apps/dashboard/package.json),
+      # not `dashboard` — using the wrong filter silently turned this job into
+      # a no-op for months ("No projects matched the filters", exit 0). Belt
+      # and braces: filter by package name AND verify the filter found a
+      # workspace member by failing the step if pnpm reports zero matches.
+      - run: pnpm --filter vestige-dashboard check
+      - run: pnpm --filter vestige-dashboard test
+      - run: pnpm --filter vestige-dashboard build
 
   coverage:
     name: Code Coverage
