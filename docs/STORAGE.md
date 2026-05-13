@@ -11,8 +11,10 @@ All memories are stored in a **single local SQLite file**:
 | Platform | Database Location |
 |----------|------------------|
 | macOS | `~/Library/Application Support/com.vestige.core/vestige.db` |
-| Linux | `~/.local/share/vestige/core/vestige.db` |
-| Windows | `%APPDATA%\vestige\core\vestige.db` |
+| Linux | `~/.local/share/core/vestige.db` (`$XDG_DATA_HOME/core/` if set) |
+| Windows | `%APPDATA%\vestige\core\data\vestige.db` |
+
+> Paths come from the [`directories`](https://docs.rs/directories) crate (`ProjectDirs::from("com", "vestige", "core")` → `data_dir()`). The Linux folder is just `core/` because `directories` uses only the application name on Linux per XDG. Override the location with `--data-dir <PATH>` (see below) if you want a stable path that does not depend on the platform.
 
 ---
 
@@ -137,7 +139,7 @@ Claude Code config - for "Storm":
 cp ~/Library/Application\ Support/com.vestige.core/vestige.db ~/vestige-backup.db
 
 # Linux
-cp ~/.local/share/vestige/core/vestige.db ~/vestige-backup.db
+cp ~/.local/share/core/vestige.db ~/vestige-backup.db
 ```
 
 ### Automated (cron job)

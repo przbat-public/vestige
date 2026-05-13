@@ -263,7 +263,7 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 |------|-------------|
 | `search` | 8-stage cognitive search — compound query decomposition + triple hybrid (BM25 + semantic + RRF) + Jina v2 reranking + temporal + competition + spreading activation |
 | `smart_ingest` | Intelligent storage with CREATE/UPDATE/SUPERSEDE via Prediction Error Gating. Runs the Content Intelligence Pipeline (entity extraction, coreference, temporal anchoring, relation extraction, provenance). Batch mode for session-end saves |
-| `memory` | Get, edit, delete, check state, promote (thumbs up), demote (thumbs down) |
+| `memory` | Get, batch get (up to 20 ids in one call), edit, delete, check state, promote (thumbs up), demote (thumbs down) |
 | `codebase` | Remember code patterns and architectural decisions per-project |
 | `intention` | Prospective memory — "remind me to X when Y happens" |
 
@@ -420,7 +420,7 @@ First run downloads ~130MB from Hugging Face. If behind a proxy:
 export HTTPS_PROXY=your-proxy:port
 ```
 
-Cache: macOS `~/Library/Caches/com.vestige.core/fastembed` | Linux `~/.cache/vestige/fastembed`
+Cache: macOS `~/Library/Caches/vestige.vestige/fastembed` | Linux `~/.cache/vestige/fastembed`
 </details>
 
 <details>

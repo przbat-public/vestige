@@ -16,9 +16,9 @@ The embedding model is cached in platform-specific directories:
 
 | Platform | Cache Location |
 |----------|----------------|
-| macOS | `~/Library/Caches/com.vestige.core/fastembed` |
+| macOS | `~/Library/Caches/vestige.vestige/fastembed` |
 | Linux | `~/.cache/vestige/fastembed` |
-| Windows | `%LOCALAPPDATA%\vestige\cache\fastembed` |
+| Windows | `%LOCALAPPDATA%\vestige\vestige\cache\fastembed` |
 
 Override with environment variable:
 ```bash

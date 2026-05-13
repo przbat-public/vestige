@@ -310,15 +310,15 @@ static DASHBOARD_DIR: Dir<'_> =
 
 ### Rust
 
-Memory is infrastructure. It runs on every interaction, on every search, on every save. Latency matters. We need sub-50ms search over thousands of memories, with embedding generation, FSRS calculations, and seven-stage pipeline execution. Rust gives us zero-cost abstractions, fearless concurrency (the `CognitiveEngine` is `Arc<Mutex<CognitiveEngine>>` shared across async handlers), and compile-time guarantees that the 29 stateful cognitive modules do not have data races.
+Memory is infrastructure. It runs on every interaction, on every search, on every save. Latency matters. We need sub-50ms search over thousands of memories, with embedding generation, FSRS calculations, and an 8-stage pipeline execution (compound query decomposition + overfetch + rerank + temporal + accessibility + context + competition + activation). Rust gives us zero-cost abstractions, fearless concurrency (the `CognitiveEngine` is `Arc<Mutex<CognitiveEngine>>` shared across async handlers), and compile-time guarantees that the 29 stateful cognitive modules do not have data races.
 
 ### SQLite + FTS5 + USearch
 
-SQLite is the most deployed database in the world for a reason. WAL mode gives us concurrent reads alongside writes. FTS5 gives us BM25 keyword search with zero operational overhead. USearch provides a Rust-native HNSW index for approximate nearest-neighbor vector search. The entire memory store is a single file at `~/.vestige/vestige.db`.
+SQLite is the most deployed database in the world for a reason. WAL mode gives us concurrent reads alongside writes. FTS5 gives us BM25 keyword search with zero operational overhead. USearch provides a Rust-native HNSW index for approximate nearest-neighbor vector search. The entire memory store is a single file in the platform data directory (e.g. `~/Library/Application Support/com.vestige.core/vestige.db` on macOS) — relocate it with `--data-dir <PATH>`.
 
 ### fastembed (Nomic Embed v1.5)
 
-All embeddings run locally. The Nomic Embed v1.5 model produces 768-dimensional vectors, runs via ONNX Runtime, and is competitive with OpenAI's ada-002. The model is cached at `~/.cache/huggingface/` after first download (~130MB). No API keys. No network calls during operation. Your memories never leave your machine.
+All embeddings run locally. The Nomic Embed v1.5 model produces 768-dimensional vectors, runs via ONNX Runtime, and is competitive with OpenAI's ada-002. The model is cached at `~/Library/Caches/vestige.vestige/fastembed` (macOS) or `~/.cache/vestige/fastembed` (Linux) after first download (~130MB). No API keys. No network calls during operation. Your memories never leave your machine.
 
 ### Performance
 

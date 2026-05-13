@@ -49,21 +49,23 @@ static EMBEDDING_MODEL_RESULT: OnceLock<Result<Mutex<TextEmbedding>, String>> = 
 ///
 /// Resolution order:
 /// 1. `FASTEMBED_CACHE_PATH` env var (explicit override)
-/// 2. Platform cache dir via `directories::ProjectDirs`
+/// 2. Platform cache dir via `directories::ProjectDirs::from("", "vestige", "vestige")`
 ///    - Linux:   `$XDG_CACHE_HOME/vestige/fastembed` (typically `~/.cache/vestige/fastembed`)
-///    - macOS:   `~/Library/Caches/vestige/fastembed`
-///    - Windows: `%LOCALAPPDATA%\vestige\cache\fastembed`
+///    - macOS:   `~/Library/Caches/vestige.vestige/fastembed`
+///    - Windows: `%LOCALAPPDATA%\vestige\vestige\cache\fastembed`
 /// 3. `~/.cache/vestige/fastembed` (home-dir fallback)
 /// 4. `.fastembed_cache` relative to CWD (absolute last resort, should never trigger)
+///
+/// `qualifier=""` keeps the project_path collapsed to `<organization>.<application>`
+/// on macOS (`vestige.vestige`) and to `<application>` on Linux (`vestige`) — both
+/// shorter than the data-dir identifier `com.vestige.core`. The cache identifier is
+/// intentionally separate from the data identifier so a model upgrade does not
+/// invalidate the user's memory database.
 pub(crate) fn get_cache_dir() -> std::path::PathBuf {
     if let Ok(path) = std::env::var("FASTEMBED_CACHE_PATH") {
         return std::path::PathBuf::from(path);
     }
 
-    // qualifier="" produces a clean app-name-only path on Linux/Windows;
-    // on macOS the qualifier is used for the bundle ID so we keep it empty
-    // to get ~/Library/Caches/vestige/fastembed rather than
-    // ~/Library/Caches/com.vestige.vestige/fastembed.
     if let Some(proj_dirs) = directories::ProjectDirs::from("", "vestige", "vestige") {
         return proj_dirs.cache_dir().join("fastembed");
     }

@@ -51,7 +51,15 @@ VESTIGE_TEST_MOCK_EMBEDDINGS=1 cargo test --workspace
 | Variable | Purpose |
 |----------|---------|
 | `VESTIGE_TEST_MOCK_EMBEDDINGS=1` | Use mock embeddings in tests (skips ONNX model download) |
-| `VESTIGE_DB_PATH` | Override default database path (`~/.vestige/vestige.db`) |
+| `VESTIGE_ENCRYPTION_KEY` | Enable SQLite encryption with the `encryption` Cargo feature |
+| `VESTIGE_HTTP_BIND` / `VESTIGE_HTTP_PORT` | HTTP transport bind address (default `127.0.0.1:3928`) |
+| `VESTIGE_DASHBOARD_PORT` | Dashboard port (default `3927`) |
+| `VESTIGE_AUTH_TOKEN` | Override the bearer token for the HTTP transport |
+| `VESTIGE_MAX_TOKEN_BUDGET` | Cap for `search` / `session_context` token budget |
+| `VESTIGE_RETENTION_TARGET` | FSRS-6 retention target override (default `0.85`) |
+| `VESTIGE_CONSOLIDATION_INTERVAL_HOURS` | Background consolidation cadence (default `6`) |
+
+Database location is set via the `--data-dir <PATH>` CLI flag, not an env var (see [`docs/STORAGE.md`](docs/STORAGE.md) for default platform paths).
 
 ## Running Tests
 
