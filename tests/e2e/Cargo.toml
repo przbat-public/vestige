@@ -108,3 +108,6 @@ path = "tests/extreme/proof_of_superiority.rs"
 [[test]]
 name = "benchmark_retrieval"
 path = "tests/extreme/benchmark_retrieval.rs"
+
+[lints]
+workspace = true

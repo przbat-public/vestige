@@ -7,11 +7,12 @@
 //! - **Supersede** a previously demoted/outdated memory (correction),
 //! - **Merge** with several similar memories (mid-similarity cluster).
 //!
-//! The decision is delegated to [`PredictionErrorGate`] in
-//! `crate::advanced::prediction_error`; this module handles the I/O side
-//! (embedding the new content, fetching candidate embeddings, applying the
-//! gate's decision to the SQLite store, and writing connection edges so
-//! memory evolution stays observable in the graph view).
+//! The decision is delegated to
+//! [`PredictionErrorGate`](crate::advanced::prediction_error::PredictionErrorGate);
+//! this module handles the I/O side (embedding the new content, fetching
+//! candidate embeddings, applying the gate's decision to the SQLite store,
+//! and writing connection edges so memory evolution stays observable in the
+//! graph view).
 //!
 //! Falls back to plain [`Storage::ingest`] when the embedding service is not
 //! ready, returning `decision: "create"` with `prediction_error: 1.0` so

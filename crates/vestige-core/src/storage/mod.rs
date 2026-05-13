@@ -6,10 +6,9 @@
 //! - FSRS-6 state management
 //! - Temporal memory support
 
-mod migrations;
+pub(crate) mod migrations;
 mod sqlite;
 
-pub use migrations::MIGRATIONS;
 pub use sqlite::{
     ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,
     IntentionRecord, Result, SmartIngestResult, StateTransitionRecord, Storage, StorageError,

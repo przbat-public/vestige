@@ -10,7 +10,7 @@
 //!   - 1 core     : smart_ingest
 //!   - 2 temporal : memory_timeline, memory_changelog
 //!   - 7 maint    : system_status, consolidate, backup, export, gc,
-//!                  split_memories, regenerate_embeddings
+//!     split_memories, regenerate_embeddings
 //!   - 2 dedup    : importance_score, find_duplicates
 //!   - 3 cog      : dream, explore_connections, predict
 //!   - 1 restore  : restore

@@ -28,7 +28,9 @@ use chrono::{DateTime, Duration, Utc};
 use rusqlite::params;
 use uuid::Uuid;
 
-use super::{ConnectionRecord, ConsolidationResult, InsightRecord, Result, Storage, StorageError};
+use crate::memory::ConsolidationResult;
+
+use super::{ConnectionRecord, InsightRecord, Result, Storage, StorageError};
 
 impl Storage {
     /// Run full FSRS-6 consolidation cycle

@@ -35,6 +35,18 @@ rusqlite = { version = "0.39", features = ["chrono", "serde_json"] }
 regex = "1"
 tempfile = "3"
 
+[workspace.lints.clippy]
+# Restriction lint added in clippy 1.81 (2024-09): scoped visibility modifiers
+# on struct fields (`pub(super)`, `pub(crate)`, `pub(in path)`) are flagged as
+# a code smell because they let any code inside the visibility window mutate
+# the field without going through the type's API, so invariants have to be
+# verified across the whole window. We document conscious uses with
+# `#[allow(clippy::field_scoped_visibility_modifiers, reason = "...")]` on the
+# owning struct (typical case: split-by-responsibility refactor where sibling
+# submodules share the parent module's trust level). New occurrences without a
+# justification are caught by this lint.
+field_scoped_visibility_modifiers = "warn"
+
 [profile.release]
 # opt-level = 3: maximize runtime speed (search, embeddings, RRF, BM25 are hot).
 # Earlier "z" optimised binary size at the cost of ~5–15% throughput on the

@@ -65,7 +65,7 @@ struct TimelineArgs {
     detail_level: Option<String>,
 }
 
-/// Parse an ISO 8601 date or datetime string into a DateTime<Utc>.
+/// Parse an ISO 8601 date or datetime string into a `DateTime<Utc>`.
 /// Supports both `2026-02-01` and `2026-02-01T00:00:00Z` formats.
 fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
     // Try full datetime first

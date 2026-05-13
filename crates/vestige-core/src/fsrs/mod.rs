@@ -3,7 +3,7 @@
 //! The state-of-the-art spaced repetition algorithm (2025-2026).
 //! 20-30% more efficient than SM-2 (Anki's original algorithm).
 //!
-//! Reference: https://github.com/open-spaced-repetition/fsrs4anki
+//! Reference: <https://github.com/open-spaced-repetition/fsrs4anki>
 //!
 //! ## Key improvements in FSRS-6 over FSRS-5:
 //! - 21 parameters (vs 19) with personalizable forgetting curve decay (w20)

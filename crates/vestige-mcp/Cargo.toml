@@ -33,7 +33,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "vestige"
-path = "src/bin/cli.rs"
+path = "src/bin/cli/main.rs"
 
 [dependencies]
 # ============================================================================
@@ -85,3 +85,6 @@ mime_guess = "2"
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[lints]
+workspace = true
