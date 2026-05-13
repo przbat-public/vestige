@@ -21,6 +21,13 @@ curl -sL "https://github.com/${REPO}/releases/download/v${VERSION}/vestige-mcp-x
 mv server/vestige-mcp server/vestige-mcp-linux-x64
 mv server/vestige server/vestige-linux-x64
 
+# Download Linux ARM64 — Graviton EC2, Raspberry Pi 4+, Apple-Silicon
+# Linux VMs. Released since v3.3.0 (release.yml second-wave sweep).
+echo "Downloading Linux ARM64 binary..."
+curl -sL "https://github.com/${REPO}/releases/download/v${VERSION}/vestige-mcp-aarch64-unknown-linux-gnu.tar.gz" | tar -xz -C server
+mv server/vestige-mcp server/vestige-mcp-linux-arm64
+mv server/vestige server/vestige-linux-arm64
+
 # Download Windows x64
 echo "Downloading Windows x64 binary..."
 curl -sL "https://github.com/${REPO}/releases/download/v${VERSION}/vestige-mcp-x86_64-pc-windows-msvc.zip" -o /tmp/win.zip
