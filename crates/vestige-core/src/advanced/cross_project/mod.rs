@@ -32,9 +32,11 @@
 //!
 //! ## Module Layout
 //!
-//! - [`types`] — public data model + private bookkeeping records.
-//! - [`internals`] — private learner methods (extraction, applicability scoring).
-//! - This file — `CrossProjectLearner` struct + public API.
+//! - `types.rs` — public data model + private bookkeeping records.
+//! - `internals.rs` — private learner methods (extraction, applicability
+//!   scoring). Skipped from rustdoc because the helpers are crate-private;
+//!   pass `--document-private-items` to inspect them.
+//! - This file — [`CrossProjectLearner`] struct + public API.
 
 mod internals;
 mod types;

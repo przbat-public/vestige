@@ -1,9 +1,9 @@
 //! Orchestrator for the cognitive search pipeline.
 //!
-//! The entire 8-stage pipeline lives in [`pipeline`](super::pipeline) split
-//! into three phases. This file:
+//! The entire 8-stage pipeline lives in the sibling `pipeline` module (split
+//! into three phases). This file:
 //!   1. Parses + validates `SearchArgs` once.
-//!   2. Builds an immutable [`PipelineConfig`] used by every phase.
+//!   2. Builds an immutable `PipelineConfig` used by every phase.
 //!   3. Runs `retrieval → scoring → finalize` and returns the response.
 //!
 //! Stage order (matches `ARCHITECTURE.md`):
@@ -11,6 +11,10 @@
 //!   - Stage 3..5G  (scoring)   — every score adjustment + adaptive prune.
 //!   - Stage 6..7   (finalize)  — spreading activation, side effects,
 //!     formatting, token budget, metacognition.
+//!
+//! The `pipeline` submodules are intentionally `pub(in crate::tools::search_unified)`
+//! and therefore not linked via rustdoc — pass `--document-private-items` if
+//! you want to inspect them.
 
 use std::sync::Arc;
 
@@ -26,7 +30,8 @@ use super::pipeline::{self, PipelineConfig};
 
 /// Execute unified search with the 8-stage cognitive pipeline.
 ///
-/// See [`pipeline`](super::pipeline) for the per-phase implementations.
+/// See the sibling `pipeline` module (private, scoped to `search_unified`)
+/// for the per-phase implementations.
 pub async fn execute(
     storage: &Arc<Storage>,
     cognitive: &Arc<Mutex<CognitiveEngine>>,

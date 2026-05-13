@@ -81,14 +81,68 @@ pub struct ServerCapabilities {
 // TOOLS
 // ============================================================================
 
-/// Tool description for tools/list
+/// Tool description for `tools/list`.
+///
+/// Mirrors the `Tool` shape from the MCP `2025-11-25` schema. `title`
+/// (display name) and `annotations` (behavior hints) are optional and were
+/// added by the spec in `2025-03-26`. We omit `outputSchema` for now — every
+/// Vestige tool returns text content rather than a structured payload, so
+/// declaring an `outputSchema` would advertise a contract we do not honor
+/// at the protocol level. See `b15` notes in `server/catalog.rs`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDescription {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub input_schema: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ToolAnnotations>,
+}
+
+/// Behavior hints that MCP clients use to decide whether a tool call needs
+/// human approval before execution. All four flags are advisory per the spec
+/// (`2025-03-26` onward) — clients that do not trust the server MUST ignore
+/// them, but trusted-server flows like Cursor's "auto-run" rely on these.
+///
+/// Spec defaults (used when a flag is absent):
+/// * `readOnlyHint` defaults to `false` (assume the tool mutates state).
+/// * `destructiveHint` defaults to `true` (assume worst-case if mutating).
+/// * `idempotentHint` defaults to `false`.
+/// * `openWorldHint` defaults to `true` (assume external interaction).
+///
+/// We always emit an explicit value for the four flags we use rather than
+/// relying on defaults, because the defaults are intentionally pessimistic
+/// and would treat read-only tools the same as destructive ones.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAnnotations {
+    /// Optional human-readable display name, separate from `name` (which is
+    /// the protocol identifier).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// `true` if the tool only reads state (search, get, list, predict, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_only_hint: Option<bool>,
+
+    /// `true` if the tool can perform destructive (irreversible) updates.
+    /// Only meaningful when `read_only_hint` is `false` or absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destructive_hint: Option<bool>,
+
+    /// `true` if calling the tool twice with the same arguments has the same
+    /// observable effect as calling it once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotent_hint: Option<bool>,
+
+    /// `true` if the tool reaches outside the local Vestige store
+    /// (network calls, filesystem outside the database, …). Vestige tools
+    /// are currently fully local, so this is always `false`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_world_hint: Option<bool>,
 }
 
 /// Result of tools/list
