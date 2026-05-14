@@ -1,20 +1,41 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet } from 'react-router';
 import { CommandPalette } from '@/components/layout/CommandPalette';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { RouteAnnouncer } from '@/components/RouteAnnouncer';
 
+// Lazy-loaded — the dialog pulls react-hook-form + zod which only matter
+// once the user actually opens "Add memory". Keeps initial Layout chunk
+// lean.
+const AddMemoryDialog = lazy(() =>
+  import('@/components/memories/AddMemoryDialog').then((m) => ({ default: m.AddMemoryDialog })),
+);
+
 export function Layout() {
   const { t } = useTranslation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [addMemoryOpen, setAddMemoryOpen] = useState(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Don't intercept ⌘K / ⌘N when the user is typing in an editable
+      // field — `'n'` would otherwise trigger every time they type a letter
+      // 'n' inside Search or any input. ⌘K is fine because the meta key
+      // disambiguates from typing "k".
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setCmdOpen((prev) => !prev);
+        return;
+      }
+      // ⌘N / Ctrl+N → open Add Memory. Browsers reserve ⌘N for "new
+      // window" but that hotkey isn't reachable from page JS anyway, so
+      // we layer our intent on top — works inside the dashboard tab,
+      // doesn't fight the browser.
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault();
+        setAddMemoryOpen(true);
       }
     }
     window.addEventListener('keydown', onKey);
@@ -92,8 +113,29 @@ export function Layout() {
         <Outlet />
       </main>
 
+      {/* Floating "Add memory" button — visible on every page. The dashboard
+          was read-only for the primary action (creating memories) before
+          this; the FAB is the dashboard's first-class write affordance.
+          Positioned bottom-right so it doesn't compete with page chrome,
+          and offset by safe-area-inset on iOS. */}
+      <button
+        type="button"
+        onClick={() => setAddMemoryOpen(true)}
+        className="fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full bg-primary text-primary-foreground shadow-2xl hover:scale-105 active:scale-95 transition-transform flex items-center justify-center text-2xl font-light focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+        style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        aria-label={t('addMemory.fabLabel')}
+        title={t('addMemory.fabTitle')}
+      >
+        <span aria-hidden="true">+</span>
+      </button>
+
       {/* Command palette */}
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
+
+      {/* Add memory dialog — lazy chunk loads on first open */}
+      <Suspense fallback={null}>
+        {addMemoryOpen && <AddMemoryDialog open={addMemoryOpen} onClose={() => setAddMemoryOpen(false)} />}
+      </Suspense>
     </div>
   );
 }

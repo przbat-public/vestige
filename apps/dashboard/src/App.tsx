@@ -11,6 +11,7 @@ const TimelinePage = lazy(() => import('@/pages/TimelinePage').then((m) => ({ de
 const FeedPage = lazy(() => import('@/pages/FeedPage').then((m) => ({ default: m.FeedPage })));
 const ExplorePage = lazy(() => import('@/pages/ExplorePage').then((m) => ({ default: m.ExplorePage })));
 const IntentionsPage = lazy(() => import('@/pages/IntentionsPage').then((m) => ({ default: m.IntentionsPage })));
+const TemporalPage = lazy(() => import('@/pages/TemporalPage').then((m) => ({ default: m.TemporalPage })));
 const StatsPage = lazy(() => import('@/pages/StatsPage').then((m) => ({ default: m.StatsPage })));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const TutorialPage = lazy(() => import('@/pages/TutorialPage').then((m) => ({ default: m.TutorialPage })));
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="feed" element={<FeedPage />} />
           <Route path="explore" element={<ExplorePage />} />
           <Route path="intentions" element={<IntentionsPage />} />
+          <Route path="temporal" element={<TemporalPage />} />
           <Route path="stats" element={<StatsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="tutorial" element={<TutorialPage />} />

@@ -12,6 +12,7 @@
     "feed": "Aktywność",
     "explore": "Eksploruj",
     "intentions": "Przypomnienia",
+    "temporal": "Czasowe",
     "stats": "Przegląd",
     "settings": "Ustawienia",
     "tutorial": "Samouczek",
@@ -218,7 +219,27 @@
     "dreamDesc": "Uruchom cykl snu, by ujawnić wzorce między domenami i ukryte powiązania.",
     "dreamHint": "Zajmie kilka sekund. Zachowuje nowe połączenia w grafie.",
     "dreamRun": "Śnij teraz",
-    "dreamCompletedToast": "Cykl snu zakończony — wyniki poniżej."
+    "dreamCompletedToast": "Cykl snu zakończony — wyniki poniżej.",
+    "insightType": {
+      "contradiction": "Sprzeczność",
+      "stale_decision": "Przestarzała decyzja",
+      "overconfident": "Zbyt pewne",
+      "knowledge_gap": "Luka wiedzy"
+    }
+  },
+  "insightSources": {
+    "noSources": "Brak wspomnień źródłowych — ten wniosek dotyczy tematu, nie konkretnych wspomnień.",
+    "loading": "Ładowanie źródeł…",
+    "expand_one": "Pokaż jeszcze {{count}} źródło",
+    "expand_few": "Pokaż jeszcze {{count}} źródła",
+    "expand_many": "Pokaż jeszcze {{count}} źródeł",
+    "expand_other": "Pokaż jeszcze {{count}} źródeł",
+    "collapse": "Zwiń źródła",
+    "partialFailure_one": "Nie udało się załadować {{count}} wspomnienia źródłowego.",
+    "partialFailure_few": "Nie udało się załadować {{count}} wspomnień źródłowych.",
+    "partialFailure_many": "Nie udało się załadować {{count}} wspomnień źródłowych.",
+    "partialFailure_other": "Nie udało się załadować {{count}} wspomnień źródłowych.",
+    "failedRow": "Wspomnienie {{id}} niedostępne"
   },
   "review": {
     "title": "Powtórki z odstępami (FSRS-6)",
@@ -250,6 +271,80 @@
     "note": "Notatka",
     "pattern": "Wzorzec",
     "decision": "Decyzja"
+  },
+  "temporal": {
+    "title": "Wersjonowanie czasowe",
+    "subtitle": "Śledź jak ewoluują zapamiętane fakty. Oznacz przestarzałe wspomnienia, żeby silnik przestał je zwracać jako aktualne.",
+    "tab": {
+      "current": "Aktualne",
+      "expired": "Wygasłe",
+      "history": "Historia"
+    },
+    "topicOptional": "Temat (opcjonalnie)",
+    "topicRequired": "Temat (wymagany)",
+    "topicPlaceholder": "proces deploymentu, wzorce React, …",
+    "search": "Szukaj",
+    "help": {
+      "current": "Wspomnienia, których okno ważności obejmuje dziś. Pusty temat = skan całej bazy.",
+      "expired": "Wspomnienia z `valid_until` w przeszłości. Przydatne do czyszczenia albo zauważenia które przekonania się zdezaktualizowały.",
+      "history": "Wybierz temat, żeby zobaczyć jego ewolucję — każdą wersję tego co silnik o nim zapamiętał."
+    },
+    "historyNeedsTopic": "Wybierz temat, żeby zobaczyć historię",
+    "historyNeedsTopicHint": "Tryb historii pokazuje jak ewoluowały fakty zapamiętane przez silnik. Bez tematu nie ma czego skanować.",
+    "empty": {
+      "current": "Brak aktualnych wspomnień dla tego tematu.",
+      "expired": "Brak wygasłych wspomnień — baza jest aktualna.",
+      "history": "Brak zapisanej historii dla tego tematu."
+    },
+    "emptyHint": {
+      "current": "Spróbuj innego tematu albo zostaw puste, żeby przeskanować całą bazę.",
+      "expired": "Wspomnienia wygasają gdy ustawisz datę `valid_until` lub ręcznie je unieważnisz.",
+      "history": "Silnik zapisuje historię tylko dla wspomnień, które były edytowane lub zastąpione."
+    },
+    "resultCount_one": "{{count}} wspomnienie",
+    "resultCount_few": "{{count}} wspomnienia",
+    "resultCount_many": "{{count}} wspomnień",
+    "resultCount_other": "{{count}} wspomnień",
+    "validFrom": "Od {{date}}",
+    "validUntil": "do {{date}}",
+    "invalidate": "Oznacz jako przestarzałe",
+    "invalidated": "Wspomnienie oznaczone jako przestarzałe."
+  },
+  "addMemory": {
+    "fabLabel": "Dodaj wspomnienie (Cmd/Ctrl+N)",
+    "fabTitle": "Dodaj wspomnienie",
+    "title": "Dodaj wspomnienie",
+    "description": "Idzie przez pełen pipeline smart-ingest — scoring ważności, detekcja intencji i prediction-error gating decydują, czy stworzyć, zaktualizować, czy zmerge'ować.",
+    "contentLabel": "Treść",
+    "contentPlaceholder": "Złap jeden fakt, decyzję albo wniosek. Atomowe wspomnienia lepiej się wyszukują.",
+    "nodeTypeLabel": "Typ",
+    "tagsLabel": "Tagi",
+    "tagsPlaceholder": "acme, web-sdk, debugowanie",
+    "tagsHint": "Po przecinku. Auto-tagi z preprocessingu dochodzą na wierzch.",
+    "sourceLabel": "Źródło",
+    "sourcePlaceholder": "url, dokument, rozmowa…",
+    "forceCreateLabel": "Wymuś utworzenie",
+    "forceCreateHint": "Pomiń sprawdzenie podobieństwa. Używaj tylko gdy świadomie tworzysz near-duplicate (np. zachowanie starej wersji przed edycją). Domyślnie wyłączone, żeby dedup mógł działać.",
+    "submit": "Zapisz wspomnienie",
+    "dismiss": "Zamknij",
+    "compoundWarning": "Złożone",
+    "nearDuplicateWarning": "Bliski duplikat",
+    "toastCreated": "Wspomnienie zapisane.",
+    "toastMerged": "Smart-ingest zdecydował: {{decision}} — szczegóły w oknie.",
+    "errors": {
+      "contentRequired": "Treść wspomnienia jest wymagana.",
+      "contentTooLarge": "Treść wspomnienia przekracza limit 1MB.",
+      "unknown": "Nieznany błąd podczas zapisu."
+    },
+    "decision": {
+      "create": "Utworzono",
+      "update": "Zaktualizowano istniejące",
+      "reinforce": "Wzmocniono istniejące",
+      "supersede": "Zastąpiono starsze wspomnienie",
+      "merge": "Połączono z powiązanymi",
+      "replace": "Zastąpiono istniejące",
+      "add_context": "Dodano jako kontekst"
+    }
   },
   "epistemic": {
     "world": "Zweryfikowany fakt",
@@ -437,7 +532,14 @@
     "retentionDistribution": "Rozkład zapamiętania",
     "byType": "Według typu",
     "endangered": "Zanikające wspomnienia",
-    "endangeredHint": "Te wspomnienia tracą siłę i mogą skorzystać z powtórki"
+    "endangeredHint": "Te wspomnienia tracą siłę i mogą skorzystać z powtórki",
+    "forgettingCurveTitle": "Krzywa zapominania",
+    "forgettingCurveHint": "Modelowane zapamiętanie w czasie, na podstawie twojej średniej siły konsolidacji. Kropka oznacza dziś; linia pokazuje, gdzie wspomnienia dryfują bez powtórek.",
+    "forgettingCurveAria": "Krzywa zapominania w stylu Ebbinghausa, 90 dni",
+    "todayLabel": "dziś {{value}}%",
+    "heatmapCellTitle": "{{range}}: {{count}} z {{total}} wspomnień",
+    "heatmapLow": "zanika",
+    "heatmapHigh": "stabilne"
   },
   "timeline": {
     "title": "Oś czasu",

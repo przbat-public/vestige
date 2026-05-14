@@ -26,7 +26,16 @@ pub async fn get_graph(
     Query(params): Query<GraphParams>,
 ) -> Result<Json<Value>, StatusCode> {
     let depth = params.depth.unwrap_or(2).clamp(1, 3);
-    let max_nodes = params.max_nodes.unwrap_or(50).clamp(1, 200);
+    // Cap raised from 200 to 500 to match the dashboard's `maxNodes`
+    // dropdown options. Previously the dashboard offered 300 and 500
+    // entries that silently capped server-side at 200 — a misleading UI
+    // contract. 500 + depth=3 is still bounded by `get_memory_subgraph`'s
+    // BFS with cycle detection and runs on `spawn_blocking`, so the
+    // larger ceiling doesn't risk reactor stalls. Beyond 500, the 3D
+    // rendering frame budget becomes the bottleneck rather than the SQL
+    // query — semantic clustering / LOD work is the right next step
+    // there.
+    let max_nodes = params.max_nodes.unwrap_or(50).clamp(1, 500);
 
     // Determine center node
     let center_id = if let Some(ref id) = params.center_id {

@@ -222,7 +222,7 @@ export function SettingsPage() {
             {reflectResult && (
               <Card className="space-y-2 text-xs">
                 <div className="text-foreground font-medium">{reflectResult.summary}</div>
-                {reflectResult.insights?.map((ins) => (
+                {reflectResult.structuredInsights?.map((ins) => (
                   <div
                     key={`${ins.type}|${ins.severity}|${ins.description}`}
                     className="flex gap-2 items-start border-t border-border pt-2"

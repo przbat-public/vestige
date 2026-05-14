@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: 'feed', labelKey: 'nav.feed' },
   { to: 'explore', labelKey: 'nav.explore' },
   { to: 'intentions', labelKey: 'nav.intentions' },
+  { to: 'temporal', labelKey: 'nav.temporal' },
   { to: 'stats', labelKey: 'nav.stats' },
   { to: 'settings', labelKey: 'nav.settings' },
   { to: 'tutorial', labelKey: 'nav.tutorial' },

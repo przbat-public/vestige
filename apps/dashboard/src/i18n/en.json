@@ -12,6 +12,7 @@
     "feed": "Activity",
     "explore": "Explore",
     "intentions": "Reminders",
+    "temporal": "Temporal",
     "stats": "Overview",
     "settings": "Settings",
     "tutorial": "Tutorial",
@@ -201,6 +202,78 @@
     "pattern": "Pattern",
     "decision": "Decision"
   },
+  "temporal": {
+    "title": "Temporal versioning",
+    "subtitle": "Track how stored facts evolve. Mark superseded memories so the engine stops returning them as current.",
+    "tab": {
+      "current": "Current",
+      "expired": "Expired",
+      "history": "History"
+    },
+    "topicOptional": "Topic (optional)",
+    "topicRequired": "Topic (required)",
+    "topicPlaceholder": "deployment process, react patterns, …",
+    "search": "Search",
+    "help": {
+      "current": "Memories whose validity window includes today. Empty topic = scan the whole base.",
+      "expired": "Memories with `valid_until` in the past. Useful for cleanup or noticing which beliefs aged out.",
+      "history": "Pick a topic to see its evolution — every version of what the engine has stored about it."
+    },
+    "historyNeedsTopic": "Pick a topic to see its history",
+    "historyNeedsTopicHint": "History mode shows how the engine's stored facts about a topic evolved over time. Without a topic there's nothing to scope to.",
+    "empty": {
+      "current": "No current memories for this topic.",
+      "expired": "No expired memories — your knowledge base is still timely.",
+      "history": "No history recorded for this topic."
+    },
+    "emptyHint": {
+      "current": "Try a different topic, or leave the field empty to scan the whole base.",
+      "expired": "Memories expire when you set a `valid_until` date or invalidate them manually.",
+      "history": "The engine only records history for memories that were edited or superseded."
+    },
+    "resultCount_one": "{{count}} memory",
+    "resultCount_other": "{{count}} memories",
+    "validFrom": "From {{date}}",
+    "validUntil": "until {{date}}",
+    "invalidate": "Mark superseded",
+    "invalidated": "Memory marked as superseded."
+  },
+  "addMemory": {
+    "fabLabel": "Add memory (Cmd/Ctrl+N)",
+    "fabTitle": "Add memory",
+    "title": "Add memory",
+    "description": "Routed through the smart-ingest pipeline — importance scoring, intent detection, and prediction-error gating decide whether to create, update, or merge.",
+    "contentLabel": "Content",
+    "contentPlaceholder": "Capture one fact, decision, or insight. Atomic memories search better.",
+    "nodeTypeLabel": "Type",
+    "tagsLabel": "Tags",
+    "tagsPlaceholder": "acme, web-sdk, debugging",
+    "tagsHint": "Comma-separated. Auto-tags from preprocessing are added on top.",
+    "sourceLabel": "Source",
+    "sourcePlaceholder": "url, doc, conversation…",
+    "forceCreateLabel": "Force create",
+    "forceCreateHint": "Skip the similarity check. Use only when intentionally creating a near-duplicate (e.g. preserving an old version before editing). Default off so dedup can do its job.",
+    "submit": "Save memory",
+    "dismiss": "Dismiss",
+    "compoundWarning": "Compound",
+    "nearDuplicateWarning": "Near duplicate",
+    "toastCreated": "Memory created.",
+    "toastMerged": "Smart-ingest decided to {{decision}} — see dialog for details.",
+    "errors": {
+      "contentRequired": "Memory content is required.",
+      "contentTooLarge": "Memory content exceeds the 1MB limit.",
+      "unknown": "Unknown error during ingest."
+    },
+    "decision": {
+      "create": "Created",
+      "update": "Updated existing",
+      "reinforce": "Reinforced existing",
+      "supersede": "Superseded older memory",
+      "merge": "Merged with related",
+      "replace": "Replaced existing",
+      "add_context": "Added as context"
+    }
+  },
   "briefing": {
     "title": "Morning briefing",
     "subtitle": "What your memory engine wants you to look at today.",
@@ -214,7 +287,23 @@
     "dreamDesc": "Run a dream cycle to surface cross-domain patterns and hidden links.",
     "dreamHint": "Takes a few seconds. Persists new connections to the graph.",
     "dreamRun": "Dream now",
-    "dreamCompletedToast": "Dream cycle complete — see results below."
+    "dreamCompletedToast": "Dream cycle complete — see results below.",
+    "insightType": {
+      "contradiction": "Contradiction",
+      "stale_decision": "Stale decision",
+      "overconfident": "Overconfident",
+      "knowledge_gap": "Knowledge gap"
+    }
+  },
+  "insightSources": {
+    "noSources": "No source memories — this insight is topic-scoped.",
+    "loading": "Loading sources…",
+    "expand_one": "Show {{count}} more source",
+    "expand_other": "Show {{count}} more sources",
+    "collapse": "Collapse sources",
+    "partialFailure_one": "{{count}} source memory failed to load.",
+    "partialFailure_other": "{{count}} source memories failed to load.",
+    "failedRow": "Memory {{id}} unavailable"
   },
   "review": {
     "title": "Spaced repetition review",
@@ -423,7 +512,14 @@
     "retentionDistribution": "Retention Distribution",
     "byType": "By Type",
     "endangered": "Fading Memories",
-    "endangeredHint": "These memories are losing strength and may benefit from review"
+    "endangeredHint": "These memories are losing strength and may benefit from review",
+    "forgettingCurveTitle": "Forgetting curve",
+    "forgettingCurveHint": "Modeled retention over time, based on your average storage strength. The dot marks today; the line shows where memories drift to without review.",
+    "forgettingCurveAria": "Ebbinghaus-style forgetting curve over 90 days",
+    "todayLabel": "today {{value}}%",
+    "heatmapCellTitle": "{{range}}: {{count}} of {{total}} memories",
+    "heatmapLow": "fading",
+    "heatmapHigh": "stable"
   },
   "timeline": {
     "title": "Timeline",

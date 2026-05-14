@@ -225,25 +225,81 @@ pub async fn execute(
     };
 
     // 6. Synthesize actionable insights
+    //
+    // Two parallel outputs:
+    //   * `insights: Vec<String>` — legacy free-form text, kept for MCP
+    //     clients that already consume it (and for the InsightRecord
+    //     persistence below, which only needs text).
+    //   * `structuredInsights: Vec<{type, description, severity,
+    //     sourceMemoryIds, suggestion}>` — actionable form for the
+    //     dashboard's "Memory Sources" panel. Each insight points back
+    //     to the memories that triggered it so a user can verify or act
+    //     on the engine's claim.
     let mut insights = Vec::new();
+    let mut structured: Vec<Value> = Vec::new();
 
     if !contradictions.is_empty() {
-        insights.push(format!(
+        let text = format!(
             "Found {} potential contradictions in your memories. Review them to resolve conflicting knowledge.",
             contradictions.len()
-        ));
+        );
+        insights.push(text.clone());
+        // Each contradiction has memory_a + memory_b; flatten the unique
+        // set so the dashboard can dedup if the same memory contradicts
+        // several others.
+        let source_ids: Vec<String> = contradictions
+            .iter()
+            .flat_map(|c| {
+                [
+                    c["memory_a"].as_str().unwrap_or("").to_string(),
+                    c["memory_b"].as_str().unwrap_or("").to_string(),
+                ]
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+        structured.push(serde_json::json!({
+            "type": "contradiction",
+            "description": text,
+            "severity": "high",
+            "sourceMemoryIds": source_ids,
+            "suggestion": "Open Memory Sources to compare the two memories side by side. Demote the weaker version or edit the survivor to be canonical.",
+        }));
     }
     if !stale_decisions.is_empty() {
-        insights.push(format!(
+        let text = format!(
             "{} decisions haven't been reviewed in 30+ days. They may be outdated.",
             stale_decisions.len()
-        ));
+        );
+        insights.push(text.clone());
+        let source_ids: Vec<String> = stale_decisions
+            .iter()
+            .filter_map(|d| d["id"].as_str().map(String::from))
+            .collect();
+        structured.push(serde_json::json!({
+            "type": "stale_decision",
+            "description": text,
+            "severity": "medium",
+            "sourceMemoryIds": source_ids,
+            "suggestion": "Open each decision and either reaffirm it (promote) or supersede with a current version.",
+        }));
     }
     if !overconfident.is_empty() {
-        insights.push(format!(
+        let text = format!(
             "{} memories are frequently retrieved but weakly encoded — high risk of recall errors.",
             overconfident.len()
-        ));
+        );
+        insights.push(text.clone());
+        let source_ids: Vec<String> = overconfident
+            .iter()
+            .filter_map(|m| m["id"].as_str().map(String::from))
+            .collect();
+        structured.push(serde_json::json!({
+            "type": "overconfident",
+            "description": text,
+            "severity": "medium",
+            "sourceMemoryIds": source_ids,
+            "suggestion": "Schedule a review session focused on these memories — repeated retrieval will drag storage strength up.",
+        }));
     }
     let critical_gaps: Vec<_> = knowledge_gaps
         .iter()
@@ -255,10 +311,22 @@ pub async fn execute(
             .take(5)
             .filter_map(|g| g["topic"].as_str())
             .collect();
-        insights.push(format!(
+        let text = format!(
             "Critical knowledge decay in: {}. These topics need reinforcement.",
             topics.join(", ")
-        ));
+        );
+        insights.push(text.clone());
+        // Knowledge gaps are topic-scoped, not memory-scoped — we don't
+        // have specific source ids to point at, so we surface the topic
+        // tags as `tags` rather than `sourceMemoryIds`.
+        structured.push(serde_json::json!({
+            "type": "knowledge_gap",
+            "description": text,
+            "severity": "high",
+            "sourceMemoryIds": Vec::<String>::new(),
+            "tags": topics,
+            "suggestion": "These topics have low average retention. Add new memories on the topic or run a review session for what exists.",
+        }));
     }
 
     // Persist insights — one blocking task wraps all writes.
@@ -291,6 +359,34 @@ pub async fn execute(
         .await;
     }
 
+    // Summary line — derived from the counts above so the dashboard has
+    // a one-shot human header without having to recompute it. Empty
+    // categories are silently skipped so a clean reflection reads
+    // "Knowledge base looks consistent" rather than "0 contradictions, 0
+    // gaps, 0 stale decisions".
+    let summary = if structured.is_empty() {
+        "Knowledge base looks consistent — no contradictions, gaps, or stale decisions detected."
+            .to_string()
+    } else {
+        let parts: Vec<String> = [
+            (contradictions.len(), "contradiction"),
+            (knowledge_gaps.len(), "knowledge gap"),
+            (stale_decisions.len(), "stale decision"),
+            (overconfident.len(), "overconfident memory"),
+        ]
+        .iter()
+        .filter(|(c, _)| *c > 0)
+        .map(|(c, label)| {
+            if *c == 1 {
+                format!("{} {}", c, label)
+            } else {
+                format!("{} {}s", c, label)
+            }
+        })
+        .collect();
+        format!("Detected {}.", parts.join(", "))
+    };
+
     Ok(serde_json::json!({
         "status": "reflected",
         "memoriesAnalyzed": memories.len(),
@@ -302,6 +398,8 @@ pub async fn execute(
         "overconfidentMemories": overconfident,
         "patternClusters": patterns,
         "insights": insights,
+        "structuredInsights": structured,
+        "summary": summary,
         "stats": {
             "contradictions_found": contradictions.len(),
             "knowledge_gaps": knowledge_gaps.len(),

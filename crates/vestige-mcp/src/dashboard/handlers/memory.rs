@@ -234,6 +234,116 @@ pub struct UpdateMemoryBody {
     pub tags: Option<Vec<String>>,
 }
 
+/// Body for `POST /api/smart_ingest`.
+///
+/// Mirrors the MCP `smart_ingest` tool's single-mode arguments. We accept
+/// camelCase here to match the rest of the dashboard wire format and rename
+/// to snake_case before handing the value to `tools::smart_ingest::execute`,
+/// which expects the MCP-tool-native casing.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartIngestBody {
+    pub content: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub node_type: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    /// When true, bypass the prediction-error gate (similarity check) and
+    /// always create a new node. Maps to `smart_ingest`'s `force_create`.
+    #[serde(default)]
+    pub force_create: bool,
+}
+
+/// `POST /api/smart_ingest` — create a memory from the dashboard.
+///
+/// Thin REST wrapper over `tools::smart_ingest::execute`, which handles the
+/// full ingest pipeline (importance scoring, intent detection, preprocessing,
+/// prediction-error gating, near-duplicate detection). The dashboard surfaces
+/// the same affordances (`compound_content_warning`, `near_duplicate_warning`,
+/// `decision`) the MCP tool returns, so users see exactly what the engine
+/// decided to do with their input.
+///
+/// Emits `MemoryCreated` so other dashboard tabs and connected clients see
+/// the new node without polling.
+pub async fn smart_ingest_memory(
+    State(state): State<AppState>,
+    Json(body): Json<SmartIngestBody>,
+) -> Result<Json<Value>, StatusCode> {
+    let cognitive = state
+        .cognitive
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    if body.content.trim().is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // The tool expects snake_case `force_create` and `node_type` — we
+    // rebuild the args here rather than re-deriving Serialize on
+    // `SmartIngestBody` so the dashboard contract stays decoupled from the
+    // MCP tool's argument schema.
+    let args = serde_json::json!({
+        "content": body.content,
+        "tags": body.tags,
+        "node_type": body.node_type,
+        "source": body.source.clone().or(Some("dashboard".to_string())),
+        "force_create": body.force_create,
+        "agent": "dashboard",
+    });
+
+    let result = crate::tools::smart_ingest::execute(&state.storage, cognitive, Some(args))
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "smart_ingest failed");
+            // Tool returns user-friendly errors for validation issues
+            // (empty content, content too large, missing fields). Map them
+            // to 400 so the dashboard surfaces them inline without forcing
+            // the user to open a console.
+            if e.contains("empty")
+                || e.contains("too large")
+                || e.contains("Missing")
+                || e.contains("Invalid")
+            {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        })?;
+
+    // Emit MemoryCreated only on a real new-node decision. `update`,
+    // `reinforce`, `merge`, etc. mutate an existing node — we want
+    // MemoryUpdated semantics for those, but the tool doesn't expose
+    // enough to differentiate cleanly. Conservative: emit Created for
+    // create/supersede, Updated for the rest, when we have a node id.
+    let decision = result["decision"].as_str().unwrap_or("");
+    let node_id = result["nodeId"].as_str().unwrap_or("").to_string();
+    if !node_id.is_empty() {
+        let preview: String = body.content.chars().take(80).collect();
+        let now = chrono::Utc::now();
+        let node_type = body.node_type.clone().unwrap_or_else(|| "fact".to_string());
+        if matches!(decision, "create" | "supersede") {
+            state.emit(VestigeEvent::MemoryCreated {
+                id: node_id,
+                content_preview: preview,
+                node_type,
+                tags: body.tags.clone(),
+                timestamp: now,
+            });
+        } else {
+            state.emit(VestigeEvent::MemoryUpdated {
+                id: node_id,
+                content_preview: preview,
+                field: "smart_ingest".to_string(),
+                timestamp: now,
+            });
+        }
+    }
+
+    Ok(Json(result))
+}
+
 /// Edit a memory's content and/or tags.
 ///
 /// Mirrors the MCP `memory(action="edit")` flow but is exposed via REST so the

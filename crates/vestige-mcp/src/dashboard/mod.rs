@@ -137,6 +137,7 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
         .route("/api/memories/{id}", get(handlers::get_memory))
         .route("/api/memories/{id}", delete(handlers::delete_memory))
         .route("/api/memories/{id}", patch(handlers::update_memory))
+        .route("/api/smart_ingest", post(handlers::smart_ingest_memory))
         .route("/api/memories/{id}/promote", post(handlers::promote_memory))
         .route("/api/memories/{id}/demote", post(handlers::demote_memory))
         .route(

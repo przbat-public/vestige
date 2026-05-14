@@ -264,20 +264,39 @@ export interface IntentionItem {
 }
 
 // Metacognitive tools (v2.1)
+/**
+ * Output of `tools/reflect.rs`. The wire shape carries two parallel
+ * insight representations: legacy free-form `insights: string[]` for MCP
+ * clients that already consume them, plus `structuredInsights` for the
+ * dashboard's "Memory Sources" panel — each entry points back at the
+ * memories that triggered it.
+ *
+ * Field names match the wire camelCase exactly. Older versions of this
+ * type declared `insights: ReflectInsight[]` which was a lie — the
+ * server returned strings — so the dashboard rendered nothing for
+ * reflection. Fixing both sides of the contract here.
+ */
 export interface ReflectResult {
   focus: string | null;
   depth: string;
-  insights: ReflectInsight[];
+  insights: string[];
+  structuredInsights: ReflectInsight[];
   summary: string;
   memoriesAnalyzed: number;
 }
 
 export interface ReflectInsight {
-  type: string;
+  type: 'contradiction' | 'stale_decision' | 'overconfident' | 'knowledge_gap' | string;
   description: string;
-  memoryIds: string[];
-  severity: string;
+  /**
+   * Memory IDs that produced this insight. Empty for `knowledge_gap`,
+   * which is topic-scoped — those carry `tags` instead.
+   */
+  sourceMemoryIds: string[];
+  severity: 'high' | 'medium' | 'low' | string;
   suggestion?: string;
+  /** Topic tags for `knowledge_gap` insights; absent otherwise. */
+  tags?: string[];
 }
 
 export type TemporalAction = 'current' | 'expired' | 'history' | 'invalidate';

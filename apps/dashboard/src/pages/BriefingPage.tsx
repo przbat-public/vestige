@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DoubtList } from '@/components/DoubtList';
 import { DreamResultPanel } from '@/components/DreamResultPanel';
+import { InsightSourcesPanel } from '@/components/InsightSourcesPanel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +11,7 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { api } from '@/stores/api';
 import { toast } from '@/stores/toast';
-import type { DreamResult } from '@/types';
+import type { DreamResult, ReflectInsight } from '@/types';
 
 /**
  * Morning briefing — what your memory engine wants you to look at today.
@@ -69,20 +70,10 @@ export function BriefingPage() {
           {reflect.data && (
             <div className="space-y-3 text-xs">
               <p className="text-foreground font-medium">{reflect.data.summary}</p>
-              {reflect.data.insights && reflect.data.insights.length > 0 ? (
-                <ul className="space-y-2">
-                  {reflect.data.insights.slice(0, 6).map((ins) => (
-                    <li
-                      key={`${ins.type}|${ins.severity}|${ins.description}`}
-                      className="flex gap-2 items-start border-t border-border pt-2"
-                    >
-                      <Badge
-                        variant={ins.severity === 'high' ? 'danger' : ins.severity === 'medium' ? 'warning' : 'default'}
-                      >
-                        {ins.type}
-                      </Badge>
-                      <span className="text-muted-foreground flex-1">{ins.description}</span>
-                    </li>
+              {reflect.data.structuredInsights && reflect.data.structuredInsights.length > 0 ? (
+                <ul className="space-y-3">
+                  {reflect.data.structuredInsights.slice(0, 6).map((ins) => (
+                    <ReflectionInsightItem key={`${ins.type}|${ins.severity}|${ins.description}`} insight={ins} />
                   ))}
                 </ul>
               ) : (
@@ -127,5 +118,42 @@ export function BriefingPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+interface ReflectionInsightItemProps {
+  insight: ReflectInsight;
+}
+
+/**
+ * One reflection insight + its sources. The sources panel is the
+ * "why should I trust this" affordance — instead of a one-line claim
+ * ("3 contradictions found") the user can expand to see the actual
+ * memories that produced the contradiction.
+ */
+function ReflectionInsightItem({ insight }: ReflectionInsightItemProps) {
+  const { t } = useTranslation();
+  const variant = insight.severity === 'high' ? 'danger' : insight.severity === 'medium' ? 'warning' : 'default';
+
+  return (
+    <li className="space-y-2 border-t border-border pt-3">
+      <div className="flex gap-2 items-start">
+        <Badge variant={variant} className="shrink-0">
+          {t(`briefing.insightType.${insight.type}`, { defaultValue: insight.type })}
+        </Badge>
+        <span className="text-muted-foreground flex-1">{insight.description}</span>
+      </div>
+      {insight.suggestion && <p className="text-[10px] text-muted-foreground/80 italic pl-1">{insight.suggestion}</p>}
+      {insight.tags && insight.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 pl-1">
+          {insight.tags.map((tag) => (
+            <Badge key={tag} variant="secondary" className="text-[10px]">
+              {tag}
+            </Badge>
+          ))}
+        </div>
+      )}
+      <InsightSourcesPanel memoryIds={insight.sourceMemoryIds} initialLimit={3} />
+    </li>
   );
 }

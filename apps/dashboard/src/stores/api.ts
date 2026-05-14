@@ -139,6 +139,39 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ rating }),
       }),
+    /**
+     * Create a memory through the full smart-ingest pipeline (importance
+     * scoring, intent detection, preprocessing, prediction-error gating).
+     * The dashboard's "Add memory" affordance uses this — the engine may
+     * decide to update or merge into an existing memory rather than create
+     * a new one, and the response carries the decision so the UI can
+     * surface it (e.g. "We merged this with an existing memory because…").
+     */
+    smartIngest: (body: {
+      content: string;
+      tags?: string[];
+      nodeType?: string;
+      source?: string;
+      forceCreate?: boolean;
+    }) =>
+      fetcher<{
+        success: boolean;
+        decision: string;
+        nodeId: string;
+        message: string;
+        hasEmbedding: boolean;
+        similarity?: number;
+        predictionError: number;
+        supersededId?: string;
+        importanceScore: number;
+        reason: string;
+        explanation?: string;
+        compound_content_warning?: string;
+        near_duplicate_warning?: string;
+      }>('/smart_ingest', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
   },
   review: {
     queue: (limit = 50) => fetcher<ReviewQueueResponse>(`/review/queue?limit=${limit}`),

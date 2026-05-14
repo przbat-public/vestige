@@ -10,12 +10,26 @@ import type { ConfidenceResult, DreamResult, ReflectResult } from '@/types';
 import { BriefingPage } from './BriefingPage';
 
 const REFLECT: ReflectResult = {
+  focus: null,
+  depth: 'standard',
   summary: 'Memory base is broadly consistent.',
-  insights: [
-    { type: 'gap', description: 'No memories about deployment process', severity: 'medium' },
-    { type: 'contradiction', description: 'Two memories disagree on deadline', severity: 'high' },
+  insights: ['No memories about deployment process', 'Two memories disagree on deadline'],
+  structuredInsights: [
+    {
+      type: 'knowledge_gap',
+      description: 'No memories about deployment process',
+      severity: 'medium',
+      sourceMemoryIds: [],
+    },
+    {
+      type: 'contradiction',
+      description: 'Two memories disagree on deadline',
+      severity: 'high',
+      sourceMemoryIds: [],
+    },
   ],
-} as ReflectResult;
+  memoriesAnalyzed: 0,
+};
 
 const CONFIDENCE: ConfidenceResult = {
   results: [{ id: 'aaa', content: 'Doubtful memory', confidence: 0.3, classification: 'opinion' }],
