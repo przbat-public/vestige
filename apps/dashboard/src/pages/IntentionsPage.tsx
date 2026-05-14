@@ -215,13 +215,28 @@ export function IntentionsPage() {
         </div>
       )}
 
-      {predictions && (
+      {predictions && predictions.predictions.length > 0 && (
         <SectionErrorBoundary>
           <Card>
-            <h3 className="text-xs font-bold text-foreground mb-2">{t('intentions.predictions')}</h3>
-            <pre className="text-xs text-muted-foreground overflow-x-auto max-h-60">
-              {JSON.stringify(predictions, null, 2)}
-            </pre>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold text-foreground">{t('intentions.predictions')}</h3>
+              <span className="text-[10px] text-muted-foreground/80 tabular-nums">
+                {t('intentions.basedOn', { source: predictions.basedOn })}
+              </span>
+            </div>
+            <ul className="space-y-1.5">
+              {predictions.predictions.map((p) => (
+                <li key={p.id} className="flex items-start gap-2 text-xs">
+                  <Badge variant="outline" className="shrink-0 mt-0.5 capitalize">
+                    {p.nodeType}
+                  </Badge>
+                  <span className="flex-1 text-muted-foreground overflow-wrap-anywhere">{p.content}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
+                    r{p.retention.toFixed(2)} · {p.predictedNeed}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </Card>
         </SectionErrorBoundary>
       )}

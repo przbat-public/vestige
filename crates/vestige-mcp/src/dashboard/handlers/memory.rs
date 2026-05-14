@@ -16,6 +16,10 @@ use super::{log_err, log_join_err};
 #[derive(Debug, Deserialize)]
 pub struct MemoryListParams {
     pub q: Option<String>,
+    // `alias = "type"` keeps older dashboard builds (and any external caller
+    // that read the original endpoint) working after the v3.3.x filter rename.
+    // The canonical name stays `node_type` to match the storage column.
+    #[serde(alias = "type")]
     pub node_type: Option<String>,
     pub tag: Option<String>,
     pub min_retention: Option<f64>,

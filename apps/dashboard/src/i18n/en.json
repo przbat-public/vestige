@@ -14,7 +14,9 @@
     "intentions": "Reminders",
     "stats": "Overview",
     "settings": "Settings",
-    "tutorial": "Tutorial"
+    "tutorial": "Tutorial",
+    "reviewDueAria_one": "{{count}} memory due for review",
+    "reviewDueAria_other": "{{count}} memories due for review"
   },
   "bulk": {
     "selectedCount_one": "{{count}} selected",
@@ -65,6 +67,7 @@
     "dupBtn": "Scan for duplicates",
     "dupSuccess": "Found {{count}} clusters of near-duplicates.",
     "dupResult": "{{clusters}} clusters across {{memories}} memories scanned.",
+    "dupReviewWarning": "Review each cluster manually — high similarity often means \"two valid notes about the same topic\", not duplicates. Bulk-deletion at this threshold is unsafe.",
     "dupClusterLabel": "Cluster of {{size}}",
     "gcTitle": "Garbage collection",
     "gcDesc": "List or delete memories whose retention has decayed below 10% — these are unlikely to surface in search anyway.",
@@ -171,6 +174,10 @@
     "nextReviewLabel": "Next review",
     "nextReviewDueNow": "due now",
     "nextReviewAria": "Next FSRS review {{when}}",
+    "temporalExpired": "expired {{days}}d ago",
+    "temporalExpiredAria": "Memory marked as superseded {{days}} days ago",
+    "temporalExpiring": "expires in {{days}}d",
+    "temporalExpiringAria": "Memory expires in {{days}} days",
     "editContentLabel": "Memory content",
     "editTagsLabel": "Tags",
     "editTagsPlaceholder": "acme, web-sdk, debugging",
@@ -402,6 +409,7 @@
     "triggerValue": "Trigger value",
     "priorityLabel": "Priority",
     "predictions": "Predictions",
+    "basedOn": "based on: {{source}}",
     "timePlaceholder": "2026-04-15T17:00",
     "topicPlaceholder": "topic",
     "created": "Reminder created"
@@ -420,7 +428,9 @@
   "timeline": {
     "title": "Timeline",
     "noActivity": "No activity for this period",
-    "memoriesOn": "{{count}} memories on {{date}}"
+    "memoriesOn": "{{count}} memories on {{date}}",
+    "moreCount_one": "+{{count}} more",
+    "moreCount_other": "+{{count}} more"
   },
   "notFound": {
     "title": "Page not found",

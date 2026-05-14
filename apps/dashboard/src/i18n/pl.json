@@ -14,7 +14,11 @@
     "intentions": "Przypomnienia",
     "stats": "Przegląd",
     "settings": "Ustawienia",
-    "tutorial": "Samouczek"
+    "tutorial": "Samouczek",
+    "reviewDueAria_one": "{{count}} wspomnienie do powtórki",
+    "reviewDueAria_few": "{{count}} wspomnienia do powtórki",
+    "reviewDueAria_many": "{{count}} wspomnień do powtórki",
+    "reviewDueAria_other": "{{count}} wspomnień do powtórki"
   },
   "bulk": {
     "selectedCount_one": "{{count}} zaznaczone",
@@ -77,6 +81,7 @@
     "dupBtn": "Szukaj duplikatów",
     "dupSuccess": "Znaleziono {{count}} klastrów blisko-duplikatów.",
     "dupResult": "Przeskanowano {{clusters}} klastrów w {{memories}} wspomnieniach.",
+    "dupReviewWarning": "Przejrzyj każdy klaster ręcznie — wysokie podobieństwo często oznacza „dwie ważne notatki o tym samym temacie\", nie duplikaty. Masowe kasowanie przy tym progu jest ryzykowne.",
     "dupClusterLabel": "Klaster {{size}}",
     "gcTitle": "Garbage collection",
     "gcDesc": "Pokaż lub usuń wspomnienia, których zapamiętanie spadło poniżej 10% — i tak rzadko pojawiają się w wyszukiwaniu.",
@@ -183,6 +188,10 @@
     "nextReviewLabel": "Następna powtórka",
     "nextReviewDueNow": "teraz",
     "nextReviewAria": "Następna powtórka FSRS {{when}}",
+    "temporalExpired": "nieaktualne ({{days}} dni)",
+    "temporalExpiredAria": "Wspomnienie nieaktualne od {{days}} dni",
+    "temporalExpiring": "wygasa za {{days}} dni",
+    "temporalExpiringAria": "Wspomnienie wygasa za {{days}} dni",
     "editContentLabel": "Treść wspomnienia",
     "editTagsLabel": "Tagi",
     "editTagsPlaceholder": "acme, web-sdk, debugowanie",
@@ -414,6 +423,7 @@
     "triggerValue": "Wartość wyzwalacza",
     "priorityLabel": "Priorytet",
     "predictions": "Predykcje",
+    "basedOn": "na podstawie: {{source}}",
     "timePlaceholder": "2026-04-15T17:00",
     "topicPlaceholder": "temat",
     "created": "Przypomnienie utworzone"
@@ -432,7 +442,11 @@
   "timeline": {
     "title": "Oś czasu",
     "noActivity": "Brak aktywności w tym okresie",
-    "memoriesOn": "{{count}} wspomnień dnia {{date}}"
+    "memoriesOn": "{{count}} wspomnień dnia {{date}}",
+    "moreCount_one": "+{{count}} więcej",
+    "moreCount_few": "+{{count}} więcej",
+    "moreCount_many": "+{{count}} więcej",
+    "moreCount_other": "+{{count}} więcej"
   },
   "notFound": {
     "title": "Nie znaleziono strony",

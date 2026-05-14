@@ -91,7 +91,9 @@ export function TimelinePage() {
                     </div>
                   ))}
                   {day.memories.length > 5 && (
-                    <div className="text-xs text-muted-foreground">+{day.memories.length - 5} more</div>
+                    <div className="text-xs text-muted-foreground">
+                      {t('timeline.moreCount', { count: day.memories.length - 5 })}
+                    </div>
                   )}
                 </div>
               )}

@@ -134,30 +134,54 @@ export interface GraphResponse {
   edgeCount: number;
 }
 
+/**
+ * A pair of memories that the dream engine flagged as contradictory.
+ *
+ * The pair is symmetric — neither side is the "winner" — so the wire shape
+ * uses `memoryA`/`memoryB`. Resolution (which one to demote, edit, or merge)
+ * is a separate UI affordance, not part of the engine output.
+ */
 export interface ContradictionPair {
-  survivorId: string;
-  demotedId: string;
-  similarity: number;
-  reason: string;
+  memoryA: string;
+  memoryB: string;
+  confidence: number;
+  insight: string;
+}
+
+export interface DreamPhase {
+  phase: string;
+  durationMs: number;
+  memoriesProcessed: number;
+  actions: string[];
+}
+
+export interface DreamStats {
+  creativeConnectionsFound: number;
+  connectionsPersisted: number;
+  memoriesStrengthened: number;
+  memoriesDownscaled: number;
+  emotionalProcessed: number;
+  contradictionsFound: number;
+  insightsGenerated: number;
+  durationMs: number;
 }
 
 export interface DreamResult {
   status: string;
   memoriesReplayed: number;
+  wakingTagsProcessed: number;
+  wakingTagsCleared: number;
   connectionsPersisted: number;
   insights: DreamInsight[];
   contradictions: ContradictionPair[];
+  /**
+   * Currently always empty — engine only counts demotions, not their IDs.
+   * Kept on the wire so the dashboard can render the count consistently
+   * with the strengthened/downscaled stats.
+   */
   memoriesDemoted: string[];
-  stats: {
-    new_connections_found: number;
-    connections_persisted: number;
-    memories_strengthened: number;
-    memories_compressed: number;
-    contradictions_found: number;
-    memories_demoted: number;
-    insights_generated: number;
-    duration_ms: number;
-  };
+  phases: DreamPhase[];
+  stats: DreamStats;
 }
 
 export interface DreamInsight {
@@ -256,20 +280,38 @@ export interface ReflectInsight {
   suggestion?: string;
 }
 
-export interface TemporalResult {
-  action: string;
-  topic?: string;
-  results: TemporalEntry[];
-  total: number;
-}
+export type TemporalAction = 'current' | 'expired' | 'history' | 'invalidate';
 
+/**
+ * One memory in a temporal-versioning result. Field names mirror the wire
+ * shape from `tools/temporal.rs` exactly (snake_case, retention as a
+ * formatted string for the `current` action). The dashboard mapper in
+ * `api.temporal()` normalises these into the camelCase shape consumed by
+ * components.
+ *
+ * Kept as a structural type rather than a class because we want JSON.parse
+ * output to flow through unchanged.
+ */
 export interface TemporalEntry {
   id: string;
   content: string;
+  /** ISO-8601, present whenever the engine has stored a validity window. */
   validFrom?: string;
+  /** Either future (still valid) or past (expired) — caller filters. */
   validUntil?: string;
-  nodeType: string;
+  /** Days since `validUntil` for `expired` action; undefined elsewhere. */
+  daysExpired?: number;
+  /** Numeric in `[0, 1]`. Backend serialises with `format!("{:.2}", ...)`
+   * for `current`; `api.temporal` converts to a number. */
   retention: number;
+  tags: string[];
+}
+
+export interface TemporalResult {
+  action: TemporalAction;
+  topic?: string;
+  count: number;
+  memories: TemporalEntry[];
 }
 
 export interface ConfidenceResult {
@@ -308,13 +350,26 @@ export interface ExploreResponse {
   bridges?: ExploreResult[];
 }
 
+/**
+ * One memory the predict engine guesses the user will need next, based on
+ * recent activity. Currently a deterministic "last 10 by recency" heuristic
+ * — the dashboard surfaces it so the cognitive engine can be observed and,
+ * later, swapped for a real spreading-activation predictor without touching
+ * UI code.
+ */
+export interface PredictedMemory {
+  id: string;
+  content: string;
+  nodeType: string;
+  retention: number;
+  /** Backend bucket: "low" | "medium" | "high". Treat as opaque ranking. */
+  predictedNeed: string;
+}
+
 export interface PredictResponse {
-  predictions: {
-    topic: string;
-    probability: number;
-    relatedMemories: string[];
-  }[];
-  context?: Record<string, unknown>;
+  predictions: PredictedMemory[];
+  /** What the prediction model is conditioning on (e.g. "recent_activity"). */
+  basedOn: string;
 }
 
 export const NODE_TYPE_COLORS: Record<string, string> = {

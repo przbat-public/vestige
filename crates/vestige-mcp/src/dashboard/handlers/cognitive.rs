@@ -37,7 +37,11 @@ pub async fn trigger_dream(State(state): State<AppState>) -> Result<Json<Value>,
     let memories_replayed = result["memoriesReplayed"].as_u64().unwrap_or(0) as usize;
     let connections = result["connectionsPersisted"].as_u64().unwrap_or(0) as usize;
     let insights_count = result["insights"].as_array().map_or(0, |a| a.len());
-    let duration_ms = result["stats"]["total_duration_ms"].as_u64().unwrap_or(0);
+    // `stats.durationMs` (camelCase) is the canonical wire shape — see
+    // `tools/dream.rs` and the dashboard `DreamStats` type. The previous
+    // `total_duration_ms` lookup silently returned 0 after the v3.4 schema
+    // tightening, which made `DreamCompleted` events report `durationMs: 0`.
+    let duration_ms = result["stats"]["durationMs"].as_u64().unwrap_or(0);
 
     state.emit(VestigeEvent::DreamCompleted {
         memories_replayed,

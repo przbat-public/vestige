@@ -19,9 +19,52 @@ import type {
   ReviewResult,
   SearchResult,
   SystemStats,
+  TemporalAction,
+  TemporalEntry,
+  TemporalResult,
   TimelineResponse,
   TriggerType,
 } from '@/types';
+
+/**
+ * Raw shape of a temporal entry as serialised by `tools/temporal.rs`. Used
+ * only inside `api.temporal` for the snake_case → camelCase conversion;
+ * components consume `TemporalEntry` exclusively.
+ */
+interface RawTemporalEntry {
+  id: string;
+  content: string;
+  valid_from?: string;
+  valid_until?: string;
+  expired_at?: string;
+  days_expired?: number;
+  // `current` returns retention pre-formatted as "0.87"; `expired` and
+  // `history` omit it. Normalised to a number in `mapTemporalEntry`.
+  retention?: string | number;
+  tags?: string[];
+}
+
+interface RawTemporalResult {
+  action: TemporalAction;
+  topic?: string;
+  count: number;
+  memories: RawTemporalEntry[];
+}
+
+function mapTemporalEntry(raw: RawTemporalEntry): TemporalEntry {
+  const retention = typeof raw.retention === 'string' ? Number.parseFloat(raw.retention) : (raw.retention ?? 0);
+  return {
+    id: raw.id,
+    content: raw.content,
+    validFrom: raw.valid_from,
+    // `expired` action stores the expiry timestamp under `expired_at` so the
+    // dashboard reads the correct field whether the row is still live or not.
+    validUntil: raw.valid_until ?? raw.expired_at,
+    daysExpired: raw.days_expired,
+    retention: Number.isFinite(retention) ? retention : 0,
+    tags: raw.tags ?? [],
+  };
+}
 
 const BASE = '/api';
 
@@ -73,8 +116,18 @@ export const api = {
     },
     get: (id: string) => fetcher<Memory>(`/memories/${id}`),
     delete: (id: string) => fetcher<{ deleted: boolean }>(`/memories/${id}`, { method: 'DELETE' }),
-    promote: (id: string) => fetcher<Memory>(`/memories/${id}/promote`, { method: 'POST' }),
-    demote: (id: string) => fetcher<Memory>(`/memories/${id}/demote`, { method: 'POST' }),
+    // Backend returns a status blob (`{ promoted: true, id, retentionStrength }`),
+    // not the full Memory object. The dashboard previously over-declared the
+    // shape as `Memory`, which would break any caller that consumed the result —
+    // today nobody does, but the lying type hid the divergence from reviewers.
+    promote: (id: string) =>
+      fetcher<{ promoted: boolean; id: string; retentionStrength: number }>(`/memories/${id}/promote`, {
+        method: 'POST',
+      }),
+    demote: (id: string) =>
+      fetcher<{ demoted: boolean; id: string; retentionStrength: number }>(`/memories/${id}/demote`, {
+        method: 'POST',
+      }),
     update: (id: string, body: { content?: string; tags?: string[] }) =>
       fetcher<Memory>(`/memories/${id}`, {
         method: 'PATCH',
@@ -197,4 +250,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action, memory_id: memoryId, limit }),
     }),
+  /**
+   * Query temporal versioning. Wraps `POST /api/temporal` and normalises the
+   * snake_case wire shape (`valid_from`, `expired_at`, retention as string)
+   * into the camelCase `TemporalResult` consumed by components.
+   *
+   * Use `current` and `expired` for topic-scoped or DB-wide scans; use
+   * `history` to follow a single concept's evolution; use `invalidate` to
+   * mark a memory as superseded (server-side state change).
+   */
+  temporal: async (action: TemporalAction, opts?: { topic?: string; memoryId?: string; limit?: number }) => {
+    const raw = await fetcher<RawTemporalResult>('/temporal', {
+      method: 'POST',
+      body: JSON.stringify({
+        action,
+        topic: opts?.topic,
+        memory_id: opts?.memoryId,
+        limit: opts?.limit ?? 20,
+      }),
+    });
+    return {
+      action: raw.action,
+      topic: raw.topic,
+      count: raw.count,
+      memories: raw.memories.map(mapTemporalEntry),
+    } satisfies TemporalResult;
+  },
 };

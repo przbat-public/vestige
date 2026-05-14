@@ -1,5 +1,8 @@
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { NavLink } from 'react-router';
+import { api } from '@/stores/api';
+import { queryKeys } from '@/stores/query';
 import { useWebSocket } from '@/stores/websocket';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { ThemeToggle } from './ThemeToggle';
@@ -18,6 +21,9 @@ const NAV_ITEMS = [
   { to: 'tutorial', labelKey: 'nav.tutorial' },
 ] as const;
 
+/** Highest count we render verbatim; anything above shows as "99+". */
+const REVIEW_BADGE_CAP = 99;
+
 interface SidebarProps {
   onNavigate?: () => void;
   onOpenCommandPalette?: () => void;
@@ -26,6 +32,17 @@ interface SidebarProps {
 export function Sidebar({ onNavigate, onOpenCommandPalette }: SidebarProps) {
   const { t } = useTranslation();
   const { connected, memoryCount, avgRetention } = useWebSocket();
+
+  // Reuse the existing `stats` query (already loaded by GraphPage / Layout)
+  // so the badge piggybacks on cached data and adds zero network traffic in
+  // the common case. WebSocket invalidation keeps it fresh after reviews.
+  const { data: stats } = useQuery({
+    queryKey: queryKeys.stats,
+    queryFn: api.stats,
+    staleTime: 60_000,
+  });
+  const dueCount = stats?.dueForReview ?? 0;
+  const dueLabel = dueCount > REVIEW_BADGE_CAP ? `${REVIEW_BADGE_CAP}+` : String(dueCount);
 
   return (
     <nav
@@ -38,27 +55,46 @@ export function Sidebar({ onNavigate, onOpenCommandPalette }: SidebarProps) {
       </div>
 
       <div className="flex-1 px-2 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              `block px-3 py-2 rounded-lg text-sm transition-all truncate ${
-                isActive
-                  ? 'bg-primary/10 text-primary font-medium nav-active-border'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-              }`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {t(item.labelKey)}
-                {isActive && <span className="sr-only">(current page)</span>}
-              </>
-            )}
-          </NavLink>
-        ))}
+        {NAV_ITEMS.map((item) => {
+          const showDueBadge = item.to === 'review' && dueCount > 0;
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                `flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-all ${
+                  isActive
+                    ? 'bg-primary/10 text-primary font-medium nav-active-border'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <span className="truncate">
+                    {t(item.labelKey)}
+                    {isActive && <span className="sr-only">(current page)</span>}
+                  </span>
+                  {showDueBadge && (
+                    // Visible badge is the count, hidden text is the
+                    // verbose plural-aware aria announcement so screen
+                    // readers say "3 memories due for review" rather than
+                    // a bare numeric. `role="status"` makes `aria-label`
+                    // valid on the otherwise non-interactive span.
+                    <span
+                      role="status"
+                      className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-medium tabular-nums bg-warning/20 text-warning"
+                    >
+                      <span aria-hidden="true">{dueLabel}</span>
+                      <span className="sr-only">{t('nav.reviewDueAria', { count: dueCount })}</span>
+                    </span>
+                  )}
+                </>
+              )}
+            </NavLink>
+          );
+        })}
       </div>
 
       <div className="px-3 py-3 border-t border-sidebar-border space-y-2">

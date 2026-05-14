@@ -2,9 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router';
 
+// Keep this list in sync with `Sidebar.NAV_ITEMS` — every route the user can
+// reach from the nav must be announced here, otherwise screen-reader users
+// don't get any feedback when navigating to it. Missing `/review` and
+// `/briefing` was a regression after those pages were added.
 const ROUTE_TITLES: Record<string, string> = {
   '/graph': 'nav.graph',
   '/memories': 'nav.memories',
+  '/review': 'nav.review',
+  '/briefing': 'nav.briefing',
   '/timeline': 'nav.timeline',
   '/feed': 'nav.feed',
   '/explore': 'nav.explore',

@@ -1,12 +1,21 @@
 import { useQuery } from '@tanstack/react-query';
+import { lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Graph3D } from '@/components/Graph3D';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { useWebSocket } from '@/stores/websocket';
+
+// Three.js + the Graph3D wrapper weigh ~178 kB gzipped. Loading them
+// synchronously here put them on the critical path of MemoryDetail (which
+// is itself behind a route-level code split). Defer the import so the
+// detail panel renders the metadata first and the mini-graph fades in.
+//
+// `Suspense` below uses a small spinner that matches the loading-state branch
+// so the user doesn't see two different placeholders.
+const Graph3D = lazy(() => import('@/components/Graph3D').then((m) => ({ default: m.Graph3D })));
 
 interface MemoryLocalGraphProps {
   memoryId: string;
@@ -62,14 +71,22 @@ export function MemoryLocalGraph({ memoryId, depth = 1, maxNodes = 30, className
 
   return (
     <div className={`relative rounded-lg overflow-hidden border border-border/60 ${className}`}>
-      <Graph3D
-        nodes={data.nodes}
-        edges={data.edges}
-        centerId={data.centerId}
-        events={events}
-        isDreaming={isDreaming}
-        reducedMotion={reducedMotion}
-      />
+      <Suspense
+        fallback={
+          <div className={`flex items-center justify-center ${className}`}>
+            <LoadingSpinner label={t('graph.loadingGraph')} />
+          </div>
+        }
+      >
+        <Graph3D
+          nodes={data.nodes}
+          edges={data.edges}
+          centerId={data.centerId}
+          events={events}
+          isDreaming={isDreaming}
+          reducedMotion={reducedMotion}
+        />
+      </Suspense>
       <div className="absolute bottom-1 right-2 text-[10px] text-muted-foreground/80 tabular-nums pointer-events-none">
         {t('graph.nodesCount', { nodes: data.nodes.length })} · {t('graph.edgesCount', { edges: data.edges.length })}
       </div>

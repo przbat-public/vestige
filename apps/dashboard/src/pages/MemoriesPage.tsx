@@ -32,7 +32,14 @@ export function MemoriesPage() {
   const [tagFilter, setTagFilter] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  const listParams = { limit: '100', ...(typeFilter && { type: typeFilter }), ...(tagFilter && { tag: tagFilter }) };
+  // Use `node_type` to match backend deserialization in `MemoryListParams`.
+  // Sending `type` was a silent no-op for non-search list views — server only
+  // accepts `node_type` (with a `type` serde alias for forward-compat).
+  const listParams = {
+    limit: '100',
+    ...(typeFilter && { node_type: typeFilter }),
+    ...(tagFilter && { tag: tagFilter }),
+  };
 
   const {
     data: listData,

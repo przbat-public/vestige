@@ -24,10 +24,10 @@ export function DreamResultPanel({ result }: Props) {
           {t('dream.contradictions')}: <span className="text-danger">{result.contradictions.length}</span>
         </div>
         <div>
-          {t('dream.demoted')}: <span className="text-danger">{result.memoriesDemoted.length}</span>
+          {t('dream.demoted')}: <span className="text-danger">{result.stats.memoriesDownscaled}</span>
         </div>
         <div>
-          {t('dream.duration')}: <span className="text-foreground">{result.stats.duration_ms}ms</span>
+          {t('dream.duration')}: <span className="text-foreground">{result.stats.durationMs}ms</span>
         </div>
       </div>
       {result.contradictions.length > 0 && (
@@ -35,10 +35,10 @@ export function DreamResultPanel({ result }: Props) {
           <div className="text-xs text-danger font-medium">{t('dream.contradictions')}:</div>
           {result.contradictions.map((c) => (
             <div
-              key={`${c.survivorId}-${c.demotedId}`}
+              key={`${c.memoryA}-${c.memoryB}`}
               className="text-xs text-muted-foreground bg-danger/5 rounded p-1.5 overflow-wrap-anywhere"
             >
-              {c.reason} ({t('dream.similarity', { value: c.similarity.toFixed(3) })})
+              {c.insight} ({t('dream.similarity', { value: c.confidence.toFixed(3) })})
             </div>
           ))}
         </div>

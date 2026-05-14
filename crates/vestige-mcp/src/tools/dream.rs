@@ -308,31 +308,40 @@ pub async fn execute(
     .await
     .map_err(|e| format!("dream persist task panicked: {}", e))?;
 
-    // Merge insights from 4-phase engine + legacy synthesizer
+    // Merge insights from 4-phase engine + legacy synthesizer.
+    //
+    // Wire shape is camelCase to match the dashboard `DreamInsight` type. The
+    // pre-3.4 payload used snake_case here (`insight_type`, `source_memories`,
+    // `novelty_score`) which silently rendered as undefined fields in
+    // `DreamResultPanel`. See AGENTS.md note about wire-format stability.
     let all_insights: Vec<serde_json::Value> = dream_result
         .insights
         .iter()
         .map(|i| {
             serde_json::json!({
-                "insight_type": i.insight_type,
+                "type": i.insight_type,
                 "insight": i.insight,
-                "source_memories": i.source_memory_ids,
+                "sourceMemories": i.source_memory_ids,
                 "confidence": i.confidence,
-                "novelty_score": i.novelty,
+                "noveltyScore": i.novelty,
             })
         })
         .chain(extra_insights.iter().map(|i| {
             serde_json::json!({
-                "insight_type": format!("{:?}", i.insight_type),
+                "type": format!("{:?}", i.insight_type),
                 "insight": i.insight,
-                "source_memories": i.source_memories,
+                "sourceMemories": i.source_memories,
                 "confidence": i.confidence,
-                "novelty_score": i.novelty_score,
+                "noveltyScore": i.novelty_score,
             })
         }))
         .collect();
 
-    // Contradiction detection from creative connections
+    // Contradiction pairs from creative connections. The pair is symmetric —
+    // neither side is the "winner" until the user (or a remediation flow)
+    // resolves it — so the wire shape uses `memoryA`/`memoryB` rather than
+    // `survivor`/`demoted`. UI is responsible for surfacing resolution
+    // affordances on top of this shape.
     let contradictions: Vec<serde_json::Value> = dream_result
         .creative_connections
         .iter()
@@ -355,21 +364,27 @@ pub async fn execute(
         "insights": all_insights,
         "connectionsPersisted": connections_persisted,
         "contradictions": contradictions,
+        // Preserve a place for explicit demoted-memory IDs once dream
+        // remediation tracks them; today the engine only counts the cohort.
+        "memoriesDemoted": Vec::<String>::new(),
         "phases": dream_result.phases.iter().map(|p| serde_json::json!({
             "phase": p.phase.as_str(),
             "durationMs": p.duration_ms,
             "memoriesProcessed": p.memories_processed,
             "actions": p.actions,
         })).collect::<Vec<_>>(),
+        // camelCase stats — matches the dashboard `DreamResult.stats` type.
+        // The previous snake_case spelling broke `result.stats.duration_ms`
+        // rendering in `DreamResultPanel` after the cognitive engine refactor.
         "stats": {
-            "creative_connections_found": dream_result.creative_connections.len(),
-            "connections_persisted": connections_persisted,
-            "memories_strengthened": dream_result.memories_strengthened,
-            "memories_downscaled": dream_result.memories_downscaled,
-            "emotional_processed": dream_result.emotional_processed,
-            "contradictions_found": contradictions.len(),
-            "insights_generated": all_insights.len(),
-            "total_duration_ms": dream_result.total_duration_ms,
+            "creativeConnectionsFound": dream_result.creative_connections.len(),
+            "connectionsPersisted": connections_persisted,
+            "memoriesStrengthened": dream_result.memories_strengthened,
+            "memoriesDownscaled": dream_result.memories_downscaled,
+            "emotionalProcessed": dream_result.emotional_processed,
+            "contradictionsFound": contradictions.len(),
+            "insightsGenerated": all_insights.len(),
+            "durationMs": dream_result.total_duration_ms,
         }
     }))
 }
@@ -479,13 +494,19 @@ mod tests {
         ingest_n_memories(&storage, 6).await;
         let result = execute(&storage, &test_cognitive(), None).await;
         let value = result.unwrap();
-        assert!(value["stats"]["creative_connections_found"].is_number());
-        assert!(value["stats"]["memories_strengthened"].is_number());
-        assert!(value["stats"]["memories_downscaled"].is_number());
-        assert!(value["stats"]["insights_generated"].is_number());
-        assert!(value["stats"]["total_duration_ms"].is_number());
-        assert!(value["stats"]["emotional_processed"].is_number());
+        // Wire shape switched to camelCase in v3.4 to match the dashboard
+        // `DreamStats` type. Keep this test exhaustive — it's the main
+        // contract test catching schema drift between dream engine and UI.
+        assert!(value["stats"]["creativeConnectionsFound"].is_number());
+        assert!(value["stats"]["memoriesStrengthened"].is_number());
+        assert!(value["stats"]["memoriesDownscaled"].is_number());
+        assert!(value["stats"]["insightsGenerated"].is_number());
+        assert!(value["stats"]["durationMs"].is_number());
+        assert!(value["stats"]["emotionalProcessed"].is_number());
+        assert!(value["stats"]["contradictionsFound"].is_number());
+        assert!(value["stats"]["connectionsPersisted"].is_number());
         assert!(value["phases"].is_array());
+        assert!(value["memoriesDemoted"].is_array());
     }
 
     #[tokio::test]
@@ -723,7 +744,7 @@ mod tests {
         let result = execute(&storage, &cognitive, None).await.unwrap();
         assert_eq!(result["status"], "dreamed");
 
-        let found = result["stats"]["creative_connections_found"]
+        let found = result["stats"]["creativeConnectionsFound"]
             .as_u64()
             .unwrap_or(0);
         let persisted = result["connectionsPersisted"].as_u64().unwrap_or(0);

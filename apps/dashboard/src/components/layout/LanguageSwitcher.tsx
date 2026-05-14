@@ -1,16 +1,18 @@
-import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from '@/lib/i18n';
 
 export function LanguageSwitcher() {
   const { i18n } = useTranslation();
-  const queryClient = useQueryClient();
 
+  // No `queryClient.invalidateQueries()` here on purpose — the backend
+  // returns identifiers and timestamps, not localised strings, so a language
+  // switch only needs to swap i18n bundles client-side. The previous
+  // unconditional invalidation forced a full dashboard refetch (≥10 round
+  // trips) on every language change.
   const changeLanguage = (lang: string) => {
     i18n.changeLanguage(lang);
     localStorage.setItem('vestige-language', lang);
     document.documentElement.lang = lang;
-    queryClient.invalidateQueries();
   };
 
   return (

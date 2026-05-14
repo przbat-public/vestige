@@ -53,8 +53,14 @@ export function MaintenancePanel() {
     onError: handleError('common.error'),
   });
 
+  // 0.82 calibrated against the 2026-05-07 audit (1960-memory base):
+  //   * 0.85+ — zero clusters returned, missed real duplicates
+  //   * 0.82  — ~30 candidate clusters, ~20% true duplicates
+  // Lower threshold surfaces splittable compounds and rephrasings, which is
+  // the actual quality problem in long-running bases. UI surfaces an
+  // explicit "review before merging" warning so users don't bulk-delete.
   const dup = useMutation({
-    mutationFn: () => api.maintenance.findDuplicates({ similarity_threshold: 0.85, limit: 20 }),
+    mutationFn: () => api.maintenance.findDuplicates({ similarity_threshold: 0.82, limit: 30 }),
     onSuccess: (res) => {
       setDupResult(res);
       const count = res.totalClusters ?? res.clusters?.length ?? 0;
@@ -137,32 +143,7 @@ export function MaintenancePanel() {
             {dup.isPending ? t('common.loading') : t('maintenance.dupBtn')}
           </Button>
         </div>
-        {dupResult && (
-          <div className="text-xs space-y-1.5">
-            {dupResult.warning && <p className="text-amber-500">{dupResult.warning}</p>}
-            <p className="text-muted-foreground tabular-nums">
-              {t('maintenance.dupResult', {
-                clusters: dupResult.totalClusters,
-                memories: dupResult.totalWithEmbeddings,
-              })}
-            </p>
-            {dupResult.clusters?.slice(0, 3).map((c) => (
-              <Card key={c.clusterId} className="text-xs space-y-1">
-                <div className="flex items-center gap-2">
-                  <Badge variant="warning">{t('maintenance.dupClusterLabel', { size: c.size })}</Badge>
-                  <span className="text-muted-foreground">{c.suggestedAction}</span>
-                </div>
-                <ul className="space-y-0.5 ml-1">
-                  {c.members.slice(0, 3).map((m) => (
-                    <li key={m.id} className="text-muted-foreground line-clamp-1" title={m.contentPreview}>
-                      {m.contentPreview}
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            ))}
-          </div>
-        )}
+        {dupResult && <DupResultPanel result={dupResult} />}
 
         {/* Garbage Collection */}
         <div className="flex flex-wrap items-start justify-between gap-3 border-t border-border pt-4">
@@ -218,5 +199,43 @@ export function MaintenancePanel() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Render the find-duplicates result. Extracted from `MaintenancePanel` to
+ * keep that component below Biome's cognitive-complexity threshold and to
+ * keep the duplicate review affordances co-located in one place.
+ */
+function DupResultPanel({ result }: { result: DupResult }) {
+  const { t } = useTranslation();
+  return (
+    <div className="text-xs space-y-1.5">
+      {result.warning && <p className="text-amber-500">{result.warning}</p>}
+      <p className="text-muted-foreground tabular-nums">
+        {t('maintenance.dupResult', {
+          clusters: result.totalClusters,
+          memories: result.totalWithEmbeddings,
+        })}
+      </p>
+      {(result.totalClusters ?? 0) > 0 && (
+        <p className="text-amber-500/90 italic">{t('maintenance.dupReviewWarning')}</p>
+      )}
+      {result.clusters?.slice(0, 3).map((c) => (
+        <Card key={c.clusterId} className="text-xs space-y-1">
+          <div className="flex items-center gap-2">
+            <Badge variant="warning">{t('maintenance.dupClusterLabel', { size: c.size })}</Badge>
+            <span className="text-muted-foreground">{c.suggestedAction}</span>
+          </div>
+          <ul className="space-y-0.5 ml-1">
+            {c.members.slice(0, 3).map((m) => (
+              <li key={m.id} className="text-muted-foreground line-clamp-1" title={m.contentPreview}>
+                {m.contentPreview}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ))}
+    </div>
   );
 }
