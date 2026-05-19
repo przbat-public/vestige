@@ -533,9 +533,10 @@ pub async fn execute(
         "insights": all_insights,
         "connectionsPersisted": connections_persisted,
         "contradictions": contradictions,
-        // Preserve a place for explicit demoted-memory IDs once dream
-        // remediation tracks them; today the engine only counts the cohort.
-        "memoriesDemoted": Vec::<String>::new(),
+        // memoriesDemoted intentionally removed — the 4-phase engine never
+        // tracked individual demotion IDs, only counts. If a future
+        // remediation pass starts tracking them, re-add the field with a
+        // real backing instead of the previous always-empty placeholder.
         "phases": dream_result.phases.iter().map(|p| serde_json::json!({
             "phase": p.phase.as_str(),
             "durationMs": p.duration_ms,
@@ -675,7 +676,8 @@ mod tests {
         assert!(value["stats"]["contradictionsFound"].is_number());
         assert!(value["stats"]["connectionsPersisted"].is_number());
         assert!(value["phases"].is_array());
-        assert!(value["memoriesDemoted"].is_array());
+        // memoriesDemoted intentionally absent — see comment in execute().
+        assert!(value.get("memoriesDemoted").is_none());
     }
 
     #[tokio::test]

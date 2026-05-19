@@ -90,11 +90,22 @@ Both forward-only; no down migration. Existing databases auto-upgrade on first s
 - `AGENTS.md` development block updated: tools 27 → 28, migrations v1–v11 → v1–v13, dashboard routes "29 across 27 paths" → "39 routes", handler list extended with `decisions`, `hubs`, `insights`. The `crate v3.3.0` self-reference bumped to v3.4.0.
 - Five new design docs under `docs/` (see Added → Design Documentation).
 
-### Known Issues (Tracked for 3.4.x)
-- **Frontend ↔ backend copy drift**: the consistency audit on 2026-05-19 surfaced four critical mismatches (Maintenance "find duplicates" describes ≥0.85 in copy but calls 0.82 in the API client; Temporal "invalidate" tutorial copy promises "no longer valid" but the backend only demotes without writing `valid_until`; Insights tutorial promises a "Promote them to validate" button that doesn't exist in the UI; the tutorial page list omits `/reasoning`). Fix tracked for 3.4.1.
-- **Hardcoded "29 cognitive modules"** in `SettingsPage.tsx`: should read from a backend `/api/_meta/modules` endpoint rather than a JSX literal. Fix tracked for 3.4.1.
-- **`memoriesDemoted` field in `/api/dream` response is always empty**: the surface contract exists but the dream cycle never populates it. Either populate it or remove from the DTO. Tracked for 3.4.1.
+### Audit Closeout (2026-05-19)
+All Tier 1/2/3 findings from the consistency audit have been addressed in this release:
+- **Maintenance dup threshold copy** synced to the 0.82 the API actually uses (`maintenance.dupDesc`).
+- **Temporal `invalidate`** now writes `valid_until = now()` before demoting (`crates/vestige-core/src/storage/sqlite/temporal.rs::set_valid_until`, wired through `tools/temporal.rs`) so invalidated memories actually move to "expired".
+- **Insights gain Validate/Dismiss buttons** on `InsightCard`, calling the existing `useMemoryMutations` (promote marks `validated_by_agent=true` for insight nodes, demote lowers ranking).
+- **Tutorial page list** now includes `/reasoning` (15 pages total).
+- **FAQ "never deletes automatically"** clarified to explain manual GC with dry-run.
+- **Governance 30% vs Maintenance 10%** copy distinguishes "warning zone" (30%) from "GC threshold" (10%).
+- **`nomic-embed-text` references** standardised to `nomic-embed-text-v1.5`.
+- **Hardcoded "29 cognitive modules"** rewritten to a non-numeric description.
+- **`memoriesDemoted` removed** from `/api/dream` DTO and `DreamResult` TS interface — the 4-phase engine never tracked the IDs, so we ship a leaner contract instead of an always-empty field.
+- **`ReasoningPage` doc comment** disambiguates the reasoning pipeline from the 8-stage search pipeline shown on Settings.
+
+### Known Issues (Tracked for 3.5)
 - **Backend features without dashboard UI**: `split_memories`, `export`, `restore`, `memory_changelog` (system-wide, not per-memory), `session_context`, `memory_health`. These remain MCP-only in 3.4.0; UI surfaces tracked for 3.5.
+- **Promote/Demote `reason` parameter** is sent as `undefined` from the dashboard; the MCP tool accepts a free-text rationale that we could collect from a small inline prompt. Tracked for 3.5.
 
 ## [3.3.0] — post-v3.2.1 work
 

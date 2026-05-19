@@ -332,9 +332,7 @@ export function SettingsPage() {
           <CardTitle>{t('settings.architecture')}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            {t('settings.architectureDesc', { count: 29 })}
-          </p>
+          <p className="text-xs text-muted-foreground leading-relaxed">{t('settings.architectureDesc')}</p>
         </CardContent>
       </Card>
     </div>

@@ -92,7 +92,6 @@ describe('BriefingPage', () => {
       connectionsPersisted: 12,
       insights: [],
       contradictions: [],
-      memoriesDemoted: [],
       stats: { duration_ms: 800 },
     } as unknown as DreamResult);
 

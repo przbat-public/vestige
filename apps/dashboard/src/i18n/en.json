@@ -73,7 +73,7 @@
     "regenSuccess": "Regenerated {{successful}} embeddings, skipped {{skipped}}.",
     "regenResult": "Regenerated {{successful}}, skipped {{skipped}}, failed {{failed}} ({{ms}}ms).",
     "dupTitle": "Find near-duplicates",
-    "dupDesc": "Cluster memories by cosine similarity (≥0.85). Review clusters before merging — the audit shows preview and similarity-to-anchor.",
+    "dupDesc": "Cluster memories by cosine similarity (≥0.82). At ≥0.85 most healthy bases return zero clusters; 0.82 finds the real splits without flooding you with semantic neighbours. Review previews and similarity-to-anchor before merging — most clusters at this threshold are still false positives.",
     "dupBtn": "Scan for duplicates",
     "dupSuccess": "Found {{count}} clusters of near-duplicates.",
     "dupResult": "{{clusters}} clusters across {{memories}} memories scanned.",
@@ -309,7 +309,7 @@
   },
   "insights": {
     "title": "Insights",
-    "subtitleHeader": "Tentative observations from dream cycles and reflect runs. Promote to validate.",
+    "subtitleHeader": "Tentative observations from dream cycles and reflect runs. Validate each card to confirm it, or dismiss to lower its ranking.",
     "subtitle": "{{date}} · derived from {{sources}} memories",
     "validatedOn": "validated {{date}}",
     "confidence": "Confidence",
@@ -323,6 +323,15 @@
     "badge": {
       "validated": "Validated",
       "unvalidated": "Unvalidated"
+    },
+    "actions": {
+      "validate": "Validate",
+      "validateTooltip": "Mark this insight as confirmed (flips validatedByAgent=true) and boost its ranking. Same as the agent calling memory(action=\"promote\").",
+      "demote": "Dismiss",
+      "demoteTooltip": "Lower the ranking so search surfaces better-supported memories instead. The insight stays in the database.",
+      "validating": "Validating…",
+      "demoting": "Dismissing…",
+      "alreadyValidated": "Validated"
     },
     "empty": {
       "title": "No insights yet",
@@ -488,8 +497,8 @@
     "title": "Memory Governance",
     "retentionDistribution": "Retention Distribution",
     "endangered": "Endangered Memories ({{count}})",
-    "endangeredHint": "retention < 30% — candidates for GC",
-    "allHealthy": "All memories above 30% retention — no GC candidates."
+    "endangeredHint": "retention < 30% — needs attention (strengthen or review). GC only deletes below 10%.",
+    "allHealthy": "All memories above 30% retention — nothing in the warning zone."
   },
   "dream": {
     "replayed": "Replayed",
@@ -562,7 +571,7 @@
     "pipeline": "Search Pipeline",
     "pipelineStages": "{{count}} stages",
     "architecture": "How It Works",
-    "architectureDesc": "Vestige uses {{count}} cognitive modules inspired by real neuroscience research to manage your memories the way your brain does.",
+    "architectureDesc": "Vestige composes cognitive modules inspired by real neuroscience research — encoding, consolidation, retrieval, spreading activation, dream cycles, metacognition — to manage your memories the way your brain does.",
     "processed": "Processed",
     "decay": "Decay applied",
     "embeddings": "Embeddings",
@@ -880,8 +889,13 @@
       },
       "temporal": {
         "title": "Temporal",
-        "desc": "Time-scoped facts: which versions are currently valid, which have expired, and the full history of a topic across edits. Invalidate a memory when a newer fact replaces it so search stops surfacing the old version.",
+        "desc": "Time-scoped facts: which versions are currently valid, which have expired, and the full history of a topic across edits. Invalidate a memory when a newer fact replaces it — the engine writes valid_until to now() and demotes the row so search stops surfacing the old version.",
         "tip": "History mode needs a topic — the engine scopes versions to the subject line you pick."
+      },
+      "reasoning": {
+        "title": "Reasoning",
+        "desc": "The deep_reference engine answering a question with full provenance: evidence memories, contradictions it found, superseded rows, and the topic's evolution timeline. FSRS-6 trust scoring weighs the evidence so the highest-retention memories rank first.",
+        "tip": "Use this when you need not just an answer but the audit trail behind it — useful for verifying a claim before promoting an Insight."
       }
     },
     "howTo": {
@@ -895,11 +909,11 @@
     "faqTitle": "Frequently Asked Questions",
     "faq": {
       "q1": "Can Vestige delete my memories without asking?",
-      "a1": "No. Vestige never deletes anything automatically. Memories can fade (their retention drops), but they stay in the database. Only you can delete a memory — from the Memories page or the Graph detail panel.",
+      "a1": "No. Vestige never deletes anything on its own. Memories can fade (retention drops), but the row stays in the database. Only you delete memories — manually from the Memories page or the Graph detail panel, or by running garbage collection explicitly in Settings (and even there a dry-run shows you what would go before anything is removed).",
       "q2": "What happens if Vestige goes offline?",
       "a2": "Your AI continues working normally — it just won't have long-term memory until Vestige is back. All your stored memories are safe in a local SQLite database on your machine. Nothing is lost.",
       "q3": "Is my data sent anywhere?",
-      "a3": "No. Everything runs locally on your machine. The embedding model (nomic-embed-text) runs on your CPU, the database is a local SQLite file, and the reranker runs locally too. No API calls, no cloud, no tracking.",
+      "a3": "No. Everything runs locally on your machine. The embedding model (nomic-embed-text-v1.5) runs on your CPU, the database is a local SQLite file, and the reranker runs locally too. No API calls, no cloud, no tracking.",
       "q4": "What's the difference between Dream and Consolidation?",
       "a4": "Dream Cycle is creative — it replays memories, finds connections, spots contradictions, and generates insights. Think of it as sleep. Consolidation is maintenance — it applies decay, generates missing embeddings, merges duplicates, and computes activation scores. Think of it as housekeeping.",
       "q5": "Why do some memories fade faster than others?",

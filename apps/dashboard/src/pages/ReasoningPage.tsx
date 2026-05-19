@@ -14,10 +14,16 @@ import type { DeepReferenceResult } from '@/types';
 
 /**
  * Deep reasoning page. Wraps `POST /api/deep_reference` (backed by
- * `tools::cross_reference::execute`) — the 7-stage cognitive pipeline
- * that surfaces a recommended answer, supporting evidence, detected
+ * `tools::cross_reference::execute`) — the reasoning pipeline that
+ * surfaces a recommended answer, supporting evidence, detected
  * contradictions, temporal supersession, and dream insights for a
  * natural-language query.
+ *
+ * Not to be confused with the 8-stage search pipeline visualised on
+ * Settings — that one ranks individual results. Reasoning runs on top:
+ * it classifies the intent (FactCheck / Timeline / RootCause /
+ * Comparison / Synthesis), then weighs candidates with FSRS-6 trust
+ * scoring, contradiction detection and temporal supersession.
  *
  * Use this page for questions a single search query can't answer
  * cleanly: "why did we decide X?", "what contradicts Y?",

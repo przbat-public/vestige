@@ -179,12 +179,6 @@ export interface DreamResult {
   connectionsPersisted: number;
   insights: DreamInsight[];
   contradictions: ContradictionPair[];
-  /**
-   * Currently always empty — engine only counts demotions, not their IDs.
-   * Kept on the wire so the dashboard can render the count consistently
-   * with the strengthened/downscaled stats.
-   */
-  memoriesDemoted: string[];
   phases: DreamPhase[];
   stats: DreamStats;
 }

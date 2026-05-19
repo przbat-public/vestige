@@ -89,7 +89,7 @@
     "regenSuccess": "Wygenerowano {{successful}} embeddingów, pominięto {{skipped}}.",
     "regenResult": "Wygenerowano {{successful}}, pominięto {{skipped}}, błędy {{failed}} ({{ms}}ms).",
     "dupTitle": "Znajdź duplikaty",
-    "dupDesc": "Klastruj wspomnienia po podobieństwie cosinus (≥0.85). Przejrzyj klastry przed scaleniem — audyt pokazuje podgląd i podobieństwo do anchora.",
+    "dupDesc": "Klastruj wspomnienia po podobieństwie cosinus (≥0.82). Powyżej 0.85 zdrowa baza zwykle nic nie zwraca; 0.82 łapie realne rozszczepienia bez zalewania sąsiadami semantycznymi. Większość klastrów to i tak fałszywe pozytywy — sprawdź podgląd i podobieństwo do anchora zanim scalisz.",
     "dupBtn": "Szukaj duplikatów",
     "dupSuccess": "Znaleziono {{count}} klastrów blisko-duplikatów.",
     "dupResult": "Przeskanowano {{clusters}} klastrów w {{memories}} wspomnieniach.",
@@ -383,7 +383,7 @@
   },
   "insights": {
     "title": "Wnioski",
-    "subtitleHeader": "Hipotezy z cykli snu i refleksji. Promuj, żeby je zweryfikować.",
+    "subtitleHeader": "Hipotezy z cykli snu i refleksji. Zweryfikuj kartę, żeby ją potwierdzić, albo odrzuć, żeby obniżyć ranking.",
     "subtitle": "{{date}} · z {{sources}} wspomnień",
     "validatedOn": "zweryfikowano {{date}}",
     "confidence": "Pewność",
@@ -397,6 +397,15 @@
     "badge": {
       "validated": "Zweryfikowany",
       "unvalidated": "Niezweryfikowany"
+    },
+    "actions": {
+      "validate": "Zweryfikuj",
+      "validateTooltip": "Oznacz wniosek jako potwierdzony (validatedByAgent=true) i podbij jego ranking. To samo robi agent przez memory(action=\"promote\").",
+      "demote": "Odrzuć",
+      "demoteTooltip": "Obniż ranking — wyszukiwarka pokaże lepiej udokumentowane wspomnienia. Wniosek zostaje w bazie.",
+      "validating": "Weryfikuję…",
+      "demoting": "Odrzucam…",
+      "alreadyValidated": "Zweryfikowany"
     },
     "empty": {
       "title": "Brak wniosków",
@@ -518,8 +527,8 @@
     "title": "Zarządzanie pamięcią",
     "retentionDistribution": "Rozkład zapamiętania",
     "endangered": "Zagrożone wspomnienia ({{count}})",
-    "endangeredHint": "zapamiętanie < 30% — kandydaci do usunięcia",
-    "allHealthy": "Wszystkie wspomnienia powyżej 30% zapamiętania — brak kandydatów do usunięcia."
+    "endangeredHint": "zapamiętanie < 30% — strefa uwagi (warto wzmocnić lub powtórzyć). GC kasuje dopiero poniżej 10%.",
+    "allHealthy": "Wszystkie wspomnienia powyżej 30% — nic nie wpadło do strefy uwagi."
   },
   "dream": {
     "replayed": "Odtworzone",
@@ -592,7 +601,7 @@
     "pipeline": "Pipeline wyszukiwania",
     "pipelineStages": "{{count}} etapów",
     "architecture": "Jak to działa",
-    "architectureDesc": "Vestige używa {{count}} modułów poznawczych inspirowanych neurobiologią, by zarządzać twoimi wspomnieniami tak jak robi to mózg.",
+    "architectureDesc": "Vestige składa moduły poznawcze inspirowane neurobiologią — kodowanie, konsolidacja, przywoływanie, spreading activation, sny i metakognicja — żeby zarządzać twoimi wspomnieniami tak, jak robi to mózg.",
     "processed": "Przetworzono",
     "decay": "Zanik zastosowany",
     "embeddings": "Embeddingi",
@@ -924,8 +933,13 @@
       },
       "temporal": {
         "title": "Wersjonowanie czasowe",
-        "desc": "Fakty z ograniczonym okresem ważności: które wersje są dziś aktualne, które wygasły i pełna historia tematu po kolejnych zmianach. Oznacz wspomnienie jako przestarzałe, gdy nowsza informacja je zastępuje — wyszukiwarka przestanie podpowiadać starą wersję.",
+        "desc": "Fakty z ograniczonym okresem ważności: które wersje są dziś aktualne, które wygasły i pełna historia tematu po kolejnych zmianach. Oznacz wspomnienie jako przestarzałe, gdy nowsza informacja je zastępuje — silnik ustawia valid_until na teraz i obniża ranking, więc wyszukiwarka przestaje pokazywać starą wersję.",
         "tip": "Tryb historii wymaga tematu — silnik układa wersje wokół wybranego hasła."
+      },
+      "reasoning": {
+        "title": "Wnioskowanie",
+        "desc": "Silnik deep_reference odpowiada na pytanie z pełną proweniencją: cytowane wspomnienia, znalezione sprzeczności, zastąpione wpisy i oś czasu ewolucji tematu. Trust scoring z FSRS-6 sortuje dowody — najwyżej te z najsilniejszą retencją.",
+        "tip": "Używaj, gdy potrzebujesz nie tylko odpowiedzi, ale śladu rozumowania — np. zanim zweryfikujesz wniosek z karty Insights."
       }
     },
     "howTo": {
@@ -939,11 +953,11 @@
     "faqTitle": "Najczęstsze pytania",
     "faq": {
       "q1": "Czy Vestige może usunąć moje wspomnienia bez pytania?",
-      "a1": "Nie. Vestige nigdy nie usuwa niczego automatycznie. Wspomnienia mogą blaknąć (ich zapamiętanie spada), ale pozostają w bazie danych. Tylko ty możesz usunąć wspomnienie — ze strony Wspomnień lub z panelu szczegółów w Grafie.",
+      "a1": "Nie. Vestige nigdy nie kasuje wspomnień sam z siebie. Retencja może zjechać do zera, ale wpis zostaje w bazie. Usuwasz tylko ty — ręcznie ze strony Wspomnień, z panelu w Grafie, albo świadomie odpalając Garbage Collection w Ustawieniach (i tam też najpierw zobaczysz suchy podgląd, co poszłoby do kosza, zanim cokolwiek zniknie).",
       "q2": "Co się dzieje, jeśli Vestige padnie?",
       "a2": "Twój AI działa dalej normalnie — po prostu nie będzie miał pamięci długoterminowej, dopóki Vestige nie wróci. Wszystkie zapisane wspomnienia leżą bezpiecznie w lokalnej bazie SQLite na twoim komputerze. Nic nie ginie.",
       "q3": "Czy moje dane są gdzieś wysyłane?",
-      "a3": "Nie. Wszystko działa lokalnie na twojej maszynie. Model embeddingów (nomic-embed-text) uruchamia się na twoim CPU, baza danych to lokalny plik SQLite, reranker też działa lokalnie. Zero zapytań do API, zero chmury, zero śledzenia.",
+      "a3": "Nie. Wszystko działa lokalnie na twojej maszynie. Model embeddingów (nomic-embed-text-v1.5) uruchamia się na twoim CPU, baza danych to lokalny plik SQLite, reranker też działa lokalnie. Zero zapytań do API, zero chmury, zero śledzenia.",
       "q4": "Jaka jest różnica między Snem a Konsolidacją?",
       "a4": "Cykl Snu jest kreatywny — odtwarza wspomnienia, szuka połączeń, wyłapuje sprzeczności i generuje wnioski. Pomyśl: sen. Konsolidacja to konserwacja — stosuje zanikanie, generuje brakujące embeddingi, łączy duplikaty, oblicza aktywację. Pomyśl: sprzątanie.",
       "q5": "Dlaczego niektóre wspomnienia blakną szybciej niż inne?",

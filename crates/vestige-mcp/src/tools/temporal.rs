@@ -212,11 +212,31 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
                 }));
             }
 
+            // Two-step invalidation:
+            //   1. write `valid_until = now` on the row so `temporal expired`
+            //      / `temporal current` / bitemporal queries treat it as gone.
+            //   2. demote ranking so it falls behind better-calibrated peers
+            //      in retrieval (matches the verbal contract the dashboard
+            //      copy makes — "no longer valid" is both *visible-as-expired*
+            //      and *ranked-lower*).
+            //
+            // Before v3.4.1 only step 2 ran, which left invalidated memories
+            // silently in "current" while telling the user they were "expired".
+            let storage_update = storage.clone();
+            let memory_id_for_until = memory_id.to_string();
+            tokio::task::spawn_blocking(move || {
+                storage_update
+                    .set_valid_until(&memory_id_for_until, now)
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| format!("set_valid_until task panicked: {}", e))??;
+
             let storage_demote = storage.clone();
-            let memory_id_owned = memory_id.to_string();
+            let memory_id_for_demote = memory_id.to_string();
             tokio::task::spawn_blocking(move || {
                 storage_demote
-                    .demote_memory(&memory_id_owned)
+                    .demote_memory(&memory_id_for_demote)
                     .map_err(|e| e.to_string())
             })
             .await
@@ -227,6 +247,7 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
                 "status": "invalidated",
                 "memory_id": memory_id,
                 "invalidated_at": now.to_rfc3339(),
+                "valid_until": now.to_rfc3339(),
                 "content_preview": truncate(&node.content, 150),
             }))
         }

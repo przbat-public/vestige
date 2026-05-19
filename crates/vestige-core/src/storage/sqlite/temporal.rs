@@ -113,6 +113,27 @@ impl Storage {
         Ok(result)
     }
 
+    /// Mark a memory as no-longer-valid by setting `valid_until = now()`.
+    ///
+    /// This is the storage-level primitive behind the `temporal invalidate`
+    /// MCP action. Idempotent on the data plane: a second call writes the same
+    /// timestamp again — callers handle the "already expired" short-circuit
+    /// before reaching this method.
+    ///
+    /// Returns `Ok(true)` if a row was actually updated, `Ok(false)` if the
+    /// memory_id didn't match any node (caller should surface a clear error).
+    pub fn set_valid_until(&self, id: &str, when: DateTime<Utc>) -> Result<bool> {
+        let writer = self
+            .writer
+            .lock()
+            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+        let n = writer.execute(
+            "UPDATE knowledge_nodes SET valid_until = ?1 WHERE id = ?2",
+            params![when.to_rfc3339(), id],
+        )?;
+        Ok(n > 0)
+    }
+
     /// Apply FSRS-6 decay to all memories using batched pagination to avoid OOM.
     ///
     /// Uses the real FSRS-6 retrievability formula: R = (1 + factor * t / S)^(-w20)

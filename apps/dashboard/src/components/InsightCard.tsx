@@ -1,9 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
+import { useMemoryMutations } from '@/hooks/useMemoryMutations';
 import type { Insight } from '@/types';
 
+/**
 /**
  * Render one synthesised Insight Tier card.
  *
@@ -11,12 +14,21 @@ import type { Insight } from '@/types';
  * ("3 of your last 5 OAuth bugs were token-cache invalidation
  * issues"). Each one becomes a `KnowledgeNode` of type `"insight"`
  * with structured metadata under `extra_json.insight`. This card
- * surfaces them so the agent (or a human reviewer) can mark them
- * validated by calling `memory(action="promote")`.
+ * surfaces them and lets the reviewer mark them validated or dismiss
+ * them inline — both buttons route through `useMemoryMutations`
+ * (which calls the same `/memories/:id/promote` and `/demote`
+ * endpoints the MCP `memory(action="promote"|"demote")` actions hit).
+ *
+ * Promoting an Insight node has a side effect at the backend layer:
+ * it flips `extra_json.insight.validatedByAgent` to `true` and stamps
+ * `validatedAt`. The "Validate" button in this card is just the UX
+ * shortcut for that flow — pre-v3.4.1 the tutorial promised this
+ * affordance but no button existed.
  *
  * Visual cues:
- *   * Unvalidated → yellow "Unvalidated" badge, normal background.
- *   * Validated   → green "Validated" badge, subtle ring around the card.
+ *   * Unvalidated → yellow "Unvalidated" badge, action row visible.
+ *   * Validated   → green "Validated" badge, subtle ring around the card,
+ *                   Validate button replaced by a disabled checkmark.
  *   * Origin chip — distinguishes dream / reflect / synthesized at a glance.
  *
  * Confidence and novelty render as inline progress bars (0..1). We
@@ -35,6 +47,10 @@ export function InsightCard({ insight }: InsightCardProps) {
 
   const confidencePct = Math.round(insight.confidence * 100);
   const noveltyPct = Math.round(insight.novelty * 100);
+
+  const { promote, demote } = useMemoryMutations();
+  const validatePending = promote.isPending && promote.variables === insight.id;
+  const demotePending = demote.isPending && demote.variables === insight.id;
 
   return (
     <Card className={insight.validated ? 'space-y-3 ring-1 ring-emerald-500/40' : 'space-y-3'}>
@@ -120,6 +136,46 @@ export function InsightCard({ insight }: InsightCardProps) {
           {insight.sourceMemoryIds.length > 6 && <span>+{insight.sourceMemoryIds.length - 6}</span>}
         </div>
       )}
+
+      <div className="flex items-center gap-2 pt-1 border-t border-border/40">
+        {insight.validated ? (
+          <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+            <span aria-hidden>✓</span>
+            {t('insights.actions.alreadyValidated', 'Validated')}
+          </span>
+        ) : (
+          <Button
+            type="button"
+            variant="success"
+            size="sm"
+            disabled={validatePending}
+            onClick={() => promote.mutate(insight.id)}
+            title={t('insights.actions.validateTooltip', 'Mark this insight as confirmed and boost its ranking.')}
+            aria-label={t('insights.actions.validateTooltip', 'Mark this insight as confirmed and boost its ranking.')}
+          >
+            {validatePending
+              ? t('insights.actions.validating', 'Validating…')
+              : t('insights.actions.validate', 'Validate')}
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={demotePending}
+          onClick={() => demote.mutate(insight.id)}
+          title={t(
+            'insights.actions.demoteTooltip',
+            'Lower the ranking so search surfaces better-supported memories instead.',
+          )}
+          aria-label={t(
+            'insights.actions.demoteTooltip',
+            'Lower the ranking so search surfaces better-supported memories instead.',
+          )}
+        >
+          {demotePending ? t('insights.actions.demoting', 'Dismissing…') : t('insights.actions.demote', 'Dismiss')}
+        </Button>
+      </div>
     </Card>
   );
 }
