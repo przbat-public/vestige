@@ -10,7 +10,10 @@ import type { ConfidenceResult, DreamResult, ReflectResult } from '@/types';
 import { BriefingPage } from './BriefingPage';
 
 const REFLECT: ReflectResult = {
-  focus: null,
+  status: 'reflected',
+  // `focus` is `string | undefined` on the wire DTO — the server omits
+  // it (rather than emitting `null`) when there's no focus filter.
+  focus: undefined,
   depth: 'standard',
   summary: 'Memory base is broadly consistent.',
   insights: ['No memories about deployment process', 'Two memories disagree on deadline'],

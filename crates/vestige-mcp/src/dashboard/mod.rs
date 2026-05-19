@@ -10,6 +10,7 @@ pub mod handlers;
 pub mod state;
 pub mod static_files;
 pub mod websocket;
+pub mod wire;
 
 use axum::Router;
 use axum::routing::{delete, get, patch, post};
@@ -179,6 +180,10 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
             "/api/retention-distribution",
             get(handlers::retention_distribution),
         )
+        // Single source of truth for shared limits (graph node cap,
+        // search defaults, WS event ring buffer). Frontend fetches once
+        // on boot — see `useDashboardLimits.ts`.
+        .route("/api/_meta/limits", get(handlers::get_limits))
         // Intentions (v2.0)
         .route(
             "/api/intentions",
@@ -188,6 +193,14 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
         .route("/api/reflect", post(handlers::trigger_reflect))
         .route("/api/temporal", post(handlers::query_temporal))
         .route("/api/confidence", post(handlers::query_confidence))
+        // Deep reference reasoning (v3.2.1 cognitive engine, exposed v3.5)
+        .route("/api/deep_reference", post(handlers::query_deep_reference))
+        // Decision Matrix (v3.4 — Proposal C)
+        .route("/api/decisions", get(handlers::list_decisions))
+        // Insight Tier (v3.4 — Proposal B)
+        .route("/api/insights", get(handlers::list_insights))
+        // Topic Hubs (v3.5 — Proposal A)
+        .route("/api/hubs", get(handlers::list_hubs))
         .layer(
             ServiceBuilder::new()
                 .concurrency_limit(50)

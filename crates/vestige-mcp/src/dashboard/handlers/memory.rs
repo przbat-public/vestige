@@ -11,6 +11,10 @@ use serde_json::Value;
 
 use super::super::events::VestigeEvent;
 use super::super::state::AppState;
+use super::super::wire::{
+    MemoryDto, MemoryListResponseDto, MemoryStatusDto, MemoryUpdateResultDto,
+};
+use super::super::wire::memory::MemoryStatusAction;
 use super::{log_err, log_join_err};
 
 #[derive(Debug, Deserialize)]
@@ -28,11 +32,15 @@ pub struct MemoryListParams {
     pub offset: Option<i32>,
 }
 
-/// List memories with optional search
+/// List memories with optional search.
+///
+/// Returns a `MemoryListResponseDto`. List view drops sentiment, validity
+/// window, and timing fields via `into_list_view()` so the wire payload
+/// stays compact for the table render path.
 pub async fn list_memories(
     State(state): State<AppState>,
     Query(params): Query<MemoryListParams>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<MemoryListResponseDto>, StatusCode> {
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
     let offset = params.offset.unwrap_or(0).max(0);
 
@@ -48,7 +56,7 @@ pub async fn list_memories(
                 .map_err(log_join_err("hybrid_search task panicked"))?
                 .map_err(log_err("storage operation"))?;
 
-        let formatted: Vec<Value> = results
+        let memories: Vec<MemoryDto> = results
             .into_iter()
             .filter(|r| {
                 if let Some(min_ret) = params.min_retention {
@@ -58,27 +66,20 @@ pub async fn list_memories(
                 }
             })
             .map(|r| {
-                serde_json::json!({
-                    "id": r.node.id,
-                    "content": r.node.content,
-                    "nodeType": r.node.node_type,
-                    "tags": r.node.tags,
-                    "retentionStrength": r.node.retention_strength,
-                    "storageStrength": r.node.storage_strength,
-                    "retrievalStrength": r.node.retrieval_strength,
-                    "createdAt": r.node.created_at.to_rfc3339(),
-                    "updatedAt": r.node.updated_at.to_rfc3339(),
-                    "combinedScore": r.combined_score,
-                    "source": r.node.source,
-                    "reviewCount": r.node.reps,
-                })
+                // combined_score is f32 in storage; widen to f64 to match
+                // the JS Number representation on the wire (avoids a
+                // precision-loss surprise on the dashboard side).
+                let score = f64::from(r.combined_score);
+                MemoryDto::from(&r.node)
+                    .into_list_view()
+                    .with_combined_score(score)
             })
             .collect();
 
-        return Ok(Json(serde_json::json!({
-            "total": formatted.len(),
-            "memories": formatted,
-        })));
+        return Ok(Json(MemoryListResponseDto {
+            total: memories.len(),
+            memories,
+        }));
     }
 
     // No search query — list all memories. `get_all_nodes` scans the full
@@ -90,7 +91,6 @@ pub async fn list_memories(
         .map_err(log_join_err("get_all_nodes task panicked"))?
         .map_err(log_err("storage operation"))?;
 
-    // Apply filters
     if let Some(ref node_type) = params.node_type {
         nodes.retain(|n| n.node_type == *node_type);
     }
@@ -101,68 +101,51 @@ pub async fn list_memories(
         nodes.retain(|n| n.retention_strength >= min_ret);
     }
 
-    let formatted: Vec<Value> = nodes
+    let memories: Vec<MemoryDto> = nodes
         .iter()
-        .map(|n| {
-            serde_json::json!({
-                "id": n.id,
-                "content": n.content,
-                "nodeType": n.node_type,
-                "tags": n.tags,
-                "retentionStrength": n.retention_strength,
-                "storageStrength": n.storage_strength,
-                "retrievalStrength": n.retrieval_strength,
-                "createdAt": n.created_at.to_rfc3339(),
-                "updatedAt": n.updated_at.to_rfc3339(),
-                "source": n.source,
-                "reviewCount": n.reps,
-            })
-        })
+        .map(|n| MemoryDto::from(n).into_list_view())
         .collect();
 
-    Ok(Json(serde_json::json!({
-        "total": formatted.len(),
-        "memories": formatted,
-    })))
+    Ok(Json(MemoryListResponseDto {
+        total: memories.len(),
+        memories,
+    }))
 }
 
-/// Get a single memory by ID
+/// Get a single memory by ID — returns the full `MemoryDto` (sentiment,
+/// validity window, last_accessed, next_review).
 pub async fn get_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<MemoryDto>, StatusCode> {
     let node = state
         .storage
         .get_node(&id)
         .map_err(log_err("get memory"))?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Json(serde_json::json!({
-        "id": node.id,
-        "content": node.content,
-        "nodeType": node.node_type,
-        "tags": node.tags,
-        "retentionStrength": node.retention_strength,
-        "storageStrength": node.storage_strength,
-        "retrievalStrength": node.retrieval_strength,
-        "sentimentScore": node.sentiment_score,
-        "sentimentMagnitude": node.sentiment_magnitude,
-        "source": node.source,
-        "createdAt": node.created_at.to_rfc3339(),
-        "updatedAt": node.updated_at.to_rfc3339(),
-        "lastAccessedAt": node.last_accessed.to_rfc3339(),
-        "nextReviewAt": node.next_review.map(|dt| dt.to_rfc3339()),
-        "reviewCount": node.reps,
-        "validFrom": node.valid_from.map(|dt| dt.to_rfc3339()),
-        "validUntil": node.valid_until.map(|dt| dt.to_rfc3339()),
-    })))
+    Ok(Json(MemoryDto::from(&node)))
 }
 
-/// Delete a memory by ID
+/// Delete a memory by ID. Returns `MemoryStatusDto { action: Deleted }`
+/// so the dashboard can confirm the operation; retention is the value
+/// the node had immediately before deletion (0.0 if unknown — we don't
+/// re-fetch).
 pub async fn delete_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<MemoryStatusDto>, StatusCode> {
+    // Capture retention BEFORE deletion so the response carries an
+    // accurate "what was promoted away" value. Storage `get_node` is a
+    // single SQL query; the cost is negligible compared to the actual
+    // delete.
+    let prior_retention = state
+        .storage
+        .get_node(&id)
+        .map_err(log_err("get memory before delete"))?
+        .map(|n| n.retention_strength)
+        .unwrap_or(0.0);
+
     let deleted = state
         .storage
         .delete_node(&id)
@@ -173,17 +156,22 @@ pub async fn delete_memory(
             id: id.clone(),
             timestamp: chrono::Utc::now(),
         });
-        Ok(Json(serde_json::json!({ "deleted": true, "id": id })))
+        Ok(Json(MemoryStatusDto {
+            ok: true,
+            id,
+            retention_strength: prior_retention,
+            action: MemoryStatusAction::Deleted,
+        }))
     } else {
         Err(StatusCode::NOT_FOUND)
     }
 }
 
-/// Promote a memory
+/// Promote a memory (retention bump). Returns the post-promote retention.
 pub async fn promote_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<MemoryStatusDto>, StatusCode> {
     let node = state
         .storage
         .promote_memory(&id)
@@ -195,18 +183,19 @@ pub async fn promote_memory(
         timestamp: chrono::Utc::now(),
     });
 
-    Ok(Json(serde_json::json!({
-        "promoted": true,
-        "id": node.id,
-        "retentionStrength": node.retention_strength,
-    })))
+    Ok(Json(MemoryStatusDto {
+        ok: true,
+        id: node.id,
+        retention_strength: node.retention_strength,
+        action: MemoryStatusAction::Promoted,
+    }))
 }
 
-/// Demote a memory
+/// Demote a memory (retention drop). Mirror of `promote_memory`.
 pub async fn demote_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<MemoryStatusDto>, StatusCode> {
     let node = state
         .storage
         .demote_memory(&id)
@@ -218,11 +207,12 @@ pub async fn demote_memory(
         timestamp: chrono::Utc::now(),
     });
 
-    Ok(Json(serde_json::json!({
-        "demoted": true,
-        "id": node.id,
-        "retentionStrength": node.retention_strength,
-    })))
+    Ok(Json(MemoryStatusDto {
+        ok: true,
+        id: node.id,
+        retention_strength: node.retention_strength,
+        action: MemoryStatusAction::Demoted,
+    }))
 }
 
 /// Body for `PATCH /api/memories/{id}` — both fields optional.
@@ -344,16 +334,18 @@ pub async fn smart_ingest_memory(
     Ok(Json(result))
 }
 
-/// Edit a memory's content and/or tags.
+/// Edit a memory's content and/or tags. Returns `MemoryUpdateResultDto`
+/// — the post-update memory plus a `field` discriminator
+/// ("content" | "tags" | "content+tags") so the dashboard can label the
+/// confirmation toast precisely.
 ///
-/// Mirrors the MCP `memory(action="edit")` flow but is exposed via REST so the
-/// dashboard can give users an inline editor. Updating content also schedules
-/// embedding regeneration server-side (see `Storage::update_node_content`).
+/// Updating content schedules embedding regeneration server-side (see
+/// `Storage::update_node_content`).
 pub async fn update_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<UpdateMemoryBody>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<MemoryUpdateResultDto>, StatusCode> {
     if body.content.is_none() && body.tags.is_none() {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -401,17 +393,17 @@ pub async fn update_memory(
         timestamp: chrono::Utc::now(),
     });
 
-    Ok(Json(serde_json::json!({
-        "id": node.id,
-        "content": node.content,
-        "nodeType": node.node_type,
-        "tags": node.tags,
-        "retentionStrength": node.retention_strength,
-        "storageStrength": node.storage_strength,
-        "retrievalStrength": node.retrieval_strength,
-        "createdAt": node.created_at.to_rfc3339(),
-        "updatedAt": node.updated_at.to_rfc3339(),
-        "lastAccessedAt": node.last_accessed.to_rfc3339(),
-        "reviewCount": node.reps,
-    })))
+    let mut memory = MemoryDto::from(&node);
+    // Drop validity window from the update response — the dashboard
+    // edit surface only shows content + tags, never temporal validity.
+    memory.valid_from = None;
+    memory.valid_until = None;
+    memory.next_review_at = None;
+    memory.sentiment_score = None;
+    memory.sentiment_magnitude = None;
+
+    Ok(Json(MemoryUpdateResultDto {
+        memory,
+        field: field.to_string(),
+    }))
 }

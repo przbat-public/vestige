@@ -6,13 +6,17 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde_json::Value;
+use std::collections::HashMap;
 
 use super::super::state::AppState;
+use super::super::wire::{
+    DashboardLimitsDto, EndangeredMemoryDto, HealthCheckDto, HealthStatus, RetentionBucketDto,
+    RetentionDistributionDto, SystemStatsDto,
+};
 use super::{log_err, log_join_err};
 
-/// Get system stats
-pub async fn get_stats(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+/// Get system stats — totals, averages, embedding coverage.
+pub async fn get_stats(State(state): State<AppState>) -> Result<Json<SystemStatsDto>, StatusCode> {
     let storage = state.storage.clone();
     let stats = tokio::task::spawn_blocking(move || storage.get_stats())
         .await
@@ -25,22 +29,26 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<Value>, Sta
         0.0
     };
 
-    Ok(Json(serde_json::json!({
-        "totalMemories": stats.total_nodes,
-        "dueForReview": stats.nodes_due_for_review,
-        "averageRetention": stats.average_retention,
-        "averageStorageStrength": stats.average_storage_strength,
-        "averageRetrievalStrength": stats.average_retrieval_strength,
-        "withEmbeddings": stats.nodes_with_embeddings,
-        "embeddingCoverage": embedding_coverage,
-        "embeddingModel": stats.embedding_model,
-        "oldestMemory": stats.oldest_memory.map(|dt| dt.to_rfc3339()),
-        "newestMemory": stats.newest_memory.map(|dt| dt.to_rfc3339()),
-    })))
+    Ok(Json(SystemStatsDto {
+        total_memories: stats.total_nodes,
+        due_for_review: stats.nodes_due_for_review,
+        average_retention: stats.average_retention,
+        average_storage_strength: stats.average_storage_strength,
+        average_retrieval_strength: stats.average_retrieval_strength,
+        with_embeddings: stats.nodes_with_embeddings,
+        embedding_coverage,
+        embedding_model: stats.embedding_model.unwrap_or_default(),
+        oldest_memory: stats.oldest_memory.map(|dt| dt.to_rfc3339()),
+        newest_memory: stats.newest_memory.map(|dt| dt.to_rfc3339()),
+    }))
 }
 
-/// Health check
-pub async fn health_check(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+/// Health check — derives a single-word status from the average
+/// retention. Mirrors the legacy threshold ladder
+/// (empty → critical < 0.3 → degraded < 0.5 → healthy).
+pub async fn health_check(
+    State(state): State<AppState>,
+) -> Result<Json<HealthCheckDto>, StatusCode> {
     let storage = state.storage.clone();
     let stats = tokio::task::spawn_blocking(move || storage.get_stats())
         .await
@@ -48,39 +56,38 @@ pub async fn health_check(State(state): State<AppState>) -> Result<Json<Value>, 
         .map_err(log_err("storage operation"))?;
 
     let status = if stats.total_nodes == 0 {
-        "empty"
+        HealthStatus::Empty
     } else if stats.average_retention < 0.3 {
-        "critical"
+        HealthStatus::Critical
     } else if stats.average_retention < 0.5 {
-        "degraded"
+        HealthStatus::Degraded
     } else {
-        "healthy"
+        HealthStatus::Healthy
     };
 
-    Ok(Json(serde_json::json!({
-        "status": status,
-        "totalMemories": stats.total_nodes,
-        "averageRetention": stats.average_retention,
-        "version": env!("CARGO_PKG_VERSION"),
-    })))
+    Ok(Json(HealthCheckDto {
+        status,
+        total_memories: stats.total_nodes,
+        average_retention: stats.average_retention,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    }))
 }
 
-/// Get retention distribution (for histogram visualization)
+/// Get retention distribution (for histogram + heatmap visualization).
 pub async fn retention_distribution(
     State(state): State<AppState>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<RetentionDistributionDto>, StatusCode> {
     // Cap at 1000 to prevent excessive memory usage on large databases.
-    // Even capped, a full SELECT + per-row deserialization runs >10ms on a
-    // warm DB, so dispatch to the blocking pool.
+    // Even capped, a full SELECT + per-row deserialization runs >10ms on
+    // a warm DB, so dispatch to the blocking pool.
     let storage = state.storage.clone();
     let nodes = tokio::task::spawn_blocking(move || storage.get_all_nodes(1000, 0))
         .await
         .map_err(log_join_err("get_all_nodes task panicked"))?
         .map_err(log_err("storage operation"))?;
 
-    // Build distribution buckets
-    let mut buckets = [0u32; 10]; // 0-10%, 10-20%, ..., 90-100%
-    let mut by_type: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut buckets = [0u32; 10];
+    let mut by_type: HashMap<String, usize> = HashMap::new();
     let mut endangered = Vec::new();
 
     for node in &nodes {
@@ -88,32 +95,40 @@ pub async fn retention_distribution(
         buckets[bucket] += 1;
         *by_type.entry(node.node_type.clone()).or_default() += 1;
 
-        // Endangered: retention below 30%
         if node.retention_strength < 0.3 {
-            endangered.push(serde_json::json!({
-                "id": node.id,
-                "content": node.content.chars().take(60).collect::<String>(),
-                "retention": node.retention_strength,
-                "nodeType": node.node_type,
-            }));
+            endangered.push(EndangeredMemoryDto {
+                id: node.id.clone(),
+                content: node.content.chars().take(60).collect::<String>(),
+                retention: node.retention_strength,
+                node_type: node.node_type.clone(),
+            });
         }
     }
 
-    let distribution: Vec<Value> = buckets
+    let distribution: Vec<RetentionBucketDto> = buckets
         .iter()
         .enumerate()
-        .map(|(i, &count)| {
-            serde_json::json!({
-                "range": format!("{}-{}%", i * 10, (i + 1) * 10),
-                "count": count,
-            })
+        .map(|(i, &count)| RetentionBucketDto {
+            range: format!("{}-{}%", i * 10, (i + 1) * 10),
+            count,
         })
         .collect();
 
-    Ok(Json(serde_json::json!({
-        "distribution": distribution,
-        "byType": by_type,
-        "endangered": endangered,
-        "total": nodes.len(),
-    })))
+    Ok(Json(RetentionDistributionDto {
+        distribution,
+        by_type,
+        endangered,
+        total: nodes.len(),
+    }))
+}
+
+/// Expose the dashboard's compile-time limits at `GET /api/_meta/limits`.
+///
+/// The frontend fetches this once on boot — used to seed the graph
+/// node-cap input, the search "load more" threshold, and the WebSocket
+/// event ring buffer. Living next to the constants in
+/// `wire::limits::DashboardLimitsDto::DEFAULT` keeps backend clamp
+/// values and frontend defaults in lockstep.
+pub async fn get_limits() -> Json<DashboardLimitsDto> {
+    Json(DashboardLimitsDto::DEFAULT)
 }

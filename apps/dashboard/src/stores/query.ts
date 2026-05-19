@@ -24,4 +24,8 @@ export const queryKeys = {
   intentions: (status: string) => ['intentions', status] as const,
   predictions: ['predictions'] as const,
   temporal: (action: string, topic?: string) => ['temporal', action, topic] as const,
+  decisions: (limit?: number) => ['decisions', limit] as const,
+  insights: (filter?: 'all' | 'validated' | 'unvalidated', limit?: number) => ['insights', filter, limit] as const,
+  hubs: (limit?: number) => ['hubs', limit] as const,
+  deepReference: (query: string, depth?: number) => ['deepReference', query, depth] as const,
 };

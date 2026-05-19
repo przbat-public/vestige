@@ -331,22 +331,113 @@ restore: { "path": "/path/to/backup.json" }
 
 ## Development
 
-- **Crate:** `vestige-mcp` v3.3.0, Rust 2024 edition, MSRV 1.91
-- **Tools:** 27 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference). Canonical list lives in `vestige-mcp/src/server/catalog.rs::build_tools_list`.
+- **Crate:** `vestige-mcp` v3.4.0, Rust 2024 edition, MSRV 1.91
+- **Tools:** 28 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference). Canonical list lives in `vestige-mcp/src/server/catalog.rs::build_tools_list`.
 - **Tests:** 1,389 passing (workspace `cargo test`) — unit + E2E + cognitive + journey + extreme + MCP protocol + scientific validation
 - **Build:** `cargo build --release -p vestige-mcp` (features: `embeddings` + `vector-search` + `preprocessing`)
 - **Build (no embeddings):** `cargo build --release -p vestige-mcp --no-default-features`
 - **Preprocessing:** entity extraction, coreference rewriting, temporal anchoring, relation extraction — all local regex/heuristic, zero model downloads. Feature-gated under `preprocessing` (default on).
 - **Bench:** `cargo bench -p vestige-core`
 - **Architecture:** `McpServer` → `Arc<Storage>` + `Arc<Mutex<CognitiveEngine>>`
-- **Storage:** SQLite WAL mode, `Mutex<Connection>` reader/writer split, FTS5 full-text search. Implementation split across `storage/sqlite/` per concern (nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats). Migrations v1–v11.
+- **Storage:** SQLite WAL mode, `Mutex<Connection>` reader/writer split, FTS5 full-text search. Implementation split across `storage/sqlite/` per concern (nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats). Migrations v1–v13.
 - **Embeddings:** nomic-embed-text-v1.5 (768D → 384D Matryoshka truncation, 8K context) via fastembed (local ONNX, no API)
 - **Reranker:** Jina Reranker v2 Base Multilingual (278M params) cross-encoder
 - **Search:** Compound query decomposition + Triple hybrid scoring (BM25 + semantic + RRF), active forgetting, prospective indexing
 - **Vector index:** USearch HNSW (20x faster than FAISS)
 - **Binaries:** `vestige-mcp` (MCP server), `vestige` (CLI), `vestige-restore`
 - **Dashboard:** React 19 + Vite 6 + React Router 7 + Three.js + Tailwind 4 + i18next (EN/PL), embedded at `/dashboard`
-- **Dashboard API:** 28 REST operations across 26 paths (including `/api/reflect`, `/api/temporal`, `/api/confidence`). Handlers split per domain under `dashboard/handlers/` (memory, search, graph, history, intentions, maintenance, review, cognitive, metacognitive, observability, pages).
+- **Dashboard API:** 39 REST routes (including `/api/reflect`, `/api/temporal`, `/api/confidence`, `/api/decisions`, `/api/hubs`, `/api/insights`, `/api/_meta/limits`). Handlers split per domain under `dashboard/handlers/` (memory, search, graph, history, intentions, maintenance, review, cognitive, metacognitive, observability, decisions, hubs, insights, pages).
 - **Env vars:** `VESTIGE_DASHBOARD_PORT` (default 3927), `VESTIGE_CONSOLIDATION_INTERVAL_HOURS` (default 6), `RUST_LOG`
 
 For cognitive architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+---
+
+## Adding a Type-Safe Dashboard Endpoint
+
+The dashboard ↔ backend contract is enforced end-to-end: ts-rs generates
+TypeScript declarations from Rust DTOs, Zod re-validates the five
+highest-blast-radius responses at runtime, and a CI gate fails any PR
+that edits a Rust DTO without committing the regenerated `.ts` file.
+
+### Where things live
+
+```
+crates/vestige-mcp/src/dashboard/
+├── wire/                 # DTOs (this is the contract — single source of truth)
+│   ├── memory.rs         # MemoryDto, MemoryListResponseDto, …
+│   ├── graph.rs
+│   ├── limits.rs         # DashboardLimitsDto + the parity tests
+│   └── …
+├── handlers/             # Convert domain → DTO → Json(...)
+└── events.rs             # VestigeEvent (WS discriminated union, also ts-rs)
+
+apps/dashboard/src/types/
+├── generated/*.ts        # AUTO-GENERATED — do not edit by hand
+├── runtime.ts            # Zod schemas for critical endpoints
+└── index.ts              # Public facade: aliases, color tables, helpers
+
+scripts/check-generated-types.sh   # CI gate
+.cargo/config.toml                 # ts-rs export dir + bigint→number
+```
+
+### Workflow for a new endpoint
+
+1. **Define the DTO** in `crates/vestige-mcp/src/dashboard/wire/<domain>.rs`:
+   ```rust
+   #[derive(Debug, Clone, Serialize, TS)]
+   #[serde(rename_all = "camelCase")]
+   #[ts(export, export_to = "MyResponseDto.ts", rename_all = "camelCase")]
+   pub struct MyResponseDto {
+       pub id: String,
+       #[serde(skip_serializing_if = "Option::is_none")]
+       #[ts(optional)]
+       pub note: Option<String>,
+   }
+   ```
+   - Re-export from `wire/mod.rs`.
+   - Optional fields: `Option<T>` + `skip_serializing_if` + `#[ts(optional)]` → `field?: T` in TS.
+   - Enums with discriminators: `#[serde(tag = "type", content = "data")]` — ts-rs emits a discriminated union.
+   - Add `From<&DomainType> for MyResponseDto` so the handler stays one line.
+
+2. **Wire the handler** in `dashboard/handlers/<domain>.rs`:
+   ```rust
+   pub async fn my_endpoint(State(state): State<AppState>)
+       -> Result<Json<MyResponseDto>, StatusCode> { … }
+   ```
+
+3. **Register the route** in `dashboard/mod.rs`.
+
+4. **Regenerate TypeScript**:
+   ```sh
+   cargo test -p vestige-mcp --lib dashboard
+   ```
+   This writes `apps/dashboard/src/types/generated/MyResponseDto.ts`.
+
+5. **Add to the barrel export**: append `export * from "./MyResponseDto";` to `apps/dashboard/src/types/generated/index.ts`.
+
+6. **(Optional) Alias for legacy callers** in `apps/dashboard/src/types/index.ts`:
+   ```ts
+   export type MyResponse = MyResponseDto;
+   ```
+
+7. **(For high-blast-radius endpoints) Add Zod runtime validation** in `apps/dashboard/src/types/runtime.ts`:
+   ```ts
+   const mySchema = z.object({ id: z.string(), note: z.string().optional() });
+   type _Check = AssertSubset<z.infer<typeof mySchema>, MyResponseDto>;
+   export const wire = { ..., my: (v: unknown) => assertWire("/my", mySchema, v) };
+   ```
+   Then in `stores/api.ts`: `wire.my(await fetcher<unknown>("/my"))`.
+
+8. **Verify**:
+   ```sh
+   ./scripts/check-generated-types.sh   # parity gate
+   cd apps/dashboard && pnpm ci         # tsc + biome + vitest
+   ```
+
+### Common pitfalls
+
+- **Editing a Rust DTO without regenerating.** The CI gate catches it, but locally you'll get confusing TypeScript errors first. Run the regen test before debugging the dashboard.
+- **Adding a field on the wire that the dashboard didn't expect.** TypeScript stays happy (extra fields are allowed), but Zod will reject — that's by design. Add the field to the schema in `runtime.ts`.
+- **Returning `Json<Value>` from a new handler.** Resist the urge — the whole point is no more `serde_json::json!()` macros in the handler layer. If the upstream tool returns `Value` (`tools::reflect::execute` and friends), parse through a DTO via `parse_or_502` (see `dashboard::handlers::metacognitive`).
+- **Hard-coding limits.** The dashboard learns its caps from `GET /api/_meta/limits`. New limits go in `wire::limits::DashboardLimitsDto::DEFAULT` plus a parity test, never in component-local `const`.

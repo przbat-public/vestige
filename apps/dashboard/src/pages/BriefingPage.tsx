@@ -7,9 +7,10 @@ import { InsightSourcesPanel } from '@/components/InsightSourcesPanel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { QueryErrorPanel } from '@/components/ui/query-error-panel';
+import { SkeletonText } from '@/components/ui/skeleton';
 import { api } from '@/stores/api';
+import { useTrackPageView } from '@/stores/telemetry';
 import { toast } from '@/stores/toast';
 import type { DreamResult, ReflectInsight } from '@/types';
 
@@ -27,6 +28,7 @@ import type { DreamResult, ReflectInsight } from '@/types';
  * actually mutates the connection graph and can take a few seconds.
  */
 export function BriefingPage() {
+  useTrackPageView('briefing');
   const { t } = useTranslation();
   const [dreamResult, setDreamResult] = useState<DreamResult | null>(null);
 
@@ -65,7 +67,7 @@ export function BriefingPage() {
           <CardDescription>{t('briefing.reflectionDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-          {reflect.isLoading && <LoadingSpinner label={t('common.loading')} />}
+          {reflect.isLoading && <SkeletonText lines={5} />}
           {reflect.isError && <QueryErrorPanel error={reflect.error} onRetry={reflect.refetch} />}
           {reflect.data && (
             <div className="space-y-3 text-xs">
@@ -91,7 +93,7 @@ export function BriefingPage() {
           <CardDescription>{t('briefing.doubtDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-          {confidence.isLoading && <LoadingSpinner label={t('common.loading')} />}
+          {confidence.isLoading && <SkeletonText lines={4} />}
           {confidence.isError && <QueryErrorPanel error={confidence.error} onRetry={confidence.refetch} />}
           {confidence.data?.results && confidence.data.results.length > 0 ? (
             <DoubtList results={confidence.data.results} limit={5} />

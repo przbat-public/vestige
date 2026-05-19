@@ -15,20 +15,28 @@ import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SearchInput } from '@/components/ui/search-input';
 import { Sheet } from '@/components/ui/sheet';
 import { filterByDate } from '@/graph/temporal';
+import { useDashboardLimits } from '@/hooks/use-dashboard-limits';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
+import { useTrackPageView } from '@/stores/telemetry';
 import { useWebSocket } from '@/stores/websocket';
 import type { GraphEdge, GraphNode } from '@/types';
 
 export function GraphPage() {
+  useTrackPageView('graph');
   const { t } = useTranslation();
   const events = useWebSocket((s) => s.events);
   const isDreaming = useWebSocket((s) => s.isDreaming);
   const reducedMotion = useReducedMotion();
 
+  const limits = useDashboardLimits();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeQuery, setActiveQuery] = useState<string | undefined>();
+  // Seed from server-driven defaults; the user can still expand up to
+  // `graphMaxNodesMax` via the slider. Keeping the initial value at 150
+  // (above the canonical default of 50) preserves the previous UX —
+  // the graph page benefits from a denser snapshot than other pages.
   const [maxNodes, setMaxNodes] = useState(150);
   const [depth, setDepth] = useState<1 | 2 | 3>(2);
   const [tagFilter, setTagFilter] = useState('');
@@ -115,6 +123,10 @@ export function GraphPage() {
 
   return (
     <div className="h-full flex flex-col relative">
+      {/* Screen-reader page title — the visible toolbar acts as the visual
+          heading, but assistive tech still needs an h1 to anchor the
+          document outline. */}
+      <h1 className="sr-only">{t('graph.title')}</h1>
       <div className="absolute top-4 left-4 right-4 z-10 flex gap-2 items-center">
         <form onSubmit={onSearch} className="flex-1 flex gap-2">
           <SearchInput
@@ -153,11 +165,13 @@ export function GraphPage() {
               aria-label={t('graph.depth')}
               className="text-xs font-medium"
             >
-              {[1, 2, 3].map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
+              {[1, 2, 3]
+                .filter((d) => d <= limits.graphDepthMax)
+                .map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
             </NativeSelect>
           </div>
           <div className="flex items-center gap-1.5 bg-card/90 backdrop-blur-sm rounded-lg px-2 py-1 border border-border/50">
@@ -180,11 +194,13 @@ export function GraphPage() {
               aria-label={t('graph.maxNodes')}
               className="text-xs font-medium"
             >
-              {[50, 100, 150, 200, 300, 500].map((n) => (
-                <option key={n} value={n}>
-                  {t('graph.nodeOption', { count: n })}
-                </option>
-              ))}
+              {[50, 100, 150, 200, 300, 500]
+                .filter((n) => n <= limits.graphMaxNodesMax)
+                .map((n) => (
+                  <option key={n} value={n}>
+                    {t('graph.nodeOption', { count: n })}
+                  </option>
+                ))}
             </NativeSelect>
           </div>
         </div>

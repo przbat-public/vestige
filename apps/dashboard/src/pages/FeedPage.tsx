@@ -3,10 +3,12 @@ import { PipelineVisualizer } from '@/components/PipelineVisualizer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { useTrackPageView } from '@/stores/telemetry';
 import { useWebSocket } from '@/stores/websocket';
 import { EVENT_TYPE_COLORS } from '@/types';
 
 export function FeedPage() {
+  useTrackPageView('feed');
   const { t } = useTranslation();
   const { events, clearEvents } = useWebSocket();
 
@@ -14,7 +16,7 @@ export function FeedPage() {
     <div className="flex h-full">
       <div className="flex-1 flex flex-col min-w-0 border-r border-border">
         <div className="p-4 flex items-center justify-between border-b border-border">
-          <h2 className="text-sm font-bold text-foreground">{t('feed.title')}</h2>
+          <h1 className="text-sm font-bold text-foreground">{t('feed.title')}</h1>
           <div className="flex items-center gap-3">
             <Badge variant="secondary">{events.length}</Badge>
             <Button variant="ghost" size="sm" onClick={clearEvents}>

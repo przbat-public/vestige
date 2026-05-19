@@ -30,8 +30,11 @@ pub(super) fn log_join_err(context: &'static str) -> impl Fn(tokio::task::JoinEr
 }
 
 mod cognitive;
+mod decisions;
 mod graph;
 mod history;
+mod hubs;
+mod insights;
 mod intentions;
 mod maintenance;
 mod memory;
@@ -42,8 +45,11 @@ mod review;
 mod search;
 
 pub use cognitive::*;
+pub use decisions::*;
 pub use graph::*;
 pub use history::*;
+pub use hubs::*;
+pub use insights::*;
 pub use intentions::*;
 pub use maintenance::*;
 pub use memory::*;

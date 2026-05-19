@@ -10,6 +10,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::super::state::AppState;
+use super::super::wire::{
+    ExploreResponseDto, ExploreResultDto, GraphEdgeDto, GraphNodeDto, GraphResponseDto,
+};
 use super::{log_err, log_join_err};
 
 #[derive(Debug, Deserialize)]
@@ -24,7 +27,7 @@ pub struct GraphParams {
 pub async fn get_graph(
     State(state): State<AppState>,
     Query(params): Query<GraphParams>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<GraphResponseDto>, StatusCode> {
     let depth = params.depth.unwrap_or(2).clamp(1, 3);
     // Cap raised from 200 to 500 to match the dashboard's `maxNodes`
     // dropdown options. Previously the dashboard offered 300 and 500
@@ -86,48 +89,51 @@ pub async fn get_graph(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    // Build nodes JSON with timestamps for recency calculation
-    let nodes_json: Vec<Value> = nodes
+    let node_count = nodes.len();
+    let edge_count = edges.len();
+
+    let nodes_dto: Vec<GraphNodeDto> = nodes
         .iter()
         .map(|n| {
+            // 80-char cap matches the legacy serializer; keeps the
+            // labels readable in the 3D renderer without overflowing
+            // sprite atlases.
             let label = if n.content.chars().count() > 80 {
                 format!("{}...", n.content.chars().take(77).collect::<String>())
             } else {
                 n.content.clone()
             };
-            serde_json::json!({
-                "id": n.id,
-                "label": label,
-                "type": n.node_type,
-                "retention": n.retention_strength,
-                "tags": n.tags,
-                "createdAt": n.created_at.to_rfc3339(),
-                "updatedAt": n.updated_at.to_rfc3339(),
-                "isCenter": n.id == center_id,
-            })
+            GraphNodeDto {
+                id: n.id.clone(),
+                label,
+                node_type: n.node_type.clone(),
+                retention: n.retention_strength,
+                tags: n.tags.clone(),
+                created_at: n.created_at.to_rfc3339(),
+                updated_at: n.updated_at.to_rfc3339(),
+                is_center: n.id == center_id,
+            }
         })
         .collect();
 
-    let edges_json: Vec<Value> = edges
+    let edges_dto: Vec<GraphEdgeDto> = edges
         .iter()
-        .map(|e| {
-            serde_json::json!({
-                "source": e.source_id,
-                "target": e.target_id,
-                "weight": e.strength,
-                "type": e.link_type,
-            })
+        .map(|e| GraphEdgeDto {
+            source: e.source_id.clone(),
+            target: e.target_id.clone(),
+            weight: e.strength,
+            link_type: e.link_type.clone(),
         })
         .collect();
 
-    Ok(Json(serde_json::json!({
-        "nodes": nodes_json,
-        "edges": edges_json,
-        "centerId": center_id,
-        "depth": depth,
-        "nodeCount": nodes.len(),
-        "edgeCount": edges.len(),
-    })))
+    Ok(Json(GraphResponseDto {
+        nodes: nodes_dto,
+        edges: edges_dto,
+        center_id,
+        depth,
+        node_count,
+        edge_count,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,17 +166,19 @@ fn explore_storage_err(
     }
 }
 
-/// Explore connections between memories
+/// Explore connections between memories. Three modes:
+/// - `associations`: hybrid search seeded with the source memory's
+///   content; returns ranked similar memories.
+/// - `chains` / `bridges`: BFS subgraph between `from_id` and `to_id`.
 pub async fn explore_connections(
     State(state): State<AppState>,
     Json(req): Json<ExploreRequest>,
-) -> Result<Json<Value>, ExploreError> {
+) -> Result<Json<ExploreResponseDto>, ExploreError> {
     let action = req.action.as_deref().unwrap_or("associations");
     let limit = req.limit.unwrap_or(10).clamp(1, 50);
 
     match action {
         "associations" => {
-            // Get the source memory content for similarity search
             let source_node = state
                 .storage
                 .get_node(&req.from_id)
@@ -183,7 +191,6 @@ pub async fn explore_connections(
                     )
                 })?;
 
-            // Use hybrid search with source content to find associated memories.
             // hybrid_search re-embeds the query (~150–500ms cold) — keep it
             // off the async reactor.
             let storage = state.storage.clone();
@@ -203,25 +210,27 @@ pub async fn explore_connections(
             })?
             .map_err(explore_storage_err("storage operation"))?;
 
-            let formatted: Vec<Value> = results
+            let results_dto: Vec<ExploreResultDto> = results
                 .iter()
                 .filter(|r| r.node.id != req.from_id) // Exclude self
-                .map(|r| {
-                    serde_json::json!({
-                        "id": r.node.id,
-                        "content": r.node.content,
-                        "nodeType": r.node.node_type,
-                        "score": r.combined_score,
-                        "retention": r.node.retention_strength,
-                    })
+                .map(|r| ExploreResultDto {
+                    id: r.node.id.clone(),
+                    content: r.node.content.clone(),
+                    node_type: Some(r.node.node_type.clone()),
+                    score: Some(f64::from(r.combined_score)),
+                    retention: Some(r.node.retention_strength),
+                    ..ExploreResultDto::default()
                 })
                 .collect();
 
-            Ok(Json(serde_json::json!({
-                "action": "associations",
-                "fromId": req.from_id,
-                "results": formatted,
-            })))
+            Ok(Json(ExploreResponseDto {
+                action: "associations".to_string(),
+                from_id: req.from_id,
+                to_id: None,
+                results: results_dto,
+                nodes: None,
+                edges: None,
+            }))
         }
         "chains" | "bridges" => {
             let to_id = req.to_id.as_deref().ok_or_else(|| {
@@ -248,37 +257,52 @@ pub async fn explore_connections(
             })?
             .map_err(explore_storage_err("storage operation"))?;
 
-            let nodes_json: Vec<Value> = nodes
+            // The chains/bridges UI shows two surfaces: a flat result
+            // list (each node abbreviated) plus the subgraph the 3D
+            // overlay highlights. We emit both.
+            let results_dto: Vec<ExploreResultDto> = nodes
                 .iter()
-                .map(|n| {
-                    serde_json::json!({
-                        "id": n.id,
-                        "content": n.content.chars().take(100).collect::<String>(),
-                        "nodeType": n.node_type,
-                        "retention": n.retention_strength,
-                    })
+                .map(|n| ExploreResultDto {
+                    id: n.id.clone(),
+                    content: n.content.chars().take(100).collect::<String>(),
+                    node_type: Some(n.node_type.clone()),
+                    retention: Some(n.retention_strength),
+                    ..ExploreResultDto::default()
                 })
                 .collect();
 
-            let edges_json: Vec<Value> = edges
+            let nodes_dto: Vec<GraphNodeDto> = nodes
                 .iter()
-                .map(|e| {
-                    serde_json::json!({
-                        "source": e.source_id,
-                        "target": e.target_id,
-                        "weight": e.strength,
-                        "type": e.link_type,
-                    })
+                .map(|n| GraphNodeDto {
+                    id: n.id.clone(),
+                    label: n.content.chars().take(80).collect::<String>(),
+                    node_type: n.node_type.clone(),
+                    retention: n.retention_strength,
+                    tags: n.tags.clone(),
+                    created_at: n.created_at.to_rfc3339(),
+                    updated_at: n.updated_at.to_rfc3339(),
+                    is_center: n.id == req.from_id,
                 })
                 .collect();
 
-            Ok(Json(serde_json::json!({
-                "action": action,
-                "fromId": req.from_id,
-                "toId": to_id,
-                "nodes": nodes_json,
-                "edges": edges_json,
-            })))
+            let edges_dto: Vec<GraphEdgeDto> = edges
+                .iter()
+                .map(|e| GraphEdgeDto {
+                    source: e.source_id.clone(),
+                    target: e.target_id.clone(),
+                    weight: e.strength,
+                    link_type: e.link_type.clone(),
+                })
+                .collect();
+
+            Ok(Json(ExploreResponseDto {
+                action: action.to_string(),
+                from_id: req.from_id,
+                to_id: Some(to_id.to_string()),
+                results: results_dto,
+                nodes: Some(nodes_dto),
+                edges: Some(edges_dto),
+            }))
         }
         _ => Err(explore_error(
             StatusCode::BAD_REQUEST,

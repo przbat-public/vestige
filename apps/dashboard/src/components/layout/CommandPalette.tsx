@@ -1,14 +1,17 @@
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
+import { useDebounce } from '@/hooks/use-debounce';
 import { api } from '@/stores/api';
+import { EVENT, track } from '@/stores/telemetry';
 import { toast } from '@/stores/toast';
 
 /**
- * A command is either a navigation jump (no side effect, instant) or an
- * action (async, can show a toast, can be destructive). Discriminated union
- * lets the renderer treat them uniformly while keeping the right handler
- * shape per kind.
+ * A command palette entry. Three kinds, each with a single canonical handler
+ * shape so the renderer can stay flat. Navigation jumps to a route, actions
+ * run a maintenance call, and memory hits jump to the Memories page with
+ * the chosen memory pre-selected via a window event (see Layout listener).
  */
 type CommandItem =
   | {
@@ -28,6 +31,14 @@ type CommandItem =
       /** When true, runs `confirm(...)` with `confirmKey` before executing. */
       destructive?: boolean;
       confirmKey?: string;
+    }
+  | {
+      kind: 'memory';
+      id: string; // synthetic for activedescendant; format `mem-<memoryId>`
+      memoryId: string;
+      icon: string;
+      label: string; // pre-translated (snippet from server) — bypasses i18n
+      nodeType: string;
     };
 
 interface CommandPaletteProps {
@@ -43,7 +54,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [runningId, setRunningId] = useState<string | null>(null);
 
-  const commands: CommandItem[] = useMemo(
+  // Static commands (nav + actions); memory hits are merged in below. We
+  // narrow off the 'memory' variant here so `c.labelKey` is reachable
+  // without a type guard in the filter.
+  const commands: Exclude<CommandItem, { kind: 'memory' }>[] = useMemo(
     () => [
       // ===== Navigation =====
       { kind: 'navigate', id: 'nav-graph', icon: '◈', labelKey: 'nav.graph', to: 'graph' },
@@ -121,11 +135,47 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     [],
   );
 
+  // ===== Live memory search =====
+  // When the user types ≥2 characters, run `api.search` so the palette
+  // doubles as a global content search — type "checkout" and jump
+  // straight to that memory. Debounced (180ms) to avoid hammering the
+  // engine for every keystroke; capped at 5 hits so the panel doesn't
+  // overflow the viewport.
+  const debouncedQuery = useDebounce(query.trim(), 180);
+  const searchEnabled = open && debouncedQuery.length >= 2;
+  const { data: searchData, isFetching: searchLoading } = useQuery({
+    queryKey: ['command-palette-search', debouncedQuery],
+    queryFn: () => api.search(debouncedQuery, 5),
+    enabled: searchEnabled,
+    // Stale-while-revalidate: keep previous hits visible while we fetch
+    // the next slice so the list doesn't flash empty between keystrokes.
+    staleTime: 30_000,
+  });
+
+  const memoryHits: CommandItem[] = useMemo(() => {
+    if (!searchEnabled || !searchData?.results) return [];
+    return searchData.results.slice(0, 5).map((m) => ({
+      kind: 'memory' as const,
+      id: `mem-${m.id}`,
+      memoryId: m.id,
+      // Neutral glyph — node type is shown as a trailing badge so we
+      // don't need to encode it twice.
+      icon: '◉',
+      // Slice rather than CSS-truncate so the activedescendant label
+      // matches what screen readers announce.
+      label: m.content.length > 70 ? `${m.content.slice(0, 70)}…` : m.content,
+      nodeType: m.nodeType,
+    }));
+  }, [searchData, searchEnabled]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return commands;
-    return commands.filter((c) => t(c.labelKey).toLowerCase().includes(q));
-  }, [commands, query, t]);
+    // Commands filter on the translated label (so "Briefing" matches in
+    // both languages). Memory hits already encode the match — they were
+    // returned by hybrid search — so we just append them.
+    const matchedCommands = q ? commands.filter((c) => t(c.labelKey).toLowerCase().includes(q)) : commands;
+    return [...matchedCommands, ...memoryHits];
+  }, [commands, memoryHits, query, t]);
 
   // Keep activeIndex in bounds when filter shrinks the list.
   useEffect(() => {
@@ -137,19 +187,17 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       dialogRef.current?.showModal();
       setQuery('');
       setActiveIndex(0);
+      track(EVENT.command_palette_open);
     } else {
       dialogRef.current?.close();
     }
   }, [open]);
 
-  const runCommand = useCallback(
-    async (cmd: CommandItem) => {
-      if (cmd.kind === 'navigate') {
-        onClose();
-        navigate(cmd.to);
-        return;
-      }
-      // Action path
+  // Action path is the most branchy: confirm, await, toast, finally. Pulled
+  // out so `runCommand` itself stays a short dispatcher and clears Biome's
+  // complexity threshold.
+  const runAction = useCallback(
+    async (cmd: Extract<CommandItem, { kind: 'action' }>) => {
       if (cmd.destructive && cmd.confirmKey) {
         // Native confirm — synchronous, blocks the UI thread, but is
         // accessible (announced as alert dialog by all major screen readers)
@@ -170,7 +218,34 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         setRunningId(null);
       }
     },
-    [navigate, onClose, t],
+    [onClose, t],
+  );
+
+  const runCommand = useCallback(
+    async (cmd: CommandItem) => {
+      track(EVENT.command_palette_select, { id: cmd.id, kind: cmd.kind });
+      if (cmd.kind === 'navigate') {
+        onClose();
+        navigate(cmd.to);
+        return;
+      }
+      if (cmd.kind === 'memory') {
+        // Navigate to /memories then emit a select event in the next
+        // microtask. We can't dispatch immediately because the route
+        // change may unmount the listener on the way out; deferring by a
+        // tick lands the event after Memories mounts. The page picks it
+        // up, fetches the memory by id, and opens the detail drawer.
+        onClose();
+        navigate('/memories');
+        const memoryId = cmd.memoryId;
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('vestige:select-memory', { detail: { id: memoryId } }));
+        }, 0);
+        return;
+      }
+      await runAction(cmd);
+    },
+    [navigate, onClose, runAction],
   );
 
   const onKeyDown = useCallback(
@@ -231,39 +306,67 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           />
           {/* biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: WAI-ARIA combobox+listbox pattern requires role="listbox" on the option container */}
           <ul id="command-palette-list" className="space-y-1 max-h-[50vh] overflow-y-auto" role="listbox">
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !searchLoading && (
               <li className="text-xs text-muted-foreground px-3 py-2">{t('common.noResults')}</li>
             )}
             {filtered.map((cmd, i) => {
               const isActive = i === activeIndex;
               const isRunning = cmd.kind === 'action' && runningId === cmd.id;
               const disabled = runningId !== null && !isRunning;
+              // Section header above the first memory hit. Cheaper than
+              // splitting the list into two arrays — keeps activeIndex
+              // (and arrow navigation) coupled to a single source of truth.
+              const previous = filtered[i - 1];
+              const showMemoryHeader = cmd.kind === 'memory' && previous?.kind !== 'memory';
               return (
-                // biome-ignore lint/a11y/useFocusableInteractive: combobox keeps focus on the input and routes selection through aria-activedescendant; options must not be tabbable
-                // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: WAI-ARIA listbox children must use role="option"
-                <li key={cmd.id} id={cmd.id} role="option" aria-selected={isActive}>
-                  <button
-                    type="button"
-                    onClick={() => runCommand(cmd)}
-                    onMouseEnter={() => setActiveIndex(i)}
-                    disabled={disabled}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
-                      isActive
-                        ? 'bg-accent text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <span aria-hidden="true">{cmd.icon}</span>
-                    <span className="flex-1 text-left">{t(cmd.labelKey)}</span>
-                    {cmd.kind === 'action' && (
-                      <span className="text-[10px] uppercase tracking-wider opacity-60" aria-hidden="true">
-                        {isRunning ? t('common.loading') : t('commands.actionBadge')}
+                <div key={cmd.id}>
+                  {showMemoryHeader && (
+                    <div
+                      // Decorative grouping label, not an interactive option.
+                      className="text-[10px] uppercase tracking-wider text-muted-foreground/70 px-3 pt-3 pb-1"
+                      aria-hidden="true"
+                    >
+                      {t('commands.memoryResults', 'Memories')}
+                    </div>
+                  )}
+                  {/* biome-ignore lint/a11y/useFocusableInteractive: combobox keeps focus on the input and routes selection through aria-activedescendant; options must not be tabbable */}
+                  {/* biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: WAI-ARIA listbox children must use role="option" */}
+                  <li id={cmd.id} role="option" aria-selected={isActive}>
+                    <button
+                      type="button"
+                      onClick={() => runCommand(cmd)}
+                      onMouseEnter={() => setActiveIndex(i)}
+                      disabled={disabled}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
+                        isActive
+                          ? 'bg-accent text-foreground'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <span aria-hidden="true">{cmd.icon}</span>
+                      <span className="flex-1 text-left truncate">
+                        {cmd.kind === 'memory' ? cmd.label : t(cmd.labelKey)}
                       </span>
-                    )}
-                  </button>
-                </li>
+                      {cmd.kind === 'action' && (
+                        <span className="text-[10px] uppercase tracking-wider opacity-60" aria-hidden="true">
+                          {isRunning ? t('common.loading') : t('commands.actionBadge')}
+                        </span>
+                      )}
+                      {cmd.kind === 'memory' && (
+                        <span className="text-[10px] uppercase tracking-wider opacity-60" aria-hidden="true">
+                          {cmd.nodeType}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                </div>
               );
             })}
+            {searchLoading && (
+              <li className="text-[11px] text-muted-foreground px-3 py-1.5 italic" aria-live="polite">
+                {t('common.searching', 'Searching…')}
+              </li>
+            )}
           </ul>
         </search>
       </div>

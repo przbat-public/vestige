@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -11,6 +12,7 @@ import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
+import { EVENT, track, useTrackPageView } from '@/stores/telemetry';
 import { toast } from '@/stores/toast';
 import type { TemporalAction, TemporalEntry } from '@/types';
 
@@ -29,12 +31,35 @@ import type { TemporalAction, TemporalEntry } from '@/types';
 
 const TABS: TemporalAction[] = ['current', 'expired', 'history'];
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: temporal page integrates URL deep-linking, three independent tab states, topic submission, optimistic invalidate mutation, and a TimelineDot decorator — extracting any one would leak prop interface complexity to children and obscure the data-flow inside this file
 export function TemporalPage() {
+  useTrackPageView('temporal');
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TemporalAction>('current');
-  const [topic, setTopic] = useState('');
-  const [submittedTopic, setSubmittedTopic] = useState('');
+  // Read deep-link params on first render so MemoryTemporalPanel's
+  // "Show temporal history for tag X" shortcut lands on the right tab
+  // with the topic pre-submitted. We avoid mirroring topic edits back
+  // into the URL to keep typing snappy and the history clean.
+  const [searchParams] = useSearchParams();
+  const initialAction = (searchParams.get('action') as TemporalAction) || 'current';
+  const initialTopic = searchParams.get('topic') ?? '';
+  const [tab, setTab] = useState<TemporalAction>(TABS.includes(initialAction) ? initialAction : 'current');
+  const [topic, setTopic] = useState(initialTopic);
+  const [submittedTopic, setSubmittedTopic] = useState(initialTopic);
+
+  // Sync on subsequent navigations (e.g. user jumps from a different
+  // memory's panel without leaving the SPA). The dependency array
+  // intentionally excludes `tab` / `submittedTopic` so manual changes
+  // inside the page aren't fought by stale URL state.
+  useEffect(() => {
+    const nextAction = (searchParams.get('action') as TemporalAction) || null;
+    const nextTopic = searchParams.get('topic');
+    if (nextAction && TABS.includes(nextAction)) setTab(nextAction);
+    if (nextTopic !== null) {
+      setTopic(nextTopic);
+      setSubmittedTopic(nextTopic);
+    }
+  }, [searchParams]);
 
   const tabOptions = useMemo(
     () =>
@@ -60,6 +85,7 @@ export function TemporalPage() {
     mutationFn: (memoryId: string) => api.temporal('invalidate', { memoryId }),
     onSuccess: () => {
       toast(t('temporal.invalidated'), 'success');
+      track(EVENT.temporal_invalidate);
       // The mutation marks the memory as expired — both the current and
       // expired lists need to refresh, plus the global memory list.
       qc.invalidateQueries({ queryKey: ['temporal'] });

@@ -14,7 +14,11 @@ const ROUTE_TITLES: Record<string, string> = {
   '/timeline': 'nav.timeline',
   '/feed': 'nav.feed',
   '/explore': 'nav.explore',
+  '/reasoning': 'nav.reasoning',
   '/intentions': 'nav.intentions',
+  '/hubs': 'nav.hubs',
+  '/insights': 'nav.insights',
+  '/decisions': 'nav.decisions',
   '/stats': 'nav.stats',
   '/settings': 'nav.settings',
   '/tutorial': 'nav.tutorial',
@@ -42,8 +46,17 @@ export function RouteAnnouncer() {
     const titleKey = resolveTitle(pathname);
     if (!titleKey) return;
 
+    const pageName = t(titleKey);
+
+    // Updating `document.title` is the second half of a complete navigation
+    // announcement — screen readers re-announce the title on route change,
+    // browser tabs become identifiable, and history entries get real labels.
+    // The aria-live region is for the in-page announcement; the title is
+    // for everything outside the document.
+    document.title = `${pageName} · ${t('app.name')}`;
+
     requestAnimationFrame(() => {
-      setAnnouncement(t('a11y.navigatedTo', { page: t(titleKey) }));
+      setAnnouncement(t('a11y.navigatedTo', { page: pageName }));
     });
   }, [pathname, t]);
 

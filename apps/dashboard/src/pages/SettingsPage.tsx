@@ -12,12 +12,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useMemoryMutations } from '@/hooks/useMemoryMutations';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
+import { useTrackPageView } from '@/stores/telemetry';
 import { toast } from '@/stores/toast';
 import { useWebSocket } from '@/stores/websocket';
 import type { ConfidenceResult, ConsolidationResult, DreamResult, ReflectResult } from '@/types';
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: settings page composes seven independent maintenance actions whose results live in local state; splitting them would force a context just to share toasts
 export function SettingsPage() {
+  useTrackPageView('settings');
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { connected, memoryCount, avgRetention } = useWebSocket();

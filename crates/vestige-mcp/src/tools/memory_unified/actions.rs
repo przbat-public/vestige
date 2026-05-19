@@ -5,6 +5,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
+use vestige_core::memory::{extract_insight, merge_insight_into_extra};
 use vestige_core::{MemoryState, Modification, OutcomeType, Storage};
 
 use crate::cognitive::CognitiveEngine;
@@ -213,11 +214,34 @@ pub(super) async fn execute_promote(
         let node = storage_clone
             .promote_memory(&id_owned)
             .map_err(|e| e.to_string())?;
-        Ok(Some((before, node)))
+
+        // Proposal B — Insight Tier: when promoting an Insight node we
+        // also flip `extra_json.insight.validatedByAgent` to `true` and
+        // stamp `validatedAt`. The action is idempotent: a second
+        // promote leaves the timestamp alone. Failures are logged but
+        // do not roll back the FSRS-6 promotion — partial state is
+        // better than no signal.
+        let mut insight_validated_now = false;
+        if node.node_type == "insight"
+            && let Some(mut metadata) = extract_insight(node.extra_json.as_ref())
+        {
+            let was_validated = metadata.validated_by_agent;
+            metadata.mark_validated(chrono::Utc::now());
+            if !was_validated {
+                let merged = merge_insight_into_extra(node.extra_json.as_ref(), &metadata);
+                if let Err(e) = storage_clone.update_node_extra_json(&node.id, Some(&merged)) {
+                    tracing::warn!(memory_id = %node.id, "Failed to persist insight validation: {}", e);
+                } else {
+                    insight_validated_now = true;
+                }
+            }
+        }
+        Ok(Some((before, node, insight_validated_now)))
     })
     .await
     .map_err(|e| format!("execute_promote task panicked: {}", e))??;
-    let (before, node) = pair.ok_or_else(|| format!("Node not found: {}", id))?;
+    let (before, node, insight_validated_now) =
+        pair.ok_or_else(|| format!("Node not found: {}", id))?;
 
     // Cognitive feedback pipeline
     if let Ok(mut cog) = cognitive.try_lock() {
@@ -232,6 +256,27 @@ pub(super) async fn execute_promote(
                 },
             );
         }
+    }
+
+    // Insight tag housekeeping. After the first successful validation we
+    // swap "unvalidated" out of the tag list for "validated" so search
+    // filters and the dashboard can distinguish the two without re-
+    // parsing extra_json. Best-effort: a tag write failure is logged but
+    // doesn't fail the promote.
+    if insight_validated_now {
+        let mut new_tags: Vec<String> =
+            node.tags.iter().filter(|t| *t != "unvalidated").cloned().collect();
+        if !new_tags.iter().any(|t| t == "validated") {
+            new_tags.push("validated".to_string());
+        }
+        let storage_tags = storage.clone();
+        let node_id = node.id.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Err(e) = storage_tags.update_node_tags(&node_id, &new_tags) {
+                tracing::warn!(memory_id = %node_id, "Failed to flip insight tags: {}", e);
+            }
+        })
+        .await;
     }
 
     Ok(serde_json::json!({
@@ -254,10 +299,12 @@ pub(super) async fn execute_promote(
                 "before": before.stability,
                 "after": node.stability,
                 "multiplier": "1.5x"
-            }
+            },
+            "insightValidated": insight_validated_now,
         },
-        "message": format!("Memory promoted. It will now surface more often in searches. Retrieval: {:.2} -> {:.2}",
-            before.retrieval_strength, node.retrieval_strength),
+        "message": format!("Memory promoted. It will now surface more often in searches. Retrieval: {:.2} -> {:.2}{}",
+            before.retrieval_strength, node.retrieval_strength,
+            if insight_validated_now { " (insight marked as validated)" } else { "" }),
     }))
 }
 

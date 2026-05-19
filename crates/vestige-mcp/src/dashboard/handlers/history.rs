@@ -8,22 +8,26 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use chrono::{Duration, Utc};
 use serde::Deserialize;
-use serde_json::Value;
+use std::collections::BTreeMap;
 
 use super::super::state::AppState;
+use super::super::wire::{
+    MemoryChangelogDto, MemoryChangelogEntryDto, TimelineDayDto, TimelineMemoryDto,
+    TimelineResponseDto,
+};
 use super::{log_err, log_join_err};
 
 /// Get the per-memory changelog (state transitions audit trail).
 ///
-/// Mirrors the MCP `memory_changelog` tool with `memory_id` set, but trimmed
-/// to the data the dashboard actually renders (transitions list).
+/// Mirrors the MCP `memory_changelog` tool with `memory_id` set, but
+/// trimmed to the data the dashboard actually renders (transitions list).
 pub async fn get_memory_changelog(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<MemoryChangelogDto>, StatusCode> {
     // get_node + get_state_transitions are two short SELECTs but still
-    // belong on the blocking pool; the inner Option preserves "not found"
-    // so the handler can map it back to 404 cleanly.
+    // belong on the blocking pool; the inner Option preserves "not
+    // found" so the handler can map it back to 404 cleanly.
     let storage = state.storage.clone();
     let id_owned = id.clone();
     let pair = tokio::task::spawn_blocking(move || -> vestige_core::Result<_> {
@@ -38,25 +42,23 @@ pub async fn get_memory_changelog(
     .map_err(log_err("get_state_transitions"))?;
     let (node, transitions) = pair.ok_or(StatusCode::NOT_FOUND)?;
 
-    let formatted: Vec<Value> = transitions
+    let formatted: Vec<MemoryChangelogEntryDto> = transitions
         .iter()
-        .map(|t| {
-            serde_json::json!({
-                "fromState": t.from_state,
-                "toState": t.to_state,
-                "reasonType": t.reason_type,
-                "reasonData": t.reason_data,
-                "timestamp": t.timestamp.to_rfc3339(),
-            })
+        .map(|t| MemoryChangelogEntryDto {
+            from_state: t.from_state.clone(),
+            to_state: t.to_state.clone(),
+            reason_type: t.reason_type.clone(),
+            reason_data: t.reason_data.clone(),
+            timestamp: t.timestamp.to_rfc3339(),
         })
         .collect();
 
-    Ok(Json(serde_json::json!({
-        "memoryId": id,
-        "memoryContent": node.content,
-        "totalTransitions": formatted.len(),
-        "transitions": formatted,
-    })))
+    Ok(Json(MemoryChangelogDto {
+        memory_id: id,
+        memory_content: node.content,
+        total_transitions: formatted.len(),
+        transitions: formatted,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,11 +67,12 @@ pub struct TimelineParams {
     pub limit: Option<i32>,
 }
 
-/// Get timeline data
+/// Get timeline data — memories grouped by `created_at` day, newest
+/// first.
 pub async fn get_timeline(
     State(state): State<AppState>,
     Query(params): Query<TimelineParams>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<TimelineResponseDto>, StatusCode> {
     let days = params.days.unwrap_or(7).clamp(1, 90);
     let limit = params.limit.unwrap_or(200).clamp(1, 500);
 
@@ -83,43 +86,37 @@ pub async fn get_timeline(
     .map_err(log_join_err("query_time_range task panicked"))?
     .map_err(log_err("storage operation"))?;
 
-    // Group by day
-    let mut by_day: std::collections::BTreeMap<String, Vec<Value>> =
-        std::collections::BTreeMap::new();
+    let mut by_day: BTreeMap<String, Vec<TimelineMemoryDto>> = BTreeMap::new();
     for node in &nodes {
         let date = node.created_at.format("%Y-%m-%d").to_string();
-        let content_preview: String = {
-            let preview: String = node.content.chars().take(100).collect();
-            if preview.len() < node.content.len() {
-                format!("{}...", preview)
-            } else {
-                preview
-            }
+        let preview: String = node.content.chars().take(100).collect();
+        let content = if preview.len() < node.content.len() {
+            format!("{}...", preview)
+        } else {
+            preview
         };
-        by_day.entry(date).or_default().push(serde_json::json!({
-            "id": node.id,
-            "content": content_preview,
-            "nodeType": node.node_type,
-            "retentionStrength": node.retention_strength,
-            "createdAt": node.created_at.to_rfc3339(),
-        }));
+        by_day.entry(date).or_default().push(TimelineMemoryDto {
+            id: node.id.clone(),
+            content,
+            node_type: node.node_type.clone(),
+            retention_strength: node.retention_strength,
+            created_at: node.created_at.to_rfc3339(),
+        });
     }
 
-    let timeline: Vec<Value> = by_day
+    let timeline: Vec<TimelineDayDto> = by_day
         .into_iter()
         .rev()
-        .map(|(date, memories)| {
-            serde_json::json!({
-                "date": date,
-                "count": memories.len(),
-                "memories": memories,
-            })
+        .map(|(date, memories)| TimelineDayDto {
+            date,
+            count: memories.len(),
+            memories,
         })
         .collect();
 
-    Ok(Json(serde_json::json!({
-        "days": days,
-        "totalMemories": nodes.len(),
-        "timeline": timeline,
-    })))
+    Ok(Json(TimelineResponseDto {
+        days,
+        total_memories: nodes.len(),
+        timeline,
+    }))
 }

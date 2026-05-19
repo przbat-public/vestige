@@ -83,6 +83,15 @@ open = "5"
 include_dir = "0.7"
 mime_guess = "2"
 
+# Generates TypeScript bindings for wire-format DTOs. The `#[derive(TS)]`
+# attribute on `dashboard::wire::*` types is the source of truth for the
+# dashboard's `apps/dashboard/src/types/generated/*.ts` files; running
+# `cargo test -p vestige-mcp` regenerates them. The `chrono-impl` feature
+# maps `DateTime<Utc>` to a TypeScript `string` (we always serialize as
+# RFC 3339 on the wire). `format` would pull in dprint-plugin-typescript
+# but biome reformats the output anyway.
+ts-rs = { version = "12", features = ["chrono-impl", "no-serde-warnings"] }
+
 [dev-dependencies]
 tempfile.workspace = true
 

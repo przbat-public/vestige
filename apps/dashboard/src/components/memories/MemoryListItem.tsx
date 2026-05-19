@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { usePinned } from '@/stores/pinned';
 import type { Memory } from '@/types';
 import { EPISTEMIC_STATUS_COLORS, NODE_TYPE_COLORS, retentionColor } from '@/types';
 
@@ -16,6 +17,8 @@ interface MemoryListItemProps {
    * clicking through rows fluidly.
    */
   selectionMode: boolean;
+  /** True when the j/k cursor is on this row. Renders a subtle focus ring. */
+  isFocused?: boolean;
   onActivate: (m: Memory) => void;
   onToggleSelect: (id: string, opts: { shift?: boolean; ctrl?: boolean }) => void;
 }
@@ -38,10 +41,13 @@ export function MemoryListItem({
   isActive,
   isSelected,
   selectionMode,
+  isFocused = false,
   onActivate,
   onToggleSelect,
 }: MemoryListItemProps) {
   const { t } = useTranslation();
+  const pinned = usePinned();
+  const isPinned = pinned.has(memory.id);
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (e.shiftKey) {
@@ -66,13 +72,14 @@ export function MemoryListItem({
 
   return (
     <div
+      data-memory-row={memory.id}
       className={`group relative flex items-stretch rounded-lg transition min-w-0 ${
         isSelected
           ? 'bg-primary/5 border border-primary/40'
           : isActive
             ? 'bg-primary/10 border-l-2 border-primary'
             : 'hover:bg-accent border border-transparent'
-      }`}
+      } ${isFocused ? 'ring-2 ring-ring ring-offset-1 ring-offset-background' : ''}`}
     >
       {/* biome-ignore lint/a11y/noLabelWithoutControl: <Checkbox/> renders a real <input type="checkbox"> that the label implicitly associates with */}
       <label
@@ -95,6 +102,16 @@ export function MemoryListItem({
             style={{ backgroundColor: NODE_TYPE_COLORS[memory.nodeType] || '#8B95A5' }}
             aria-hidden="true"
           />
+          {isPinned && (
+            <span
+              role="img"
+              aria-label={t('memories.pinnedAria', { defaultValue: 'Pinned' })}
+              title={t('memories.pinnedAria', { defaultValue: 'Pinned' })}
+              className="text-amber-500 text-[11px] leading-none flex-shrink-0"
+            >
+              ★
+            </span>
+          )}
           <span className="text-xs text-foreground truncate">{memory.content.slice(0, 80)}</span>
         </div>
         <div className="flex items-center gap-2 mt-1 text-xs">

@@ -5,6 +5,97 @@ All notable changes to Vestige will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0] — typed-memory dashboard surface, end-to-end wire contract, tutorial v2
+
+Closes the gap between the typed-memory schema groundwork shipped in 3.3.0 and what the dashboard actually exposes. Four new pages (Decisions, Insights, Hubs, Reasoning) surface the typed kinds and the `deep_reference` reasoning engine; three new dream sub-modules (`dreamer_hubs`, `dreamer_insights`, `dreamer_contradictions`) emit the data those pages render. The TypeScript ↔ Rust boundary is now enforced end-to-end: every dashboard response is ts-rs-generated from a Rust DTO, and the five highest-blast-radius endpoints are re-validated at runtime via Zod, with a CI gate (`scripts/check-generated-types.sh`) that fails any PR editing a DTO without committing the regenerated `.ts`. The tutorial was rebuilt around twelve modular components (sticky TOC, glossary tooltips, mode toggle, interactive FSRS-6 curve, live memory example, quiz, guided tour, in-page search, "what's new" banner, progress tracking) and bilingual EN/PL copy applying the writing-english and writing-polish style guides. No public-API removals; SQLite migrations v12 and v13 are forward-only and additive.
+
+This release captures the post-3.3.0 dashboard work as a single release boundary so the upcoming consistency-audit pass (FE↔BE copy discrepancies, missing UI for `split_memories`/`export`/`restore`, dynamic "modules" count, governance vs maintenance threshold reconciliation) lands as a clean 3.4.x patch series on top of a tagged baseline.
+
+### Added
+
+#### Typed-Memory Dashboard Pages (`feat(dashboard)`)
+- **Decisions page** (`/decisions`) surfaces the new `Decision` memory kind — what was decided, the rationale, rejected alternatives, files touched. Backed by `apps/dashboard/src/pages/DecisionsPage.tsx` and `DecisionCard.tsx`.
+- **Insights page** (`/insights`) surfaces tentative observations emitted by dream cycles and `reflect` runs. Backed by `InsightsPage.tsx` and `InsightCard.tsx`.
+- **Hubs page** (`/hubs`) surfaces auto-detected topic clusters (concepts with high in-degree in the knowledge graph). Backed by `HubsPage.tsx` and `HubCard.tsx`.
+- **Reasoning page** (`/reasoning`) wraps the `deep_reference` cognitive engine — query → evidence + contradictions + superseded memories + evolution timeline. Replaces the previous CLI-only surface.
+
+#### Typed-Memory Backend (`feat(core)`, `feat(mcp)`)
+- **`vestige-core::memory::decision`, `::hub`, `::insight`** modules formalise the three new typed kinds. Each owns its own DTO, validation rules, and projection helpers.
+- **SQLite migration v12** adds `decisions`, `hubs`, and `insights` tables plus indexes on the foreign-key columns into `knowledge_nodes`. Migration v13 adds tier/confidence columns. Both are forward-only and idempotent.
+- **`dashboard/handlers/decisions`, `::hubs`, `::insights`** REST modules expose typed CRUD endpoints. Mirrors the per-domain handler layout introduced in 3.3.0.
+- **Dream refactor**: `vestige-core::advanced::dreams::dreamer` split into six sub-modules — `dreamer_lifecycle`, `dreamer_clustering`, `dreamer_connections`, `dreamer_contradictions`, `dreamer_hubs`, `dreamer_insights` — so each phase output can evolve independently of the others.
+
+#### End-to-End Type Safety (`feat(mcp,dashboard)`)
+- **ts-rs wire contract**: every dashboard DTO under `crates/vestige-mcp/src/dashboard/wire/` is `#[derive(TS)]` and auto-exports a TypeScript declaration into `apps/dashboard/src/types/generated/`. The `.cargo/config.toml` pins the export dir and forces `i64`/`u64` → JS `number` so consumers don't have to handle `bigint`.
+- **Zod runtime validation** in `apps/dashboard/src/types/runtime.ts` covers the five highest-blast-radius endpoints (memory list, search, graph, dream, stats). `AssertSubset` static checks keep the Zod schemas in sync with the ts-rs declarations at compile time.
+- **`scripts/check-generated-types.sh`** CI gate fails any PR that touches a Rust DTO without committing the regenerated `.ts` companion. Closes the manual-sync drift that bit us between 3.2 and 3.3.
+- **`/api/_meta/limits`** endpoint publishes the dashboard's blast-radius caps (page sizes, search timeouts, fetch budgets) from `DashboardLimitsDto::DEFAULT` instead of hardcoding them in React components. Parity test fails if any limit drifts.
+
+#### Tutorial v2 (`feat(dashboard)`)
+- **12 modular components** under `apps/dashboard/src/components/tutorial/`: `TutorialTOC` (sticky right-rail TOC with `IntersectionObserver`-driven active-section highlighting), `GlossaryTerm` (inline tooltips backed by a canonical `glossary.ts` list), `ModeToggle` (Quick vs Full mode segmented control), `RetentionCurveWidget` (interactive SVG FSRS-6 forgetting curve `R(t) = (1 + 19/81 · t/S)^-0.5`), `TutorialProgress` (per-section completion ring), `WhatsNewBanner` (semver-aware new-feature surfacing), `TutorialSearch` (in-page keyword search across sections), `LiveMemoryExample` (fetches and renders the user's actual highest-retention memory), `TutorialQuiz` (4-question multiple-choice with explanations), `InteractiveTour` (5-step guided tour with keyboard navigation), `PageCTA` (deep links into the relevant dashboard page), `useSectionTracking` (custom hook marking sections as explored on dwell + visibility).
+- **Three localStorage stores** (`tutorial-progress.ts`, `tutorial-quiz.ts`, `tutorial-tour.ts`) persist progress, quiz attempts, and tour state across visits.
+- **Bilingual EN/PL copy** applying the `writing-english` and `writing-polish` style guides — active voice, concrete nouns, no AI clichés, no "in conclusion" / "kluczowy" / "leverage".
+- **`telemetry.ts` store** records tutorial interactions (`tutorial_mode_change`, `tutorial_section_explored`, `tutorial_glossary_open`, `tutorial_quiz_submit`, `tutorial_tour_start/complete/skip`, …) so future copy iterations can be data-driven rather than vibe-driven.
+
+#### Dashboard UI Primitives (`feat(dashboard)`)
+- **`ConfidenceRing`** SVG component renders the 0–1 confidence score as a single-glyph ring (matches the FSRS-6 retention bar idiom used elsewhere).
+- **`MemoryTemporalPanel`** surfaces the temporal-versioning state (`current` / `expired` / `superseded` chain) on memory detail.
+- **`InfoTooltip`** standardises inline help — replaces six ad-hoc `title=` attributes and one custom popover.
+- **`Skeleton`** loading primitive replaces the previous text-only `loading…` placeholders.
+- **`DensityToggle`** (in `components/layout/`) lets users switch between compact and comfortable row densities; persisted via the new `use-density` hook.
+- **`KeyboardShortcutsDialog`** documents all global shortcuts in one searchable surface (`?` to open).
+
+#### Stores & Hooks (`feat(dashboard)`)
+- **`stores/pinned.ts`** persists user-pinned memories and surfaces them at the top of relevant lists.
+- **`stores/recent-searches.ts`** maintains a per-locale history of recent search queries.
+- **`hooks/use-dashboard-limits.ts`** reads `/api/_meta/limits` once per session and exposes the caps to any component.
+- **`hooks/use-debounce.ts`** standardises debounce timing across search inputs (was inlined inconsistently in 3.3).
+- **`hooks/use-density.ts`** drives the new `DensityToggle`.
+
+#### Design Documentation (`docs`)
+- `docs/TOPIC-HUBS-DESIGN.md`, `docs/INSIGHT-TIER-DESIGN.md`, `docs/DECISION-MATRIX-DESIGN.md`, `docs/CONTRADICTION-DETECTION-DESIGN.md`, `docs/CLEANUP-ROADMAP-2026-05.md` document the design intent behind the four new dashboard pages and the dream-cycle refactor. They are intentionally not auto-deleted after shipping — future iterations need to know what was rejected and why.
+
+### Changed
+
+#### MCP Catalog & Tools (`refactor(mcp)`)
+- **`catalog.rs`**: 27 → 28 tools after dream-cycle sub-action split. Behaviour-preserving for existing callers (the canonical alias still routes the old name).
+- **`tools/dream.rs`** (+190 lines): per-phase reporting (clustering, contradictions, hubs, insights, connections) so the dashboard can render a meaningful per-phase breakdown instead of a single opaque "done" flag.
+- **`tools/reflect.rs`** (+486 lines, the largest single-tool change in 3.4): standard depth now returns structured contradictions + gaps + stale-decision candidates instead of a free-text wall.
+- **`tools/codebase_unified.rs`** (+283 lines): wires the new `Decision` / `Hub` / `Insight` types into the unified codebase-memory entry point.
+- **`tools/memory_unified/actions.rs`**: promote/demote now accept an optional `reason` field on the wire path (frontend still doesn't send one — tracked for 3.4.x).
+
+#### Dashboard Handlers (`refactor(mcp)`)
+- All handler modules (`memory`, `search`, `graph`, `history`, `intentions`, `maintenance`, `review`, `cognitive`, `metacognitive`, `observability`) rewritten to consume DTOs from `wire/` and return `Json<T>` instead of `Json<Value>`. Eliminates the `serde_json::json!()` macro from the entire handler layer.
+- **Total dashboard routes: ~29 → 39** after adding the typed-memory endpoints, `/api/_meta/limits`, and per-domain search/graph endpoints.
+
+#### Existing Pages (`refactor(dashboard)`)
+- `BriefingPage`, `ExplorePage`, `FeedPage`, `GraphPage`, `IntentionsPage`, `MemoriesPage`, `ReviewPage`, `SettingsPage`, `StatsPage`, `TemporalPage`, `TimelinePage`, `TutorialPage`: all migrated to the ts-rs DTO contract and (where applicable) the Zod runtime validation layer.
+- `Sidebar`: 11 → 16 entries after surfacing the new pages and renaming a few to match the typed-memory vocabulary.
+- `CommandPalette`: keyboard shortcut documentation extracted into the new `KeyboardShortcutsDialog`; palette itself stays focused on navigation + search.
+
+#### Styling & Tooling
+- `apps/dashboard/biome.json`: tightened lint rules to flag `noArrayIndexKey`, `noExcessiveCognitiveComplexity` (cap 15), `useExhaustiveDependencies`. Several components in this release surfaced violations and were refactored rather than suppressed.
+- `apps/dashboard/src/app.css`: density tokens and the confidence-ring gradient added.
+
+### Removed
+- Nothing removed at the public API surface. The only deletions are stale build artefacts under `apps/dashboard/build/assets/` that are regenerated on every build.
+
+### Migrations
+- **v12** — `decisions`, `hubs`, `insights` tables + foreign-key indexes into `knowledge_nodes`.
+- **v13** — tier/confidence columns on `insights` and `decisions` (feeds the new Insights tier UI and the Decision confidence ring).
+
+Both forward-only; no down migration. Existing databases auto-upgrade on first start.
+
+### Documentation
+- `AGENTS.md` development block updated: tools 27 → 28, migrations v1–v11 → v1–v13, dashboard routes "29 across 27 paths" → "39 routes", handler list extended with `decisions`, `hubs`, `insights`. The `crate v3.3.0` self-reference bumped to v3.4.0.
+- Five new design docs under `docs/` (see Added → Design Documentation).
+
+### Known Issues (Tracked for 3.4.x)
+- **Frontend ↔ backend copy drift**: the consistency audit on 2026-05-19 surfaced four critical mismatches (Maintenance "find duplicates" describes ≥0.85 in copy but calls 0.82 in the API client; Temporal "invalidate" tutorial copy promises "no longer valid" but the backend only demotes without writing `valid_until`; Insights tutorial promises a "Promote them to validate" button that doesn't exist in the UI; the tutorial page list omits `/reasoning`). Fix tracked for 3.4.1.
+- **Hardcoded "29 cognitive modules"** in `SettingsPage.tsx`: should read from a backend `/api/_meta/modules` endpoint rather than a JSX literal. Fix tracked for 3.4.1.
+- **`memoriesDemoted` field in `/api/dream` response is always empty**: the surface contract exists but the dream cycle never populates it. Either populate it or remove from the DTO. Tracked for 3.4.1.
+- **Backend features without dashboard UI**: `split_memories`, `export`, `restore`, `memory_changelog` (system-wide, not per-memory), `session_context`, `memory_health`. These remain MCP-only in 3.4.0; UI surfaces tracked for 3.5.
+
 ## [3.3.0] — post-v3.2.1 work
 
 Aggregates the post-v3.2.1 refactor wave (Storage God Object decomposition, MCP tool polish, preprocessing/neuroscience tightening, expanded test coverage) plus the LoCoMo benchmark harness improvements that lifted full N=1540 from 41.00% to 66.17% (+25.17 pp, surpassing LangMem and within 0.71 pp of Mem0). Includes the typed-memory schema/type foundation needed for the upcoming typed-memory work. Closes the supply-chain and metadata-drift gaps surfaced by the bird's-eye sweep on 2026-05-13. No public-API removals; all changes default-on but additive at the data layer.

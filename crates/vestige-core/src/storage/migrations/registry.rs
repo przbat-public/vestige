@@ -60,4 +60,14 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "v3.3.0 typed memory (kind, subject, predicate, object, episodic_at, procedural_frequency)",
         up: MIGRATION_V11_UP,
     },
+    Migration {
+        version: 12,
+        description: "v3.4.0 typed extensions: extra_json column for Decision matrix, Hub metadata, Insight payload",
+        up: MIGRATION_V12_UP,
+    },
+    Migration {
+        version: 13,
+        description: "v3.5.0 Proposal A: partial indexes on extra_json.hub.clusterSignature for hub dedup",
+        up: MIGRATION_V13_UP,
+    },
 ];

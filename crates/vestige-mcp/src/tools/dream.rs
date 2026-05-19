@@ -11,7 +11,10 @@ use tokio::sync::Mutex;
 
 use crate::cognitive::CognitiveEngine;
 use chrono::Utc;
-use vestige_core::{CreativeConnectionType, DreamHistoryRecord, InsightRecord, LinkType, Storage};
+use vestige_core::memory::{HubMetadata, InsightMetadata, InsightOrigin, merge_hub_into_extra};
+use vestige_core::{
+    CreativeConnectionType, DreamHistoryRecord, IngestInput, InsightRecord, LinkType, Storage,
+};
 
 pub fn schema() -> serde_json::Value {
     serde_json::json!({
@@ -153,9 +156,15 @@ pub async fn execute(
     .await
     .map_err(|e| format!("dream embedding fetch task panicked: {}", e))?;
 
-    let extra_insights = {
+    let (extra_insights, hub_candidates) = {
         let cog = cognitive.lock().await;
-        cog.dreamer.synthesize_insights(&dream_memories)
+        let insights = cog.dreamer.synthesize_insights(&dream_memories);
+        // Topic Hubs (Proposal A) — feed the same memories through the
+        // hub generator so a single dream cycle materialises both insights
+        // and hubs. The dreamer enforces MIN_HUB_CLUSTER_SIZE so this is a
+        // no-op when clustering is sparse.
+        let hubs = cog.dreamer.synthesize_hubs(&dream_memories);
+        (insights, hubs)
     };
 
     // Persist creative connections from 4-phase dream cycle.
@@ -256,53 +265,213 @@ pub async fn execute(
     };
     let primary_insights = dream_result.insights.clone();
     let extra_insights_owned = extra_insights.clone();
+    let hub_candidates_owned = hub_candidates.clone();
     let tags_cleared: i64 = tokio::task::spawn_blocking(move || {
         if let Err(e) = storage_persist.save_dream_history(&dream_history_record) {
             tracing::warn!("Failed to persist dream history: {}", e);
         }
         let now = Utc::now();
         let mut insights_persisted = 0u64;
-        for insight in &primary_insights {
+        let mut insight_nodes_created = 0u64;
+
+        // For each insight: write the legacy InsightRecord row AND mirror
+        // the same observation as a first-class KnowledgeNode of
+        // node_type="insight" with structured metadata under
+        // extra_json.insight (Proposal B — Insight Tier). The dual write
+        // is intentional during the transition: existing dashboards keep
+        // rendering off InsightRecord while the new Insight Tier
+        // surfaces work through the regular memory pipeline (search,
+        // promote/demote, FSRS-6 review).
+        let mut persist_one = |insight_text: &str,
+                                source_memories: Vec<String>,
+                                confidence: f64,
+                                novelty: f64,
+                                insight_type: String,
+                                origin: InsightOrigin,
+                                tags: Vec<String>| {
+            let record_id = uuid::Uuid::new_v4().to_string();
             let record = InsightRecord {
-                id: uuid::Uuid::new_v4().to_string(),
-                insight: insight.insight.clone(),
-                source_memories: insight.source_memory_ids.clone(),
-                confidence: insight.confidence,
-                novelty_score: insight.novelty,
-                insight_type: insight.insight_type.clone(),
+                id: record_id.clone(),
+                insight: insight_text.to_string(),
+                source_memories: source_memories.clone(),
+                confidence,
+                novelty_score: novelty,
+                insight_type: insight_type.clone(),
                 generated_at: now,
-                tags: vec!["dream".to_string()],
+                tags: tags.clone(),
                 feedback: None,
                 applied_count: 0,
             };
             if storage_persist.save_insight(&record).is_ok() {
                 insights_persisted += 1;
             }
+
+            // Mirror as a KnowledgeNode of type "insight" so it shows up
+            // in search and FSRS scheduling. Skip insights with no
+            // source memories — InsightMetadata.validate() would reject
+            // them anyway and an evidence-less insight is just noise.
+            if source_memories.is_empty() {
+                return;
+            }
+            // InsightMetadata uses f32 because the wire format already
+            // does — convert from the storage layer's f64 once here.
+            let metadata = InsightMetadata {
+                insight_type: insight_type.clone(),
+                origin,
+                source_memory_ids: source_memories,
+                confidence: confidence as f32,
+                novelty: novelty as f32,
+                validated_by_agent: false,
+                validated_at: None,
+                insight_record_id: Some(record_id),
+            };
+            if metadata.validate().is_err() {
+                return;
+            }
+            let extra_json = serde_json::json!({ "insight": metadata });
+            let mut node_tags = tags;
+            // Make insight nodes filterable from search without scanning
+            // node_type. "unvalidated" gets stripped on promote.
+            node_tags.push("insight".to_string());
+            node_tags.push("unvalidated".to_string());
+
+            let input = IngestInput {
+                content: insight_text.to_string(),
+                node_type: "insight".to_string(),
+                tags: node_tags,
+                source: Some("dream".to_string()),
+                extra_json: Some(extra_json),
+                ..Default::default()
+            };
+            match storage_persist.ingest(input) {
+                Ok(_) => insight_nodes_created += 1,
+                Err(e) => tracing::warn!("Failed to ingest insight node: {}", e),
+            }
+        };
+
+        for insight in &primary_insights {
+            persist_one(
+                &insight.insight,
+                insight.source_memory_ids.clone(),
+                insight.confidence,
+                insight.novelty,
+                insight.insight_type.clone(),
+                InsightOrigin::Dream,
+                vec!["dream".to_string()],
+            );
         }
         for insight in &extra_insights_owned {
-            let record = InsightRecord {
-                id: uuid::Uuid::new_v4().to_string(),
-                insight: insight.insight.clone(),
-                source_memories: insight.source_memories.clone(),
-                confidence: insight.confidence,
-                novelty_score: insight.novelty_score,
-                insight_type: format!("{:?}", insight.insight_type),
-                generated_at: now,
-                tags: vec!["dream".to_string(), "synthesized".to_string()],
-                feedback: None,
-                applied_count: 0,
-            };
-            if storage_persist.save_insight(&record).is_ok() {
-                insights_persisted += 1;
-            }
+            persist_one(
+                &insight.insight,
+                insight.source_memories.clone(),
+                insight.confidence,
+                insight.novelty_score,
+                format!("{:?}", insight.insight_type),
+                InsightOrigin::Synthesized,
+                vec!["dream".to_string(), "synthesized".to_string()],
+            );
         }
         if insights_persisted > 0 {
             tracing::info!(
                 insights_persisted,
-                "Dream: persisted {} insights to database",
-                insights_persisted
+                insight_nodes_created,
+                "Dream: persisted {} insight records, {} insight nodes",
+                insights_persisted,
+                insight_nodes_created,
             );
         }
+
+        // Topic Hub persistence (Proposal A). For each candidate:
+        //   - look up an existing hub by cluster_signature (partial index
+        //     idx_nodes_hub_signature, migration v13)
+        //   - if found → bump regeneration count, rewrite content, refresh
+        //     child_ids/dominant_tags; no new node created
+        //   - if not   → ingest a fresh node_type="hub" node carrying the
+        //     HubMetadata under extra_json.hub
+        // The whole branch is best-effort — a failure to persist one hub
+        // never breaks the rest of the dream cycle.
+        let mut hubs_created = 0u64;
+        let mut hubs_refreshed = 0u64;
+        for candidate in &hub_candidates_owned {
+            let mut metadata = HubMetadata {
+                child_ids: candidate.child_ids.clone(),
+                cluster_signature: candidate.cluster_signature.clone(),
+                regeneration_count: 0,
+                last_regenerated_at: now,
+                generation_method: candidate.generation_method.clone(),
+                dominant_tags: candidate.dominant_tags.clone(),
+                date_range: candidate.date_range,
+            };
+            if metadata.validate().is_err() {
+                continue;
+            }
+
+            match storage_persist.find_hub_by_signature(&candidate.cluster_signature) {
+                Ok(Some(existing)) => {
+                    // Carry forward the prior regeneration count so the
+                    // dashboard can show "regenerated N times".
+                    if let Some(prev) =
+                        vestige_core::memory::extract_hub(existing.extra_json.as_ref())
+                    {
+                        metadata.regeneration_count = prev.regeneration_count;
+                    }
+                    metadata.touch_regeneration(now);
+
+                    let new_extra =
+                        merge_hub_into_extra(existing.extra_json.as_ref(), &metadata);
+                    if storage_persist
+                        .update_node_extra_json(&existing.id, Some(&new_extra))
+                        .is_ok()
+                    {
+                        // Rewrite the human-facing body so the new hub
+                        // text replaces the stale one. Content change also
+                        // refreshes the embedding (see update_node_content).
+                        if let Err(e) =
+                            storage_persist.update_node_content(&existing.id, &candidate.content)
+                        {
+                            tracing::warn!(
+                                hub_id = %existing.id,
+                                "Failed to refresh hub content: {}",
+                                e
+                            );
+                        }
+                        hubs_refreshed += 1;
+                    }
+                }
+                Ok(None) => {
+                    let extra_json = serde_json::json!({ "hub": metadata });
+                    let input = IngestInput {
+                        content: candidate.content.clone(),
+                        node_type: "hub".to_string(),
+                        tags: candidate.tags.clone(),
+                        source: Some("dream".to_string()),
+                        extra_json: Some(extra_json),
+                        ..Default::default()
+                    };
+                    match storage_persist.ingest(input) {
+                        Ok(_) => hubs_created += 1,
+                        Err(e) => tracing::warn!("Failed to ingest hub node: {}", e),
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        signature = %candidate.cluster_signature,
+                        "Failed to look up hub by signature: {}",
+                        e
+                    );
+                }
+            }
+        }
+        if hubs_created > 0 || hubs_refreshed > 0 {
+            tracing::info!(
+                hubs_created,
+                hubs_refreshed,
+                "Dream: persisted {} new hubs, refreshed {} existing hubs",
+                hubs_created,
+                hubs_refreshed,
+            );
+        }
+
         storage_persist.clear_waking_tags().unwrap_or(0)
     })
     .await

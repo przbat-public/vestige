@@ -10,6 +10,7 @@ import { ProgressBar } from '@/components/ui/progress-bar';
 import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
+import { useTrackPageView } from '@/stores/telemetry';
 import { toast } from '@/stores/toast';
 import type { FsrsRating } from '@/types';
 import { NODE_TYPE_COLORS, retentionColor } from '@/types';
@@ -43,6 +44,7 @@ const RATING_BUTTONS: RatingButtonSpec[] = [
  * keyboard-driven progress, so we hint shortcuts on every button.
  */
 export function ReviewPage() {
+  useTrackPageView('review');
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [index, setIndex] = useState(0);

@@ -138,10 +138,11 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
         tool(
             "codebase",
             "Codebase patterns and decisions",
-            "Unified codebase tool. Actions: 'remember_pattern' (store code pattern), 'remember_decision' (store architectural decision), 'get_context' (retrieve patterns and decisions).",
+            "Unified codebase tool. Actions: 'remember_pattern' (store code pattern), 'remember_decision' (legacy free-form Markdown decision), 'remember_decision_v2' (structured Decision Matrix — question + choices + criteria + 1–5 score matrix + optional validUntil; reflect auto-flags decisions whose validUntil has passed), 'get_context' (retrieve patterns and decisions). Prefer 'remember_decision_v2' for non-trivial decisions so the Decision Matrix dashboard can render them and the reflect tool can detect staleness automatically.",
             tools::codebase_unified::schema(),
-            // 'remember_pattern' / 'remember_decision' are additive writes;
-            // 'get_context' is read-only. Pick the worst-case (mutating).
+            // 'remember_pattern' / 'remember_decision' / 'remember_decision_v2'
+            // are additive writes; 'get_context' is read-only. Pick the
+            // worst-case (mutating).
             mutating("Codebase patterns and decisions", false),
         ),
         tool(

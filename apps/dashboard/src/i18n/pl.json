@@ -11,6 +11,10 @@
     "timeline": "Oś czasu",
     "feed": "Aktywność",
     "explore": "Eksploruj",
+    "reasoning": "Rozumowanie",
+    "decisions": "Decyzje",
+    "insights": "Wnioski",
+    "hubs": "Huby tematyczne",
     "intentions": "Przypomnienia",
     "temporal": "Czasowe",
     "stats": "Przegląd",
@@ -44,6 +48,12 @@
     "deletedToast_few": "Usunięto {{count}} wspomnienia.",
     "deletedToast_many": "Usunięto {{count}} wspomnień.",
     "deletedToast_other": "Usunięto {{count}} wspomnień.",
+    "deletedPending_one": "Usunięto {{count}} wspomnienie",
+    "deletedPending_few": "Usunięto {{count}} wspomnienia",
+    "deletedPending_many": "Usunięto {{count}} wspomnień",
+    "deletedPending_other": "Usunięto {{count}} wspomnień",
+    "deleteUndone_one": "Usuwanie cofnięte",
+    "deleteUndone_other": "Usuwanie cofnięte",
     "deleteConfirm_one": "Trwale usunąć {{count}} wspomnienie? Nie można cofnąć.",
     "deleteConfirm_few": "Trwale usunąć {{count}} wspomnienia? Nie można cofnąć.",
     "deleteConfirm_many": "Trwale usunąć {{count}} wspomnień? Nie można cofnąć.",
@@ -58,24 +68,25 @@
     "actionBadge": "Akcja",
     "dream": "Uruchom cykl snu",
     "dreamSuccess": "Cykl snu rozpoczęty — obserwuj graf, by zobaczyć nowe połączenia.",
-    "consolidate": "Uruchom konsolidację (FSRS + embedingi)",
+    "consolidate": "Uruchom konsolidację (FSRS + embeddingi)",
     "consolidateSuccess": "Konsolidacja zakończona.",
-    "reflect": "Zrefleksja nad bazą wspomnień",
+    "reflect": "Refleksja nad bazą wspomnień",
     "reflectSuccess": "Refleksja zakończona — zobacz sprzeczności i luki w Ustawieniach.",
     "confidenceAudit": "Audyt pewności wspomnień",
     "confidenceAuditSuccess": "Audyt pewności zakończony.",
-    "regenerateEmbeddings": "Wygeneruj brakujące embedingi",
-    "regenerateEmbeddingsSuccess": "Brakujące embedingi uzupełnione.",
+    "regenerateEmbeddings": "Wygeneruj brakujące embeddingi",
+    "regenerateEmbeddingsSuccess": "Brakujące embeddingi uzupełnione.",
     "backup": "Utwórz kopię zapasową bazy",
-    "backupSuccess": "Kopia zapasowa zapisana w ~/.vestige/backups."
+    "backupSuccess": "Kopia zapasowa zapisana w ~/.vestige/backups.",
+    "memoryResults": "Wspomnienia"
   },
   "maintenance": {
     "title": "Utrzymanie",
-    "description": "Narzędzia operacyjne dostępne wcześniej tylko z poziomu MCP. Sięgaj po nie, gdy embedingi rozjeżdżają się, gdy podejrzewasz duplikaty lub przed ryzykownymi operacjami masowymi.",
-    "regenTitle": "Wygeneruj embedingi",
-    "regenDesc": "Uzupełnij wspomnienia bez embedingu (np. utracone, gdy model nie był gotowy). Tani do uruchomienia.",
+    "description": "Narzędzia operacyjne dostępne wcześniej tylko z poziomu MCP. Sięgaj po nie, gdy embeddingi rozjeżdżają się, gdy podejrzewasz duplikaty lub przed ryzykownymi operacjami masowymi.",
+    "regenTitle": "Wygeneruj embeddingi",
+    "regenDesc": "Uzupełnij wspomnienia bez embeddingu (np. utracone, gdy model nie był gotowy). Tani do uruchomienia.",
     "regenBtn": "Wygeneruj",
-    "regenSuccess": "Wygenerowano {{successful}} embedingów, pominięto {{skipped}}.",
+    "regenSuccess": "Wygenerowano {{successful}} embeddingów, pominięto {{skipped}}.",
     "regenResult": "Wygenerowano {{successful}}, pominięto {{skipped}}, błędy {{failed}} ({{ms}}ms).",
     "dupTitle": "Znajdź duplikaty",
     "dupDesc": "Klastruj wspomnienia po podobieństwie cosinus (≥0.85). Przejrzyj klastry przed scaleniem — audyt pokazuje podgląd i podobieństwo do anchora.",
@@ -84,7 +95,7 @@
     "dupResult": "Przeskanowano {{clusters}} klastrów w {{memories}} wspomnieniach.",
     "dupReviewWarning": "Przejrzyj każdy klaster ręcznie — wysokie podobieństwo często oznacza „dwie ważne notatki o tym samym temacie\", nie duplikaty. Masowe kasowanie przy tym progu jest ryzykowne.",
     "dupClusterLabel": "Klaster {{size}}",
-    "gcTitle": "Garbage collection",
+    "gcTitle": "Czyszczenie pamięci (GC)",
     "gcDesc": "Pokaż lub usuń wspomnienia, których zapamiętanie spadło poniżej 10% — i tak rzadko pojawiają się w wyszukiwaniu.",
     "gcPreviewBtn": "Podgląd kandydatów",
     "gcPreviewSuccess": "{{count}} wspomnień zostałoby usuniętych.",
@@ -99,7 +110,32 @@
     "backupSuccess": "Kopia utworzona.",
     "backupResult": "Zapisano w {{path}} ({{kb}} KB)."
   },
+  "shortcuts": {
+    "title": "Skróty klawiszowe",
+    "subtitle": "Wszystkie skróty, na które reaguje dashboard. Naciśnij ?, by otworzyć to okno.",
+    "closeAria": "Zamknij okno skrótów",
+    "footer": "Wskazówka: zostaw to okno otwarte w drugim oknie, gdy się uczysz dashboardu.",
+    "group": {
+      "global": "Wszędzie",
+      "memories": "Strona Wspomnienia",
+      "dialogs": "W dialogach i listach"
+    },
+    "commandPalette": "Otwórz paletę poleceń",
+    "addMemory": "Nowe wspomnienie",
+    "openHelp": "Otwórz to okno skrótów",
+    "skipToContent": "Przejdź do treści (pierwszy Tab)",
+    "selectAll": "Zaznacz wszystkie wspomnienia",
+    "clearSelection": "Wyczyść zaznaczenie",
+    "cursorDown": "Następne wspomnienie (kursor w dół)",
+    "cursorUp": "Poprzednie wspomnienie (kursor w górę)",
+    "cursorOpen": "Otwórz aktywne wspomnienie",
+    "cursorToggle": "Przełącz zaznaczenie aktywnego wspomnienia",
+    "close": "Zamknij okno",
+    "confirm": "Potwierdź wybór",
+    "navigateList": "Poruszaj się po liście"
+  },
   "a11y": {
+    "currentPage": "aktywna strona",
     "mainNavigation": "Nawigacja główna",
     "openNavigation": "Otwórz nawigację",
     "closeNavigation": "Zamknij nawigację",
@@ -119,20 +155,27 @@
     "delete": "Usuń",
     "cancel": "Anuluj",
     "save": "Zapisz",
+    "undo": "Cofnij",
     "new": "+ Nowe",
+    "clear": "wyczyść",
     "loading": "Ładowanie...",
     "noResults": "Brak wyników",
+    "searching": "Szukam…",
     "total": "{{count}} łącznie",
     "language": "Język",
     "theme": "Motyw",
     "lightMode": "Jasny motyw",
     "darkMode": "Ciemny motyw",
+    "densityComfortable": "Przełącz na komfortową gęstość",
+    "densityCompact": "Przełącz na kompaktową gęstość",
     "score": "Oceń",
     "more": "+{{count}} więcej",
     "error": "Coś poszło nie tak",
     "fetchError": "Nie udało się pobrać danych. Sprawdź połączenie i spróbuj ponownie.",
     "errorDetails": "Pokaż szczegóły techniczne",
-    "errorRetry": "Spróbuj ponownie"
+    "errorRetry": "Spróbuj ponownie",
+    "yes": "tak",
+    "no": "nie"
   },
   "status": {
     "connected": "Połączono",
@@ -169,10 +212,19 @@
     "filterByTag": "Filtruj po tagu...",
     "noMemories": "Nie znaleziono wspomnień",
     "noMemoriesHint": "Spróbuj innego wyszukiwania lub filtra",
+    "emptyCta": "+ Dodaj pierwsze wspomnienie",
+    "recent": "Ostatnie",
+    "recentClearAria": "Wyczyść ostatnie wyszukiwania",
+    "pin": "Przypnij",
+    "unpin": "Odepnij",
+    "pinnedAria": "Przypięte",
     "selectMemory": "Wybierz wspomnienie, by zobaczyć szczegóły",
     "promote": "Wzmocnij",
     "demote": "Osłab",
     "deleted": "Wspomnienie usunięte",
+    "deletedPending": "Wspomnienie usunięte",
+    "deleteUndone": "Anulowano usuwanie",
+    "demoteUndone": "Anulowano osłabienie",
     "promoted": "Wspomnienie wzmocnione",
     "demotedToast": "Wspomnienie osłabione",
     "retention": "Zapamiętanie",
@@ -204,6 +256,29 @@
     "localGraph": {
       "title": "Lokalne połączenia",
       "empty": "Brak zarejestrowanych połączeń — uruchom cykl snu, by je odkryć."
+    },
+    "hint": {
+      "retention": "Prawdopodobieństwo, że teraz przypomnisz sobie to wspomnienie, obliczone przez FSRS-6 na podstawie czasu od ostatniej powtórki. 100% = świeżo powtórzone, spada w czasie.",
+      "storage": "Jak mocno wspomnienie jest zakodowane — rośnie z każdą udaną powtórką. Wyższa siła zapisu = dłuższe odstępy między powtórkami.",
+      "retrieval": "Jak łatwo teraz przywołać wspomnienie do pamięci roboczej. Spada przy każdym lapsie, rośnie przy powtórkach.",
+      "trust": "Złączony sygnał FSRS: jak często to wspomnienie zostało potwierdzone vs jak często wypadło z pamięci. Używany do rankingu dowodów.",
+      "reviews": "Łączna liczba powtórzeń wykonanych przez Ciebie lub agenta.",
+      "validUntil": "Po tej dacie wspomnienie jest traktowane jako wygasłe i przestaje pojawiać się w wynikach jako aktualne."
+    },
+    "temporalPanel": {
+      "title": "Okno ważności",
+      "noWindow": "Brak ustawionego okna ważności.",
+      "noWindowHint": "Oznacz to wspomnienie jako zastąpione, jeśli nie jest już aktualne.",
+      "validFromLabel": "Ważne od",
+      "validUntilLabel": "Ważne do",
+      "invalidate": "Oznacz jako zastąpione",
+      "invalidating": "Oznaczam…",
+      "invalidated": "Wspomnienie oznaczone jako zastąpione.",
+      "exploreTopic": "Pokaż historię czasową dla tagu „{{tag}}”",
+      "exploreTopicHint": "Otwiera konsolę temporal z tym tagiem wybranym.",
+      "expiredRelative": "Wygasło {{days}} dni temu",
+      "expiringRelative": "Wygasa za {{days}} dni",
+      "validRelative": "Ważne przez kolejne {{days}} dni"
     }
   },
   "briefing": {
@@ -272,6 +347,88 @@
     "pattern": "Wzorzec",
     "decision": "Decyzja"
   },
+  "decisions": {
+    "title": "Decyzje",
+    "subtitleHeader": "Strukturalne wybory zarejestrowane przez agenta — z wagami i datą ważności.",
+    "subtitle": "Zdecydowane {{date}} · rekomendacja: {{choice}}",
+    "noRecommendation": "brak rekomendacji",
+    "tableCaption": "Macierz ocen dla: {{question}}",
+    "criterion": "Kryterium",
+    "recommended": "Rekomendowane",
+    "weight": "waga {{value}}",
+    "summary": "{{total}} razem · {{active}} aktywnych · {{expired}} wygasłych",
+    "filter": {
+      "all": "Wszystkie",
+      "active": "Aktywne",
+      "expired": "Wygasłe"
+    },
+    "badge": {
+      "expired": "Wygasła",
+      "validUntil": "Ważna do {{date}}",
+      "supersedes_one": "Zastępuje {{count}}",
+      "supersedes_few": "Zastępuje {{count}}",
+      "supersedes_many": "Zastępuje {{count}}",
+      "supersedes_other": "Zastępuje {{count}}"
+    },
+    "empty": {
+      "title": "Brak decyzji",
+      "description": "Gdy agent zapisze decyzję przez codebase.remember_decision_v2 z macierzą ocen, pojawi się tutaj.",
+      "filteredTitle": {
+        "all": "Brak pasujących decyzji",
+        "active": "Brak aktywnych decyzji",
+        "expired": "Brak wygasłych decyzji"
+      },
+      "filteredDescription": "Zmień filtr lub poczekaj, aż agent zarejestruje kolejne decyzje."
+    }
+  },
+  "insights": {
+    "title": "Wnioski",
+    "subtitleHeader": "Hipotezy z cykli snu i refleksji. Promuj, żeby je zweryfikować.",
+    "subtitle": "{{date}} · z {{sources}} wspomnień",
+    "validatedOn": "zweryfikowano {{date}}",
+    "confidence": "Pewność",
+    "novelty": "Nowość",
+    "summary": "{{validated}} z {{total}} zweryfikowanych",
+    "filter": {
+      "all": "Wszystkie",
+      "validated": "Zweryfikowane",
+      "unvalidated": "Niezweryfikowane"
+    },
+    "badge": {
+      "validated": "Zweryfikowany",
+      "unvalidated": "Niezweryfikowany"
+    },
+    "empty": {
+      "title": "Brak wniosków",
+      "description": "Uruchom cykl snu, żeby wygenerować zsyntetyzowane obserwacje z Twoich wspomnień.",
+      "cta": "Uruchom cykl snu"
+    }
+  },
+  "hubs": {
+    "title": "Huby tematyczne",
+    "subtitleHeader": "Klastry powiązanych wspomnień, które cykl snu zszył w jedno podsumowanie.",
+    "summary_one": "{{count}} aktywny hub",
+    "summary_few": "{{count}} aktywne huby",
+    "summary_many": "{{count}} aktywnych hubów",
+    "summary_other": "{{count}} aktywnych hubów",
+    "subtitle": "ostatnio odświeżony {{last}} przez {{method}}",
+    "range": "zakres {{from}} → {{to}}",
+    "badge": {
+      "children_one": "{{count}} wspomnienie",
+      "children_few": "{{count}} wspomnienia",
+      "children_many": "{{count}} wspomnień",
+      "children_other": "{{count}} wspomnień",
+      "regenerated_one": "odświeżony {{count}}×",
+      "regenerated_few": "odświeżony {{count}}×",
+      "regenerated_many": "odświeżony {{count}}×",
+      "regenerated_other": "odświeżony {{count}}×"
+    },
+    "empty": {
+      "title": "Brak hubów",
+      "description": "Huby pojawiają się, gdy cykl snu odkryje klastry 5+ powiązanych wspomnień.",
+      "cta": "Uruchom cykl snu"
+    }
+  },
   "temporal": {
     "title": "Wersjonowanie czasowe",
     "subtitle": "Śledź jak ewoluują zapamiętane fakty. Oznacz przestarzałe wspomnienia, żeby silnik przestał je zwracać jako aktualne.",
@@ -314,7 +471,7 @@
     "fabLabel": "Dodaj wspomnienie (Cmd/Ctrl+N)",
     "fabTitle": "Dodaj wspomnienie",
     "title": "Dodaj wspomnienie",
-    "description": "Idzie przez pełen pipeline smart-ingest — scoring ważności, detekcja intencji i prediction-error gating decydują, czy stworzyć, zaktualizować, czy zmerge'ować.",
+    "description": "Idzie przez pełny pipeline smart-ingest — ważność, intencja i prediction-error gating decydują, czy stworzyć, zaktualizować, czy scalić.",
     "contentLabel": "Treść",
     "contentPlaceholder": "Złap jeden fakt, decyzję albo wniosek. Atomowe wspomnienia lepiej się wyszukują.",
     "nodeTypeLabel": "Typ",
@@ -367,7 +524,7 @@
   "dream": {
     "replayed": "Odtworzone",
     "connections": "Połączenia",
-    "insights": "Spostrzeżenia",
+    "insights": "Wnioski",
     "contradictions": "Sprzeczności",
     "demoted": "Osłabione",
     "duration": "Czas trwania",
@@ -469,6 +626,10 @@
     "title": "Eksploruj połączenia",
     "searchPlaceholder": "Wpisz ID wspomnienia lub szukaj...",
     "associations": "Powiązane wspomnienia",
+    "associationsCount_one": "{{count}} powiązane wspomnienie",
+    "associationsCount_few": "{{count}} powiązane wspomnienia",
+    "associationsCount_many": "{{count}} powiązanych wspomnień",
+    "associationsCount_other": "{{count}} powiązanych wspomnień",
     "chain": "Ścieżka połączeń",
     "bridges": "Koncepcje pomostowe",
     "noResults": "Nie znaleziono połączeń",
@@ -487,6 +648,51 @@
     "errorExploration": "Eksploracja nie powiodła się",
     "errorSearch": "Wyszukiwanie nie powiodło się",
     "errorLoadMemory": "Nie udało się załadować wspomnienia {{id}}"
+  },
+  "reasoning": {
+    "title": "Głębokie rozumowanie",
+    "subtitle": "Zadaj pytanie w naturalnym języku — Vestige przepuszcza je przez 7 etapów (wyszukiwanie, zaufanie, propagacja, sprzeczności, supersesja czasowa, wnioski ze snów, synteza) i zwraca odpowiedź z cytatami.",
+    "queryLabel": "Pytanie",
+    "queryPlaceholder": "np. Dlaczego wybraliśmy PostgreSQL? · Co przeczy naszej polityce ponowień? · Jak ewoluował przepływ logowania?",
+    "depthLabel": "Przeanalizuj {{count}} wspomnień",
+    "depthHint": "Więcej wspomnień = dokładniej, ale wolniej. Domyślne 20 wystarczy w większości przypadków.",
+    "run": "Uruchom rozumowanie",
+    "loading": "Rozumowanie po wspomnieniach…",
+    "emptyTitle": "Zadaj dowolne pytanie",
+    "emptyHint": "Vestige przeszuka pamięć, oceni zaufanie, wykryje sprzeczności i zsyntetyzuje odpowiedź z cytatami.",
+    "errorGeneric": "Rozumowanie nie powiodło się. Spróbuj krótszego zapytania.",
+    "intent": {
+      "fact_check": "Weryfikacja faktu",
+      "timeline": "Oś czasu",
+      "root_cause": "Przyczyna źródłowa",
+      "comparison": "Porównanie",
+      "synthesis": "Synteza"
+    },
+    "topAnswer": "Najlepsza odpowiedź",
+    "trustScore": "Zaufanie {{pct}}%",
+    "confidence": "Pewność {{pct}}%",
+    "analyzed_one": "Przeanalizowano {{count}} wspomnienie",
+    "analyzed_few": "Przeanalizowano {{count}} wspomnienia",
+    "analyzed_many": "Przeanalizowano {{count}} wspomnień",
+    "analyzed_other": "Przeanalizowano {{count}} wspomnień",
+    "contradictionsTitle_one": "Wykryto {{count}} sprzeczność",
+    "contradictionsTitle_few": "Wykryto {{count}} sprzeczności",
+    "contradictionsTitle_many": "Wykryto {{count}} sprzeczności",
+    "contradictionsTitle_other": "Wykryto {{count}} sprzeczności",
+    "supersededTitle_one": "{{count}} zastąpione wspomnienie",
+    "supersededTitle_few": "{{count}} zastąpione wspomnienia",
+    "supersededTitle_many": "{{count}} zastąpionych wspomnień",
+    "supersededTitle_other": "{{count}} zastąpionych wspomnień",
+    "dreamInsightsTitle_one": "{{count}} pasujący wniosek ze snu",
+    "dreamInsightsTitle_few": "{{count}} pasujące wnioski ze snu",
+    "dreamInsightsTitle_many": "{{count}} pasujących wniosków ze snu",
+    "dreamInsightsTitle_other": "{{count}} pasujących wniosków ze snu",
+    "insightConfidence": "Pewność wniosku {{pct}}%",
+    "evidenceTitle_one": "{{count}} wspierające wspomnienie",
+    "evidenceTitle_few": "{{count}} wspierające wspomnienia",
+    "evidenceTitle_many": "{{count}} wspierających wspomnień",
+    "evidenceTitle_other": "{{count}} wspierających wspomnień",
+    "stagesFooter": "Etapy: propagacja {{activation}} · wnioski ze snu {{dream}}"
   },
   "intentions": {
     "title": "Przypomnienia",
@@ -516,6 +722,8 @@
     "deadline": "Termin",
     "triggerLabel": "Typ wyzwalacza",
     "triggerValue": "Wartość wyzwalacza",
+    "contentLabel": "Treść przypomnienia",
+    "contentPlaceholder": "O czym mam Ci przypomnieć?",
     "priorityLabel": "Priorytet",
     "predictions": "Predykcje",
     "basedOn": "na podstawie: {{source}}",
@@ -689,6 +897,35 @@
         "title": "Ustawienia",
         "desc": "Centrum dowodzenia. Informacje o systemie (wersja, model embeddingów, status połączenia), operacje konserwacyjne (Cykl Snu, Konsolidacja), narzędzia metapoznawcze (Autorefleksja, Audyt Pewności), wizualizacja pipeline'u wyszukiwania i zarządzanie pamięcią (rozkład zapamiętania, zagrożone wspomnienia).",
         "tip": "Uruchom Cykl Snu po intensywnym tygodniu. Uruchom Autorefleksję, gdy chcesz wyłapać sprzeczności lub nieaktualne decyzje w bazie wiedzy."
+      },
+      "briefing": {
+        "title": "Briefing",
+        "desc": "Poranna odprawa. Refleksja podświetla sprzeczności i luki, tryb wątpliwości pokazuje najmniej pewne wspomnienia do weryfikacji lub osłabienia, a Sen pozostaje świadomym, cięższym krokiem dla nowych powiązań.",
+        "tip": "Zacznij stąd od „co dziś wymaga uwagi”, zanim przejdziesz do list lub grafu."
+      },
+      "review": {
+        "title": "Powtórki",
+        "desc": "Kolejka powtórek wspomnień, które FSRS planuje na dziś. Szybka ocena (Powtórz / Trudne / Dobre / Łatwe) dostraja kolejny interwał i nie pozwala ważnej wiedzy zblaknąć."
+      },
+      "hubs": {
+        "title": "Huby tematyczne",
+        "desc": "Skupiska powiązanych wspomnień, które Cykl Snu zszył w jedną kartę: wspólny temat, liczbę elementów i moment ostatniego odświeżenia. Mapa tego, co silnik już pogrupował.",
+        "tip": "Otwórz hub, gdy chcesz złapać temat z lotu ptaka, bez klikania każdego wspomnienia osobno."
+      },
+      "insights": {
+        "title": "Wnioski",
+        "desc": "Obserwacje wygenerowane przez Sen i Refleksję. Pozostają hipotezami, dopóki ich nie Promujesz — to krok weryfikacji. Filtry oddzielają zweryfikowane od czekających, żebyś mógł się skupić na tym, co wymaga decyzji.",
+        "tip": "Traktuj wnioski jak hipotezy do oceny, nie jak ostateczną prawdę."
+      },
+      "decisions": {
+        "title": "Decyzje",
+        "desc": "Galeria do odczytu ze strukturalnymi wyborami agenta: alternatywy, ważone oceny, rekomendacja i daty ważności. Filtr aktywne / wygasłe pokazuje, co dalej obowiązuje, a co zostało zastąpione.",
+        "tip": "Tu szukasz uzasadnienia starej decyzji. Edycja idzie przez MCP, żeby ślad audytu pozostał spójny."
+      },
+      "temporal": {
+        "title": "Wersjonowanie czasowe",
+        "desc": "Fakty z ograniczonym okresem ważności: które wersje są dziś aktualne, które wygasły i pełna historia tematu po kolejnych zmianach. Oznacz wspomnienie jako przestarzałe, gdy nowsza informacja je zastępuje — wyszukiwarka przestanie podpowiadać starą wersję.",
+        "tip": "Tryb historii wymaga tematu — silnik układa wersje wokół wybranego hasła."
       }
     },
     "howTo": {
@@ -720,6 +957,18 @@
     },
     "glossary": {
       "title": "Słowniczek",
+      "terms": {
+        "retention": "Retencja",
+        "storage": "Siła zapisu",
+        "retrieval": "Siła przywołania",
+        "fsrs": "FSRS",
+        "embedding": "Embedding",
+        "dream": "Cykl snu",
+        "activation": "Aktywacja rozprzestrzeniająca",
+        "consolidation": "Konsolidacja",
+        "nodeType": "Typ węzła",
+        "mcp": "MCP"
+      },
       "retention": "Prawdopodobieństwo skutecznego przywołania wspomnienia teraz (0-100%). Spada z czasem, resetuje się po udanym przywołaniu.",
       "storage": "Jak głęboko wspomnienie jest zakodowane. Rośnie z każdym przywołaniem. Wysoki zapis oznacza trwałość — wspomnienie nie zblaknie łatwo.",
       "retrieval": "Jak łatwo wspomnienie przychodzi na myśl teraz. Spada z czasem, resetuje się do 100% przy dostępie.",
@@ -731,6 +980,163 @@
       "nodeType": "Kategoria wspomnienia: fakt, koncepcja, zdarzenie, osoba, miejsce, notatka, wzorzec lub decyzja. Określa, jak wspomnienie wygląda na grafie.",
       "mcp": "Model Context Protocol — standard komunikacji pozwalający asystentom AI czytać z i zapisywać do Vestige."
     },
-    "footer": "To wszystko. Przeglądaj strony we własnym tempie. Vestige zajmuje się złożonością — ty rozglądaj się i od czasu do czasu uruchamiaj Cykl Snu."
+    "footer": "To wszystko. Przeglądaj strony we własnym tempie. Vestige zajmuje się złożonością — ty rozglądaj się i od czasu do czasu uruchamiaj Cykl Snu.",
+    "toc": {
+      "heading": "Na tej stronie",
+      "aria": "Sekcje samouczka",
+      "whatIs": "Czym jest Vestige",
+      "analogies": "Analogie",
+      "howMemoryWorks": "Jak działa pamięć",
+      "concepts": "Kluczowe pojęcia",
+      "retentionCurve": "Krzywa zapominania",
+      "science": "Nauka",
+      "pages": "Przegląd stron",
+      "liveExample": "Twoje wspomnienia",
+      "howTo": "Jak tego używać",
+      "faq": "Najczęstsze pytania",
+      "glossary": "Słowniczek",
+      "quiz": "Szybki test"
+    },
+    "mode": {
+      "quick": "Szybko (3 min)",
+      "full": "Pełny (15 min)"
+    },
+    "search": {
+      "label": "Szukaj w samouczku",
+      "placeholder": "Szukaj w tym samouczku…"
+    },
+    "cta": {
+      "openPage": "Otwórz tę stronę"
+    },
+    "progress": {
+      "sections": "sekcji odkrytych",
+      "completed": "Ukończono",
+      "completedTitle": "Wszystko jasne — podstawy Vestige masz w małym palcu."
+    },
+    "whatsNew": {
+      "header_one": "{{count}} nowość od twojej ostatniej wizyty",
+      "header_few": "{{count}} nowości od twojej ostatniej wizyty",
+      "header_many": "{{count}} nowości od twojej ostatniej wizyty",
+      "header_other": "{{count}} nowości od twojej ostatniej wizyty",
+      "dismiss": "Wiem",
+      "dismissAria": "Zamknij baner z nowościami",
+      "v3_3": {
+        "title": "Samouczek od nowa",
+        "body": "Spis treści, podpowiedzi nad terminami, interaktywna krywa zapominania i krótki test na koniec."
+      },
+      "v3_1": {
+        "title": "Narzędzia metapoznawcze",
+        "body": "Refleksja, wersjonowanie czasowe i ocena pewności — wyłapują sprzeczności, oznaczają fakty jako wygasłe i wskazują wspomnienia, którym warto się przyjrzeć."
+      }
+    },
+    "tour": {
+      "startCta": "Pokaż mi to w 2 minuty",
+      "replay": "Pokaż jeszcze raz",
+      "skip": "Pomiń",
+      "skipAria": "Pomiń przewodnik",
+      "back": "Wstecz",
+      "next": "Dalej",
+      "finish": "Gotowe",
+      "dotsAria": "Postęp przewodnika",
+      "dotAria": "Przejdź do kroku {{current}} z {{total}}",
+      "s1": {
+        "title": "Zacznij dzień od Briefingu",
+        "body": "Briefing pokazuje, co dziś wymaga uwagi: sprzeczności do rozstrzygnięcia, wspomnienia o niskiej pewności do weryfikacji, a gdy presja rośnie — przycisk uruchamiający Cykl Snu.",
+        "cta": "Otwórz Briefing"
+      },
+      "s2": {
+        "title": "Zobacz całą mapę pamięci",
+        "body": "Graf rysuje wszystkie wspomnienia w 3D. Większa kropka — silniejsze zapamiętanie. Kolor mówi o typie. Przeciągaj, kręć, klikaj.",
+        "cta": "Otwórz Graf"
+      },
+      "s3": {
+        "title": "Szukaj, sortuj, porządkuj listę",
+        "body": "Wspomnienia to twój warsztat. Filtruj po typie, szukaj po znaczeniu, przypinaj ważne, wzmacniaj te, na których ci zależy. Bulk akcje i cofnięcie są pod ręką.",
+        "cta": "Otwórz Wspomnienia"
+      },
+      "s4": {
+        "title": "Nie pozwól ważnym rzeczom zblaknąć",
+        "body": "Powtórki zbierają wspomnienia, które FSRS-6 zaplanował na dziś. Oceniasz Powtórz / Trudne / Dobre / Łatwe — silnik sam liczy następny interwał.",
+        "cta": "Otwórz Powtórki"
+      },
+      "s5": {
+        "title": "Co tydzień — Cykl Snu",
+        "body": "W Ustawieniach masz dźwignie konserwacji: Sen (szuka nowych połączeń), Refleksja (łapie sprzeczności), Audyt Pewności (oznacza chwiejne wspomnienia). Traktuj to jak spanie — zaplanuj i zapomnij.",
+        "cta": "Otwórz Ustawienia"
+      }
+    },
+    "curve": {
+      "title": "Jak wspomnienia blakną — pobaw się",
+      "subtitle": "Pociągnij za suwaki. Krzywa rysuje się dokładnie tym wzorem FSRS-6, którego silnik używa do planowania powtórek.",
+      "daysLabel": "Dni od ostatniej powtórki: {{days}}",
+      "daysHint": "Ile czasu minęło, odkąd silnik dotknął tego wspomnienia.",
+      "daysAria": "Dni od ostatniej powtórki",
+      "stabilityLabel": "Stabilność: {{stability}} dni",
+      "stabilityHint": "Jak dobrze wspomnienie jest nauczone. Wyższa stabilność → wolniejsze blaknięcie.",
+      "stabilityAria": "Stabilność wspomnienia w dniach",
+      "readout": "Po {{days}} dniach wspomnienie o stabilności {{stability}} dni daje {{retention}}% szansy na przywołanie.",
+      "svgAria": "Krzywa zapominania pokazująca zapamiętanie w ciągu 90 dni"
+    },
+    "live": {
+      "title": "Twoje najsilniejsze wspomnienie",
+      "subtitle": "Wybrane na żywo z twojej bazy. Abstrakcyjne liczby — namacalnie.",
+      "retentionLabel": "Zapamiętanie",
+      "ageLabel": "Wiek",
+      "ageValue_one": "{{count}} dzień",
+      "ageValue_few": "{{count}} dni",
+      "ageValue_many": "{{count}} dni",
+      "ageValue_other": "{{count}} dni",
+      "typeLabel": "Typ",
+      "explainer": "Zapamiętanie siedzi na {{retention}}% po {{days}} dniach. Każde wyszukiwanie, które trafia w to wspomnienie, podbija licznik; tygodnie ciszy ściągają go w dół.",
+      "openCta": "Otwórz to wspomnienie",
+      "empty": {
+        "subtitle": "Nic jeszcze nie ma",
+        "body": "Gdy twój AI zapisze pierwsze wspomnienia, ta karta wybierze jedno i pokaże jego zapamiętanie. Na razie najlepszym startem jest Briefing.",
+        "cta": "Otwórz Briefing"
+      }
+    },
+    "quiz": {
+      "title": "Szybki test (4 pytania)",
+      "subtitle": "Sprawdź, czy łapiesz to, co najważniejsze. Przy złej odpowiedzi pokażę krótką podpowiedź.",
+      "submit": "Sprawdź",
+      "replay": "Spróbuj jeszcze raz",
+      "previous": "Poprzedni wynik: {{score}} / {{total}}",
+      "scoreLine": "{{score}} / {{total}} poprawnych",
+      "scorePerfect": "Komplet. Jesteś gotów.",
+      "scoreClose": "Jedna wtopa — blisko ideału.",
+      "scoreReview": "Wróć do podświetlonych sekcji i spróbuj jeszcze raz.",
+      "q1": {
+        "prompt": "Co właściwie mierzy „zapamiętanie” w Vestige?",
+        "opt0": "Ile wspomnień Vestige aktualnie trzyma",
+        "opt1": "Ile miejsca na dysku zajmuje plik z pamięcią",
+        "opt2": "Szansę, że silnik przywoła wspomnienie właśnie teraz",
+        "opt3": "Liczbę tagów przypisanych do wspomnienia",
+        "hint": "To licznik prawdopodobieństwa FSRS-6 (0–100%). Resetuje się przy każdym udanym przywołaniu, spada gdy nikt nie sięga."
+      },
+      "q2": {
+        "prompt": "Kiedy Vestige usuwa wspomnienie sam z siebie?",
+        "opt0": "Po 30 dniach bez dostępu",
+        "opt1": "Nigdy — usunięcie zawsze wymaga twojej zgody",
+        "opt2": "Gdy zapamiętanie spadnie do 0%",
+        "opt3": "Po przekroczeniu 1000 wspomnień w bazie",
+        "hint": "Wspomnienia blakną, ale leżą w bazie. Garbage collection wskazuje kandydatów, ostatnie słowo masz ty."
+      },
+      "q3": {
+        "prompt": "Która strona pokazuje wspomnienia, którym silnik nie do końca ufa?",
+        "opt0": "Briefing (tryb wątpliwości)",
+        "opt1": "Graf",
+        "opt2": "Oś czasu",
+        "opt3": "Wnioski",
+        "hint": "Tryb wątpliwości na Briefingu układa wspomnienia od najmniej pewnych — możesz je weryfikować lub osłabiać."
+      },
+      "q4": {
+        "prompt": "Po co właściwie jest Cykl Snu?",
+        "opt0": "Bezgłośnie kasuje najstarsze wspomnienia",
+        "opt1": "Odtwarza wszystkie twoje dotychczasowe wyszukiwania",
+        "opt2": "Zmienia nazwy tagów",
+        "opt3": "Odtwarza wspomnienia, szuka połączeń, łapie sprzeczności",
+        "hint": "Sen to robota kreatywna. Konsolidacja to porządki. Dwa różne zadania."
+      }
+    }
   }
 }

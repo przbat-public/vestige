@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::cognitive::CognitiveEngine;
+use vestige_core::memory::DecisionPayload;
 use vestige_core::{IngestInput, Storage};
 
 /// Input schema for the unified codebase tool
@@ -18,8 +19,8 @@ pub fn schema() -> Value {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["remember_pattern", "remember_decision", "get_context"],
-                "description": "Action to perform: 'remember_pattern' stores a code pattern, 'remember_decision' stores an architectural decision, 'get_context' retrieves patterns and decisions for a codebase"
+                "enum": ["remember_pattern", "remember_decision", "remember_decision_v2", "get_context"],
+                "description": "Action to perform: 'remember_pattern' stores a code pattern, 'remember_decision' stores an architectural decision (legacy Markdown), 'remember_decision_v2' stores a structured decision matrix (question + choices + criteria + score matrix), 'get_context' retrieves patterns and decisions for a codebase"
             },
             // remember_pattern fields
             "name": {
@@ -43,6 +44,56 @@ pub fn schema() -> Value {
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "Alternatives that were considered (optional for remember_decision)"
+            },
+            // remember_decision_v2 fields (structured matrix payload — see DecisionPayload)
+            "question": {
+                "type": "string",
+                "description": "(remember_decision_v2) What was being decided? Becomes the card title."
+            },
+            "choices": {
+                "type": "array",
+                "description": "(remember_decision_v2) Alternatives considered. Exactly one entry must have chosen=true. Min 2 entries.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "Stable identifier within the payload." },
+                        "label": { "type": "string", "description": "Human-readable label." },
+                        "summary": { "type": "string", "description": "Short distinguishing summary (optional)." },
+                        "chosen": { "type": "boolean", "description": "True for the selected choice. Exactly one." }
+                    },
+                    "required": ["id", "label"]
+                }
+            },
+            "criteria": {
+                "type": "array",
+                "description": "(remember_decision_v2) Evaluation axes. Used by the radar chart.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "label": { "type": "string" },
+                        "weight": { "type": "number", "description": "Relative weight, defaults to 1.0. Must be >= 0." }
+                    },
+                    "required": ["id", "label"]
+                }
+            },
+            "scoreMatrix": {
+                "type": "object",
+                "description": "(remember_decision_v2) Sparse 1-5 score matrix keyed by criterion id, then by choice id. Missing cells render as '—'.",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 5 }
+                }
+            },
+            "validUntil": {
+                "type": "string",
+                "format": "date-time",
+                "description": "(remember_decision_v2) Optional RFC3339 timestamp. When the date passes the decision is auto-flagged as stale by reflect."
+            },
+            "supersedes": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "(remember_decision_v2) IDs of decisions this one replaces."
             },
             // Shared fields
             "files": {
@@ -72,10 +123,20 @@ struct CodebaseArgs {
     // Pattern fields
     name: Option<String>,
     description: Option<String>,
-    // Decision fields
+    // Decision fields (legacy remember_decision)
     decision: Option<String>,
     rationale: Option<String>,
     alternatives: Option<Vec<String>>,
+    // Decision matrix fields (remember_decision_v2)
+    question: Option<String>,
+    choices: Option<Vec<vestige_core::memory::Choice>>,
+    criteria: Option<Vec<vestige_core::memory::Criterion>>,
+    #[serde(default)]
+    score_matrix:
+        Option<std::collections::HashMap<String, std::collections::HashMap<String, u8>>>,
+    valid_until: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    supersedes: Option<Vec<String>>,
     // Shared fields
     files: Option<Vec<String>>,
     codebase: Option<String>,
@@ -97,9 +158,10 @@ pub async fn execute(
     match args.action.as_str() {
         "remember_pattern" => execute_remember_pattern(storage, cognitive, &args).await,
         "remember_decision" => execute_remember_decision(storage, cognitive, &args).await,
+        "remember_decision_v2" => execute_remember_decision_v2(storage, cognitive, &args).await,
         "get_context" => execute_get_context(storage, cognitive, &args).await,
         _ => Err(format!(
-            "Invalid action '{}'. Must be one of: remember_pattern, remember_decision, get_context",
+            "Invalid action '{}'. Must be one of: remember_pattern, remember_decision, remember_decision_v2, get_context",
             args.action
         )),
     }
@@ -290,6 +352,135 @@ async fn execute_remember_decision(
     }))
 }
 
+/// Remember a structured decision matrix (Proposal C).
+///
+/// Validates the payload with [`DecisionPayload::validate`] *before* writing,
+/// so malformed matrices never reach storage. On success the structured
+/// payload is persisted under `extra_json.decision` and a human-readable
+/// Markdown rendering is stored in `content` so the regular search and
+/// dashboard views keep working without knowing about the matrix shape.
+async fn execute_remember_decision_v2(
+    storage: &Arc<Storage>,
+    cognitive: &Arc<Mutex<CognitiveEngine>>,
+    args: &CodebaseArgs,
+) -> Result<Value, String> {
+    let question = args
+        .question
+        .as_ref()
+        .ok_or("'question' is required for remember_decision_v2 action")?
+        .trim()
+        .to_string();
+    if question.is_empty() {
+        return Err("Question cannot be empty".to_string());
+    }
+    let rationale = args
+        .rationale
+        .as_ref()
+        .ok_or("'rationale' is required for remember_decision_v2 action")?
+        .clone();
+    let choices = args
+        .choices
+        .clone()
+        .ok_or("'choices' is required for remember_decision_v2 action")?;
+    let criteria = args.criteria.clone().unwrap_or_default();
+    let score_matrix = args.score_matrix.clone().unwrap_or_default();
+
+    let payload = DecisionPayload {
+        question: question.clone(),
+        rationale: rationale.clone(),
+        choices,
+        criteria,
+        score_matrix,
+        valid_until: args.valid_until,
+        supersedes: args.supersedes.clone().unwrap_or_default(),
+    };
+    payload
+        .validate()
+        .map_err(|e| format!("Invalid decision payload: {}", e))?;
+
+    let chosen_label = payload
+        .chosen_choice()
+        .map(|c| c.label.clone())
+        .unwrap_or_else(|| "<unknown>".to_string());
+
+    // Markdown rendering of the matrix. Stored in `content` so legacy search
+    // and dashboard list views surface a useful preview even without
+    // knowing about the structured payload.
+    let mut content = format!(
+        "# Decision: {}\n\n**Chosen:** {}\n\n## Rationale\n\n{}\n\n## Choices\n",
+        question, chosen_label, rationale
+    );
+    for c in &payload.choices {
+        let marker = if c.chosen { "✓" } else { " " };
+        let summary = c.summary.as_deref().unwrap_or("");
+        content.push_str(&format!("- [{marker}] **{}** — {}\n", c.label, summary));
+    }
+    if !payload.criteria.is_empty() {
+        content.push_str("\n## Criteria\n");
+        for cr in &payload.criteria {
+            content.push_str(&format!("- {} (weight {:.1})\n", cr.label, cr.weight));
+        }
+    }
+    if let Some(ref files) = args.files
+        && !files.is_empty()
+    {
+        content.push_str("\n## Affected Files\n");
+        for f in files {
+            content.push_str(&format!("- {}\n", f));
+        }
+    }
+
+    let mut tags = vec![
+        "decision".to_string(),
+        "decision-matrix".to_string(),
+        "architecture".to_string(),
+        "codebase".to_string(),
+    ];
+    if let Some(ref codebase) = args.codebase {
+        tags.push(format!("codebase:{}", codebase));
+    }
+
+    let extra_json = serde_json::json!({ "decision": payload });
+
+    let input = IngestInput {
+        content,
+        node_type: "decision".to_string(),
+        source: args.codebase.clone(),
+        tags,
+        extra_json: Some(extra_json),
+        ..Default::default()
+    };
+
+    let storage_clone = storage.clone();
+    let node =
+        tokio::task::spawn_blocking(move || storage_clone.ingest(input).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| format!("remember_decision_v2 task panicked: {}", e))??;
+    let node_id = node.id.clone();
+
+    if let Ok(cog) = cognitive.try_lock() {
+        let codebase_name = args.codebase.as_deref().unwrap_or("default");
+        cog.cross_project
+            .record_project_memory(&node_id, codebase_name, None);
+        let _ = cog.hippocampal_index.index_memory(
+            &node_id,
+            &format!("Decision: {}", question),
+            "decision",
+            chrono::Utc::now(),
+            None,
+        );
+    }
+
+    Ok(serde_json::json!({
+        "action": "remember_decision_v2",
+        "success": true,
+        "nodeId": node_id,
+        "question": question,
+        "chosen": chosen_label,
+        "message": "Structured decision matrix remembered successfully",
+    }))
+}
+
 /// Get codebase context (patterns and decisions)
 async fn execute_get_context(
     storage: &Arc<Storage>,
@@ -405,6 +596,12 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .contains(&serde_json::json!("get_context"))
+        );
+        assert!(
+            action_enum
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("remember_decision_v2"))
         );
     }
 
@@ -547,6 +744,84 @@ mod tests {
         let result = execute(&storage, &test_cognitive(), Some(args)).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[tokio::test]
+    async fn test_remember_decision_v2_persists_structured_payload() {
+        let (storage, _dir) = test_storage().await;
+        let cog = test_cognitive();
+        let args = serde_json::json!({
+            "action": "remember_decision_v2",
+            "question": "Which database engine?",
+            "rationale": "Postgres has the best JSONB story.",
+            "choices": [
+                { "id": "postgres", "label": "PostgreSQL", "summary": "Native JSONB", "chosen": true },
+                { "id": "mysql", "label": "MySQL", "chosen": false }
+            ],
+            "criteria": [
+                { "id": "performance", "label": "Read performance", "weight": 1.5 },
+                { "id": "ops", "label": "Operational complexity" }
+            ],
+            "scoreMatrix": {
+                "performance": { "postgres": 4, "mysql": 3 },
+                "ops": { "postgres": 4, "mysql": 4 }
+            },
+            "codebase": "vestige"
+        });
+        let result = execute(&storage, &cog, Some(args)).await.unwrap();
+        assert_eq!(result["action"], "remember_decision_v2");
+        assert_eq!(result["chosen"], "PostgreSQL");
+
+        let node_id = result["nodeId"].as_str().unwrap().to_string();
+        let storage_clone = storage.clone();
+        let node = tokio::task::spawn_blocking(move || storage_clone.get_node(&node_id))
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let payload = vestige_core::memory::extract_decision(node.extra_json.as_ref())
+            .expect("extra_json.decision should round-trip");
+        assert_eq!(payload.question, "Which database engine?");
+        assert_eq!(payload.choices.len(), 2);
+        assert_eq!(payload.chosen_choice().unwrap().id, "postgres");
+        assert_eq!(payload.criteria.len(), 2);
+        assert_eq!(payload.score_matrix.len(), 2);
+        assert!(node.tags.iter().any(|t| t == "decision-matrix"));
+    }
+
+    #[tokio::test]
+    async fn test_remember_decision_v2_rejects_invalid_payload() {
+        let (storage, _dir) = test_storage().await;
+        let args = serde_json::json!({
+            "action": "remember_decision_v2",
+            "question": "Which?",
+            "rationale": "Because",
+            "choices": [
+                { "id": "a", "label": "A", "chosen": false },
+                { "id": "b", "label": "B", "chosen": false }
+            ]
+        });
+        let result = execute(&storage, &test_cognitive(), Some(args)).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Invalid decision payload"));
+        assert!(err.contains("exactly one choice"));
+    }
+
+    #[tokio::test]
+    async fn test_remember_decision_v2_requires_question() {
+        let (storage, _dir) = test_storage().await;
+        let args = serde_json::json!({
+            "action": "remember_decision_v2",
+            "rationale": "x",
+            "choices": [
+                { "id": "a", "label": "A", "chosen": true },
+                { "id": "b", "label": "B", "chosen": false }
+            ]
+        });
+        let result = execute(&storage, &test_cognitive(), Some(args)).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("'question' is required"));
     }
 
     #[tokio::test]

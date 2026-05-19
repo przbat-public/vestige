@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { useMemoryMutations } from '@/hooks/useMemoryMutations';
 import type { ConfidenceResult } from '@/types';
 
@@ -38,7 +39,16 @@ export function DoubtList({ results, limit = 5 }: DoubtListProps) {
 
   return (
     <div className="space-y-2 text-xs">
-      <p className="text-muted-foreground">{t('settings.doubtModeHint')}</p>
+      <p className="text-muted-foreground inline-flex items-center gap-1.5">
+        {t('settings.doubtModeHint')}
+        <InfoTooltip
+          ariaLabel={t('settings.doubtModeTooltipAria', { defaultValue: 'About doubt mode' })}
+          content={t(
+            'settings.doubtModeTooltip',
+            'Doubt mode surfaces memories the engine has low confidence in. Verifying strengthens FSRS retention; demoting tells the engine to suppress without deleting.',
+          )}
+        />
+      </p>
       {visible.map((item) => (
         <div
           key={item.id}

@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import type { Memory } from '@/types';
 import { retentionColor } from '@/types';
@@ -13,11 +14,20 @@ export function MemoryStrengthBars({ memory }: Props) {
   const strengths = [
     {
       label: t('memories.retention'),
+      hint: t('memories.hint.retention'),
       value: memory.retentionStrength,
       color: retentionColor(memory.retentionStrength),
     },
-    { label: t('memories.storage'), value: memory.storageStrength },
-    { label: t('memories.retrieval'), value: memory.retrievalStrength },
+    {
+      label: t('memories.storage'),
+      hint: t('memories.hint.storage'),
+      value: memory.storageStrength,
+    },
+    {
+      label: t('memories.retrieval'),
+      hint: t('memories.hint.retrieval'),
+      value: memory.retrievalStrength,
+    },
   ];
 
   return (
@@ -25,7 +35,10 @@ export function MemoryStrengthBars({ memory }: Props) {
       {strengths.map((s) => (
         <div key={s.label}>
           <div className="flex justify-between text-xs text-muted-foreground mb-0.5">
-            <span>{s.label}</span>
+            <span className="flex items-center gap-1.5">
+              {s.label}
+              <InfoTooltip content={s.hint} />
+            </span>
             <span className="tabular-nums">{(s.value * 100).toFixed(1)}%</span>
           </div>
           <ProgressBar value={s.value * 100} label={s.label} color={s.color} showValue={false} />

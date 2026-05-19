@@ -23,6 +23,8 @@ function makeItem(overrides: Partial<ReviewItem> = {}): ReviewItem {
     reviewCount: 1,
     difficulty: 5.0,
     stability: 1.5,
+    epistemicStatus: 'world',
+    memorySystem: 'semantic',
     ...overrides,
   };
 }
@@ -105,7 +107,10 @@ describe('ReviewPage', () => {
       difficulty: 4.0,
       reps: 2,
       lapses: 0,
-      nextReviewAt: null,
+      // `nextReviewAt` is omitted by the server when FSRS-6 suppresses
+      // the card; the wire DTO uses `Option<String>` + `skip_serializing_if`
+      // so the dashboard sees `undefined`, never `null`.
+      nextReviewAt: undefined,
     } satisfies ReviewResult);
 
     renderPage();
@@ -135,7 +140,7 @@ describe('ReviewPage', () => {
       difficulty: 5.0,
       reps: 2,
       lapses: 0,
-      nextReviewAt: null,
+      nextReviewAt: undefined,
     } satisfies ReviewResult);
 
     renderPage();

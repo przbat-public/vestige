@@ -181,6 +181,15 @@ impl Storage {
                 .ok()
                 .flatten()
                 .and_then(|s| serde_json::from_str(&s).ok()),
+            // v3.4.0 typed extensions (Decision matrix, Hub metadata,
+            // Insight payload). Defaults to None when the column is absent
+            // (pre-v12 databases) or when JSON parsing fails — drift-tolerant
+            // by design so one corrupt row never poisons a whole query.
+            extra_json: row
+                .get::<_, Option<String>>("extra_json")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
             // v3.3.0 typed memory. Columns may be absent on databases
             // that haven't run migration v11 yet, so default to Raw silently
             // rather than failing the whole row.

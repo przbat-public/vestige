@@ -7,11 +7,17 @@
 //! - Semantic embedding metadata
 
 mod confidence;
+mod decision;
+mod hub;
+mod insight;
 mod node;
 mod strength;
 mod temporal;
 
 pub use confidence::ConfidenceEstimate;
+pub use decision::{Choice, Criterion, DecisionPayload, extract_decision};
+pub use hub::{HubMetadata, cluster_signature, extract_hub, merge_hub_into_extra};
+pub use insight::{InsightMetadata, InsightOrigin, extract_insight, merge_insight_into_extra};
 pub use node::{IngestInput, KnowledgeNode, MemoryKind, NodeType, RecallInput, SearchMode};
 pub use strength::{DualStrength, StrengthDecay};
 pub use temporal::{TemporalRange, TemporalValidity};

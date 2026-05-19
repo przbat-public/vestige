@@ -49,6 +49,8 @@ pub use dreams::{
     // DreamMemory - input type for dreaming
     DreamMemory,
     DreamResult,
+    // Topic Hub candidate (Proposal A) — draft hub emitted by MemoryDreamer
+    HubCandidate,
     MemoryConnection,
     MemoryDreamer,
     MemoryReplay,

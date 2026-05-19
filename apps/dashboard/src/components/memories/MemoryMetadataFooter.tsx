@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 import type { Memory } from '@/types';
 import { formatNextReview } from './memoryDetailUtils';
 
@@ -33,8 +34,14 @@ export function MemoryMetadataFooter({ memory }: Props) {
   return (
     <>
       <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
-        <span>
+        <span className="inline-flex items-center gap-1">
           {t('memories.reviews')}: <span className="text-foreground tabular-nums">{memory.reviewCount ?? 0}</span>
+          <InfoTooltip
+            content={t(
+              'memories.reviewsTooltip',
+              'How many times you have rated this memory in spaced repetition. The FSRS scheduler uses this to decide how often to surface it again.',
+            )}
+          />
         </span>
         {nextReview && (
           <Badge

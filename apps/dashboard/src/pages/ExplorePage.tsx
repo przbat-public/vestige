@@ -10,6 +10,7 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SearchInput } from '@/components/ui/search-input';
 import { api } from '@/stores/api';
+import { useTrackPageView } from '@/stores/telemetry';
 import type { ExploreResult, Memory } from '@/types';
 
 type ExploreMode = 'associations' | 'chains' | 'bridges';
@@ -21,6 +22,7 @@ const MODE_KEYS: Record<ExploreMode, { icon: string; labelKey: string }> = {
 };
 
 export function ExplorePage() {
+  useTrackPageView('explore');
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const [mode, setMode] = useState<ExploreMode>('associations');
@@ -240,7 +242,7 @@ export function ExplorePage() {
         ) : results.length > 0 ? (
           <div className="space-y-4">
             <h2 className="text-sm text-foreground font-semibold">
-              {results.length} {t('explore.associations')}
+              {t('explore.associationsCount', { count: results.length })}
             </h2>
             <div className="space-y-2">
               {results.map((assoc, i) => (

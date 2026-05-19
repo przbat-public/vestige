@@ -6,6 +6,8 @@ interface Props {
   onPromote: () => void;
   onDemote: () => void;
   onDelete: () => void;
+  onTogglePin: () => void;
+  isPinned: boolean;
   promotePending: boolean;
   demotePending: boolean;
   deletePending: boolean;
@@ -17,6 +19,8 @@ export function MemoryActions({
   onPromote,
   onDemote,
   onDelete,
+  onTogglePin,
+  isPinned,
   promotePending,
   demotePending,
   deletePending,
@@ -24,6 +28,19 @@ export function MemoryActions({
   const { t } = useTranslation();
   return (
     <div className="flex gap-1">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onTogglePin}
+        aria-label={
+          isPinned ? t('memories.unpin', { defaultValue: 'Unpin' }) : t('memories.pin', { defaultValue: 'Pin' })
+        }
+        aria-pressed={isPinned}
+        className={isPinned ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-foreground'}
+        title={isPinned ? t('memories.unpin', { defaultValue: 'Unpin' }) : t('memories.pin', { defaultValue: 'Pin' })}
+      >
+        {isPinned ? '★' : '☆'}
+      </Button>
       <Button variant="secondary" size="sm" onClick={onEdit} aria-label={t('memories.edit')}>
         ✎ {t('memories.edit')}
       </Button>

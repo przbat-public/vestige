@@ -1,14 +1,20 @@
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@/hooks/use-theme';
+import { EVENT, track } from '@/stores/telemetry';
 
 export function ThemeToggle() {
   const { isDark, toggle } = useTheme();
   const { t } = useTranslation();
 
+  const handleClick = () => {
+    track(EVENT.theme_toggle, { target: isDark ? 'light' : 'dark' });
+    toggle();
+  };
+
   return (
     <button
       type="button"
-      onClick={toggle}
+      onClick={handleClick}
       className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
       aria-label={isDark ? t('common.lightMode') : t('common.darkMode')}
       title={isDark ? t('common.lightMode') : t('common.darkMode')}

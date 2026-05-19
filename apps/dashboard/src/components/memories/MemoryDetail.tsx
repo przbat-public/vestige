@@ -5,6 +5,8 @@ import { RetentionCurve } from '@/components/RetentionCurve';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useMemoryMutations } from '@/hooks/useMemoryMutations';
+import { togglePinned, usePinned } from '@/stores/pinned';
+import { EVENT, track } from '@/stores/telemetry';
 import type { Memory } from '@/types';
 import { EPISTEMIC_STATUS_COLORS, MEMORY_SYSTEM_COLORS, NODE_TYPE_COLORS } from '@/types';
 import { MemoryActions } from './MemoryActions';
@@ -14,6 +16,7 @@ import { MemoryLocalGraph } from './MemoryLocalGraph';
 import { MemoryMarkdownView } from './MemoryMarkdownView';
 import { MemoryMetadataFooter } from './MemoryMetadataFooter';
 import { MemoryStrengthBars } from './MemoryStrengthBars';
+import { MemoryTemporalPanel } from './MemoryTemporalPanel';
 import { parseTagsInput } from './memoryDetailUtils';
 
 interface MemoryDetailProps {
@@ -25,6 +28,13 @@ interface MemoryDetailProps {
 export function MemoryDetail({ memory, onUpdate, onClose }: MemoryDetailProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const pinned = usePinned();
+  const isPinned = pinned.has(memory.id);
+
+  const handleTogglePin = () => {
+    const nowPinned = togglePinned(memory.id);
+    track(nowPinned ? EVENT.memory_pin : EVENT.memory_unpin);
+  };
 
   const [editing, setEditing] = useState(false);
   const [draftContent, setDraftContent] = useState(memory.content);
@@ -96,6 +106,8 @@ export function MemoryDetail({ memory, onUpdate, onClose }: MemoryDetailProps) {
             onPromote={() => promote.mutate(memory.id)}
             onDemote={() => demote.mutate(memory.id)}
             onDelete={() => remove.mutate(memory.id)}
+            onTogglePin={handleTogglePin}
+            isPinned={isPinned}
             promotePending={promote.isPending}
             demotePending={demote.isPending}
             deletePending={remove.isPending}
@@ -141,6 +153,8 @@ export function MemoryDetail({ memory, onUpdate, onClose }: MemoryDetailProps) {
       )}
 
       <MemoryStrengthBars memory={memory} />
+
+      <MemoryTemporalPanel memory={memory} />
 
       <MemoryMetadataFooter memory={memory} />
 

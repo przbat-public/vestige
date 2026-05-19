@@ -8,10 +8,10 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use chrono::Utc;
 use serde::Deserialize;
-use serde_json::Value;
 
 use super::super::events::VestigeEvent;
 use super::super::state::AppState;
+use super::super::wire::{MemoryDto, SearchResultDto};
 use super::{log_err, log_join_err};
 
 #[derive(Debug, Deserialize)]
@@ -21,18 +21,17 @@ pub struct SearchParams {
     pub min_retention: Option<f64>,
 }
 
-/// Search memories with hybrid search
+/// Search memories with hybrid search (BM25 + cosine, 0.3/0.7 weighting).
 pub async fn search_memories(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<SearchResultDto>, StatusCode> {
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let start = std::time::Instant::now();
 
     // hybrid_search re-embeds the query (~150–500ms on cold cache) and
     // touches BM25 + HNSW indices, so it blocks longer than the 10ms
-    // soft-limit Tokio sets for its async reactor threads. Run it on the
-    // blocking pool to keep concurrent dashboard requests responsive.
+    // soft-limit Tokio sets for its async reactor threads.
     let storage = state.storage.clone();
     let query = params.q.clone();
     let results =
@@ -42,19 +41,17 @@ pub async fn search_memories(
             .map_err(log_err("storage operation"))?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
-
     let result_ids: Vec<String> = results.iter().map(|r| r.node.id.clone()).collect();
 
-    // Emit search event
     state.emit(VestigeEvent::SearchPerformed {
         query: params.q.clone(),
         result_count: results.len(),
-        result_ids: result_ids.clone(),
+        result_ids,
         duration_ms,
         timestamp: Utc::now(),
     });
 
-    let formatted: Vec<Value> = results
+    let memories: Vec<MemoryDto> = results
         .into_iter()
         .filter(|r| {
             params
@@ -62,22 +59,17 @@ pub async fn search_memories(
                 .is_none_or(|min| r.node.retention_strength >= min)
         })
         .map(|r| {
-            serde_json::json!({
-                "id": r.node.id,
-                "content": r.node.content,
-                "nodeType": r.node.node_type,
-                "tags": r.node.tags,
-                "retentionStrength": r.node.retention_strength,
-                "combinedScore": r.combined_score,
-                "createdAt": r.node.created_at.to_rfc3339(),
-            })
+            let score = f64::from(r.combined_score);
+            MemoryDto::from(&r.node)
+                .into_list_view()
+                .with_combined_score(score)
         })
         .collect();
 
-    Ok(Json(serde_json::json!({
-        "query": params.q,
-        "total": formatted.len(),
-        "durationMs": duration_ms,
-        "results": formatted,
-    })))
+    Ok(Json(SearchResultDto {
+        query: params.q,
+        total: memories.len(),
+        duration_ms,
+        results: memories,
+    }))
 }

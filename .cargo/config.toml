@@ -1,0 +1,13 @@
+# ts-rs (TypeScript bindings generator) writes generated files here when
+# `cargo test` runs in vestige-mcp. Path is relative to this config file
+# (workspace root). Keep this in sync with `apps/dashboard/src/types/index.ts`
+# which re-exports the generated definitions.
+#
+# `TS_RS_LARGE_INT = "number"` keeps i64/u64 as plain `number` instead of
+# `bigint` — our wire format always JSON-serializes counts and ids that fit
+# in JS safe-integer range; bigint would force every consumer to deal with
+# `JSON.parse` reviver. If we ever expose >2^53 ids, switch this back to
+# `bigint` and update the dashboard accordingly.
+[env]
+TS_RS_EXPORT_DIR = { value = "apps/dashboard/src/types/generated", relative = true }
+TS_RS_LARGE_INT = "number"

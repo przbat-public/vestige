@@ -11,6 +11,10 @@
     "timeline": "Timeline",
     "feed": "Activity",
     "explore": "Explore",
+    "reasoning": "Reasoning",
+    "decisions": "Decisions",
+    "insights": "Insights",
+    "hubs": "Topic Hubs",
     "intentions": "Reminders",
     "temporal": "Temporal",
     "stats": "Overview",
@@ -34,6 +38,10 @@
     "demotedToast_other": "Weakened {{count}} memories.",
     "deletedToast_one": "Deleted {{count}} memory.",
     "deletedToast_other": "Deleted {{count}} memories.",
+    "deletedPending_one": "{{count}} memory deleted",
+    "deletedPending_other": "{{count}} memories deleted",
+    "deleteUndone_one": "Deletion cancelled",
+    "deleteUndone_other": "Deletion cancelled",
     "deleteConfirm_one": "Permanently delete {{count}} memory? This cannot be undone.",
     "deleteConfirm_other": "Permanently delete {{count}} memories? This cannot be undone.",
     "partialFailureToast": "Applied to {{ok}} memories, {{failed}} failed.",
@@ -53,7 +61,8 @@
     "regenerateEmbeddings": "Regenerate missing embeddings",
     "regenerateEmbeddingsSuccess": "Embeddings backfilled.",
     "backup": "Create database backup",
-    "backupSuccess": "Backup written to ~/.vestige/backups."
+    "backupSuccess": "Backup written to ~/.vestige/backups.",
+    "memoryResults": "Memories"
   },
   "maintenance": {
     "title": "Maintenance",
@@ -86,6 +95,7 @@
     "backupResult": "Saved to {{path}} ({{kb}} KB)."
   },
   "a11y": {
+    "currentPage": "current page",
     "mainNavigation": "Main navigation",
     "openNavigation": "Open navigation",
     "closeNavigation": "Close navigation",
@@ -99,26 +109,57 @@
     "connected": "Connected",
     "disconnected": "Disconnected"
   },
+  "shortcuts": {
+    "title": "Keyboard shortcuts",
+    "subtitle": "Every key the dashboard listens for. Press ? at any time to open this dialog.",
+    "closeAria": "Close shortcuts dialog",
+    "footer": "Tip: keep this open in a second window while you learn the dashboard.",
+    "group": {
+      "global": "Everywhere",
+      "memories": "Memories page",
+      "dialogs": "Inside dialogs & lists"
+    },
+    "commandPalette": "Open command palette",
+    "addMemory": "New memory",
+    "openHelp": "Open this shortcuts dialog",
+    "skipToContent": "Skip to main content (first Tab press)",
+    "selectAll": "Select all memories",
+    "clearSelection": "Clear selection",
+    "cursorDown": "Move cursor down (next memory)",
+    "cursorUp": "Move cursor up (previous memory)",
+    "cursorOpen": "Open focused memory",
+    "cursorToggle": "Toggle focused memory in selection",
+    "close": "Close dialog",
+    "confirm": "Confirm selection",
+    "navigateList": "Move between list items"
+  },
   "common": {
     "search": "Search",
     "close": "Close",
     "delete": "Delete",
     "cancel": "Cancel",
     "save": "Save",
+    "undo": "Undo",
     "new": "+ New",
+    "clear": "clear",
     "loading": "Loading...",
     "noResults": "No results found",
+    "searching": "Searching…",
     "total": "{{count}} total",
     "language": "Language",
     "theme": "Theme",
     "lightMode": "Light mode",
     "darkMode": "Dark mode",
+    "densityComfortable": "Switch to comfortable density",
+    "densityCompact": "Switch to compact density",
     "score": "Score",
     "more": "+{{count}} more",
     "error": "Something went wrong",
     "fetchError": "Failed to load data. Check your connection and try again.",
     "errorDetails": "Show technical details",
-    "errorRetry": "Try again"
+    "errorRetry": "Try again",
+    "yes": "yes",
+    "no": "no"
   },
   "status": {
     "connected": "Connected",
@@ -155,10 +196,19 @@
     "filterByTag": "Filter by tag...",
     "noMemories": "No memories found",
     "noMemoriesHint": "Try a different search or filter",
+    "emptyCta": "+ Add your first memory",
+    "recent": "Recent",
+    "recentClearAria": "Clear recent searches",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "pinnedAria": "Pinned",
     "selectMemory": "Select a memory to view details",
     "promote": "Strengthen",
     "demote": "Weaken",
     "deleted": "Memory removed",
+    "deletedPending": "Memory deleted",
+    "deleteUndone": "Deletion cancelled",
+    "demoteUndone": "Demotion cancelled",
     "promoted": "Memory strengthened",
     "demotedToast": "Memory weakened",
     "retention": "Retention",
@@ -190,6 +240,29 @@
     "localGraph": {
       "title": "Local connections",
       "empty": "No connections recorded yet — try running the dream cycle to discover some."
+    },
+    "hint": {
+      "retention": "Probability you can still recall this memory right now, computed by FSRS-6 from time since last review. 100% = just reviewed, drops over time.",
+      "storage": "How firmly the memory is encoded — grows with each successful recall. Higher storage means longer intervals between reviews.",
+      "retrieval": "How easy it is to bring the memory back into working memory right now. Drops with each lapse, recovers with reviews.",
+      "trust": "Combined FSRS signal: how often this memory has been confirmed correct vs how often it lapsed. Used to rank evidence.",
+      "reviews": "Total number of times you (or an agent) recalled this memory.",
+      "validUntil": "After this date, the memory is treated as expired and no longer surfaces as a current fact in searches."
+    },
+    "temporalPanel": {
+      "title": "Validity window",
+      "noWindow": "No validity window set.",
+      "noWindowHint": "Mark this memory as superseded if it's no longer accurate.",
+      "validFromLabel": "Valid from",
+      "validUntilLabel": "Valid until",
+      "invalidate": "Mark as superseded",
+      "invalidating": "Marking…",
+      "invalidated": "Memory marked as superseded.",
+      "exploreTopic": "Show temporal history for tag “{{tag}}”",
+      "exploreTopicHint": "Opens the temporal console with this tag pre-selected.",
+      "expiredRelative": "Expired {{days}}d ago",
+      "expiringRelative": "Expires in {{days}}d",
+      "validRelative": "Valid for {{days}}d"
     }
   },
   "nodeTypes": {
@@ -201,6 +274,80 @@
     "note": "Note",
     "pattern": "Pattern",
     "decision": "Decision"
+  },
+  "decisions": {
+    "title": "Decisions",
+    "subtitleHeader": "Structured choices the agent committed to, with scoring and validity.",
+    "subtitle": "Decided {{date}} · recommended: {{choice}}",
+    "noRecommendation": "no pick",
+    "tableCaption": "Score matrix for {{question}}",
+    "criterion": "Criterion",
+    "recommended": "Recommended",
+    "weight": "weight {{value}}",
+    "summary": "{{total}} total · {{active}} active · {{expired}} expired",
+    "filter": {
+      "all": "All",
+      "active": "Active",
+      "expired": "Expired"
+    },
+    "badge": {
+      "expired": "Expired",
+      "validUntil": "Valid until {{date}}",
+      "supersedes_one": "Supersedes {{count}}",
+      "supersedes_other": "Supersedes {{count}}"
+    },
+    "empty": {
+      "title": "No decisions yet",
+      "description": "When the agent records a structured decision with a score matrix, the result shows up here.",
+      "filteredTitle": {
+        "all": "No decisions match",
+        "active": "No active decisions",
+        "expired": "No expired decisions"
+      },
+      "filteredDescription": "Try switching the filter or wait for the agent to record more decisions."
+    }
+  },
+  "insights": {
+    "title": "Insights",
+    "subtitleHeader": "Tentative observations from dream cycles and reflect runs. Promote to validate.",
+    "subtitle": "{{date}} · derived from {{sources}} memories",
+    "validatedOn": "validated {{date}}",
+    "confidence": "Confidence",
+    "novelty": "Novelty",
+    "summary": "{{validated}} validated of {{total}} shown",
+    "filter": {
+      "all": "All",
+      "validated": "Validated",
+      "unvalidated": "Unvalidated"
+    },
+    "badge": {
+      "validated": "Validated",
+      "unvalidated": "Unvalidated"
+    },
+    "empty": {
+      "title": "No insights yet",
+      "description": "Run a dream cycle to generate synthesised observations across your memories.",
+      "cta": "Run dream cycle"
+    }
+  },
+  "hubs": {
+    "title": "Topic Hubs",
+    "subtitleHeader": "Clusters of related memories the dream cycle has stitched into a single summary.",
+    "summary_one": "{{count}} active hub",
+    "summary_other": "{{count}} active hubs",
+    "subtitle": "last refreshed {{last}} via {{method}}",
+    "range": "spans {{from}} → {{to}}",
+    "badge": {
+      "children_one": "{{count}} memory",
+      "children_other": "{{count}} memories",
+      "regenerated_one": "regenerated {{count}}×",
+      "regenerated_other": "regenerated {{count}}×"
+    },
+    "empty": {
+      "title": "No hubs yet",
+      "description": "Topic hubs appear once a dream cycle discovers clusters of 5+ related memories.",
+      "cta": "Run dream cycle"
+    }
   },
   "temporal": {
     "title": "Temporal versioning",
@@ -449,6 +596,8 @@
     "title": "Explore Connections",
     "searchPlaceholder": "Enter a memory ID or search...",
     "associations": "Related Memories",
+    "associationsCount_one": "{{count}} related memory",
+    "associationsCount_other": "{{count}} related memories",
     "chain": "Connection Path",
     "bridges": "Bridging Concepts",
     "noResults": "No connections found",
@@ -467,6 +616,41 @@
     "errorExploration": "Exploration failed",
     "errorSearch": "Search failed",
     "errorLoadMemory": "Could not load memory {{id}}"
+  },
+  "reasoning": {
+    "title": "Deep Reasoning",
+    "subtitle": "Ask a natural-language question — Vestige routes it through 7 cognitive stages (retrieval, trust scoring, spreading activation, contradiction detection, temporal supersession, dream insights, synthesis) and returns a sourced answer.",
+    "queryLabel": "Question",
+    "queryPlaceholder": "e.g. Why did we choose PostgreSQL? · What contradicts our retry policy? · How has the auth flow evolved?",
+    "depthLabel": "Analyze {{count}} memories",
+    "depthHint": "More memories = more thorough, slower. Default 20 covers most queries.",
+    "run": "Run reasoning",
+    "loading": "Reasoning across memories…",
+    "emptyTitle": "Ask any question",
+    "emptyHint": "Vestige will mine its memory store, score trust, detect contradictions, and synthesize an answer with citations.",
+    "errorGeneric": "Reasoning failed. Try a shorter query.",
+    "intent": {
+      "fact_check": "Fact check",
+      "timeline": "Timeline",
+      "root_cause": "Root cause",
+      "comparison": "Comparison",
+      "synthesis": "Synthesis"
+    },
+    "topAnswer": "Top answer",
+    "trustScore": "Trust {{pct}}%",
+    "confidence": "Confidence {{pct}}%",
+    "analyzed_one": "{{count}} memory analyzed",
+    "analyzed_other": "{{count}} memories analyzed",
+    "contradictionsTitle_one": "{{count}} contradiction detected",
+    "contradictionsTitle_other": "{{count}} contradictions detected",
+    "supersededTitle_one": "{{count}} superseded memory",
+    "supersededTitle_other": "{{count}} superseded memories",
+    "dreamInsightsTitle_one": "{{count}} matching dream insight",
+    "dreamInsightsTitle_other": "{{count}} matching dream insights",
+    "insightConfidence": "Dream confidence {{pct}}%",
+    "evidenceTitle_one": "{{count}} supporting memory",
+    "evidenceTitle_other": "{{count}} supporting memories",
+    "stagesFooter": "Stages: spreading activation {{activation}} · dream insights {{dream}}"
   },
   "intentions": {
     "title": "Reminders",
@@ -496,6 +680,8 @@
     "deadline": "Deadline",
     "triggerLabel": "Trigger type",
     "triggerValue": "Trigger value",
+    "contentLabel": "Reminder text",
+    "contentPlaceholder": "What should I remind you about?",
     "priorityLabel": "Priority",
     "predictions": "Predictions",
     "basedOn": "based on: {{source}}",
@@ -667,6 +853,35 @@
         "title": "Settings",
         "desc": "The control room. System information (version, embedding model, connection status), maintenance operations (Dream Cycle, Consolidation), metacognitive tools (Self-Reflection, Confidence Audit), the search pipeline visualization, and memory governance (retention distribution, endangered memories).",
         "tip": "Run a Dream Cycle after a busy week. Run Self-Reflection when you want to spot contradictions or stale decisions in your knowledge base."
+      },
+      "briefing": {
+        "title": "Briefing",
+        "desc": "Your morning dashboard. Automatic Reflection highlights contradictions and gaps; Doubt mode surfaces low-confidence memories you can verify or weaken; Dream remains a deliberate heavier action for finding new connections.",
+        "tip": "Start here for \"what needs attention today\" before diving into lists or the graph."
+      },
+      "review": {
+        "title": "Review",
+        "desc": "Spaced-repetition queue for memories that FSRS schedules for recall today. Quick rating (Again / Hard / Good / Easy) tunes the next interval and keeps important knowledge from fading."
+      },
+      "hubs": {
+        "title": "Topic Hubs",
+        "desc": "Clusters of related memories the Dream Cycle stitches into one card: shared topic, member count, and the timestamp of the last refresh. A high-level map of what the engine has already grouped.",
+        "tip": "Open a hub when you want a topic-level overview without clicking every memory one by one."
+      },
+      "insights": {
+        "title": "Insights",
+        "desc": "Machine-generated observations from dream runs and reflections. They stay tentative until you Promote them — that's the validation step. Filters separate validated from pending so you can focus on what still needs a call.",
+        "tip": "Treat insights as hypotheses to triage, not as ground truth."
+      },
+      "decisions": {
+        "title": "Decisions",
+        "desc": "A read-only gallery of structured choices the agent recorded: alternatives, weighted scores, recommendation, and validity dates. Filter by active vs expired to see what still governs behaviour and what has been superseded.",
+        "tip": "Use this view to find the rationale behind a past choice. Editing happens on the MCP side so the audit trail stays consistent."
+      },
+      "temporal": {
+        "title": "Temporal",
+        "desc": "Time-scoped facts: which versions are currently valid, which have expired, and the full history of a topic across edits. Invalidate a memory when a newer fact replaces it so search stops surfacing the old version.",
+        "tip": "History mode needs a topic — the engine scopes versions to the subject line you pick."
       }
     },
     "howTo": {
@@ -698,6 +913,18 @@
     },
     "glossary": {
       "title": "Glossary",
+      "terms": {
+        "retention": "Retention",
+        "storage": "Storage Strength",
+        "retrieval": "Retrieval Strength",
+        "fsrs": "FSRS",
+        "embedding": "Embedding",
+        "dream": "Dream Cycle",
+        "activation": "Spreading Activation",
+        "consolidation": "Consolidation",
+        "nodeType": "Node Type",
+        "mcp": "MCP"
+      },
       "retention": "The probability of successfully recalling a memory right now (0-100%). Decays over time, resets on successful retrieval.",
       "storage": "How deeply a memory is encoded. Increases with every retrieval. High storage means the memory is durable — it won't fade easily.",
       "retrieval": "How easily a memory comes to mind right now. Drops over time, resets to 100% when you access the memory.",
@@ -709,6 +936,159 @@
       "nodeType": "The category of a memory: fact, concept, event, person, place, note, pattern, or decision. Determines how the memory appears on the graph.",
       "mcp": "Model Context Protocol — the communication standard that lets AI assistants read from and write to Vestige."
     },
-    "footer": "That's everything. Explore the pages at your own pace. Vestige handles the complexity — you just need to look around and occasionally run a Dream Cycle."
+    "footer": "That's everything. Explore the pages at your own pace. Vestige handles the complexity — you just need to look around and occasionally run a Dream Cycle.",
+    "toc": {
+      "heading": "On this page",
+      "aria": "Tutorial sections",
+      "whatIs": "What is Vestige",
+      "analogies": "Analogies",
+      "howMemoryWorks": "How memory works",
+      "concepts": "Key concepts",
+      "retentionCurve": "Forgetting curve",
+      "science": "The science",
+      "pages": "Pages overview",
+      "liveExample": "Your memories",
+      "howTo": "How to use it",
+      "faq": "FAQ",
+      "glossary": "Glossary",
+      "quiz": "Quick check"
+    },
+    "mode": {
+      "quick": "Quick (3 min)",
+      "full": "Full (15 min)"
+    },
+    "search": {
+      "label": "Search the tutorial",
+      "placeholder": "Search this tutorial…"
+    },
+    "cta": {
+      "openPage": "Open this page"
+    },
+    "progress": {
+      "sections": "sections explored",
+      "completed": "Completed",
+      "completedTitle": "You aced the quick check — Vestige's basics are yours."
+    },
+    "whatsNew": {
+      "header_one": "{{count}} update since you last visited",
+      "header_other": "{{count}} updates since you last visited",
+      "dismiss": "Got it",
+      "dismissAria": "Dismiss what's-new banner",
+      "v3_3": {
+        "title": "Tutorial reboot",
+        "body": "A table of contents, inline glossary tooltips, an interactive forgetting curve, and a four-question check at the end."
+      },
+      "v3_1": {
+        "title": "Metacognitive tools",
+        "body": "Reflect, Temporal versioning, and Confidence scoring — surface contradictions, mark facts as expired, and audit shaky memories."
+      }
+    },
+    "tour": {
+      "startCta": "Take the 2-minute tour",
+      "replay": "Replay tour",
+      "skip": "Skip",
+      "skipAria": "Skip the guided tour",
+      "back": "Back",
+      "next": "Next",
+      "finish": "All done",
+      "dotsAria": "Tour progress",
+      "dotAria": "Go to step {{current}} of {{total}}",
+      "s1": {
+        "title": "Start the day on the Briefing page",
+        "body": "Briefing surfaces what needs attention today: contradictions to resolve, low-confidence memories to verify, and a Dream Cycle button when the load gets heavy.",
+        "cta": "Open Briefing"
+      },
+      "s2": {
+        "title": "See the whole memory map at a glance",
+        "body": "Graph plots every memory in 3D. Bigger dots mean stronger retention; colour marks the type. Drag, spin, click any node to inspect it.",
+        "cta": "Open Graph"
+      },
+      "s3": {
+        "title": "Search, sort, and groom the list",
+        "body": "Memories is the workshop. Filter by type, search by meaning, pin the keepers, strengthen the ones you still care about. Bulk actions and undo built in.",
+        "cta": "Open Memories"
+      },
+      "s4": {
+        "title": "Keep important things from fading",
+        "body": "Review queues memories that FSRS-6 picked for today. Rate them Again / Hard / Good / Easy — the engine reschedules the next interval automatically.",
+        "cta": "Open Review"
+      },
+      "s5": {
+        "title": "Run a Dream Cycle once a week",
+        "body": "Settings holds the maintenance levers: Dream (find new links), Reflect (spot contradictions), Confidence audit (flag shaky memories). Treat it like sleep — schedule it, then move on.",
+        "cta": "Open Settings"
+      }
+    },
+    "curve": {
+      "title": "How memories fade — try it",
+      "subtitle": "Drag the sliders. The curve is the same FSRS-6 formula the engine uses to schedule reviews.",
+      "daysLabel": "Days since last review: {{days}}",
+      "daysHint": "How long since the engine last touched this memory.",
+      "daysAria": "Days since last review",
+      "stabilityLabel": "Stability: {{stability}} days",
+      "stabilityHint": "How well-learned the memory is. Higher stability → slower decay.",
+      "stabilityAria": "Memory stability in days",
+      "readout": "After {{days}} day(s), a memory with {{stability}}-day stability has a {{retention}}% chance of being recalled.",
+      "svgAria": "Forgetting curve showing retention over the next 90 days"
+    },
+    "live": {
+      "title": "Your strongest memory right now",
+      "subtitle": "Picked live from your database. Abstract decay numbers, made concrete.",
+      "retentionLabel": "Retention",
+      "ageLabel": "Age",
+      "ageValue_one": "{{count}} day",
+      "ageValue_other": "{{count}} days",
+      "typeLabel": "Type",
+      "explainer": "Retention sits at {{retention}}% after {{days}} days. Every search that finds this memory bumps it back up; weeks of silence let it drift down.",
+      "openCta": "Open this memory",
+      "empty": {
+        "subtitle": "Nothing to show yet",
+        "body": "Once your AI saves a few memories, this card will pick one and visualise its retention. Until then, the Briefing page is the best starting point.",
+        "cta": "Open Briefing"
+      }
+    },
+    "quiz": {
+      "title": "Quick check (4 questions)",
+      "subtitle": "Make sure the load-bearing ideas landed. Wrong answers come with a short hint.",
+      "submit": "Check answers",
+      "replay": "Try again",
+      "previous": "Last attempt: {{score}} / {{total}}",
+      "scoreLine": "{{score}} / {{total}} correct",
+      "scorePerfect": "Perfect run. You're ready.",
+      "scoreClose": "One slip — close to perfect.",
+      "scoreReview": "Re-skim the highlighted sections and try again.",
+      "q1": {
+        "prompt": "What does \"retention\" measure in Vestige?",
+        "opt0": "How many memories Vestige currently stores",
+        "opt1": "Disk space the memory file consumes",
+        "opt2": "The chance the engine can recall a memory right now",
+        "opt3": "How many tags the memory has been given",
+        "hint": "Retention is an FSRS-6 probability score (0–100%) that resets when the memory is retrieved and drops while it sits unused."
+      },
+      "q2": {
+        "prompt": "When does Vestige delete a memory on its own?",
+        "opt0": "After 30 days of no access",
+        "opt1": "Never — deletion always needs your confirmation",
+        "opt2": "As soon as retention hits 0%",
+        "opt3": "Once the database passes 1,000 memories",
+        "hint": "Memories fade but stay in the database. Garbage collection marks candidates; you have the final word."
+      },
+      "q3": {
+        "prompt": "Which page surfaces memories the engine is least sure about?",
+        "opt0": "Briefing (Doubt mode)",
+        "opt1": "Graph",
+        "opt2": "Timeline",
+        "opt3": "Insights",
+        "hint": "Doubt mode on the Briefing page ranks memories by low confidence so you can verify or weaken them."
+      },
+      "q4": {
+        "prompt": "What does a Dream Cycle do?",
+        "opt0": "Deletes the oldest memories without warning",
+        "opt1": "Re-runs every search you've made",
+        "opt2": "Renames the tags",
+        "opt3": "Replays memories, finds connections, spots contradictions",
+        "hint": "Dream is the creative pass. Consolidation is the housekeeping pass. Different jobs."
+      }
+    }
   }
 }

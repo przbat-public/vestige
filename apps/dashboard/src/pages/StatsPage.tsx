@@ -7,9 +7,11 @@ import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { StatCard } from '@/components/ui/stat-card';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
+import { useTrackPageView } from '@/stores/telemetry';
 import { NODE_TYPE_COLORS, retentionColor } from '@/types';
 
 export function StatsPage() {
+  useTrackPageView('stats');
   const { t } = useTranslation();
   const {
     data: stats,
@@ -104,9 +106,7 @@ export function StatsPage() {
               {distribution.endangered.slice(0, 5).map((m) => (
                 <div key={m.id} className="text-xs text-muted-foreground truncate">
                   {m.content.slice(0, 60)} —{' '}
-                  <span style={{ color: retentionColor(m.retentionStrength) }}>
-                    {(m.retentionStrength * 100).toFixed(0)}%
-                  </span>
+                  <span style={{ color: retentionColor(m.retention) }}>{(m.retention * 100).toFixed(0)}%</span>
                 </div>
               ))}
             </div>

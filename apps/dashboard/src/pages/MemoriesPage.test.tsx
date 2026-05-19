@@ -21,6 +21,12 @@ function makeMemory(overrides: Partial<Memory>): Memory {
     createdAt: '2026-04-01T00:00:00Z',
     updatedAt: '2026-04-01T00:00:00Z',
     reviewCount: 0,
+    // The wire DTO requires both — server infers them from `nodeType` +
+    // tags + content. Tests pick the most common defaults so they don't
+    // have to think about it; override per-test when behavior depends on
+    // it.
+    epistemicStatus: 'world',
+    memorySystem: 'semantic',
     ...overrides,
   };
 }

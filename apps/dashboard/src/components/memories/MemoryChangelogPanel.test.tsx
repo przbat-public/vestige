@@ -53,7 +53,9 @@ describe('MemoryChangelogPanel', () => {
           fromState: 'dormant',
           toState: 'active',
           reasonType: 'promote',
-          reasonData: null,
+          // The wire DTO uses `Option<String>` + `skip_serializing_if` so
+          // absent reasons appear as `undefined`, never `null`.
+          reasonData: undefined,
           timestamp: '2026-05-08T10:00:00Z',
         },
       ],

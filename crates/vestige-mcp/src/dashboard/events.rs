@@ -5,10 +5,18 @@
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use ts_rs::TS;
 
 /// Every cognitive operation emits one of these events.
-#[derive(Debug, Clone, Serialize)]
+///
+/// `serde(tag = "type", content = "data")` produces a discriminated
+/// union on the wire (and in the generated TypeScript), so the
+/// dashboard's WebSocket handler can `switch (ev.type)` exhaustively.
+/// New variants here automatically expand the TS union after
+/// `cargo test -p vestige-mcp --lib dashboard::events`.
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(tag = "type", content = "data", rename_all_fields = "camelCase")]
+#[ts(export, export_to = "VestigeEvent.ts", rename_all_fields = "camelCase")]
 pub enum VestigeEvent {
     // -- Memory lifecycle --
     MemoryCreated {

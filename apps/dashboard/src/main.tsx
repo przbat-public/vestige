@@ -10,6 +10,15 @@ import { initWebSocket } from '@/stores/websocket';
 import '@/lib/i18n';
 import './app.css';
 
+// Apply persisted density before React mounts so the first paint already
+// reflects the user's preference. The hook below it would set the same
+// attribute on mount, but only after the initial render — without this
+// pre-mount step the page briefly flashes in default "comfortable" density.
+const persistedDensity = localStorage.getItem('vestige-density');
+if (persistedDensity === 'compact' || persistedDensity === 'comfortable') {
+  document.documentElement.setAttribute('data-density', persistedDensity);
+}
+
 const cleanupWs = initWebSocket();
 window.addEventListener('unload', cleanupWs);
 

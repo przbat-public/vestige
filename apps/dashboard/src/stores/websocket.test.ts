@@ -58,14 +58,34 @@ describe('processWebSocketMessage', () => {
 
   it('appends events newest-first and caps at MAX_EVENTS', () => {
     for (let i = 0; i < 205; i++) {
-      processWebSocketMessage(JSON.stringify({ type: 'MemoryCreated', data: { seq: i } }));
+      // Use the real `MemoryCreated.data` shape (post-DTO refactor) so
+      // the test type-checks against the discriminated union; the index
+      // travels in `id`, which is already a string field.
+      processWebSocketMessage(
+        JSON.stringify({
+          type: 'MemoryCreated',
+          data: {
+            id: `mem-${i}`,
+            contentPreview: 'test',
+            nodeType: 'fact',
+            tags: [],
+            timestamp: '2026-05-12T00:00:00Z',
+          },
+        }),
+      );
     }
 
     const events = useWebSocket.getState().events;
     expect(events.length).toBe(200);
-    // Newest event is first; oldest 5 dropped.
-    expect((events[0].data as { seq: number }).seq).toBe(204);
-    expect((events[199].data as { seq: number }).seq).toBe(5);
+    // Newest event is first; oldest 5 dropped. `discriminate` narrows
+    // the union — guard against the wrong variant first.
+    const first = events[0];
+    const last = events[199];
+    if (first.type !== 'MemoryCreated' || last.type !== 'MemoryCreated') {
+      throw new Error(`unexpected variants: ${first.type}, ${last.type}`);
+    }
+    expect(first.data.id).toBe('mem-204');
+    expect(last.data.id).toBe('mem-5');
   });
 
   it('returns false and does not throw on malformed JSON', () => {

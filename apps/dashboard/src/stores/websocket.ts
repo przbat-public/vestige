@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import type { IdentifiedEvent, VestigeEvent, VestigeEventType } from '@/types';
 import { queryClient } from './query';
 
+// Mirrors `wire::limits::DashboardLimitsDto::DEFAULT.ws_max_events`.
+// Kept as a plain const (not a hook) because Zustand stores live outside
+// the React tree and run before TanStack Query's cache is hydrated.
+// The limits-parity test in the Rust crate pins the canonical value.
 const MAX_EVENTS = 200;
 let _eventIdCounter = 0;
 

@@ -1,70 +1,30 @@
 import type {
   ConfidenceResult,
   ConsolidationResult,
+  DecisionListResponse,
+  DeepReferenceResult,
   DreamResult,
   ExploreResponse,
   FsrsRating,
   GraphResponse,
   HealthCheck,
+  HubListResponse,
   ImportanceScore,
+  InsightListResponse,
   IntentionItem,
   IntentionPriority,
   Memory,
   MemoryChangelog,
-  MemoryListResponse,
   PredictResponse,
-  ReflectResult,
   RetentionDistribution,
   ReviewQueueResponse,
   ReviewResult,
-  SearchResult,
   SystemStats,
   TemporalAction,
-  TemporalEntry,
-  TemporalResult,
   TimelineResponse,
   TriggerType,
 } from '@/types';
-
-/**
- * Raw shape of a temporal entry as serialised by `tools/temporal.rs`. Used
- * only inside `api.temporal` for the snake_case → camelCase conversion;
- * components consume `TemporalEntry` exclusively.
- */
-interface RawTemporalEntry {
-  id: string;
-  content: string;
-  valid_from?: string;
-  valid_until?: string;
-  expired_at?: string;
-  days_expired?: number;
-  // `current` returns retention pre-formatted as "0.87"; `expired` and
-  // `history` omit it. Normalised to a number in `mapTemporalEntry`.
-  retention?: string | number;
-  tags?: string[];
-}
-
-interface RawTemporalResult {
-  action: TemporalAction;
-  topic?: string;
-  count: number;
-  memories: RawTemporalEntry[];
-}
-
-function mapTemporalEntry(raw: RawTemporalEntry): TemporalEntry {
-  const retention = typeof raw.retention === 'string' ? Number.parseFloat(raw.retention) : (raw.retention ?? 0);
-  return {
-    id: raw.id,
-    content: raw.content,
-    validFrom: raw.valid_from,
-    // `expired` action stores the expiry timestamp under `expired_at` so the
-    // dashboard reads the correct field whether the row is still live or not.
-    validUntil: raw.valid_until ?? raw.expired_at,
-    daysExpired: raw.days_expired,
-    retention: Number.isFinite(retention) ? retention : 0,
-    tags: raw.tags ?? [],
-  };
-}
+import { wire } from '@/types/runtime';
 
 const BASE = '/api';
 
@@ -110,11 +70,13 @@ async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   memories: {
-    list: (params?: Record<string, string>) => {
+    list: async (params?: Record<string, string>) => {
       const qs = params ? `?${new URLSearchParams(params).toString()}` : '';
-      return fetcher<MemoryListResponse>(`/memories${qs}`);
+      // Runtime-validated: this is the dashboard's home page; a silent
+      // wire drift here would break every list-driven view.
+      return wire.memoryList(await fetcher<unknown>(`/memories${qs}`));
     },
-    get: (id: string) => fetcher<Memory>(`/memories/${id}`),
+    get: async (id: string) => wire.memory(await fetcher<unknown>(`/memories/${id}`)),
     delete: (id: string) => fetcher<{ deleted: boolean }>(`/memories/${id}`, { method: 'DELETE' }),
     // Backend returns a status blob (`{ promoted: true, id, retentionStrength }`),
     // not the full Memory object. The dashboard previously over-declared the
@@ -227,7 +189,8 @@ export const api = {
         method: 'POST',
       }),
   },
-  search: (q: string, limit = 20) => fetcher<SearchResult>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  search: async (q: string, limit = 20) =>
+    wire.search(await fetcher<unknown>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`)),
   stats: () => fetcher<SystemStats>('/stats'),
   health: () => fetcher<HealthCheck>('/health'),
   timeline: (days = 7, limit = 200) => fetcher<TimelineResponse>(`/timeline?days=${days}&limit=${limit}`),
@@ -242,16 +205,19 @@ export const api = {
     return fetcher<GraphResponse>(`/graph${qs}`);
   },
   dream: () => fetcher<DreamResult>('/dream', { method: 'POST' }),
-  explore: async (fromId: string, action = 'associations', toId?: string, limit = 10) => {
-    const raw = await fetcher<ExploreResponse>('/explore', {
+  /**
+   * Query the explore engine. The wire DTO unifies all three modes
+   * ("associations" | "chains" | "bridges") under a single `results`
+   * array — earlier versions of this client used to fall back to
+   * `nodes` / `chain` / `bridges` because the backend used to fan them
+   * out to separate fields. The DTO refactor collapsed those, so the
+   * shim is gone.
+   */
+  explore: (fromId: string, action = 'associations', toId?: string, limit = 10) =>
+    fetcher<ExploreResponse>('/explore', {
       method: 'POST',
       body: JSON.stringify({ from_id: fromId, action, to_id: toId, limit }),
-    });
-    return {
-      ...raw,
-      results: raw.results || raw.nodes || raw.chain || raw.bridges || [],
-    };
-  },
+    }),
   predict: () => fetcher<PredictResponse>('/predict', { method: 'POST' }),
   importance: (content: string) =>
     fetcher<ImportanceScore>('/importance', {
@@ -273,40 +239,89 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  reflect: (focus?: string, depth: 'quick' | 'standard' | 'deep' = 'standard') =>
-    fetcher<ReflectResult>('/reflect', {
-      method: 'POST',
-      body: JSON.stringify({ focus, depth }),
-    }),
+  reflect: async (focus?: string, depth: 'quick' | 'standard' | 'deep' = 'standard') =>
+    wire.reflect(
+      await fetcher<unknown>('/reflect', {
+        method: 'POST',
+        body: JSON.stringify({ focus, depth }),
+      }),
+    ),
   confidence: (action: string, memoryId?: string, limit = 20) =>
     fetcher<ConfidenceResult>('/confidence', {
       method: 'POST',
       body: JSON.stringify({ action, memory_id: memoryId, limit }),
     }),
   /**
-   * Query temporal versioning. Wraps `POST /api/temporal` and normalises the
-   * snake_case wire shape (`valid_from`, `expired_at`, retention as string)
-   * into the camelCase `TemporalResult` consumed by components.
+   * Query temporal versioning. Wraps `POST /api/temporal`. The wire
+   * DTO already lands in camelCase with retention as a `number`, so
+   * this is a thin pass-through — earlier versions had a snake→camel
+   * mapper that's now redundant.
    *
    * Use `current` and `expired` for topic-scoped or DB-wide scans; use
-   * `history` to follow a single concept's evolution; use `invalidate` to
-   * mark a memory as superseded (server-side state change).
+   * `history` to follow a single concept's evolution; use `invalidate`
+   * to mark a memory as superseded (server-side state change).
    */
-  temporal: async (action: TemporalAction, opts?: { topic?: string; memoryId?: string; limit?: number }) => {
-    const raw = await fetcher<RawTemporalResult>('/temporal', {
-      method: 'POST',
-      body: JSON.stringify({
-        action,
-        topic: opts?.topic,
-        memory_id: opts?.memoryId,
-        limit: opts?.limit ?? 20,
+  temporal: async (action: TemporalAction, opts?: { topic?: string; memoryId?: string; limit?: number }) =>
+    wire.temporal(
+      await fetcher<unknown>('/temporal', {
+        method: 'POST',
+        body: JSON.stringify({
+          action,
+          topic: opts?.topic,
+          memory_id: opts?.memoryId,
+          limit: opts?.limit ?? 20,
+        }),
       }),
-    });
-    return {
-      action: raw.action,
-      topic: raw.topic,
-      count: raw.count,
-      memories: raw.memories.map(mapTemporalEntry),
-    } satisfies TemporalResult;
+    ),
+  /**
+   * List structured decisions written through `codebase.remember_decision_v2`.
+   * Each entry exposes the human-readable question, the choice matrix, the
+   * recommended pick, and validity / supersession metadata so the dashboard
+   * can render a comparison-table view instead of free-form Markdown.
+   *
+   * Backed by `GET /api/decisions`; the handler filters memories with a
+   * `extra_json.decision` payload and projects them through `DecisionDto`.
+   */
+  decisions: (limit = 50) => fetcher<DecisionListResponse>(`/decisions?limit=${limit}`),
+  /**
+   * List structured Proposal B insights — synthesised observations the
+   * dream cycle has decided are worth promoting to first-class memories.
+   * `filter` narrows the result to validated/unvalidated insights;
+   * defaults to `all`. `limit` clamps to [1, 500] server-side.
+   *
+   * Backed by `GET /api/insights`; the handler walks `node_type =
+   * "insight"` and projects `extra_json.insight` through `InsightDto`.
+   */
+  insights: (filter: 'all' | 'validated' | 'unvalidated' = 'all', limit = 50) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (filter === 'validated') params.set('only_validated', 'true');
+    if (filter === 'unvalidated') params.set('only_unvalidated', 'true');
+    return fetcher<InsightListResponse>(`/insights?${params.toString()}`);
   },
+  /**
+   * List Topic Hubs (Proposal A) — clusters of related memories the
+   * dream cycle materialised as `node_type="hub"`. Hubs are sorted by
+   * `lastRegeneratedAt` desc server-side; `limit` clamps to [1, 500].
+   *
+   * Backed by `GET /api/hubs`; the handler walks `node_type = "hub"` and
+   * projects `extra_json.hub` through `HubDto`.
+   */
+  hubs: (limit = 50) => fetcher<HubListResponse>(`/hubs?limit=${limit}`),
+  /**
+   * Run the deep_reference cognitive reasoning pipeline against the
+   * memory store. The backend composes 7 stages (broad retrieval →
+   * FSRS-6 trust scoring → spreading activation → contradiction
+   * detection → temporal supersession → dream insight integration →
+   * structured synthesis) and returns a single typed answer with
+   * supporting evidence. `depth` clamps to [5, 50].
+   *
+   * Backed by `POST /api/deep_reference`. Use this for "why did we
+   * decide X?", "what contradicts Y?", "show me the evolution of Z"
+   * — questions a single search query can't answer cleanly.
+   */
+  deepReference: (query: string, depth = 20) =>
+    fetcher<DeepReferenceResult>('/deep_reference', {
+      method: 'POST',
+      body: JSON.stringify({ query, depth }),
+    }),
 };

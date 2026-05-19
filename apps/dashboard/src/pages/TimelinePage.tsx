@@ -9,12 +9,14 @@ import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
+import { useTrackPageView } from '@/stores/telemetry';
 import { NODE_TYPE_COLORS, retentionColor } from '@/types';
 
 const DAY_OPTIONS = [7, 14, 30, 90] as const;
 type DayOption = (typeof DAY_OPTIONS)[number];
 
 export function TimelinePage() {
+  useTrackPageView('timeline');
   const { t, i18n } = useTranslation();
   const [days, setDays] = useState<DayOption>(7);
   const {

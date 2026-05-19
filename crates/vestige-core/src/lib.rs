@@ -227,6 +227,8 @@ pub use advanced::{
     // DreamMemory - input type for dreaming
     DreamMemory,
     DreamResult,
+    // Topic Hub candidate (Proposal A) — draft hub emitted by MemoryDreamer
+    HubCandidate,
     EmbeddingStrategy,
     EvaluationIntent,
     GateDecision,

@@ -4,6 +4,7 @@ import { NavLink } from 'react-router';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { useWebSocket } from '@/stores/websocket';
+import { DensityToggle } from './DensityToggle';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -15,6 +16,10 @@ const NAV_ITEMS = [
   { to: 'timeline', labelKey: 'nav.timeline' },
   { to: 'feed', labelKey: 'nav.feed' },
   { to: 'explore', labelKey: 'nav.explore' },
+  { to: 'reasoning', labelKey: 'nav.reasoning' },
+  { to: 'decisions', labelKey: 'nav.decisions' },
+  { to: 'insights', labelKey: 'nav.insights' },
+  { to: 'hubs', labelKey: 'nav.hubs' },
   { to: 'intentions', labelKey: 'nav.intentions' },
   { to: 'temporal', labelKey: 'nav.temporal' },
   { to: 'stats', labelKey: 'nav.stats' },
@@ -75,7 +80,7 @@ export function Sidebar({ onNavigate, onOpenCommandPalette }: SidebarProps) {
                 <>
                   <span className="truncate">
                     {t(item.labelKey)}
-                    {isActive && <span className="sr-only">(current page)</span>}
+                    {isActive && <span className="sr-only">{t('a11y.currentPage')}</span>}
                   </span>
                   {showDueBadge && (
                     // Visible badge is the count, hidden text is the
@@ -101,7 +106,10 @@ export function Sidebar({ onNavigate, onOpenCommandPalette }: SidebarProps) {
       <div className="px-3 py-3 border-t border-sidebar-border space-y-2">
         <div className="flex items-center justify-between">
           <LanguageSwitcher />
-          <ThemeToggle />
+          <div className="flex items-center gap-1">
+            <DensityToggle />
+            <ThemeToggle />
+          </div>
         </div>
 
         <div className="flex items-center gap-2 text-xs">

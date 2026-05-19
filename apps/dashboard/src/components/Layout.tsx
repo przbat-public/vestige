@@ -2,8 +2,10 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet } from 'react-router';
 import { CommandPalette } from '@/components/layout/CommandPalette';
+import { KeyboardShortcutsDialog } from '@/components/layout/KeyboardShortcutsDialog';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { RouteAnnouncer } from '@/components/RouteAnnouncer';
+import { EVENT, track } from '@/stores/telemetry';
 
 // Lazy-loaded — the dialog pulls react-hook-form + zod which only matter
 // once the user actually opens "Add memory". Keeps initial Layout chunk
@@ -17,9 +19,43 @@ export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [addMemoryOpen, setAddMemoryOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keyboard router intentionally enumerates each chord linearly so reviewers can audit shortcut precedence at a glance; splitting per-chord would obscure the order
     function onKey(e: KeyboardEvent) {
+      // `?` / Cmd+/ — open the keyboard shortcuts cheat sheet. We check
+      // this BEFORE the typing guard because the user pressing `?` while
+      // in an input is much more likely to mean "I want the cheat sheet"
+      // than wanting to literally type "?" — but we keep the typing
+      // bail-out for the bare `?` variant. Cmd+/ is the JetBrains/VS Code
+      // convention for "help".
+      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+        e.preventDefault();
+        setShortcutsOpen((prev) => {
+          if (!prev) track(EVENT.shortcuts_dialog_open, { trigger: 'cmd_slash' });
+          return !prev;
+        });
+        return;
+      }
+
+      const target = e.target as HTMLElement | null;
+      const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable === true;
+
+      // Bare `?` only when the user isn't typing — same guard rationale
+      // as the `'n'` handler below.
+      if (e.key === '?' && !typing) {
+        e.preventDefault();
+        setShortcutsOpen((prev) => {
+          if (!prev) track(EVENT.shortcuts_dialog_open, { trigger: 'question_mark' });
+          return !prev;
+        });
+        return;
+      }
+
       // Don't intercept ⌘K / ⌘N when the user is typing in an editable
       // field — `'n'` would otherwise trigger every time they type a letter
       // 'n' inside Search or any input. ⌘K is fine because the meta key
@@ -36,10 +72,24 @@ export function Layout() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
         e.preventDefault();
         setAddMemoryOpen(true);
+        track(EVENT.add_memory_open, { trigger: 'cmd_n' });
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Custom event lets empty-state CTAs (e.g. on MemoriesPage) open the
+  // Add Memory dialog without prop-drilling through every page. The
+  // dialog state lives here because the ⌘N shortcut also lives here —
+  // single source of truth wins over multiple lazy clones.
+  useEffect(() => {
+    function onOpenAddMemory() {
+      setAddMemoryOpen(true);
+      track(EVENT.add_memory_open, { trigger: 'event' });
+    }
+    window.addEventListener('vestige:open-add-memory', onOpenAddMemory);
+    return () => window.removeEventListener('vestige:open-add-memory', onOpenAddMemory);
   }, []);
 
   return (
@@ -120,7 +170,10 @@ export function Layout() {
           and offset by safe-area-inset on iOS. */}
       <button
         type="button"
-        onClick={() => setAddMemoryOpen(true)}
+        onClick={() => {
+          setAddMemoryOpen(true);
+          track(EVENT.add_memory_open, { trigger: 'fab' });
+        }}
         className="fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full bg-primary text-primary-foreground shadow-2xl hover:scale-105 active:scale-95 transition-transform flex items-center justify-center text-2xl font-light focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
         style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}
         aria-label={t('addMemory.fabLabel')}
@@ -131,6 +184,9 @@ export function Layout() {
 
       {/* Command palette */}
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
+
+      {/* Keyboard shortcuts cheat sheet — ? or ⌘/ */}
+      <KeyboardShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {/* Add memory dialog — lazy chunk loads on first open */}
       <Suspense fallback={null}>

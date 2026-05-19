@@ -20,6 +20,10 @@ const baseMemory: Memory = {
   createdAt: '2026-04-01T10:00:00Z',
   updatedAt: '2026-05-01T10:00:00Z',
   reviewCount: 3,
+  // Required by the wire DTO; defaults match what the server would
+  // infer for a plain `fact` with no special tags.
+  epistemicStatus: 'world',
+  memorySystem: 'semantic',
 };
 
 function renderDetail(overrides: Partial<{ memory: Memory; onUpdate: () => void; onClose: () => void }> = {}) {

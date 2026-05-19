@@ -16,6 +16,7 @@ import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
+import { useTrackPageView } from '@/stores/telemetry';
 import { toast } from '@/stores/toast';
 
 const TRIGGER_TYPES = ['context', 'time', 'event'] as const;
@@ -32,6 +33,7 @@ const intentionSchema = z.object({
 type IntentionForm = z.infer<typeof intentionSchema>;
 
 export function IntentionsPage() {
+  useTrackPageView('intentions');
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [status, setStatus] = useState('active');
@@ -117,12 +119,12 @@ export function IntentionsPage() {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
             <div>
               <label htmlFor="intention-content" className="text-xs text-muted-foreground block mb-1">
-                {t('intentions.title')}
+                {t('intentions.contentLabel')}
               </label>
               <Input
                 id="intention-content"
                 {...register('content')}
-                placeholder={t('intentions.searchPlaceholder')}
+                placeholder={t('intentions.contentPlaceholder')}
                 aria-invalid={!!errors.content}
               />
               {errors.content && <p className="text-xs text-red-500 mt-1">{errors.content.message}</p>}
@@ -130,7 +132,7 @@ export function IntentionsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label htmlFor="trigger-type" className="text-xs text-muted-foreground block mb-1">
-                  {t('intentions.triggerType.context')}
+                  {t('intentions.triggerLabel')}
                 </label>
                 <NativeSelect id="trigger-type" {...register('trigger_type')} className="w-full">
                   {TRIGGER_TYPES.map((type) => (

@@ -607,3 +607,63 @@ CREATE INDEX IF NOT EXISTS idx_nodes_episodic_at ON knowledge_nodes(episodic_at)
 
 UPDATE schema_version SET version = 11, applied_at = datetime('now');
 "#;
+
+pub(super) const MIGRATION_V12_UP: &str = r#"
+-- ============================================================================
+-- v3.4.0 typed extensions: extra_json for Decision matrix, Hub metadata, etc.
+-- ============================================================================
+--
+-- Free-form JSON column that lets typed extensions store structured payloads
+-- without adding a new column per feature. Current readers:
+--   * extra_json.decision  - Proposal C (Decision Matrix): question, choices,
+--                            criteria, score_matrix, valid_until, supersedes
+--   * extra_json.hub       - Proposal A (Topic Hubs): cluster signature,
+--                            member_ids, last_synthesized_at
+--   * extra_json.insight   - Proposal B (Insight Tier): template, evidence,
+--                            promoted_at
+--
+-- Defaults to NULL so existing rows stay unchanged and the column adds zero
+-- bytes per legacy row (SQLite stores NULL inline).
+ALTER TABLE knowledge_nodes ADD COLUMN extra_json TEXT;
+
+-- Partial index on rows that actually use extra_json.decision so the
+-- /api/decisions endpoint can scan only the decision rows quickly.
+-- json_extract returns NULL for non-decision rows; the WHERE clause
+-- keeps those out of the index entirely.
+CREATE INDEX IF NOT EXISTS idx_nodes_decision_extra
+    ON knowledge_nodes(id)
+    WHERE extra_json IS NOT NULL AND json_extract(extra_json, '$.decision') IS NOT NULL;
+
+UPDATE schema_version SET version = 12, applied_at = datetime('now');
+"#;
+
+pub(super) const MIGRATION_V13_UP: &str = r#"
+-- ============================================================================
+-- v3.5.0 Proposal A — Topic Hub indexes
+-- ============================================================================
+--
+-- Hubs are written into the same knowledge_nodes table under
+-- node_type='hub' with structured payload at extra_json.hub. Two access
+-- patterns dominate:
+--
+--   1. "Do we already have a hub for this cluster?"
+--      Looked up by extra_json.hub.clusterSignature.
+--   2. "Show me every hub for the dashboard /api/hubs route."
+--      Scanned by node_type='hub' (or extra_json.hub IS NOT NULL).
+--
+-- Both partial indexes are tiny (one row per hub, currently dozens not
+-- thousands) so the disk cost is negligible. We restrict on
+-- json_extract being non-NULL to keep legacy rows out of the index.
+
+CREATE INDEX IF NOT EXISTS idx_nodes_hub_signature
+    ON knowledge_nodes(json_extract(extra_json, '$.hub.clusterSignature'))
+    WHERE extra_json IS NOT NULL
+      AND json_extract(extra_json, '$.hub.clusterSignature') IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_nodes_hub_extra
+    ON knowledge_nodes(id)
+    WHERE extra_json IS NOT NULL
+      AND json_extract(extra_json, '$.hub') IS NOT NULL;
+
+UPDATE schema_version SET version = 13, applied_at = datetime('now');
+"#;

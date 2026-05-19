@@ -29,6 +29,12 @@ pub(crate) mod constants;
 mod activity;
 mod connection_graph;
 mod dreamer;
+mod dreamer_clustering;
+mod dreamer_connections;
+mod dreamer_contradictions;
+mod dreamer_hubs;
+mod dreamer_insights;
+mod dreamer_lifecycle;
 mod replay;
 mod report;
 mod scheduler;
@@ -46,5 +52,5 @@ pub use report::ConsolidationReport;
 pub use scheduler::ConsolidationScheduler;
 pub use types::{
     ContradictionPair, DiscoveredConnection, DiscoveredConnectionType, DreamConfig, DreamMemory,
-    DreamResult, DreamStats, InsightType, SynthesizedInsight,
+    DreamResult, DreamStats, HubCandidate, InsightType, SynthesizedInsight,
 };

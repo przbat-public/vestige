@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { I18nextProvider } from 'react-i18next';
@@ -10,14 +11,19 @@ import { CommandPalette } from './CommandPalette';
 // <dialog>.showModal/close polyfilled globally in src/test/setup.ts.
 
 function renderPalette({ onClose = vi.fn() }: { onClose?: () => void } = {}) {
+  // Fresh client per render — keeps test state isolated. Retries off so a
+  // mocked rejection surfaces immediately instead of waiting for backoff.
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <I18nextProvider i18n={i18n}>
-      <MemoryRouter>
-        <ToastProvider>
-          <CommandPalette open={true} onClose={onClose} />
-        </ToastProvider>
-      </MemoryRouter>
-    </I18nextProvider>,
+    <QueryClientProvider client={qc}>
+      <I18nextProvider i18n={i18n}>
+        <MemoryRouter>
+          <ToastProvider>
+            <CommandPalette open={true} onClose={onClose} />
+          </ToastProvider>
+        </MemoryRouter>
+      </I18nextProvider>
+    </QueryClientProvider>,
   );
 }
 

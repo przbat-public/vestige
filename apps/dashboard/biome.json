@@ -98,7 +98,8 @@
       "!src/lib",
       "!src/app.html",
       "!.svelte-kit",
-      "!e2e"
+      "!e2e",
+      "!src/types/generated/**"
     ]
   }
 }

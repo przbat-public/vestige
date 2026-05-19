@@ -55,10 +55,10 @@ export function GovernancePanel({ distribution }: Props) {
               <div key={mem.id} className="flex items-center gap-2 text-xs bg-danger/5 rounded px-2 py-1">
                 <span
                   className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: retentionColor(mem.retentionStrength) }}
+                  style={{ backgroundColor: retentionColor(mem.retention) }}
                 />
                 <span className="text-muted-foreground truncate flex-1">{mem.content}</span>
-                <span className="text-danger flex-shrink-0">{(mem.retentionStrength * 100).toFixed(0)}%</span>
+                <span className="text-danger flex-shrink-0">{(mem.retention * 100).toFixed(0)}%</span>
               </div>
             ))}
             {distribution.endangered.length > 20 && (

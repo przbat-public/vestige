@@ -10,6 +10,10 @@ const BriefingPage = lazy(() => import('@/pages/BriefingPage').then((m) => ({ de
 const TimelinePage = lazy(() => import('@/pages/TimelinePage').then((m) => ({ default: m.TimelinePage })));
 const FeedPage = lazy(() => import('@/pages/FeedPage').then((m) => ({ default: m.FeedPage })));
 const ExplorePage = lazy(() => import('@/pages/ExplorePage').then((m) => ({ default: m.ExplorePage })));
+const ReasoningPage = lazy(() => import('@/pages/ReasoningPage').then((m) => ({ default: m.ReasoningPage })));
+const DecisionsPage = lazy(() => import('@/pages/DecisionsPage').then((m) => ({ default: m.DecisionsPage })));
+const InsightsPage = lazy(() => import('@/pages/InsightsPage').then((m) => ({ default: m.InsightsPage })));
+const HubsPage = lazy(() => import('@/pages/HubsPage').then((m) => ({ default: m.HubsPage })));
 const IntentionsPage = lazy(() => import('@/pages/IntentionsPage').then((m) => ({ default: m.IntentionsPage })));
 const TemporalPage = lazy(() => import('@/pages/TemporalPage').then((m) => ({ default: m.TemporalPage })));
 const StatsPage = lazy(() => import('@/pages/StatsPage').then((m) => ({ default: m.StatsPage })));
@@ -38,6 +42,10 @@ export default function App() {
           <Route path="timeline" element={<TimelinePage />} />
           <Route path="feed" element={<FeedPage />} />
           <Route path="explore" element={<ExplorePage />} />
+          <Route path="reasoning" element={<ReasoningPage />} />
+          <Route path="decisions" element={<DecisionsPage />} />
+          <Route path="insights" element={<InsightsPage />} />
+          <Route path="hubs" element={<HubsPage />} />
           <Route path="intentions" element={<IntentionsPage />} />
           <Route path="temporal" element={<TemporalPage />} />
           <Route path="stats" element={<StatsPage />} />

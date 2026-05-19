@@ -19,12 +19,48 @@ pub struct DreamResult {
     pub contradictions_found: Vec<ContradictionPair>,
     /// Memory IDs demoted by active forgetting (low retention + superseded)
     pub memories_demoted: Vec<String>,
+    /// Topic Hub candidates produced this cycle (Proposal A). The dream
+    /// engine only **discovers** them; persistence is the caller's
+    /// responsibility — see `tools/dream.rs`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hub_candidates: Vec<HubCandidate>,
     /// Dream cycle duration in milliseconds
     pub duration_ms: u64,
     /// Timestamp of the dream
     pub dreamed_at: DateTime<Utc>,
     /// Statistics about the dream
     pub stats: DreamStats,
+}
+
+/// A draft Topic Hub ready to be persisted. Holds the deduplicated
+/// child IDs, the human-readable summary, and everything the storage
+/// layer needs to either create a brand-new hub node or update an
+/// existing one (matched by `cluster_signature`).
+///
+/// Proposal A — see `docs/TOPIC-HUBS-DESIGN.md`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HubCandidate {
+    /// SHA-256-style deterministic identity (FNV-1a 64 hex) of the
+    /// sorted child IDs. Used for dedup across dream cycles.
+    pub cluster_signature: String,
+    /// Member memory IDs, **sorted and deduplicated**. Always at
+    /// least 2 entries — clusters below the threshold are filtered
+    /// out by the generator.
+    pub child_ids: Vec<String>,
+    /// Top tags shared by the cluster, capped at 16.
+    pub dominant_tags: Vec<String>,
+    /// `[earliest, latest]` `created_at` across cluster members.
+    pub date_range: (DateTime<Utc>, DateTime<Utc>),
+    /// Rendered content body for the hub node — template or LLM
+    /// output. The generator stamps this so the persistence layer
+    /// can write it verbatim without re-running the renderer.
+    pub content: String,
+    /// Free-form pipeline tag — `"template_v1"` today, future LLM
+    /// variants stamp e.g. `"llm_gpt-4o-mini_v1"`.
+    pub generation_method: String,
+    /// Suggested tags for the hub node itself (e.g. `["hub",
+    /// "auto-generated"]` plus the cluster's dominant tags).
+    pub tags: Vec<String>,
 }
 
 /// A detected contradiction between two memories
@@ -51,6 +87,9 @@ pub struct DreamStats {
     pub clusters_found: usize,
     /// Candidate insights considered
     pub candidates_considered: usize,
+    /// Topic Hub candidates generated this cycle (Proposal A).
+    #[serde(default)]
+    pub hub_candidates_generated: usize,
 }
 
 /// A synthesized insight from memory combination
