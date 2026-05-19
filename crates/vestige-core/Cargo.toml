@@ -28,7 +28,7 @@ encryption = ["rusqlite/bundled-sqlcipher"]
 # Core embeddings with fastembed (ONNX-based, local inference)
 embeddings = ["dep:fastembed"]
 
-# HNSW vector search with USearch (20x faster than FAISS)
+# HNSW vector search with USearch (in-memory ANN; persistence is a known gap)
 vector-search = ["dep:usearch"]
 
 # Nomic Embed Text v2 MoE (475M params, 305M active, Candle backend)
@@ -79,7 +79,7 @@ fastembed = { version = "5.13", default-features = false, features = [
 ], optional = true }
 
 # ============================================================================
-# OPTIONAL: Vector Search (USearch - HNSW, 20x faster than FAISS)
+# OPTIONAL: Vector Search (USearch HNSW; in-memory only for now)
 # ============================================================================
 usearch = { version = "2", optional = true }
 

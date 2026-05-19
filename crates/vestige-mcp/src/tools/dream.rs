@@ -167,6 +167,37 @@ pub async fn execute(
         (insights, hubs)
     };
 
+    // Apply NREM3 consolidation in SQL: strengthen replayed memories and
+    // mark downscaled-low-importance memories for accelerated decay. Up to
+    // here the boost was tag-only (in-memory `SynapticTaggingSystem`), which
+    // made the dream look productive in the response but left the database
+    // untouched. This block mirrors strengthened/downscaled IDs into the
+    // durable retention/retrieval columns so the next search/FSRS pass sees
+    // them. Failures are logged but never fail the dream call.
+    {
+        let storage_nrem3 = storage.clone();
+        let strengthened: Vec<String> = dream_result.strengthened_ids.clone();
+        let downscaled: Vec<String> = dream_result.downscaled_ids.clone();
+        let downscale_factor = 0.95_f64;
+        let _ = tokio::task::spawn_blocking(move || {
+            if !strengthened.is_empty() {
+                let refs: Vec<&str> = strengthened.iter().map(|s| s.as_str()).collect();
+                if let Err(e) = storage_nrem3.strengthen_batch_on_access(&refs) {
+                    tracing::warn!(error = %e, count = strengthened.len(),
+                        "NREM3 strengthen_batch_on_access failed");
+                }
+            }
+            if !downscaled.is_empty() {
+                let refs: Vec<&str> = downscaled.iter().map(|s| s.as_str()).collect();
+                if let Err(e) = storage_nrem3.downscale_retention_batch(&refs, downscale_factor) {
+                    tracing::warn!(error = %e, count = downscaled.len(),
+                        "NREM3 downscale_retention_batch failed");
+                }
+            }
+        })
+        .await;
+    }
+
     // Persist creative connections from 4-phase dream cycle.
     // Run all save_connection() inserts on the blocking pool — easily
     // hundreds of writes on dense graphs.

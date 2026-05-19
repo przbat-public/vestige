@@ -1,13 +1,17 @@
 //! High-Performance Vector Search
 //!
-//! Uses USearch for HNSW (Hierarchical Navigable Small World) indexing.
-//! 20x faster than FAISS for approximate nearest neighbor search.
+//! Uses USearch for HNSW (Hierarchical Navigable Small World) indexing. The
+//! earlier "20× faster than FAISS" framing was inherited from upstream README
+//! talking points and has been removed from our docs — Vestige does not
+//! benchmark against FAISS in-tree.
 //!
 //! Features:
-//! - Sub-millisecond query times
+//! - Sub-millisecond query times for the in-memory index
 //! - Cosine similarity by default
 //! - Incremental index updates
-//! - Persistence to disk
+//! - On-disk persistence is supported by USearch but **not yet** wired into
+//!   Vestige's lifecycle — the index is rebuilt from SQLite on startup. See
+//!   the "Known Issues" section of CHANGELOG for the planned remediation.
 
 use std::collections::HashMap;
 use std::path::Path;

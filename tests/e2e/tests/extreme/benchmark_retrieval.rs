@@ -93,7 +93,7 @@ fn build_corpus() -> Vec<SyntheticMemory> {
         ),
         mem(
             "m14",
-            "USearch HNSW index provides 20x faster vector search than FAISS.",
+            "USearch HNSW index provides in-memory ANN vector search; persistence is a separate concern.",
             &["search", "vector"],
         ),
         mem(

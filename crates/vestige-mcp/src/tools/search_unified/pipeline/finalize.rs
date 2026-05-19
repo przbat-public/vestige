@@ -47,11 +47,13 @@ pub(in crate::tools::search_unified) async fn run(
     let (formatted, budget_expandable, budget_tokens_used) =
         enforce_token_budget(formatted, args, config.detail_level);
 
-    let learning_mode = cognitive
-        .try_lock()
-        .ok()
-        .map(|cog| cog.attention_signal.is_learning_mode())
-        .unwrap_or(false);
+    let learning_mode = match cognitive.try_lock() {
+        Ok(cog) => cog.attention_signal.is_learning_mode(),
+        Err(_) => {
+            crate::cognitive::try_lock_metrics::record_miss("search_finalize");
+            false
+        }
+    };
 
     let mut response = serde_json::json!({
         "query": args.query,
@@ -117,6 +119,7 @@ fn apply_spreading_activation(
         return;
     }
     let Ok(mut cog) = cognitive.try_lock() else {
+        crate::cognitive::try_lock_metrics::record_miss("search_finalize");
         return;
     };
     let Some(first) = scoring.results.first() else {
@@ -276,6 +279,7 @@ fn record_metacognition(
     response: &mut Value,
 ) {
     let Ok(mut cog) = cognitive.try_lock() else {
+        crate::cognitive::try_lock_metrics::record_miss("search_finalize");
         return;
     };
     let avg_conf = if results.is_empty() {

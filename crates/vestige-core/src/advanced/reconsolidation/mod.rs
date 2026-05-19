@@ -20,11 +20,17 @@
 //!
 //! ## Scientific Background
 //!
-//! Based on Karim Nader's groundbreaking 2000 research showing that:
-//! - Retrieved memories become temporarily unstable
-//! - Protein synthesis is required to re-store them
-//! - This window allows memories to be updated or modified
-//! - Memories are not static recordings but dynamic reconstructions
+//! Inspired by Karim Nader's 2000 work on memory reconsolidation in the
+//! amygdala — retrieved memories were shown to become temporarily unstable
+//! and to require protein synthesis to be re-stored, which is how the brain
+//! ends up rewriting memories at retrieval time rather than playing them
+//! back unchanged.
+//!
+//! What Vestige implements is **not** that biochemical mechanism. It is a
+//! short flag-based window per memory ("labile" for a few minutes after
+//! retrieval) during which the modification API will apply changes in-place
+//! and bump retrieval strength. The biology is the metaphor; the code is a
+//! plain bookkeeping layer on top of SQLite.
 
 mod constants;
 mod context;

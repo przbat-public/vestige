@@ -368,6 +368,7 @@ pub async fn execute(
         }
         true
     } else {
+        crate::cognitive::try_lock_metrics::record_miss("deep_reference");
         tracing::warn!("deep_reference: cognitive engine locked, spreading activation skipped");
         false
     };

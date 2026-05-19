@@ -240,6 +240,8 @@ async fn execute_remember_pattern(
             chrono::Utc::now(),
             None,
         );
+    } else {
+        crate::cognitive::try_lock_metrics::record_miss("codebase_pattern");
     }
 
     Ok(serde_json::json!({
@@ -342,6 +344,8 @@ async fn execute_remember_decision(
             chrono::Utc::now(),
             None,
         );
+    } else {
+        crate::cognitive::try_lock_metrics::record_miss("codebase_decision");
     }
 
     Ok(serde_json::json!({
@@ -469,6 +473,8 @@ async fn execute_remember_decision_v2(
             chrono::Utc::now(),
             None,
         );
+    } else {
+        crate::cognitive::try_lock_metrics::record_miss("codebase_decision_v2");
     }
 
     Ok(serde_json::json!({
@@ -532,23 +538,28 @@ async fn execute_get_context(
     // COGNITIVE: Cross-project knowledge discovery
     // ====================================================================
     let mut universal_patterns = Vec::new();
-    if let Some(codebase_name) = &args.codebase
-        && let Ok(cog) = cognitive.try_lock()
-    {
-        let context = vestige_core::advanced::cross_project::ProjectContext {
-            path: None,
-            name: Some(codebase_name.clone()),
-            languages: Vec::new(),
-            frameworks: Vec::new(),
-            file_types: std::collections::HashSet::new(),
-            dependencies: Vec::new(),
-            structure: Vec::new(),
-        };
-        let applicable = cog.cross_project.detect_applicable(&context);
-        for knowledge in applicable {
-            universal_patterns.push(serde_json::json!({
-                "pattern": format!("{:?}", knowledge),
-            }));
+    if let Some(codebase_name) = &args.codebase {
+        match cognitive.try_lock() {
+            Ok(cog) => {
+                let context = vestige_core::advanced::cross_project::ProjectContext {
+                    path: None,
+                    name: Some(codebase_name.clone()),
+                    languages: Vec::new(),
+                    frameworks: Vec::new(),
+                    file_types: std::collections::HashSet::new(),
+                    dependencies: Vec::new(),
+                    structure: Vec::new(),
+                };
+                let applicable = cog.cross_project.detect_applicable(&context);
+                for knowledge in applicable {
+                    universal_patterns.push(serde_json::json!({
+                        "pattern": format!("{:?}", knowledge),
+                    }));
+                }
+            }
+            Err(_) => {
+                crate::cognitive::try_lock_metrics::record_miss("codebase_get_context");
+            }
         }
     }
 

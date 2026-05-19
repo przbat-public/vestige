@@ -114,4 +114,12 @@ pub struct FourPhaseDreamResult {
     pub memories_downscaled: usize,
     pub emotional_processed: usize,
     pub replay_queue_size: usize,
+    /// Memory IDs strengthened during NREM3 — caller is expected to apply
+    /// the actual SQL boost (e.g. via `storage.strengthen_batch_on_access`)
+    /// so the in-memory synaptic tags are mirrored to durable storage.
+    pub strengthened_ids: Vec<String>,
+    /// Memory IDs marked for synaptic downscaling during NREM3 — caller
+    /// is expected to apply a small multiplicative decay (or schedule a
+    /// review) on these in storage. Empty when triage replayed everything.
+    pub downscaled_ids: Vec<String>,
 }

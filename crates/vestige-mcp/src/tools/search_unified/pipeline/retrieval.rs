@@ -106,6 +106,7 @@ pub(in crate::tools::search_unified) async fn run(
             filtered_results.truncate(config.limit as usize);
         }
     } else {
+        crate::cognitive::try_lock_metrics::record_miss("search_rerank");
         tracing::debug!("Search stage 2: cognitive lock contention, skipping reranker");
         filtered_results.truncate(config.limit as usize);
     }

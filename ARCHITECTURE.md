@@ -108,7 +108,7 @@ vestige/
 
 ### Search Pipeline (8 stages)
 
-0. **Decompose (new)** — compound queries split into sub-queries (semicolons, question chains, conjunctions), searched independently, merged via max-score dedup. +43% MRR on compound queries (ACL 2025)
+0. **Decompose** — compound queries split into sub-queries (semicolons, question chains, conjunctions), searched independently, merged via max-score dedup. Mitigates the single-embedding-per-multi-topic-query failure mode; no formal effect-size benchmark on production traffic.
 1. **Overfetch** — 3x results from triple hybrid search (BM25 keyword + semantic vector + Reciprocal Rank Fusion)
    - Embeddings: nomic-embed-text-v1.5, 768D → 384D Matryoshka truncation, 8K token context
    - Vector index: USearch HNSW
@@ -324,6 +324,6 @@ Three tools that go beyond automatic consolidation to enable deliberate self-exa
 |------|---------|-----------------|
 | `reflect` | Active self-examination: contradictions, gaps, stale decisions, pattern clusters | Flavell 1979 (metacognition), Schön 1983 (reflection-in-action), Nelson & Narens 1990 (metamemory) |
 | `temporal` | Temporal fact versioning: current, expired, history, invalidation | Snodgrass 1999 (bi-temporal), Graphiti/Zep 2024 (temporal knowledge graphs) |
-| `confidence` | Multi-dimensional confidence scoring: encoding, retrieval, temporal, evidence | Kahneman 2011 (dual process), Tetlock 2015 (superforecasting), Mercier & Sperber 2017 (argumentative theory) |
+| `confidence` | Heuristic multi-dimensional confidence scoring (encoding/retrieval/temporal/evidence); `calibrate` does a retention-based consistency check rather than Brier-style calibration | Inspired by Kahneman 2011 (dual process), Tetlock 2015 (superforecasting), Mercier & Sperber 2017 (argumentative theory); implementation is a weighted heuristic, **not** a calibration procedure |
 
 Exposed both as MCP tools (stdio/HTTP) and dashboard REST API endpoints (`/api/reflect`, `/api/temporal`, `/api/confidence`).

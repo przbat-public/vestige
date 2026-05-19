@@ -7,7 +7,7 @@ A Rust [Model Context Protocol](https://modelcontextprotocol.io) server that giv
 - **FSRS-6 spaced repetition** — 21-parameter personalized decay model.
 - **Dual-strength memory** — storage strength + retrieval strength (Bjork & Bjork 1992).
 - **Local semantic embeddings** — `nomic-embed-text-v1.5` (768d → 384d Matryoshka) via fastembed v5; no external API call leaves the host.
-- **HNSW vector search** — USearch index, ~20× faster than FAISS at typical sizes.
+- **HNSW vector search** — USearch index, in-memory (persistence is on the roadmap).
 - **Hybrid retrieval** — BM25 + semantic, fused with Reciprocal Rank Fusion (RRF), wrapped in an 8-stage cognitive pipeline (compound-query decomposition, Jina Reranker v2, temporal boosting, accessibility filtering, context matching, retrieval competition, spreading activation).
 - **Content Intelligence Pipeline** — entity extraction, coreference rewriting, temporal anchoring, relation extraction, and provenance tracking before storage.
 - **27 MCP tools** with `readOnlyHint` / `destructiveHint` annotations so clients can decide auto-approval per the MCP `2025-03-26` spec.
@@ -105,7 +105,8 @@ The catalog is built in [`server/catalog.rs`](src/server/catalog.rs); every entr
 ## Example Usage
 
 ```
-User: Remember that we picked FSRS-6 over SM-2 because it's 20-30% more efficient.
+User: Remember that we picked FSRS-6 over SM-2 — the open SRS benchmark
+shows materially better retention prediction at the same review budget.
 
 Claude: [calls codebase action="remember_decision"]
 Decision recorded.
@@ -113,7 +114,8 @@ Decision recorded.
 User: What did we decide about the spaced repetition algorithm?
 
 Claude: [calls codebase action="get_context", codebase="vestige"]
-We picked FSRS-6 over SM-2 — 20-30% more efficient.
+We picked FSRS-6 over SM-2 — better retention prediction in the upstream
+SRS benchmark.
 ```
 
 ## Data Storage

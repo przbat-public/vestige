@@ -308,7 +308,20 @@ async fn test_promote_changes_contain_expected_fields() {
     assert_eq!(value["changes"]["retrievalStrength"]["delta"], "+0.20");
     assert!(value["changes"]["retentionStrength"]["before"].is_number());
     assert_eq!(value["changes"]["retentionStrength"]["delta"], "+0.10");
-    assert_eq!(value["changes"]["stability"]["multiplier"], "1.5x");
+    let multiplier = value["changes"]["stability"]["multiplier"]
+        .as_str()
+        .expect("stability.multiplier must be a string");
+    assert!(
+        multiplier.ends_with('x'),
+        "stability multiplier should be FSRS-derived (e.g. 1.27x), got {multiplier}"
+    );
+    assert!(
+        value["changes"]["stability"]["note"]
+            .as_str()
+            .unwrap_or("")
+            .contains("FSRS"),
+        "stability.note should mention FSRS derivation"
+    );
 }
 
 #[tokio::test]
@@ -355,7 +368,20 @@ async fn test_demote_changes_contain_expected_fields() {
     assert!(value["changes"]["retrievalStrength"]["before"].is_number());
     assert_eq!(value["changes"]["retrievalStrength"]["delta"], "-0.30");
     assert_eq!(value["changes"]["retentionStrength"]["delta"], "-0.15");
-    assert_eq!(value["changes"]["stability"]["multiplier"], "0.5x");
+    let multiplier = value["changes"]["stability"]["multiplier"]
+        .as_str()
+        .expect("stability.multiplier must be a string");
+    assert!(
+        multiplier.ends_with('x') || multiplier == "n/a",
+        "stability multiplier should be FSRS-derived or n/a, got {multiplier}"
+    );
+    assert!(
+        value["changes"]["stability"]["note"]
+            .as_str()
+            .unwrap_or("")
+            .contains("FSRS"),
+        "stability.note should mention FSRS derivation"
+    );
 }
 
 // ========================================================================

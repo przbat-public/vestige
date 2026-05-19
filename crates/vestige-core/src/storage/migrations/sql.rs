@@ -432,10 +432,17 @@ CREATE INDEX IF NOT EXISTS idx_dream_history_dreamed_at ON dream_history(dreamed
 UPDATE schema_version SET version = 6, applied_at = datetime('now');
 "#;
 
-/// V7: Performance — FTS5 porter tokenizer for 15-30% better keyword recall (stemming)
-/// page_size upgrade handled in apply_migrations() since VACUUM can't run inside execute_batch
+/// V7: Performance — FTS5 porter tokenizer for better keyword recall (stemming).
+///
+/// `page_size = 8192` + `VACUUM` are applied by `runner::apply_migrations`
+/// after this batch, because VACUUM cannot run inside a transaction.
+///
+/// IMPORTANT: do **not** bump `schema_version` here. The runner bumps it to 7
+/// only after the post-VACUUM step succeeds — otherwise a half-finished V7
+/// (rebuilt FTS but missing page_size upgrade) would be silently considered
+/// "done" on the next startup.
 pub(super) const MIGRATION_V7_UP: &str = r#"
--- FTS5 porter tokenizer upgrade (15-30% better keyword recall via stemming)
+-- FTS5 porter tokenizer upgrade (better keyword recall via stemming)
 DROP TRIGGER IF EXISTS knowledge_ai;
 DROP TRIGGER IF EXISTS knowledge_ad;
 DROP TRIGGER IF EXISTS knowledge_au;
@@ -469,7 +476,7 @@ CREATE TRIGGER knowledge_au AFTER UPDATE ON knowledge_nodes BEGIN
     VALUES (NEW.rowid, NEW.id, NEW.content, NEW.tags);
 END;
 
-UPDATE schema_version SET version = 7, applied_at = datetime('now');
+-- schema_version bumped from runner::apply_migrations *after* VACUUM succeeds.
 "#;
 
 /// V8: v1.9.0 Autonomic — Waking SWR tags, utility scoring, retention trend tracking

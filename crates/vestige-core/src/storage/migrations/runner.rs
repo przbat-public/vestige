@@ -31,10 +31,18 @@ pub fn apply_migrations(conn: &rusqlite::Connection) -> rusqlite::Result<u32> {
 
             if migration.version == 7 {
                 // V7 includes a VACUUM which cannot run inside a transaction.
-                // Apply the SQL statements first, then page_size + VACUUM separately.
+                // Apply the SQL statements first, then page_size + VACUUM,
+                // then bump schema_version explicitly — only when every step
+                // succeeded. The earlier version of this branch bumped the
+                // version *inside* `migration.up`, which meant a VACUUM
+                // failure left the DB stuck at version=7 with no page_size
+                // upgrade and no way to retry on next start. (Audit 2026-05-19.)
                 conn.execute_batch(migration.up)?;
                 conn.pragma_update(None, "page_size", 8192)?;
                 conn.execute_batch("VACUUM;")?;
+                conn.execute_batch(
+                    "UPDATE schema_version SET version = 7, applied_at = datetime('now');",
+                )?;
                 tracing::info!("Database page_size upgraded to 8192 via VACUUM");
             } else {
                 // Wrap in a transaction so partial failures roll back atomically.

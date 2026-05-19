@@ -1,7 +1,11 @@
 //! FSRS-6 (Free Spaced Repetition Scheduler) Module
 //!
 //! The state-of-the-art spaced repetition algorithm (2025-2026).
-//! 20-30% more efficient than SM-2 (Anki's original algorithm).
+//!
+//! For an independent comparison with SM-2 see
+//! <https://github.com/open-spaced-repetition/srs-benchmark>. We deliberately
+//! do not quote a single % delta in our own docs — the effect depends heavily
+//! on the review distribution and isn't measured on Vestige's corpus.
 //!
 //! Reference: <https://github.com/open-spaced-repetition/fsrs4anki>
 //!

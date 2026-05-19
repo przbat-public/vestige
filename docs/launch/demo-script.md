@@ -43,7 +43,7 @@ vestige ingest "MCP protocol uses JSON-RPC 2.0 over stdio — no HTTP overhead, 
 vestige ingest "Bjork dual-strength model: storage strength never decreases, retrieval strength decays with time" --tags science,bjork
 vestige ingest "HyDE query expansion classifies intent into 6 types and generates 3-5 hypothetical document variants" --tags hyde,search
 vestige ingest "Ebbinghaus forgetting curve: R = e^(-t/S) where R=retrievability, t=time, S=stability" --tags science,ebbinghaus
-vestige ingest "USearch HNSW index is 20x faster than FAISS for nearest neighbor search" --tags performance,search
+vestige ingest "USearch HNSW index gives sub-millisecond in-memory ANN; persistence is a known gap" --tags performance,search
 vestige ingest "Reconsolidation (Nader 2000): retrieved memories enter a labile state for 24-48 hours where they can be modified" --tags science,reconsolidation
 vestige ingest "Anderson 1994 retrieval-induced forgetting: retrieving one memory suppresses competing memories" --tags science,competition
 vestige ingest "Einstein & McDaniel 1990 prospective memory: remember to do X when Y happens, with time/context/event triggers" --tags science,prospective-memory
@@ -411,10 +411,10 @@ vestige-mcp --version
 > Nomic Embed Text v1.5 by default — 768 dimensions truncated to 256 via Matryoshka representation learning. All local via ONNX through fastembed. v2.0 also supports Nomic v2 MoE (475M params, 8 experts) as an opt-in feature. The reranker is Jina v1 Turbo, with Qwen3-Reranker-0.6B available as opt-in.
 
 **Q: What's the storage backend?**
-> SQLite with WAL mode. FTS5 for keyword search with Porter stemming. USearch HNSW for vector search — 20x faster than FAISS. Separate reader/writer connections for concurrent access. Single file database. I8 vector quantization for 2x storage savings with under 1% recall loss.
+> SQLite with WAL mode. FTS5 for keyword search with Porter stemming. USearch HNSW for in-memory vector search — historical README quotes about "20× faster than FAISS" come from upstream marketing material, not our own benchmark, and have been removed. Separate reader/writer connections for concurrent access. Single file database.
 
 **Q: How does FSRS-6 actually work? What are the 21 parameters?**
-> FSRS models memory as a power-law forgetting curve: `R(t) = (1 + FACTOR * t / S)^(-w20)` where S is stability and w20 is the decay parameter. The 21 parameters were trained on 700 million Anki reviews using machine learning. They encode how difficulty changes with repeated reviews, how stability grows based on review quality (Again/Hard/Good/Easy), and how same-day reviews affect long-term retention. It's 30% more efficient than SM-2, which is what Anki has used for decades.
+> FSRS models memory as a power-law forgetting curve: `R(t) = (1 + FACTOR * t / S)^(-w20)` where S is stability and w20 is the decay parameter. The 21 parameters were trained on 700 million Anki reviews using machine learning. They encode how difficulty changes with repeated reviews, how stability grows based on review quality (Again/Hard/Good/Easy), and how same-day reviews affect long-term retention. For an apples-to-apples comparison against SM-2 see the upstream SRS benchmark — we do not requote a single percentage delta on our own data.
 
 **Q: Does it work with Claude Desktop? Other AI clients?**
 > Yes. It speaks MCP — the Model Context Protocol. One config change and it works with Claude Desktop, Cursor, VS Code Copilot, JetBrains, Windsurf, Xcode 26.3. Anything that speaks MCP.

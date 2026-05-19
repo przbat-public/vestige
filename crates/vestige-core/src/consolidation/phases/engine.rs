@@ -61,7 +61,7 @@ impl DreamEngine {
         phases.push(phase1);
 
         // ==================== PHASE 2: NREM3 (Consolidation) ====================
-        let (strengthened_ids, downscaled_count, phase2) =
+        let (strengthened_ids, downscaled_ids, phase2) =
             self.phase_nrem3(&replay_queue, &triaged, synaptic_tagging);
         phases.push(phase2);
 
@@ -80,9 +80,11 @@ impl DreamEngine {
             insights,
             creative_connections: connections,
             memories_strengthened: strengthened_ids.len(),
-            memories_downscaled: downscaled_count,
+            memories_downscaled: downscaled_ids.len(),
             emotional_processed,
             phases,
+            strengthened_ids,
+            downscaled_ids,
         }
     }
 

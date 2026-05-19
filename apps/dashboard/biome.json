@@ -99,7 +99,7 @@
       "!src/app.html",
       "!.svelte-kit",
       "!e2e",
-      "!src/types/generated/**"
+      "!src/types/generated"
     ]
   }
 }

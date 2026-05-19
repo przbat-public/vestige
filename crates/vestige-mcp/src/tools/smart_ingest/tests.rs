@@ -556,7 +556,7 @@ fn test_detect_compound_bullet_list() {
 fn test_detect_compound_single_fact_no_warning() {
     let content = "The hybrid_search function in vestige-core uses triple scoring: BM25 for lexical match, \
                         semantic embeddings for meaning match, and Reciprocal Rank Fusion to combine them. \
-                        The default weights are 0.4 for BM25 and 0.6 for semantic. This is configured in \
+                        The default weights are 0.3 for BM25 and 0.7 for semantic. This is configured in \
                         the search module at crates/vestige-core/src/search/hybrid.rs.";
     assert!(detect_compound_content(content).is_none());
 }

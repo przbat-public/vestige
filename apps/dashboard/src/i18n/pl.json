@@ -865,9 +865,9 @@
     },
     "science": {
       "title": "Nauka za Vestige",
-      "p1": "Vestige nie jest zbudowany na hype'ie — jest zbudowany na recenzowanych badaniach. Krzywa zapominania używa algorytmu FSRS-6 (Free Spaced Repetition Scheduler), który jest o 20-30% wydajniejszy niż SM-2 z Anki. Model podwójnej siły pochodzi od Bjork & Bjork (1992), którzy wykazali, że zapis i przywołanie to niezależne wymiary pamięci.",
-      "p2": "System połączeń używa Spreading Activation z modelu ACT-R Johna Andersona (2007) — tej samej teorii, która wyjaśnia, dlaczego widok czerwonego samochodu może przypomnieć ci o wozach strażackich. Cykl snu inspirowany jest konsolidacją pamięci podczas snu, gdy hipokamp odtwarza doświadczenia, żeby wzmocnić ważne ścieżki neuronowe.",
-      "p3": "Nawet sposób, w jaki Vestige rozróżnia opinie od faktów, czerpie z prac Daniela Kahnemana o kalibracji (2011) i badań Philipa Tetlocka nad superprognozami (2015). Cel: system, który nie tylko pamięta, ale wie, jak bardzo ufać temu, co pamięta."
+      "p1": "Vestige korzysta z recenzowanych prac nad pamięcią, ale rozróżniamy to, co naprawdę sami sprawdzamy, od tego, co po prostu zapożyczamy. Krzywa zapominania pochodzi z algorytmu FSRS-6, który zespół FSRS otwarcie porównuje z SM-2 — my tej miary nie przepowtarzamy. Model podwójnej siły pochodzi od Bjork & Bjork (1992): zapis i przywołanie to niezależne wymiary pamięci.",
+      "p2": "System połączeń to ograniczony spacer aktywacyjny po grafie wspomnień — bliżej teorii sieci semantycznej Collinsa i Loftus (1975) niż pełnego równania aktywacji z ACT-R. Cykl snu jest inspirowany odtwarzaniem hipokampalnym, które wzmacnia ważne ścieżki i tnie słabe; w środku Vestige to czterofazowa heurystyka wsadowa naśladująca tę pętlę, a nie model biofizyczny.",
+      "p3": "Kiedy Vestige oznacza opinię jako mało wiarygodną, robi spójnościowe porównanie retencji opinii z faktami — to nie jest kalibracja w stylu superprognostów Tetlocka, bo system nie ma sygnału prawdy obiektywnej, do której mógłby porównać swoje predykcje. Cel jest jednak ten sam, o który chodziło Kahnemanowi: system, który nie tylko pamięta, ale potrafi zasygnalizować, że własne przekonania warto sprawdzić."
     },
     "pagesTitle": "Przegląd stron",
     "steps": {
@@ -957,7 +957,7 @@
       "q2": "Co się dzieje, jeśli Vestige padnie?",
       "a2": "Twój AI działa dalej normalnie — po prostu nie będzie miał pamięci długoterminowej, dopóki Vestige nie wróci. Wszystkie zapisane wspomnienia leżą bezpiecznie w lokalnej bazie SQLite na twoim komputerze. Nic nie ginie.",
       "q3": "Czy moje dane są gdzieś wysyłane?",
-      "a3": "Nie. Wszystko działa lokalnie na twojej maszynie. Model embeddingów (nomic-embed-text-v1.5) uruchamia się na twoim CPU, baza danych to lokalny plik SQLite, reranker też działa lokalnie. Zero zapytań do API, zero chmury, zero śledzenia.",
+      "a3": "Gdy już działa — nie. Wszystko dzieje się lokalnie: model embeddingów (nomic-embed-text-v1.5) liczy na twoim CPU przez ONNX/fastembed, baza to lokalny plik SQLite, reranker (Jina v2) też pracuje lokalnie. Jedyny wyjątek to pierwsze uruchomienie: wagi embeddera i rerankera są wtedy ściągane z Hugging Face (potem zostają w cache na dysku). W trakcie normalnej pracy: zero zapytań do API, zero chmury, zero telemetrii.",
       "q4": "Jaka jest różnica między Snem a Konsolidacją?",
       "a4": "Cykl Snu jest kreatywny — odtwarza wspomnienia, szuka połączeń, wyłapuje sprzeczności i generuje wnioski. Pomyśl: sen. Konsolidacja to konserwacja — stosuje zanikanie, generuje brakujące embeddingi, łączy duplikaty, oblicza aktywację. Pomyśl: sprzątanie.",
       "q5": "Dlaczego niektóre wspomnienia blakną szybciej niż inne?",
@@ -986,10 +986,10 @@
       "retention": "Prawdopodobieństwo skutecznego przywołania wspomnienia teraz (0-100%). Spada z czasem, resetuje się po udanym przywołaniu.",
       "storage": "Jak głęboko wspomnienie jest zakodowane. Rośnie z każdym przywołaniem. Wysoki zapis oznacza trwałość — wspomnienie nie zblaknie łatwo.",
       "retrieval": "Jak łatwo wspomnienie przychodzi na myśl teraz. Spada z czasem, resetuje się do 100% przy dostępie.",
-      "fsrs": "Free Spaced Repetition Scheduler (wersja 6). Algorytm obliczający, kiedy wspomnienia zblakną i kiedy powinny być powtórzone. O 20-30% wydajniejszy niż SM-2.",
+      "fsrs": "Free Spaced Repetition Scheduler (wersja 6). Algorytm szacujący, kiedy wspomnienie zblaknie i kiedy warto je powtórzyć. Zespół FSRS publikuje otwarty benchmark porównujący go z SM-2 — Vestige używa ich domyślnych wag bez retreningu.",
       "embedding": "Wektor 384 liczb reprezentujący znaczenie tekstu. Generowany przez model nomic-embed-text-v1.5 działający lokalnie na twojej maszynie.",
       "dream": "Proces inspirowany neurobiologią, który odtwarza wspomnienia, szuka połączeń, wykrywa sprzeczności i generuje wnioski. Bazuje na odtwarzaniu hipokampalnym podczas snu.",
-      "activation": "Gdy myślisz o jednej rzeczy, powiązane przychodzą na myśl. W Vestige dostęp do jednego wspomnienia \"aktywuje\" połączone. Bazuje na ACT-R (Anderson, 2007).",
+      "activation": "Gdy myślisz o jednej rzeczy, powiązane przychodzą na myśl. W Vestige sięgnięcie po jedno wspomnienie \"aktywuje\" połączone — to ograniczony spacer po grafie, bliżej sieci semantycznej (Collins & Loftus, 1975) niż pełnego ACT-R.",
       "consolidation": "Rutynowa konserwacja: zastosowanie krzywej zapominania, generowanie brakujących embeddingów, łączenie duplikatów, obliczanie aktywacji.",
       "nodeType": "Kategoria wspomnienia: fakt, koncepcja, zdarzenie, osoba, miejsce, notatka, wzorzec lub decyzja. Określa, jak wspomnienie wygląda na grafie.",
       "mcp": "Model Context Protocol — standard komunikacji pozwalający asystentom AI czytać z i zapisywać do Vestige."

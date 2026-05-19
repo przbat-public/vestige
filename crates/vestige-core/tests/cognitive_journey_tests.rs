@@ -12,7 +12,9 @@
 //! - Roediger & Butler (2011): Testing effect
 //! - Loftus (2005): Misinformation effect
 //! - Tulving (1972): Episodic vs semantic memory distinction
-//! - Anderson (2007): ACT-R spreading activation
+//! - Collins & Loftus (1975): semantic network / spreading activation
+//!   (the implementation here is a bounded graph walk inspired by their model,
+//!    not the full ACT-R activation equation from Anderson 2007)
 //! - Nelson & Narens (1990): Metamemory monitoring
 //! - Cepeda et al. (2006): Spacing effect
 
@@ -126,7 +128,8 @@ fn j3_multiple_recalls_compound_storage() {
 
 // ====================================================================
 // JOURNEY 4: Spreading Activation — Associative Retrieval
-// Anderson (2007) ACT-R
+// Collins & Loftus (1975) — bounded semantic-network walk
+// (NOT the full ACT-R activation equation from Anderson 2007)
 // ====================================================================
 
 #[test]

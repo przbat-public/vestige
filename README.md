@@ -41,7 +41,7 @@ Every memory ingested through `smart_ingest` is now automatically enriched:
 All local heuristic/regex — zero model downloads, sub-millisecond latency (98µs per memory).
 
 ### Compound Query Decomposition
-Queries like "auth security; infrastructure costs" or "Who worked on FSRS? And what about dream consolidation?" are automatically split, searched independently, and merged. **+43% MRR improvement** on compound queries.
+Queries like "auth security; infrastructure costs" or "Who worked on FSRS? And what about dream consolidation?" are automatically split on semicolons, question chains and conjunctions, searched independently, then merged with max-score dedup. Helpful whenever a single dense embedding has to represent two unrelated topics at once.
 
 ### Provenance in Search Results
 Use `detail_level: "full"` to see the full provenance trail — which agent created the memory, what entities were extracted, what temporal anchors were found, and what relations were extracted.
@@ -51,7 +51,7 @@ Use `detail_level: "full"` to see the full provenance trail — which agent crea
 ### Metacognitive Tools (new in v3.1)
 - **`reflect`** — deliberate self-examination of memories. Detects contradictions, knowledge gaps, stale decisions, overconfident memories, pattern clusters. Based on Flavell (1979), Schön (1983), Nelson & Narens (1990)
 - **`temporal`** — temporal fact versioning. Query valid-now, expired, historical facts. Mark facts as no longer valid. Based on bi-temporal theory (Snodgrass 1999) and Graphiti temporal knowledge graphs
-- **`confidence`** — multi-dimensional confidence scoring. Evaluate encoding, retrieval, temporal, and evidence strength. Audit poorly-calibrated memories. Based on Kahneman (2011), Tetlock (2015)
+- **`confidence`** — heuristic multi-dimensional confidence scoring (encoding, retrieval, temporal, evidence). Audit surfaces memories with low aggregate scores. `calibrate` performs a retention-based consistency check between opinions and facts on the same topic — it is **not** Brier-score calibration (Vestige has no ground-truth prediction stream). Inspired by Kahneman (2011) and Tetlock (2015).
 - **Dashboard integration** — Self-Reflection and Confidence Audit accessible from the Settings page
 - **18 cognitive journey tests** — each mapped to published research (Bjork, Roediger & Karpicke, Collins & Loftus, Brown & Kulik, and more)
 
@@ -345,7 +345,7 @@ At the start of every session:
 | **Codebase** | 1,080+ tests + 10 scientific validation + 18 cognitive journey tests |
 | **Binary size** | ~20MB |
 | **Embeddings** | Nomic Embed Text v1.5 (768D → 384D Matryoshka, 8192 context) |
-| **Vector search** | USearch HNSW (20x faster than FAISS) |
+| **Vector search** | USearch HNSW (in-memory ANN, single-thread reads via mutex) |
 | **Reranker** | Jina Reranker v2 Base Multilingual (278M params) |
 | **Search** | Triple hybrid scoring (BM25 + semantic + RRF) + metacognition + interference resolution |
 | **Storage** | SQLite + FTS5 (optional SQLCipher encryption) |

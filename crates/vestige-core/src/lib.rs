@@ -2,10 +2,10 @@
 //!
 //! Cognitive memory engine for AI systems. Implements modern memory science:
 //!
-//! - **FSRS-6**: 21-parameter spaced repetition (30% more efficient than SM-2)
+//! - **FSRS-6**: 21-parameter spaced repetition (see <https://github.com/open-spaced-repetition/srs-benchmark> for FSRS-vs-SM-2 effect sizes)
 //! - **Dual-Strength Model**: Bjork & Bjork (1992) storage/retrieval strength
 //! - **Semantic Embeddings**: Local fastembed v5 (nomic-embed-text-v1.5, 768 dimensions)
-//! - **HNSW Vector Search**: USearch (20x faster than FAISS)
+//! - **HNSW Vector Search**: USearch (in-memory; persistence is a known gap — see CHANGELOG)
 //! - **Temporal Memory**: Bi-temporal model with validity periods
 //! - **Hybrid Search**: RRF fusion of keyword (BM25/FTS5) + semantic
 //!

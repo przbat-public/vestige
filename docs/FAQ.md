@@ -589,9 +589,11 @@ This is powerful for personal growth tracking but should not replace professiona
 | **FSRS-6** | Power law | 21 | 700M+ reviews |
 
 FSRS-6 advantages:
-- **30% more efficient** than SM-2 in benchmarks
-- **Power law forgetting** (more accurate than exponential)
-- **Personalized parameters** (w₀-w₂₀ tune to your pattern)
+- **Better fit than SM-2** on the FSRS team's open SRS benchmark
+  ([`open-spaced-repetition/srs-benchmark`](https://github.com/open-spaced-repetition/srs-benchmark)).
+  Vestige uses the upstream weights as-is and does not rerun the benchmark on its own corpus.
+- **Power law forgetting** (better fit to long-tail decay than a pure exponential)
+- **Personalized parameters** (w₀-w₂₀ tune to your review history)
 - **Open source** and actively maintained
 
 The forgetting curve:

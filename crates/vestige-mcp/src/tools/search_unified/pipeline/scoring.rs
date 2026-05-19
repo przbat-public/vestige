@@ -87,6 +87,8 @@ fn apply_temporal_boost(
             result.combined_score = result.combined_score * 0.85
                 + (result.combined_score * temporal_factor as f32) * 0.15;
         }
+    } else {
+        crate::cognitive::try_lock_metrics::record_miss("search_scoring");
     }
 }
 

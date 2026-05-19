@@ -203,11 +203,12 @@ fn test_synaptic_downscaling() {
     // Only replay the important one
     let replay_queue = vec!["replayed".to_string()];
 
-    let (_strengthened, downscaled, _phase) =
+    let (_strengthened, downscaled_ids, _phase) =
         engine.phase_nrem3(&replay_queue, &triaged, &mut synaptic);
 
     // The unreplayed low-importance memory should be marked for downscaling
-    assert_eq!(downscaled, 1);
+    assert_eq!(downscaled_ids.len(), 1);
+    assert_eq!(downscaled_ids[0], "unreplayed");
 }
 
 #[test]

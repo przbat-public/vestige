@@ -3,8 +3,13 @@
 //! Assigns multi-dimensional confidence scores to memories, distinguishing
 //! hard facts from opinions, verified knowledge from assumptions.
 //!
-//! Based on: Kahneman (2011) confidence calibration, Tetlock (2015)
-//! superforecasting, Mercier & Sperber (2017) argumentative theory.
+//! Inspired by the broader literature on belief calibration (Kahneman 2011,
+//! Tetlock 2015, Mercier & Sperber 2017), but the scoring implemented here is
+//! a heuristic weighted sum over four signals (encoding, retrieval, temporal,
+//! evidence). It is *not* Brier-score calibration — we have no ground-truth
+//! prediction stream to score against. The `calibrate` action specifically
+//! does a retention-based consistency check between opinions and facts on the
+//! same topic, not a true probability calibration in the Tetlock sense.
 
 use std::sync::Arc;
 
@@ -19,7 +24,7 @@ pub fn schema() -> Value {
             "action": {
                 "type": "string",
                 "enum": ["score", "audit", "calibrate"],
-                "description": "score: evaluate a single memory's confidence. audit: find poorly-calibrated memories. calibrate: compare self-assessment with evidence."
+                "description": "score: evaluate a single memory's heuristic confidence (encoding/retrieval/temporal/evidence). audit: surface poorly-calibrated memories based on the same heuristic. calibrate: retention-based consistency check — compare how strongly opinions and facts on the same topic are remembered (not Brier-score calibration; the system has no ground-truth prediction stream)."
             },
             "memory_id": {
                 "type": "string",
@@ -207,12 +212,20 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
 
             Ok(serde_json::json!({
                 "action": "calibrate",
+                "methodology": "retention-based consistency check (opinions vs facts on this corpus). NOT Brier-score probability calibration — Vestige does not store predicted probabilities or ground-truth outcomes.",
                 "totalMemories": memories.len(),
                 "opinions": opinions.len(),
                 "facts": facts.len(),
                 "opinionAvgRetention": format!("{:.3}", opinion_avg_retention),
                 "factAvgRetention": format!("{:.3}", fact_avg_retention),
-                "calibrationGap": format!("{:.3}", (opinion_avg_retention - fact_avg_retention).abs()),
+                "retentionGap": format!("{:.3}", (opinion_avg_retention - fact_avg_retention).abs()),
+                "interpretation": if opinion_avg_retention > fact_avg_retention + 0.1 {
+                    "Opinions are remembered more strongly than facts on this corpus — review opinions before relying on them."
+                } else if fact_avg_retention > opinion_avg_retention + 0.1 {
+                    "Facts dominate retention — opinions decay faster, which is the expected pattern."
+                } else {
+                    "Opinions and facts decay at comparable rates; no obvious imbalance detected."
+                },
                 "opinionsNeedingReview": opinions_needing_review,
             }))
         }

@@ -49,7 +49,7 @@ where factor = 0.9^(-1/w₂₀) - 1
 - `S` = stability (time for R to drop to 90%)
 - `w₂₀` = personalized decay parameter (0.1-0.8)
 
-FSRS-6 uses 21 parameters optimized on 700M+ Anki reviews—[30% more efficient than SM-2](https://github.com/open-spaced-repetition/srs-benchmark).
+FSRS-6 uses 21 parameters optimized on 700M+ Anki reviews. The FSRS team's open [SRS benchmark](https://github.com/open-spaced-repetition/srs-benchmark) compares it against SM-2 and other schedulers; their published number is roughly a 30% reduction in review burden at the same target retention. Vestige uses the upstream default weights as-is and does **not** rerun that benchmark on its own corpus — quote the upstream measurement, not ours.
 
 ### Why Power Law?
 

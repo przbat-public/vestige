@@ -248,7 +248,7 @@ Adds a 5-stage Content Intelligence Pipeline that enriches memories at ingest ti
 #### Compound Query Decomposition (`search/decompose.rs`)
 - Detects and splits multi-part queries: semicolons ("X; Y"), question chains ("What about X? And Y?"), conjunctions ("X and also Y")
 - Searches sub-queries independently, merges results via union + max-score dedup
-- **+43% MRR improvement** on compound queries, **470ns latency** per decomposition
+- **~470ns latency** per decomposition (split + heuristic detection). MRR effect on real workloads is workload-dependent and has not been formally benchmarked outside the internal LoCoMo subset.
 - Integrated into `search_unified.rs` Stage 0 (before overfetch)
 
 #### Schema & Storage
@@ -265,7 +265,7 @@ Adds a 5-stage Content Intelligence Pipeline that enriches memories at ingest ti
 - **77 unit tests** across 7 modules (entities, coref, temporal, relations, provenance, pipeline, decompose)
 - **8 integration tests** (`preprocessing_pipeline.rs`) — full pipeline journeys, edge cases, performance
 - **5 retrieval benchmarks** (`benchmark_retrieval.rs`) — 50 synthetic memories, Precision@5/Recall@5/MRR evaluation, latency measurements
-- Benchmark results: Preprocessing 98µs/memory, Decomposition 470ns/query, +11% MRR from enrichment
+- Benchmark numbers: preprocessing ~98µs/memory, decomposition ~470ns/query. The "MRR from enrichment" delta previously quoted (+11%) was measured on a 50-memory synthetic set and is not reproducible across realistic corpora; removed from the README and AGENTS docs accordingly.
 
 #### Dependencies
 - `natural-date-rs` v0.3 — natural language date parsing (optional, `preprocessing` feature)
@@ -288,7 +288,7 @@ Building on v3.0.0's foundation, this release adds three metacognitive tools to 
 #### MCP Tools — Metacognitive Layer (24 tools total, was 21)
 - **`reflect`** — deliberate self-examination of memories. Detects contradictions, knowledge gaps, stale decisions, overconfident memories, and pattern clusters. Configurable depth (quick/standard/deep) and optional topic focus. Based on Flavell (1979) metacognition, Schön (1983) reflection-in-action, Nelson & Narens (1990) metamemory monitoring
 - **`temporal`** — temporal fact versioning. Query time-sensitive knowledge: `current` (valid-now facts), `expired` (no-longer-valid), `history` (evolution of a topic over time), `invalidate` (mark a fact as no longer valid). Based on Graphiti temporal knowledge graphs (Zep 2024), bi-temporal database theory (Snodgrass 1999)
-- **`confidence`** — confidence scoring for opinions and beliefs. Multi-dimensional scores (encoding, retrieval, temporal, evidence). Actions: `score` (single memory), `audit` (find poorly-calibrated memories), `calibrate` (compare opinions vs facts retention). Based on Kahneman (2011), Tetlock (2015), Mercier & Sperber (2017)
+- **`confidence`** — confidence scoring for opinions and beliefs. Multi-dimensional heuristic scores (encoding, retrieval, temporal, evidence). Actions: `score` (heuristic per-memory), `audit` (surface low-confidence memories using the same heuristic), `calibrate` (retention-based consistency check comparing opinions vs facts on the same topic — **not** Brier-score calibration, since the system has no ground-truth prediction stream). Inspired by Kahneman (2011), Tetlock (2015), Mercier & Sperber (2017), but the implementation is a heuristic weighted sum, not a calibration procedure in the Tetlock sense.
 
 #### Dashboard REST API — 3 New Endpoints (18 total, was 15)
 - `POST /api/reflect` — trigger self-reflection with optional `focus` and `depth` params
@@ -297,7 +297,7 @@ Building on v3.0.0's foundation, this release adds three metacognitive tools to 
 
 #### Dashboard Frontend
 - **Metacognitive Tools panel** on Settings page — "Self-Reflection" and "Confidence Audit" buttons with result visualization (severity badges, confidence percentages, classification labels)
-- **Tutorial page massively expanded** — 6 new sections: "Think of it like..." (3 analogies: library, brain, web), "How a memory lives and dies" (5-step lifecycle), "The Science Behind Vestige" (FSRS-6, Bjork, ACT-R, Kahneman/Tetlock), FAQ (8 questions covering privacy, embeddings, MCP), Glossary (10 terms), 4 new concepts (dual strength, search, reflect, confidence). Written for high-school comprehension level
+- **Tutorial page massively expanded** — 6 new sections: "Think of it like..." (3 analogies: library, brain, web), "How a memory lives and dies" (5-step lifecycle), "The Science Behind Vestige" (FSRS-6, Bjork, Collins & Loftus spreading activation, Kahneman-style "know what you don't know"), FAQ (8 questions covering privacy, embeddings, MCP), Glossary (10 terms), 4 new concepts (dual strength, search, reflect, confidence). Written for high-school comprehension level
 - **Frontend API client** — `api.reflect()`, `api.temporal()`, `api.confidence()` with full TypeScript types (`ReflectResult`, `TemporalResult`, `ConfidenceResult`)
 
 #### Backend Cleanup (from earlier in session)
@@ -683,9 +683,9 @@ The biggest release in Vestige history. A complete visual and cognitive overhaul
 - FSRS-6 spaced repetition algorithm with 21 parameters
 - Bjork & Bjork dual-strength memory model (storage + retrieval strength)
 - Local semantic embeddings with fastembed v5 (BGE-base-en-v1.5, 768 dimensions)
-- HNSW vector search with USearch (20x faster than FAISS)
+- HNSW vector search with USearch (in-memory ANN; historical READMEs and comments quoted "20× faster than FAISS" without an in-repo benchmark — that claim has been removed from current docs)
 - Hybrid search combining BM25 keyword + semantic + RRF fusion
-- Two-stage retrieval with reranking (+15-20% precision)
+- Two-stage retrieval with reranking (Jina Reranker v2 cross-encoder; cited precision uplifts are from the published reranker paper, not measured on this corpus)
 - MCP server for Claude Desktop integration
 - Tauri desktop application
 - Codebase memory module for AI code understanding

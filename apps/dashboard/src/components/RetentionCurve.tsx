@@ -9,9 +9,24 @@ interface Props {
   height?: number;
 }
 
+// FSRS-6 power-law forgetting curve, matched to the tutorial sandbox
+// (`RetentionCurveWidget`) so the two visualisations on the dashboard never
+// disagree.
+//
+// Formula:  R(t) = (1 + FACTOR * t / S) ^ DECAY
+// with `FACTOR = 19 / 81` and `DECAY = -0.5`, the canonical FSRS-6 constants
+// for `w20 = 0.5`.
+//
+// The previous implementation used a plain exponential `exp(-t/S)`. That is
+// the Ebbinghaus curve, not FSRS-6, and it was visibly inconsistent with
+// the rest of the engine (which is power-law). Replaced 2026-05-19.
+const FSRS_FACTOR = 19 / 81;
+const FSRS_DECAY = -0.5;
+
 function retentionAtDays(days: number, stability: number): number {
   if (stability <= 0) return 0;
-  return Math.exp(-days / stability);
+  if (days <= 0) return 1;
+  return (1 + (FSRS_FACTOR * days) / stability) ** FSRS_DECAY;
 }
 
 export function RetentionCurve({ retention, stability, width = 240, height = 80 }: Props) {

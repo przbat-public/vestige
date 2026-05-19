@@ -5,10 +5,12 @@
 //! powered by 130 years of memory research.
 //!
 //! Core Features:
-//! - FSRS-6 spaced repetition algorithm (21 parameters, 30% more efficient than SM-2)
+//! - FSRS-6 spaced repetition algorithm (21 parameters; see the upstream SRS
+//!   benchmark at <https://github.com/open-spaced-repetition/srs-benchmark> for
+//!   FSRS-vs-SM-2 comparisons — we do not requote a single percentage here)
 //! - Bjork dual-strength memory model
 //! - Local semantic embeddings (nomic-embed-text-v1.5, 384D Matryoshka, no external API)
-//! - HNSW vector search (20x faster than FAISS)
+//! - HNSW vector search via USearch (in-memory; persistence still pending)
 //! - Hybrid search (BM25 + semantic + RRF fusion)
 //!
 //! Neuroscience Features:

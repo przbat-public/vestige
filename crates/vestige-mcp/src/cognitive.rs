@@ -80,6 +80,17 @@ use vestige_core::{
 /// index vs metacognition…) is the obvious next step once the API stabilizes;
 /// the current monolith is fine while the surface keeps shifting between
 /// patches. See the audit notes in CHANGELOG `[3.2.1]` for the open plan.
+///
+/// ## Lock miss telemetry
+///
+/// Hot paths that *do* keep using `try_lock()` (rerank, scoring, post-ingest,
+/// finalize, codebase tools…) intentionally treat contention as
+/// "skip this enrichment". To make those skips observable, every such call
+/// site reports a counter via [`try_lock_metrics::record_miss`]. The
+/// `system_status` MCP tool exposes the snapshot under
+/// `cognitive.tryLockMisses`, so we can tell *which* enrichment was being
+/// skipped instead of staring at a constant retention number wondering why
+/// activations look flat. Added 2026-05-19.
 pub struct CognitiveEngine {
     // -- Neuroscience --
     pub activation_network: ActivationNetwork,
@@ -274,6 +285,70 @@ impl CognitiveEngine {
             // Metacognition
             metacognition: MetacognitionMonitor::new(),
         }
+    }
+}
+
+/// Per-stage telemetry for `try_lock()` skips in cognitive hot paths.
+///
+/// `try_lock()` returning `None` is *not* an error — it's how we keep request
+/// latency bounded when the engine is busy. But silently dropping the
+/// enrichment used to be invisible from the outside: search would return
+/// fewer activated neighbours, scores would shift, and there was no signal
+/// at all in logs or metrics. Now every call site that bails on `try_lock()`
+/// bumps a counter here, and `system_status` surfaces the totals so operators
+/// can spot a saturated cognitive engine.
+///
+/// The counters are best-effort `Relaxed` atomics — we never read them on a
+/// hot path, only when `system_status` snapshots them.
+pub mod try_lock_metrics {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    macro_rules! stages {
+        ($($name:ident => $key:literal),* $(,)?) => {
+            $(static $name: AtomicU64 = AtomicU64::new(0);)*
+
+            /// Stable, snake_case labels exposed in `system_status`.
+            pub const STAGES: &[&str] = &[$($key),*];
+
+            /// Bump the counter for `stage`. Unknown stages are silently
+            /// ignored so a typo never breaks a request path.
+            pub fn record_miss(stage: &'static str) {
+                match stage {
+                    $($key => { $name.fetch_add(1, Ordering::Relaxed); })*
+                    _ => {}
+                }
+            }
+
+            /// Snapshot of every counter as `(label, count)` pairs.
+            pub fn snapshot() -> Vec<(&'static str, u64)> {
+                vec![$(($key, $name.load(Ordering::Relaxed))),*]
+            }
+
+            #[cfg(test)]
+            pub fn reset() {
+                $($name.store(0, Ordering::Relaxed);)*
+            }
+        };
+    }
+
+    stages! {
+        SEARCH_RETRIEVAL => "search_retrieval",
+        SEARCH_RERANK => "search_rerank",
+        SEARCH_SCORING => "search_scoring",
+        SEARCH_FINALIZE => "search_finalize",
+        INGEST_PRE => "ingest_pre",
+        INGEST_POST => "ingest_post",
+        MEMORY_PROMOTE => "memory_promote",
+        MEMORY_DEMOTE => "memory_demote",
+        INTENTION_SET => "intention_set",
+        INTENTION_CHECK => "intention_check",
+        CODEBASE_PATTERN => "codebase_pattern",
+        CODEBASE_DECISION => "codebase_decision",
+        CODEBASE_DECISION_V2 => "codebase_decision_v2",
+        CODEBASE_GET_CONTEXT => "codebase_get_context",
+        CROSS_REFERENCE => "cross_reference",
+        DEEP_REFERENCE => "deep_reference",
+        SYSTEM_STATUS => "system_status",
     }
 }
 

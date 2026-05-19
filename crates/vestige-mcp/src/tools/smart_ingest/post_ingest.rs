@@ -71,6 +71,8 @@ pub(super) fn run_post_ingest_with_neighbors(
                 0.5,
             );
         }
+    } else {
+        crate::cognitive::try_lock_metrics::record_miss("ingest_post");
     }
 }
 
@@ -112,7 +114,11 @@ pub(super) async fn create_relation_edges(
         return;
     };
 
-    if let Ok(mut cog) = cognitive.try_lock() {
+    let Ok(mut cog) = cognitive.try_lock() else {
+        crate::cognitive::try_lock_metrics::record_miss("ingest_post");
+        return;
+    };
+    {
         for matches in matches_per_relation {
             for matched in matches {
                 if matched.id != node_id {

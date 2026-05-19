@@ -154,8 +154,12 @@ pub async fn execute_system_status(
             },
         }))
     } else {
+        crate::cognitive::try_lock_metrics::record_miss("system_status");
         None
     };
+
+    // === try_lock skip metrics (operational visibility into cognitive contention) ===
+    let try_lock_skips = crate::cognitive::try_lock_metrics::snapshot();
 
     // === Automation triggers (for conditional dream/backup/gc at session start) ===
     // Three sequential single-row SELECTs plus an optional COUNT. Cheap each,
@@ -206,6 +210,7 @@ pub async fn execute_system_status(
         "fsrsPreview": fsrs_preview,
         // Cognitive
         "cognitiveHealth": cognitive_health,
+        "tryLockSkips": try_lock_skips,
         // Automation triggers — Claude uses these to decide when to dream/backup/gc
         "automationTriggers": {
             "lastDreamTimestamp": last_dream.map(|dt| dt.to_rfc3339()),

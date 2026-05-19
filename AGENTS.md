@@ -97,7 +97,7 @@ Every memory must contain **exactly ONE** fact, decision, event, or insight. Com
 
 **Good (atomic):**
 ```json
-{ "content": "Vestige search uses triple hybrid scoring: BM25 + semantic + RRF. The weights are 0.4/0.6 for BM25/semantic.", "tags": ["vestige", "architecture"], "node_type": "fact" }
+{ "content": "Vestige search uses triple hybrid scoring: BM25 + semantic + RRF. The default weights are 0.3/0.7 for BM25/semantic.", "tags": ["vestige", "architecture"], "node_type": "fact" }
 ```
 
 **Bad (compound — will trigger warning):**
@@ -150,7 +150,7 @@ Every search strengthens the memories it finds (Testing Effect).
 
 **Retrieval modes:** `precise` (top results only, fast, skips activation/competition), `balanced` (full 8-stage cognitive pipeline, default), `exhaustive` (maximum recall with 5x overfetch, deep graph traversal, no competition suppression).
 
-**Compound query decomposition:** Queries containing semicolons, question chains, or conjunctions are automatically split into sub-queries, searched independently, and merged (union, max-score dedup). Improves MRR by +43% on multi-topic queries.
+**Compound query decomposition:** Queries containing semicolons, question chains, or conjunctions are automatically split into sub-queries, searched independently, and merged (union, max-score dedup). Useful for multi-topic questions like `"Who worked on FSRS? And dream consolidation?"`. Effect size on real workloads has not been formally benchmarked outside the internal LoCoMo subset; treat any improvement as workload-dependent.
 
 **Provenance in results:** Use `detail_level: "full"` to include provenance metadata (session, agent, entities, relations, temporal anchors) in search results.
 
@@ -333,7 +333,7 @@ restore: { "path": "/path/to/backup.json" }
 
 - **Crate:** `vestige-mcp` v3.4.0, Rust 2024 edition, MSRV 1.91
 - **Tools:** 28 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference). Canonical list lives in `vestige-mcp/src/server/catalog.rs::build_tools_list`.
-- **Tests:** 1,389 passing (workspace `cargo test`) — unit + E2E + cognitive + journey + extreme + MCP protocol + scientific validation
+- **Tests:** workspace `cargo test` runs the full unit + E2E + cognitive + journey + extreme + MCP protocol + scientific-validation suites; exact pass count drifts with each release, so check the latest CI log instead of hard-coding it here
 - **Build:** `cargo build --release -p vestige-mcp` (features: `embeddings` + `vector-search` + `preprocessing`)
 - **Build (no embeddings):** `cargo build --release -p vestige-mcp --no-default-features`
 - **Preprocessing:** entity extraction, coreference rewriting, temporal anchoring, relation extraction — all local regex/heuristic, zero model downloads. Feature-gated under `preprocessing` (default on).
@@ -343,7 +343,7 @@ restore: { "path": "/path/to/backup.json" }
 - **Embeddings:** nomic-embed-text-v1.5 (768D → 384D Matryoshka truncation, 8K context) via fastembed (local ONNX, no API)
 - **Reranker:** Jina Reranker v2 Base Multilingual (278M params) cross-encoder
 - **Search:** Compound query decomposition + Triple hybrid scoring (BM25 + semantic + RRF), active forgetting, prospective indexing
-- **Vector index:** USearch HNSW (20x faster than FAISS)
+- **Vector index:** USearch HNSW (in-memory ANN; persistence is a known gap — see CHANGELOG "Known Issues")
 - **Binaries:** `vestige-mcp` (MCP server), `vestige` (CLI), `vestige-restore`
 - **Dashboard:** React 19 + Vite 6 + React Router 7 + Three.js + Tailwind 4 + i18next (EN/PL), embedded at `/dashboard`
 - **Dashboard API:** 39 REST routes (including `/api/reflect`, `/api/temporal`, `/api/confidence`, `/api/decisions`, `/api/hubs`, `/api/insights`, `/api/_meta/limits`). Handlers split per domain under `dashboard/handlers/` (memory, search, graph, history, intentions, maintenance, review, cognitive, metacognitive, observability, decisions, hubs, insights, pages).

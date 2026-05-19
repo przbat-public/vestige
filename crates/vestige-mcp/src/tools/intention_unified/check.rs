@@ -24,21 +24,25 @@ pub(super) async fn execute_check(
     // ====================================================================
     // COGNITIVE: Update prospective memory context
     // ====================================================================
-    if let Some(ctx) = &args.context
-        && let Ok(cog) = cognitive.try_lock()
-    {
-        let mut prospective_ctx = ProspectiveContext::new();
-        if let Some(codebase) = &ctx.codebase {
-            prospective_ctx.project_name = Some(codebase.clone());
+    if let Some(ctx) = &args.context {
+        match cognitive.try_lock() {
+            Ok(cog) => {
+                let mut prospective_ctx = ProspectiveContext::new();
+                if let Some(codebase) = &ctx.codebase {
+                    prospective_ctx.project_name = Some(codebase.clone());
+                }
+                if let Some(file) = &ctx.file {
+                    prospective_ctx.active_files = vec![file.clone()];
+                }
+                if let Some(topics) = &ctx.topics {
+                    prospective_ctx.active_topics = topics.clone();
+                }
+                let _ = cog.prospective_memory.update_context(prospective_ctx);
+            }
+            Err(_) => {
+                crate::cognitive::try_lock_metrics::record_miss("intention_check");
+            }
         }
-        if let Some(file) = &ctx.file {
-            prospective_ctx.active_files = vec![file.clone()];
-        }
-        if let Some(topics) = &ctx.topics {
-            prospective_ctx.active_topics = topics.clone();
-        }
-        // Update context on prospective memory (triggers internal monitoring)
-        let _ = cog.prospective_memory.update_context(prospective_ctx);
     }
 
     // Get active intentions on the blocking pool — covering index on

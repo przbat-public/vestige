@@ -256,6 +256,8 @@ pub(super) async fn execute_promote(
                 },
             );
         }
+    } else {
+        crate::cognitive::try_lock_metrics::record_miss("memory_promote");
     }
 
     // Insight tag housekeeping. After the first successful validation we
@@ -279,6 +281,11 @@ pub(super) async fn execute_promote(
         .await;
     }
 
+    let stability_ratio = if before.stability > 0.0 {
+        node.stability / before.stability
+    } else {
+        1.0
+    };
     Ok(serde_json::json!({
         "success": true,
         "action": "promoted",
@@ -298,8 +305,10 @@ pub(super) async fn execute_promote(
             "stability": {
                 "before": before.stability,
                 "after": node.stability,
-                "multiplier": "1.5x"
+                "multiplier": format!("{:.2}x", stability_ratio),
+                "note": "Derived from an FSRS Good review, not a flat heuristic",
             },
+            "nextReview": node.next_review.map(|dt| dt.to_rfc3339()),
             "insightValidated": insight_validated_now,
         },
         "message": format!("Memory promoted. It will now surface more often in searches. Retrieval: {:.2} -> {:.2}{}",
@@ -348,6 +357,8 @@ pub(super) async fn execute_demote(
                 },
             );
         }
+    } else {
+        crate::cognitive::try_lock_metrics::record_miss("memory_demote");
     }
 
     Ok(serde_json::json!({
@@ -369,8 +380,12 @@ pub(super) async fn execute_demote(
             "stability": {
                 "before": before.stability,
                 "after": node.stability,
-                "multiplier": "0.5x"
-            }
+                "multiplier": if before.stability > 0.0 {
+                    format!("{:.2}x", node.stability / before.stability)
+                } else { "n/a".to_string() },
+                "note": "Derived from an FSRS Again (lapse) review, not a flat heuristic",
+            },
+            "nextReview": node.next_review.map(|dt| dt.to_rfc3339()),
         },
         "message": format!("Memory demoted. Better alternatives will now surface instead. Retrieval: {:.2} -> {:.2}",
             before.retrieval_strength, node.retrieval_strength),

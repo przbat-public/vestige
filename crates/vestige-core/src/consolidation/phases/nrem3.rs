@@ -14,7 +14,7 @@ impl DreamEngine {
         replay_queue: &[String],
         triaged: &[TriagedMemory],
         synaptic_tagging: &mut SynapticTaggingSystem,
-    ) -> (Vec<String>, usize, PhaseResult) {
+    ) -> (Vec<String>, Vec<String>, PhaseResult) {
         let start = Instant::now();
         let mut actions = Vec::new();
         let mut strengthened_ids = Vec::new();
@@ -55,11 +55,11 @@ impl DreamEngine {
 
         // Synaptic downscaling: reduce retention on unreplayed low-importance memories
         let mut downscaled_count = 0;
+        let mut downscaled_ids = Vec::new();
         for tm in triaged {
             if !replay_set.contains(&tm.id) && tm.importance < 0.4 {
-                // This memory wasn't replayed and has low importance
-                // In the actual DB update, we'd multiply retrieval_strength by downscale_factor
                 downscaled_count += 1;
+                downscaled_ids.push(tm.id.clone());
             }
         }
 
@@ -77,6 +77,7 @@ impl DreamEngine {
             actions,
         };
 
-        (strengthened_ids, downscaled_count, phase)
+        let _ = downscaled_count; // kept for parity with the previous return signature
+        (strengthened_ids, downscaled_ids, phase)
     }
 }

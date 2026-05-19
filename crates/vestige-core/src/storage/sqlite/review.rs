@@ -188,6 +188,40 @@ impl Storage {
         Ok(())
     }
 
+    /// NREM3 synaptic downscaling — multiplies retention/retrieval strengths
+    /// by `factor` (typically 0.95) on memories that weren't replayed during
+    /// the dream cycle. Unlike `apply_decay`, this is event-driven (one
+    /// pulse per dream) rather than time-based. Best-effort: a failed UPDATE
+    /// inside the batch logs and continues so a single bad row never aborts
+    /// the rest of the consolidation.
+    pub fn downscale_retention_batch(&self, ids: &[&str], factor: f64) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        // Clamp to a safe range — downscaling above 1.0 would silently
+        // promote, below 0.0 would zero everything out.
+        let f = factor.clamp(0.1, 0.999);
+        let writer = self
+            .writer
+            .lock()
+            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+        writer.execute_batch("BEGIN IMMEDIATE")?;
+        let mut stmt = writer.prepare_cached(
+            "UPDATE knowledge_nodes SET
+                retention_strength = MAX(0.05, retention_strength * ?1),
+                retrieval_strength = MAX(0.05, retrieval_strength * ?1)
+            WHERE id = ?2",
+        )?;
+        for id in ids {
+            if let Err(e) = stmt.execute(params![f, id]) {
+                tracing::debug!(error = %e, memory_id = %id, "downscale skipped");
+            }
+        }
+        drop(stmt);
+        writer.execute_batch("COMMIT")?;
+        Ok(())
+    }
+
     /// Batch strengthen multiple memories on access.
     /// Runs primary boost for all IDs in a single transaction to avoid
     /// acquiring/releasing the writer lock N times.
@@ -289,66 +323,116 @@ impl Storage {
         Ok(())
     }
 
-    /// Promote a memory (thumbs up) - used when a memory led to a good outcome
-    /// Significantly boosts retrieval strength so it surfaces more often.
+    /// Promote a memory (thumbs up) — runs an FSRS `Good` review under the
+    /// hood so stability, difficulty, and `next_review` move along the same
+    /// curve as a normal review, then adds the user-feedback delta on
+    /// retrieval/retention so the memory surfaces more often.
     /// v1.9.0: Also sets waking SWR tag for preferential dream replay.
+    /// v3.4.0: Stability/difficulty now flow through `FSRSScheduler::review`
+    /// instead of the previous flat `stability * 1.5` heuristic — see
+    /// `mark_reviewed` for the same code path with explicit grading.
     pub fn promote_memory(&self, id: &str) -> Result<KnowledgeNode> {
-        let now = Utc::now();
-
-        // Strong boost: +0.2 retrieval, +0.1 retention, +1 useful count
-        {
-            let writer = self
-                .writer
-                .lock()
-                .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-            writer.execute(
-                "UPDATE knowledge_nodes SET
-                    last_accessed = ?1,
-                    retrieval_strength = MIN(1.0, retrieval_strength + 0.20),
-                    retention_strength = MIN(1.0, retention_strength + 0.10),
-                    stability = stability * 1.5,
-                    times_useful = COALESCE(times_useful, 0) + 1
-                WHERE id = ?2",
-                params![now.to_rfc3339(), id],
-            )?;
-        }
-
+        let _ = self.fsrs_user_feedback(id, Rating::Good, 0.20, 0.10, true)?;
         let _ = self.log_access(id, "promote");
-
-        // v1.9.0: Set waking SWR tag for preferential dream replay
         let _ = self.set_waking_tag(id);
-
         self.get_node(id)?
             .ok_or_else(|| StorageError::NotFound(id.to_string()))
     }
 
-    /// Demote a memory (thumbs down) - used when a memory led to a bad outcome
-    /// Significantly reduces retrieval strength so better alternatives surface
-    /// Does NOT delete - the memory stays for reference but ranks lower
+    /// Demote a memory (thumbs down) — runs an FSRS `Again` review so
+    /// stability collapses through the lapse path rather than a flat
+    /// `× 0.5` heuristic, then applies the user-feedback retrieval/retention
+    /// penalty so better alternatives surface. The memory is not deleted.
     pub fn demote_memory(&self, id: &str) -> Result<KnowledgeNode> {
-        let now = Utc::now();
-
-        // Strong penalty: -0.3 retrieval, -0.15 retention, halve stability
-        {
-            let writer = self
-                .writer
-                .lock()
-                .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-            writer.execute(
-                "UPDATE knowledge_nodes SET
-                    last_accessed = ?1,
-                    retrieval_strength = MAX(0.05, retrieval_strength - 0.30),
-                    retention_strength = MAX(0.05, retention_strength - 0.15),
-                    stability = stability * 0.5
-                WHERE id = ?2",
-                params![now.to_rfc3339(), id],
-            )?;
-        }
-
+        let _ = self.fsrs_user_feedback(id, Rating::Again, -0.30, -0.15, false)?;
         let _ = self.log_access(id, "demote");
-
         self.get_node(id)?
             .ok_or_else(|| StorageError::NotFound(id.to_string()))
+    }
+
+    /// Shared promote/demote implementation. Runs an FSRS review with the
+    /// supplied synthetic rating, then layers the user-feedback delta on
+    /// retrieval/retention so the surfacing behaviour the dashboard
+    /// promised stays intact. Best-effort: any FSRS write failure is logged
+    /// and the caller falls back to the existing node state.
+    fn fsrs_user_feedback(
+        &self,
+        id: &str,
+        rating: Rating,
+        retrieval_delta: f64,
+        retention_delta: f64,
+        bump_times_useful: bool,
+    ) -> Result<()> {
+        let node = self
+            .get_node(id)?
+            .ok_or_else(|| StorageError::NotFound(id.to_string()))?;
+
+        let learning_state = match node.reps {
+            0 => LearningState::New,
+            _ if node.lapses > 0 && node.reps == node.lapses => LearningState::Relearning,
+            _ => LearningState::Review,
+        };
+        let current_state = FSRSState {
+            difficulty: node.difficulty,
+            stability: node.stability,
+            state: learning_state,
+            reps: node.reps,
+            lapses: node.lapses,
+            last_review: node.last_accessed,
+            scheduled_days: 0,
+        };
+
+        let scheduler = self
+            .scheduler
+            .lock()
+            .map_err(|_| StorageError::Init("Scheduler lock poisoned".into()))?;
+        let elapsed_days = scheduler.days_since_review(&current_state.last_review);
+        let sentiment_boost = if node.sentiment_magnitude > 0.0 {
+            Some(node.sentiment_magnitude)
+        } else {
+            None
+        };
+        let result = scheduler.review(&current_state, rating, elapsed_days, sentiment_boost);
+        drop(scheduler);
+
+        let now = Utc::now();
+        let next_review = now + Duration::days(result.interval as i64);
+
+        let writer = self
+            .writer
+            .lock()
+            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+        writer.execute(
+            "UPDATE knowledge_nodes SET
+                stability = ?1,
+                difficulty = ?2,
+                reps = ?3,
+                lapses = ?4,
+                learning_state = ?5,
+                last_accessed = ?6,
+                updated_at = ?6,
+                next_review = ?7,
+                scheduled_days = ?8,
+                retrieval_strength = MAX(0.05, MIN(1.0, retrieval_strength + ?9)),
+                retention_strength = MAX(0.05, MIN(1.0, retention_strength + ?10)),
+                times_useful = COALESCE(times_useful, 0) + ?11
+            WHERE id = ?12",
+            params![
+                result.state.stability,
+                result.state.difficulty,
+                result.state.reps,
+                result.state.lapses,
+                format!("{:?}", result.state.state).to_lowercase(),
+                now.to_rfc3339(),
+                next_review.to_rfc3339(),
+                result.interval,
+                retrieval_delta,
+                retention_delta,
+                if bump_times_useful { 1 } else { 0 },
+                id,
+            ],
+        )?;
+        Ok(())
     }
 
     /// Get memories due for review

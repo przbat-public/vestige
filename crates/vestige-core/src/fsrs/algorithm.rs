@@ -9,8 +9,11 @@ use super::scheduler::Rating;
 // FSRS-6 CONSTANTS (21 Parameters)
 // ============================================================================
 
-/// FSRS-6 default weights (w0 to w20)
-/// Trained on millions of Anki reviews - 20-30% more efficient than SM-2
+/// FSRS-6 default weights (w0 to w20).
+/// Trained on millions of Anki reviews; see
+/// <https://github.com/open-spaced-repetition/srs-benchmark> for the FSRS-vs-SM-2
+/// comparison numbers. We intentionally do not restate a single % delta here
+/// — Vestige does not retrain or rebenchmark these weights.
 pub const FSRS6_WEIGHTS: [f64; 21] = [
     0.212,  // w0: Initial stability for Again
     1.2931, // w1: Initial stability for Hard

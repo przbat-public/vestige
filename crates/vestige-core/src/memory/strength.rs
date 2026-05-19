@@ -12,6 +12,21 @@
 //!
 //! Key insight: Difficult retrievals (low retrieval strength + high storage
 //! strength) lead to larger gains in both strengths ("desirable difficulties").
+//!
+//! ## A note on the constants below
+//!
+//! `FSRS_FACTOR = 9.0` and `FSRS_DECAY = 0.5` give the curve
+//! `R = (1 + t / (9·S))^(-2)`, which is **historically compatible** with
+//! the old fsrs4anki defaults but **not identical** to the FSRS-6 curve used
+//! by [`crate::fsrs::algorithm::retrievability`]. The canonical FSRS-6 form
+//! is `R = (1 + factor · t / S)^(-w20)` with `factor = 0.9^(-1/w20) - 1`,
+//! and FSRS_FACTOR/FSRS_DECAY are not used inside [`crate::fsrs`].
+//!
+//! In practice the consolidation path (and the dashboard's `RetentionCurve`
+//! component) drive their retention from [`crate::fsrs::algorithm`]. The
+//! types in this module are kept for the dual-strength bookkeeping and the
+//! historical journey tests; the curve here is a coarser approximation of
+//! the same shape and is **not** the source of truth for the engine.
 
 use serde::{Deserialize, Serialize};
 

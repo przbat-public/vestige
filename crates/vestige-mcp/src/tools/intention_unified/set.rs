@@ -46,7 +46,11 @@ pub(super) async fn execute_set(
     let mut nlp_priority = None;
     let mut tags = Vec::new();
 
-    if let Ok(cog) = cognitive.try_lock() {
+    let lock_attempt = cognitive.try_lock();
+    if lock_attempt.is_err() {
+        crate::cognitive::try_lock_metrics::record_miss("intention_set");
+    }
+    if let Ok(cog) = lock_attempt {
         // 8A. Try NLP parsing when no explicit trigger is provided
         if args.trigger.is_none()
             && let Ok(parsed) = cog.intention_parser.parse(description)
