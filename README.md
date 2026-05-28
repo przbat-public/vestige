@@ -12,7 +12,7 @@
 
 Built on 130 years of memory research — FSRS-6 spaced repetition, prediction error gating, synaptic tagging, spreading activation, memory dreaming — all running in a single Rust binary with a 3D neural visualization dashboard. 100% local. Zero cloud.
 
-[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-27-mcp-tools) | [Docs](docs/)
+[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-28-mcp-tools) | [Docs](docs/)
 
 </div>
 
@@ -28,58 +28,64 @@ Built on 130 years of memory research — FSRS-6 spaced repetition, prediction e
 
 ---
 
-## What's New in v3.2.0 "Content Intelligence"
+## What's New
 
-### Content Intelligence Pipeline (new in v3.2)
-Every memory ingested through `smart_ingest` is now automatically enriched:
-- **Entity extraction** — detects URLs, emails, file paths, monetary values, proper nouns → auto-tags (`entity:john-smith`)
-- **Coreference rewriting** — "He said X" → "John said X" (makes memories self-contained for better search recall)
-- **Temporal anchoring** — "by next Friday" resolves to absolute `valid_until` dates; "starting Monday" → `valid_from`
-- **Relation extraction** — "John manages Auth Team" → knowledge graph edge (feeds spreading activation from day one)
-- **Provenance tracking** — every memory records session ID, agent, derivation chain, and preprocessing artifacts
+> Full version history lives in [CHANGELOG.md](CHANGELOG.md). The highlights below cover the post-fork releases.
 
-All local heuristic/regex — zero model downloads, sub-millisecond latency (98µs per memory).
+### v3.4.0 — Typed-Memory Dashboard
 
-### Compound Query Decomposition
-Queries like "auth security; infrastructure costs" or "Who worked on FSRS? And what about dream consolidation?" are automatically split on semicolons, question chains and conjunctions, searched independently, then merged with max-score dedup. Helpful whenever a single dense embedding has to represent two unrelated topics at once.
+- **Four new pages** surface the typed-memory schema: `Decisions` (structured Decision Matrix), `Insights` (dream + reflect output with validate/dismiss workflow), `Hubs` (auto-detected topic clusters), `Reasoning` (the `deep_reference` engine — evidence, contradictions, supersession, evolution timeline).
+- **End-to-end wire contract.** Every dashboard response is a ts-rs-generated DTO from Rust; the five highest-blast-radius endpoints re-validate at runtime via Zod. CI gate (`scripts/check-generated-types.sh`) fails any PR that edits a Rust DTO without committing the regenerated `.ts`.
+- **Dream-cycle refactor.** `MemoryDreamer` split into six sub-modules (lifecycle, clustering, connections, contradictions, hubs, insights) so each phase output evolves independently. Dream API returns a per-phase breakdown.
+- **Tutorial v2.** Twelve modular components — sticky TOC, glossary tooltips, mode toggle, interactive FSRS-6 curve, live memory example, quiz, guided tour, in-page search, "what's new" banner, progress tracking. Bilingual EN/PL.
+- **Migrations v12 + v13** add `decisions`, `hubs`, `insights` tables plus tier/confidence columns. Forward-only and idempotent.
 
-### Provenance in Search Results
-Use `detail_level: "full"` to see the full provenance trail — which agent created the memory, what entities were extracted, what temporal anchors were found, and what relations were extracted.
+### v3.3.0 — Refactor Wave + LoCoMo Breakthrough
 
-## What's New in v3.1.0 "Metacognitive Expansion"
+- **LoCoMo benchmark: 41% → 66.17%** (+25 pp). Jina Reranker v2 + turn-level chunking + typed-memory `turn_extracted` mode. Beats LangMem (58.10%), within 0.71 pp of Mem0.
+- **`MemoryKind` typed memory** (`Raw` / `Semantic` / `Episodic` / `Procedural` / `Aggregate`) with subject/predicate/object triples and episodic timestamps. Existing memories default to `Raw` — behaviour-neutral until typed retrievers ship.
+- **Storage decomposition.** `storage/sqlite/` split into per-concern submodules (nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats).
+- **Supply-chain sweep.** Bare `openssl` eliminated; `rustls-webpki` RUSTSEC-2026-0049/0098/0099/0104 patched; `cargo deny` + Dependabot + ARM Linux release target.
 
-### Metacognitive Tools (new in v3.1)
-- **`reflect`** — deliberate self-examination of memories. Detects contradictions, knowledge gaps, stale decisions, overconfident memories, pattern clusters. Based on Flavell (1979), Schön (1983), Nelson & Narens (1990)
-- **`temporal`** — temporal fact versioning. Query valid-now, expired, historical facts. Mark facts as no longer valid. Based on bi-temporal theory (Snodgrass 1999) and Graphiti temporal knowledge graphs
-- **`confidence`** — heuristic multi-dimensional confidence scoring (encoding, retrieval, temporal, evidence). Audit surfaces memories with low aggregate scores. `calibrate` performs a retention-based consistency check between opinions and facts on the same topic — it is **not** Brier-score calibration (Vestige has no ground-truth prediction stream). Inspired by Kahneman (2011) and Tetlock (2015).
-- **Dashboard integration** — Self-Reflection and Confidence Audit accessible from the Settings page
-- **18 cognitive journey tests** — each mapped to published research (Bjork, Roediger & Karpicke, Collins & Loftus, Brown & Kulik, and more)
+### v3.2.0 — Content Intelligence Pipeline
 
-### Inherited from v3.0.0 "Cognitive Expansion"
-- **Metacognition layer** — the search pipeline monitors its own quality, tracks hit/miss rates, detects knowledge gaps
-- **Bayesian confidence** — access-pattern-based confidence with credible intervals via Beta distribution
-- **Epistemic classification** — memories classified as facts, experiences, observations, or opinions
-- **Proactive interference resolution** — fan-effect penalty for competing memories (Anderson, 1974)
-- **Memory evolution** (A-Mem) — new memories auto-discover and link to related existing memories
-- **Context compression** (LightMem) — key sentence extraction for token budget compliance
-- **Privacy governance** — `right_to_erasure()` for GDPR-style complete removal
-- **10 scientific validation tests** — each mapped to published research
-- **Tutorial page** — comprehensive guide (analogies, lifecycle, science, FAQ, glossary) written for beginners, in English and Polish
+Every memory ingested through `smart_ingest` is automatically enriched:
 
-### Dashboard
-- **Internationalization** — full EN + PL via i18next
-- **Light / dark mode** — oklch-based semantic design tokens with `prefers-color-scheme` detection
-- **Accessibility** — skip-to-content, route announcer, `aria-live`, keyboard navigation, reduced motion
-- **UI component library** — Button, Card, Badge, ProgressBar, SearchInput, EmptyState, LoadingSpinner, StatCard
-- **Component decomposition** — focused sub-components across all pages
-- **10 pages** — Graph, Memories, Timeline, Feed, Explore, Intentions, Stats, Settings, Tutorial, Not Found
+- **Entity extraction** — URLs, emails, file paths, monetary values, proper nouns → auto-tags (`entity:john-smith`).
+- **Coreference rewriting** — "He said X" → "John said X" (makes memories self-contained for better recall).
+- **Temporal anchoring** — "by next Friday" resolves to absolute `valid_until`; "starting Monday" → `valid_from`.
+- **Relation extraction** — SVO triples → knowledge graph edges (feed spreading activation from day one).
+- **Provenance tracking** — session ID, agent, derivation chain, preprocessing artefacts on every memory.
+
+All local heuristic/regex — zero model downloads, sub-millisecond latency.
+
+**Compound query decomposition** — `"auth security; infrastructure costs"` or `"Who worked on FSRS? And dream consolidation?"` are split on semicolons, question chains, and conjunctions, searched independently, then merged via max-score dedup.
+
+### v3.1.0 — Metacognitive Expansion
+
+- **`reflect`** — deliberate self-examination. Detects contradictions, knowledge gaps, stale decisions, overconfident memories, pattern clusters. Flavell (1979), Schön (1983), Nelson & Narens (1990).
+- **`temporal`** — bi-temporal fact versioning (Snodgrass 1999). Query valid-now / expired / history / invalidate.
+- **`confidence`** — heuristic multi-dimensional scoring (encoding / retrieval / temporal / evidence). `calibrate` is a retention-based consistency check between opinions and facts, **not** Brier-score calibration.
+- Eighteen cognitive journey tests mapped to published research (Bjork, Roediger & Karpicke, Collins & Loftus, Brown & Kulik, …).
+
+### Inherited from v3.0.0 — Cognitive Expansion
+
+- Metacognition layer — the search pipeline monitors its own quality, tracks hit/miss rates, detects knowledge gaps.
+- Bayesian confidence with credible intervals via Beta distribution.
+- Epistemic classification — memories tagged as facts, experiences, observations, or opinions.
+- Proactive interference resolution — fan-effect penalty for competing memories (Anderson 1974).
+- Memory evolution (A-Mem) — new memories auto-discover and link to related existing memories.
+- Context compression (LightMem) — key-sentence extraction for token budget compliance.
+- Privacy governance — `right_to_erasure()` for GDPR-style complete removal.
+- Ten scientific validation tests, each mapped to published research.
 
 ### Inherited from upstream v2.0.3
-- React 19 + Vite 6 + Three.js 3D neural graph with WebSocket events
-- Jina Reranker v2 Base Multilingual (278M params)
-- Triple hybrid search (BM25 + semantic + RRF)
-- HyDE query expansion, FSRS-6 spaced repetition, 29 cognitive modules
-- Command palette, PWA support, FSRS decay visualization
+
+- React 19 + Vite 6 + Three.js 3D neural graph with WebSocket events.
+- Jina Reranker v2 Base Multilingual (278M params).
+- Triple hybrid search (BM25 + semantic + RRF).
+- HyDE query expansion, FSRS-6 spaced repetition.
+- Command palette, PWA support, FSRS decay visualisation.
 
 ---
 
@@ -176,14 +182,15 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 ```
 ┌─────────────────────────────────────────────────────┐
 │  React Dashboard (apps/dashboard)                   │
-│  React 19 · Vite 6 · Three.js 3D Graph · i18next    │
-│  Light/Dark Mode · a11y · EN/PL · WebSocket         │
+│  React 19 · Vite 6 · React Router 7 · Three.js      │
+│  Tailwind 4 · i18next (EN/PL) · WebSocket           │
+│  Light/Dark Mode · a11y · 16 pages                  │
 ├─────────────────────────────────────────────────────┤
 │  Axum HTTP + WebSocket Server (port 3927)           │
-│  28 REST operations · WS event broadcast            │
+│  39 REST routes · ts-rs/Zod wire contract · WS bus  │
 ├─────────────────────────────────────────────────────┤
 │  MCP Server (stdio JSON-RPC + HTTP on :3928)        │
-│  27 tools · 29 cognitive modules                    │
+│  28 tools · 11 resources · per-session instances    │
 ├─────────────────────────────────────────────────────┤
 │  Cognitive Engine                                   │
 │  ┌──────────┐ ┌────────────┐ ┌───────────────┐      │
@@ -202,6 +209,7 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 │  Storage Layer                                      │
 │  SQLite + FTS5 · USearch HNSW · Nomic Embed v1.5    │
 │  Jina Reranker v2 · RRF · Active Forgetting         │
+│  Migrations v1–v13 · WAL · optional SQLCipher       │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -251,7 +259,9 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 
 ---
 
-## 🛠 27 MCP Tools
+## 🛠 28 MCP Tools
+
+The canonical catalog lives in [`crates/vestige-mcp/src/server/catalog.rs`](crates/vestige-mcp/src/server/catalog.rs). CI fails any PR that drifts.
 
 ### Context Packets
 | Tool | What It Does |
@@ -264,15 +274,16 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 | `search` | 8-stage cognitive search — compound query decomposition + triple hybrid (BM25 + semantic + RRF) + Jina v2 reranking + temporal + competition + spreading activation |
 | `smart_ingest` | Intelligent storage with CREATE/UPDATE/SUPERSEDE via Prediction Error Gating. Runs the Content Intelligence Pipeline (entity extraction, coreference, temporal anchoring, relation extraction, provenance). Batch mode for session-end saves |
 | `memory` | Get, batch get (up to 20 ids in one call), edit, delete, check state, promote (thumbs up), demote (thumbs down) |
-| `codebase` | Remember code patterns and architectural decisions per-project |
+| `codebase` | Remember code patterns and architectural decisions per-project. `remember_decision_v2` writes a structured Decision Matrix (question + choices + criteria + 1–5 scoring + optional `validUntil`) — `reflect` auto-flags decisions whose window has passed |
 | `intention` | Prospective memory — "remind me to X when Y happens" |
 
 ### Cognitive Engine
 | Tool | What It Does |
 |------|-------------|
 | `dream` | Memory consolidation — replays memories, discovers connections, synthesizes insights, persists graph |
-| `explore_connections` | Graph traversal — reasoning chains, associations, bridges between memories |
+| `explore_connections` | Graph traversal — reasoning chains, associations, bridges between memories, **`causal_chain` walks only persisted causal edges for `why?` questions** |
 | `predict` | Proactive retrieval — predicts what you'll need next based on context and activity |
+| `precompute_for_context` | **Sleep-time compute** — pre-fetch + summarize a topic before you ask, store as `precomputed_summary` with TTL (1–168h) and `topic:<slug>` tag. Next search hits a warm cache |
 
 ### Cognitive Reasoning (v3.2)
 | Tool | What It Does |
@@ -353,8 +364,8 @@ At the start of every session:
 | **Locales** | English, Polish (extensible) |
 | **Themes** | Light + Dark (oklch design tokens, `prefers-color-scheme` aware) |
 | **Transport** | MCP stdio (JSON-RPC 2.0) + optional HTTP MCP (port 3928) + WebSocket |
-| **MCP tools** | 27 (4 unified + smart_ingest + 2 temporal + 7 maintenance + 2 dedup + 3 cognitive + restore + session_context + 2 autonomic + 3 metacognitive + deep_reference) |
-| **Cognitive modules** | 29 stateful + metacognition + Bayesian confidence + epistemic separation |
+| **MCP tools** | 28 (4 unified + smart_ingest + 2 temporal + 7 maintenance + 2 dedup + 4 cognitive + restore + session_context + 2 autonomic + 3 metacognitive + deep_reference) |
+| **Cognitive modules** | Stateful neuroscience + advanced + search families. Canonical list in `cognitive.rs::CognitiveEngine` |
 | **First run** | Downloads embedding + reranker models (~1.3GB), then fully offline |
 | **Platforms** | macOS (ARM/Intel), Linux (x86_64), Windows |
 
@@ -449,5 +460,5 @@ AGPL-3.0 — free to use, modify, and self-host. If you offer Vestige as a netwo
 
 <p align="center">
   <i>Originally built by <a href="https://github.com/samvallad33">@samvallad33</a></i><br>
-  <sub>27 tools · 29 cognitive modules · content intelligence pipeline · scientific validation · i18n · light/dark mode · one binary</sub>
+  <sub>28 tools · typed-memory dashboard · content intelligence pipeline · scientific validation · i18n · light/dark mode · one binary</sub>
 </p>

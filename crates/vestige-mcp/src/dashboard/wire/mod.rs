@@ -75,7 +75,10 @@ pub use history::{
 };
 pub use hubs::{HubDto, HubListResponseDto};
 pub use insights::{InsightDto, InsightListResponseDto};
-pub use intentions::{CreateIntentionResponseDto, IntentionItemDto, IntentionListResponseDto};
+pub use intentions::{
+    CreateIntentionResponseDto, IntentionItemDto, IntentionListResponseDto,
+    UpdateIntentionRequestDto, UpdateIntentionResponseDto,
+};
 pub use limits::DashboardLimitsDto;
 pub use memory::{
     EpistemicStatusDto, MemoryDto, MemoryListResponseDto, MemoryStatusDto, MemorySystemDto,

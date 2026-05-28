@@ -33,7 +33,10 @@ pub struct DashboardLimitsDto {
     pub graph_max_nodes_default: u32,
     /// Hard ceiling for the node cap. Above this the rendering pipeline
     /// stalls on the main thread and FPS collapses; verified empirically
-    /// at ~600 nodes on M1 Air.
+    /// at ~600 nodes on M1 Air. Raised from 500 to 1000 as a deliberate UX
+    /// call — users on faster hardware can opt in to denser graphs while
+    /// the LOD/clustering work in `Graph3D` is still pending. Going much
+    /// further than 1000 is irresponsible until that lands.
     pub graph_max_nodes_max: u32,
     /// Default BFS depth — covers most exploratory queries without
     /// pulling 90% of the graph in.
@@ -57,7 +60,7 @@ impl DashboardLimitsDto {
     /// Compile-time defaults — the values handlers should clamp to.
     pub const DEFAULT: Self = Self {
         graph_max_nodes_default: 50,
-        graph_max_nodes_max: 500,
+        graph_max_nodes_max: 1000,
         graph_depth_default: 1,
         graph_depth_max: 5,
         search_limit_default: 20,
@@ -86,7 +89,7 @@ mod tests {
     fn defaults_match_pinned_values() {
         let d = DashboardLimitsDto::DEFAULT;
         assert_eq!(d.graph_max_nodes_default, 50);
-        assert_eq!(d.graph_max_nodes_max, 500);
+        assert_eq!(d.graph_max_nodes_max, 1000);
         assert_eq!(d.graph_depth_default, 1);
         assert_eq!(d.graph_depth_max, 5);
         assert_eq!(d.search_limit_default, 20);

@@ -14,14 +14,55 @@ use chrono::{Duration, Utc};
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
+use crate::fsrs::{DEFAULT_MAX_SENTIMENT_BOOST, apply_sentiment_boost};
 use crate::fts::sanitize_fts5_query;
 use crate::memory::{IngestInput, KnowledgeNode};
 
 use super::{Result, Storage, StorageError, normalize_tags};
 
 impl Storage {
+    /// Ingest a new memory using a pre-computed embedding.
+    ///
+    /// Equivalent to [`Self::ingest`] except the caller has already paid the
+    /// cost of running the embedding model on `input.content`. The smart
+    /// ingest path uses this to avoid re-embedding the same string twice
+    /// (once for the prediction-error gate, once for storage).
+    ///
+    /// The embedding is taken on trust — we do not re-verify that it was
+    /// produced from `input.content`. Mis-pairing here would corrupt
+    /// retrieval, so only call this from paths where the embedding's
+    /// provenance is obvious.
+    #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+    pub fn ingest_with_embedding(
+        &self,
+        input: IngestInput,
+        embedding: &crate::embeddings::Embedding,
+    ) -> Result<KnowledgeNode> {
+        self.ingest_inner(input, Some(embedding))
+    }
+
     /// Ingest a new memory
-    pub fn ingest(&self, mut input: IngestInput) -> Result<KnowledgeNode> {
+    pub fn ingest(&self, input: IngestInput) -> Result<KnowledgeNode> {
+        #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+        return self.ingest_inner(input, None);
+        #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
+        return self.ingest_inner(input);
+    }
+
+    /// Shared implementation behind `ingest` / `ingest_with_embedding`.
+    ///
+    /// Centralises the SQL insert + sentiment-boost + embedding logic so the
+    /// public API stays slim. The `precomputed_embedding` argument is only
+    /// honoured when the `embeddings` + `vector-search` features are active;
+    /// the no-features build silently ignores it (the parameter is removed
+    /// at compile time by the `#[cfg]` on the function signature).
+    fn ingest_inner(
+        &self,
+        mut input: IngestInput,
+        #[cfg(all(feature = "embeddings", feature = "vector-search"))] precomputed_embedding: Option<
+            &crate::embeddings::Embedding,
+        >,
+    ) -> Result<KnowledgeNode> {
         let now = Utc::now();
         let id = Uuid::new_v4().to_string();
 
@@ -36,11 +77,21 @@ impl Storage {
             .map_err(|_| StorageError::Init("Scheduler lock poisoned".into()))?
             .new_card();
 
-        // Sentiment boost for stability
-        let sentiment_boost = if input.sentiment_magnitude > 0.0 {
-            1.0 + (input.sentiment_magnitude * 0.5)
+        // Emotional-memory stability boost. Routed through the shared FSRS
+        // helper so a fresh ingest and the first review use the same curve
+        // and the same cap (`DEFAULT_MAX_SENTIMENT_BOOST`). Pre-v3.4.1 this
+        // path hard-coded `1 + 0.5·magnitude` (cap 1.5×) while the scheduler
+        // already used `apply_sentiment_boost` with cap 2.0×, so the
+        // first review silently widened the boost — small but real source
+        // of stability drift between ingest and the first FSRS update.
+        let boosted_initial_stability = if input.sentiment_magnitude > 0.0 {
+            apply_sentiment_boost(
+                fsrs_state.stability,
+                input.sentiment_magnitude,
+                DEFAULT_MAX_SENTIMENT_BOOST,
+            )
         } else {
-            1.0
+            fsrs_state.stability
         };
 
         let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string());
@@ -93,7 +144,7 @@ impl Storage {
                     now.to_rfc3339(),
                     now.to_rfc3339(),
                     now.to_rfc3339(),
-                    fsrs_state.stability * sentiment_boost,
+                    boosted_initial_stability,
                     fsrs_state.difficulty,
                     fsrs_state.reps,
                     fsrs_state.lapses,
@@ -125,10 +176,19 @@ impl Storage {
             )?;
         }
 
-        // Generate embedding if available
+        // Generate or reuse the embedding. When a caller supplies a
+        // pre-computed embedding (e.g. `smart_ingest`, which already paid for
+        // it during the prediction-error probe) we hand straight to
+        // `store_embedding_for_node` and skip the second embed pass.
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-        if let Err(e) = self.generate_embedding_for_node(&id, &input.content) {
-            tracing::warn!("Failed to generate embedding for {}: {}", id, e);
+        {
+            let result = match precomputed_embedding {
+                Some(emb) => self.store_embedding_for_node(&id, emb),
+                None => self.generate_embedding_for_node(&id, &input.content),
+            };
+            if let Err(e) = result {
+                tracing::warn!("Failed to generate embedding for {}: {}", id, e);
+            }
         }
 
         self.get_node(&id)?
@@ -302,23 +362,126 @@ impl Storage {
 
     /// Get all nodes (paginated)
     pub fn get_all_nodes(&self, limit: i32, offset: i32) -> Result<Vec<KnowledgeNode>> {
+        self.get_all_nodes_filtered(limit, offset, None, None, None)
+    }
+
+    /// `get_all_nodes` with SQL-side filtering for `node_type`, `tag`,
+    /// and `min_retention`.
+    ///
+    /// All three filters are optional. The tag filter uses `json_each` to
+    /// scan the `tags` JSON array — fast for small tag arrays (typical:
+    /// 0–5 elements) and correct for the storage format. We do **not** add
+    /// an index on `tags` because tag membership queries hit at most a few
+    /// rows per term; FTS5 already covers the keyword-search case.
+    ///
+    /// Pushdown matters because the dashboard caller previously did
+    /// `get_all_nodes(LIMIT 50) → retain(filter)` in Rust, which silently
+    /// returned 0–3 rows instead of 50 whenever the filter rejected the
+    /// top-50 by created_at. (Audit 2026-05-22.)
+    pub fn get_all_nodes_filtered(
+        &self,
+        limit: i32,
+        offset: i32,
+        node_type: Option<&str>,
+        tag: Option<&str>,
+        min_retention: Option<f64>,
+    ) -> Result<Vec<KnowledgeNode>> {
         let reader = self
             .reader
             .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-        let mut stmt = reader.prepare(
-            "SELECT * FROM knowledge_nodes
-             ORDER BY created_at DESC
-             LIMIT ?1 OFFSET ?2",
-        )?;
 
-        let nodes = stmt.query_map(params![limit, offset], Self::row_to_node)?;
+        // Build the WHERE clause dynamically. Each branch appends both the
+        // SQL fragment and the bound parameter so the ordering stays in
+        // sync — rusqlite's positional params are easy to get wrong here.
+        let mut sql = String::from("SELECT * FROM knowledge_nodes");
+        let mut clauses: Vec<&'static str> = Vec::new();
+        let mut params_dyn: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(nt) = node_type {
+            clauses.push("node_type = ?");
+            params_dyn.push(Box::new(nt.to_string()));
+        }
+        if let Some(t) = tag {
+            // `tags` is JSON like `["foo","bar"]`. `json_each` flattens it
+            // into a virtual row per element; EXISTS short-circuits on
+            // the first match.
+            clauses.push(
+                "EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?)",
+            );
+            params_dyn.push(Box::new(t.to_string()));
+        }
+        if let Some(min_ret) = min_retention {
+            clauses.push("retention_strength >= ?");
+            params_dyn.push(Box::new(min_ret));
+        }
+        if !clauses.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&clauses.join(" AND "));
+        }
+        sql.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+        params_dyn.push(Box::new(limit));
+        params_dyn.push(Box::new(offset));
+
+        let mut stmt = reader.prepare(&sql)?;
+        let refs: Vec<&dyn rusqlite::ToSql> =
+            params_dyn.iter().map(|b| b.as_ref()).collect();
+        let nodes = stmt.query_map(refs.as_slice(), Self::row_to_node)?;
 
         let mut result = Vec::new();
         for node in nodes {
             result.push(node?);
         }
         Ok(result)
+    }
+
+    /// Count rows that `get_all_nodes_filtered` would emit if its
+    /// `LIMIT` were removed. The dashboard uses this to render an
+    /// honest "X of Y" — `page.len()` lied whenever the population
+    /// exceeded the page size. (Audit 2026-05-22.)
+    ///
+    /// The WHERE clause MUST stay byte-for-byte identical to
+    /// `get_all_nodes_filtered` (modulo SELECT/ORDER/LIMIT) — that's
+    /// the invariant the test guards.
+    pub fn count_nodes_filtered(
+        &self,
+        node_type: Option<&str>,
+        tag: Option<&str>,
+        min_retention: Option<f64>,
+    ) -> Result<usize> {
+        let reader = self
+            .reader
+            .lock()
+            .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
+
+        let mut sql = String::from("SELECT COUNT(*) FROM knowledge_nodes");
+        let mut clauses: Vec<&'static str> = Vec::new();
+        let mut params_dyn: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(nt) = node_type {
+            clauses.push("node_type = ?");
+            params_dyn.push(Box::new(nt.to_string()));
+        }
+        if let Some(t) = tag {
+            clauses.push(
+                "EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?)",
+            );
+            params_dyn.push(Box::new(t.to_string()));
+        }
+        if let Some(min_ret) = min_retention {
+            clauses.push("retention_strength >= ?");
+            params_dyn.push(Box::new(min_ret));
+        }
+        if !clauses.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&clauses.join(" AND "));
+        }
+
+        let mut stmt = reader.prepare(&sql)?;
+        let refs: Vec<&dyn rusqlite::ToSql> =
+            params_dyn.iter().map(|b| b.as_ref()).collect();
+        let count: i64 = stmt.query_row(refs.as_slice(), |row| row.get(0))?;
+        Ok(count.max(0) as usize)
     }
 
     /// Find the existing Topic Hub node (Proposal A) for a given

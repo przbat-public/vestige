@@ -1,6 +1,6 @@
 //! Wire DTOs for the prospective memory (intentions) endpoints.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// One intention as the dashboard sees it.
@@ -51,4 +51,33 @@ pub struct IntentionListResponseDto {
 pub struct CreateIntentionResponseDto {
     pub id: String,
     pub intention: IntentionItemDto,
+}
+
+/// `PATCH /api/intentions/{id}` request.
+///
+/// Mirrors the MCP `intention(action="update", status="...")` tool. The
+/// dashboard uses this to close out the loop after the user finishes an
+/// intention — previously the only way to mark it `fulfilled` was through
+/// the MCP layer, so the list grew stale.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "UpdateIntentionRequestDto.ts", rename_all = "camelCase")]
+pub struct UpdateIntentionRequestDto {
+    /// New status — accepts `fulfilled` | `cancelled` | `snoozed` | `active`.
+    /// Anything else is rejected with 400 so the storage layer never sees
+    /// an unconstrained string.
+    pub status: String,
+}
+
+/// `PATCH /api/intentions/{id}` response.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "UpdateIntentionResponseDto.ts", rename_all = "camelCase")]
+pub struct UpdateIntentionResponseDto {
+    pub id: String,
+    pub status: String,
+    /// True when the row existed and was updated. False is impossible from
+    /// the public endpoint (we 404 first) but kept to mirror the storage
+    /// contract for future consumers.
+    pub updated: bool,
 }

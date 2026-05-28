@@ -137,26 +137,69 @@ pub async fn execute_system_status(
         None
     };
 
-    // === Cognitive health ===
-    let cognitive_health = if let Ok(cog) = cognitive.try_lock() {
-        let activation_count = cog.activation_network.get_associations("_probe_").len();
-        let prediction_accuracy = cog.predictive_memory.prediction_accuracy().unwrap_or(0.0);
-        let scheduler_stats = cog.consolidation_scheduler.get_activity_stats();
-        Some(serde_json::json!({
-            "activationNetworkSize": activation_count,
-            "predictionAccuracy": format!("{:.2}", prediction_accuracy),
-            "modulesActive": 28,
-            "schedulerStats": {
-                "totalEvents": scheduler_stats.total_events,
-                "eventsPerMinute": scheduler_stats.events_per_minute,
-                "isIdle": scheduler_stats.is_idle,
-                "timeUntilNextConsolidation": format!("{:?}", cog.consolidation_scheduler.time_until_next()),
-            },
-        }))
-    } else {
-        crate::cognitive::try_lock_metrics::record_miss("system_status");
-        None
-    };
+    // === Cognitive health + reranker readiness ===
+    //
+    // `rerankerReady`/`rerankerStatus` answer a question monitoring keeps
+    // asking: are search results coming from the cross-encoder, or are we
+    // still serving BM25 fallback? main.rs loads Jina v2 (~1.1GB) on a
+    // background task after stdio handshake; during that warm-up the
+    // reranker exists but `has_cross_encoder()` is false. We surface that
+    // explicitly so the dashboard can show "warming…" instead of a green
+    // tick that lies.
+    //
+    // tri-state status:
+    // - "ready":    cross-encoder loaded, neural reranking active
+    // - "warming":  `embeddings` feature on, model not yet loaded
+    // - "disabled": built without the `embeddings` feature
+    //
+    // We probe under `try_lock` so a busy reranker (e.g. another search in
+    // flight) doesn't stall status calls. If the lock is contended we
+    // optimistically report `warming` — the next status call will reflect
+    // truth and this matches dashboards' polling cadence.
+    let (cognitive_health, reranker_ready, reranker_status) =
+        if let Ok(cog) = cognitive.try_lock() {
+            // `activation_network` is now its own lock — use try_read so a
+            // contended status call doesn't stall behind a long-running
+            // search/ingest path. `0` is the safe fallback.
+            let activation_count = cog
+                .activation_network
+                .try_read()
+                .map(|n| n.get_associations("_probe_").len())
+                .unwrap_or(0);
+            let prediction_accuracy = cog.predictive_memory.prediction_accuracy().unwrap_or(0.0);
+            let scheduler_stats = cog.consolidation_scheduler.get_activity_stats();
+            let health = Some(serde_json::json!({
+                "activationNetworkSize": activation_count,
+                "predictionAccuracy": format!("{:.2}", prediction_accuracy),
+                "modulesActive": 28,
+                "schedulerStats": {
+                    "totalEvents": scheduler_stats.total_events,
+                    "eventsPerMinute": scheduler_stats.events_per_minute,
+                    "isIdle": scheduler_stats.is_idle,
+                    "timeUntilNextConsolidation": format!("{:?}", cog.consolidation_scheduler.time_until_next()),
+                },
+            }));
+            let ready = cog.reranker.has_cross_encoder();
+            let status = if !cfg!(feature = "embeddings") {
+                "disabled"
+            } else if ready {
+                "ready"
+            } else {
+                "warming"
+            };
+            (health, ready, status)
+        } else {
+            crate::cognitive::try_lock_metrics::record_miss("system_status");
+            // Lock contention — assume warming rather than ready. False
+            // negatives here are safe (a brief "warming" blip); a false
+            // positive would mislead monitoring.
+            let status = if cfg!(feature = "embeddings") {
+                "warming"
+            } else {
+                "disabled"
+            };
+            (None, false, status)
+        };
 
     // === try_lock skip metrics (operational visibility into cognitive contention) ===
     let try_lock_skips = crate::cognitive::try_lock_metrics::snapshot();
@@ -210,6 +253,8 @@ pub async fn execute_system_status(
         "fsrsPreview": fsrs_preview,
         // Cognitive
         "cognitiveHealth": cognitive_health,
+        "rerankerReady": reranker_ready,
+        "rerankerStatus": reranker_status,
         "tryLockSkips": try_lock_skips,
         // Automation triggers — Claude uses these to decide when to dream/backup/gc
         "automationTriggers": {

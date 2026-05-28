@@ -15,7 +15,10 @@ graphMaxNodesDefault: number,
 /**
  * Hard ceiling for the node cap. Above this the rendering pipeline
  * stalls on the main thread and FPS collapses; verified empirically
- * at ~600 nodes on M1 Air.
+ * at ~600 nodes on M1 Air. Raised from 500 to 1000 as a deliberate UX
+ * call — users on faster hardware can opt in to denser graphs while
+ * the LOD/clustering work in `Graph3D` is still pending. Going much
+ * further than 1000 is irresponsible until that lands.
  */
 graphMaxNodesMax: number, 
 /**

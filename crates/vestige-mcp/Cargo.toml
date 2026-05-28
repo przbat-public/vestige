@@ -22,6 +22,13 @@ preprocessing = ["vestige-core/preprocessing"]
 encryption = ["vestige-core/encryption"]
 # Apple Silicon Metal GPU acceleration for embeddings (fastembed)
 metal = ["vestige-core/metal"]
+# OpenTelemetry / OTLP export. OFF by default so the binary stays lean —
+# turn on when shipping to an environment with an OTLP collector. With the
+# feature off, `telemetry::init` is a no-op and reports `FeatureDisabled`.
+# Real OTLP exporter wiring lands in a follow-up once we agree on the
+# concrete dependency set (opentelemetry / opentelemetry-otlp /
+# tracing-opentelemetry — gated here to keep the default build fast).
+telemetry = []
 
 [[bin]]
 name = "vestige-mcp"
@@ -94,6 +101,9 @@ ts-rs = { version = "12", features = ["chrono-impl", "no-serde-warnings"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# `start_paused = true` requires test-util explicitly — it isn't in tokio's
+# `full` feature set. Keeps the production binary lean.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

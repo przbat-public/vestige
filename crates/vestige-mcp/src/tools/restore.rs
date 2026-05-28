@@ -18,9 +18,14 @@ pub fn schema() -> Value {
             "path": {
                 "type": "string",
                 "description": "Path to the backup JSON file to restore from"
+            },
+            "confirmed": {
+                "type": "boolean",
+                "description": "Required to be `true`. Restore reingests every memory in the backup and can shadow or overwrite live state — there is no dry-run mode, so the gate is unconditional. Mirrors the MCP `elicitation/create` flow for transports that cannot prompt mid-call.",
+                "default": false
             }
         },
-        "required": ["path"]
+        "required": ["path", "confirmed"]
     })
 }
 
@@ -52,6 +57,17 @@ struct MemoryBackup {
 }
 
 pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
+    let raw = args.clone().unwrap_or_else(|| serde_json::json!({}));
+
+    // Destructive-op gate. Restore has no dry-run; the only safe call is
+    // an explicitly confirmed one. See `tools::common`.
+    if !crate::tools::common::is_confirmed(&raw) {
+        return Err(crate::tools::common::missing_confirmation_error(
+            "restore",
+            "Restore reingests every memory in the backup and may shadow or overwrite live state.",
+        ));
+    }
+
     let args: RestoreArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => return Err("Missing arguments".to_string()),
@@ -162,16 +178,24 @@ mod tests {
         path.to_string_lossy().to_string()
     }
 
+    /// Every legitimate restore call must opt in via `confirmed: true`.
+    /// Tests below funnel through this helper so we don't duplicate the
+    /// pattern thirteen times.
+    fn restore_args(path: &str) -> serde_json::Value {
+        serde_json::json!({ "path": path, "confirmed": true })
+    }
+
     #[test]
     fn test_schema_has_required_fields() {
         let s = schema();
         assert_eq!(s["type"], "object");
         assert!(s["properties"]["path"].is_object());
+        assert!(s["properties"]["confirmed"].is_object());
+        let required = s["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("path")));
         assert!(
-            s["required"]
-                .as_array()
-                .unwrap()
-                .contains(&serde_json::json!("path"))
+            required.contains(&serde_json::json!("confirmed")),
+            "restore must require `confirmed`; without it the destructive-op gate has no schema-level signal"
         );
     }
 
@@ -180,21 +204,65 @@ mod tests {
         let (storage, _dir) = test_storage().await;
         let result = execute(&storage, None).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Missing arguments"));
+        // The confirmation gate fires before deserialization, so the
+        // error mentions the operation, not "Missing arguments". This is
+        // intentional — the destructive guard is the FIRST thing a
+        // caller should fix.
+        let err = result.unwrap_err();
+        assert!(err.contains("`restore`"), "got: {err}");
     }
 
     #[tokio::test]
-    async fn test_missing_path_field_fails() {
+    async fn test_missing_path_field_fails_after_gate() {
         let (storage, _dir) = test_storage().await;
-        let result = execute(&storage, Some(serde_json::json!({}))).await;
+        let result = execute(&storage, Some(serde_json::json!({ "confirmed": true }))).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid arguments"));
     }
 
+    // ---- Destructive-op confirmation gate ---------------------------
+
+    #[tokio::test]
+    async fn test_restore_without_confirmation_is_blocked() {
+        let (storage, dir) = test_storage().await;
+        let backup = serde_json::json!([{ "content": "should not be restored" }]);
+        let path = write_temp_file(&dir, "blocked.json", &backup.to_string());
+
+        // No `confirmed` flag — even with a valid backup we must refuse.
+        let args = serde_json::json!({ "path": path });
+        let result = execute(&storage, Some(args)).await;
+        let err = result.expect_err("restore without confirmation must error");
+        assert!(err.contains("`restore`"), "must name the op: {err}");
+        assert!(
+            err.contains("confirmed: true"),
+            "must tell the agent how to retry: {err}"
+        );
+        assert!(
+            err.contains("requestedSchema"),
+            "must include the elicitation schema clients translate into a prompt: {err}"
+        );
+
+        // Make sure NOTHING was ingested.
+        let stats = storage.get_stats().unwrap();
+        assert_eq!(stats.total_nodes, 0, "blocked restore must not ingest");
+    }
+
+    #[tokio::test]
+    async fn test_restore_with_confirmation_false_is_blocked() {
+        let (storage, dir) = test_storage().await;
+        let backup = serde_json::json!([{ "content": "still no" }]);
+        let path = write_temp_file(&dir, "no.json", &backup.to_string());
+        let args = serde_json::json!({ "path": path, "confirmed": false });
+        let result = execute(&storage, Some(args)).await;
+        assert!(result.is_err(), "explicit confirmed=false must remain blocked");
+    }
+
+    // ---- Original happy-path tests (now with `confirmed: true`) -----
+
     #[tokio::test]
     async fn test_nonexistent_file_fails() {
         let (storage, _dir) = test_storage().await;
-        let args = serde_json::json!({ "path": "/tmp/does_not_exist_vestige_test.json" });
+        let args = restore_args("/tmp/does_not_exist_vestige_test.json");
         let result = execute(&storage, Some(args)).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
@@ -204,8 +272,7 @@ mod tests {
     async fn test_malformed_json_fails() {
         let (storage, dir) = test_storage().await;
         let path = write_temp_file(&dir, "bad.json", "this is not json {{{");
-        let args = serde_json::json!({ "path": path });
-        let result = execute(&storage, Some(args)).await;
+        let result = execute(&storage, Some(restore_args(&path))).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unrecognized backup format"));
     }
@@ -218,8 +285,7 @@ mod tests {
             { "content": "Memory two", "nodeType": "concept" }
         ]);
         let path = write_temp_file(&dir, "backup.json", &backup.to_string());
-        let args = serde_json::json!({ "path": path });
-        let result = execute(&storage, Some(args)).await;
+        let result = execute(&storage, Some(restore_args(&path))).await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["tool"], "restore");
@@ -240,8 +306,7 @@ mod tests {
             ]
         });
         let path = write_temp_file(&dir, "recall.json", &backup.to_string());
-        let args = serde_json::json!({ "path": path });
-        let result = execute(&storage, Some(args)).await;
+        let result = execute(&storage, Some(restore_args(&path))).await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["restored"], 3);
@@ -253,8 +318,7 @@ mod tests {
         let (storage, dir) = test_storage().await;
         let backup = serde_json::json!({ "results": [] });
         let path = write_temp_file(&dir, "empty.json", &backup.to_string());
-        let args = serde_json::json!({ "path": path });
-        let result = execute(&storage, Some(args)).await;
+        let result = execute(&storage, Some(restore_args(&path))).await;
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(value["restored"], 0);
@@ -263,11 +327,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_restore_empty_array_returns_error() {
-        // Empty [] parses as Vec<BackupWrapper> first, which has no items → "Empty backup file"
         let (storage, dir) = test_storage().await;
         let path = write_temp_file(&dir, "empty_arr.json", "[]");
-        let args = serde_json::json!({ "path": path });
-        let result = execute(&storage, Some(args)).await;
+        let result = execute(&storage, Some(restore_args(&path))).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Empty backup file"));
     }
@@ -277,8 +339,7 @@ mod tests {
         let (storage, dir) = test_storage().await;
         let backup = serde_json::json!([{ "content": "No type specified" }]);
         let path = write_temp_file(&dir, "notype.json", &backup.to_string());
-        let args = serde_json::json!({ "path": path });
-        let result = execute(&storage, Some(args)).await;
+        let result = execute(&storage, Some(restore_args(&path))).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap()["restored"], 1);
     }

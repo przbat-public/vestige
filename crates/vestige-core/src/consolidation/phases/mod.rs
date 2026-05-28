@@ -22,7 +22,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use engine::DreamEngine;
+pub use engine::{DEFAULT_NREM3_DOWNSCALE_FACTOR, DreamEngine, default_nrem3_downscale_factor};
 pub use types::{
     CreativeConnection, CreativeConnectionType, DreamInsight, DreamPhase, FourPhaseDreamResult,
     PhaseResult, TriageCategory, TriagedMemory,

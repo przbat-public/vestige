@@ -24,6 +24,10 @@ use super::types::{
 
 /// Memory dreamer for enhanced consolidation.
 #[derive(Debug)]
+#[allow(
+    clippy::field_scoped_visibility_modifiers,
+    reason = "Sibling submodules (`dreamer_*`) read and write these fields directly as part of a split-by-responsibility refactor; they share the parent's trust boundary."
+)]
 pub struct MemoryDreamer {
     pub(super) config: DreamConfig,
     pub(super) dream_history: Arc<RwLock<Vec<DreamResult>>>,

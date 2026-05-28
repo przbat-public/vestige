@@ -44,6 +44,21 @@ pub fn apply_migrations(conn: &rusqlite::Connection) -> rusqlite::Result<u32> {
                     "UPDATE schema_version SET version = 7, applied_at = datetime('now');",
                 )?;
                 tracing::info!("Database page_size upgraded to 8192 via VACUUM");
+            } else if migration.version == 14 {
+                // V14: switch to auto_vacuum=INCREMENTAL. Same dance as V7 —
+                // `PRAGMA auto_vacuum` only takes effect *after* a VACUUM,
+                // and VACUUM cannot run inside a transaction. We toggle the
+                // pragma, run VACUUM, *then* bump the schema version, so a
+                // VACUUM failure leaves us at v13 and the migration retries
+                // on next start.
+                conn.pragma_update(None, "auto_vacuum", 2)?;
+                conn.execute_batch("VACUUM;")?;
+                conn.execute_batch(
+                    "UPDATE schema_version SET version = 14, applied_at = datetime('now');",
+                )?;
+                tracing::info!(
+                    "Database switched to auto_vacuum=INCREMENTAL — incremental_vacuum is now usable"
+                );
             } else {
                 // Wrap in a transaction so partial failures roll back atomically.
                 conn.execute_batch("BEGIN IMMEDIATE;")?;

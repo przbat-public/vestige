@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
+import { useShallow } from 'zustand/react/shallow';
 import { DreamResultPanel } from '@/components/DreamResultPanel';
 import { GovernancePanel } from '@/components/GovernancePanel';
 import { MaintenancePanel } from '@/components/MaintenancePanel';
@@ -11,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useMemoryMutations } from '@/hooks/useMemoryMutations';
 import { api } from '@/stores/api';
+import { useDialogStore } from '@/stores/dialogs';
 import { queryKeys } from '@/stores/query';
 import { useTrackPageView } from '@/stores/telemetry';
 import { toast } from '@/stores/toast';
@@ -21,8 +24,27 @@ import type { ConfidenceResult, ConsolidationResult, DreamResult, ReflectResult 
 export function SettingsPage() {
   useTrackPageView('settings');
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const qc = useQueryClient();
-  const { connected, memoryCount, avgRetention } = useWebSocket();
+
+  // Every "this memory is suspicious / part of a contradiction" UI
+  // surface gets the same affordance: clicking the content (or a
+  // source-id chip) stages the id on the dialog store and routes to
+  // /memories so MemoriesPage opens the drawer. Read first, vote
+  // second.
+  const openMemory = (id: string) => {
+    useDialogStore.getState().requestSelectMemory(id);
+    navigate('/memories');
+  };
+  // Slice the WS store so unrelated events (`events` array growth, dream
+  // lifecycle toggles) don't repaint the settings page.
+  const { connected, memoryCount, avgRetention } = useWebSocket(
+    useShallow((s) => ({
+      connected: s.connected,
+      memoryCount: s.memoryCount,
+      avgRetention: s.avgRetention,
+    })),
+  );
   const { data: stats } = useQuery({ queryKey: queryKeys.stats, queryFn: api.stats });
   const { data: health } = useQuery({ queryKey: queryKeys.health, queryFn: api.health });
   const { data: distribution } = useQuery({
@@ -227,14 +249,32 @@ export function SettingsPage() {
                 {reflectResult.structuredInsights?.map((ins) => (
                   <div
                     key={`${ins.type}|${ins.severity}|${ins.description}`}
-                    className="flex gap-2 items-start border-t border-border pt-2"
+                    className="flex flex-col gap-1.5 border-t border-border pt-2"
                   >
-                    <Badge
-                      variant={ins.severity === 'high' ? 'danger' : ins.severity === 'medium' ? 'warning' : 'default'}
-                    >
-                      {ins.type}
-                    </Badge>
-                    <span className="text-muted-foreground flex-1">{ins.description}</span>
+                    <div className="flex gap-2 items-start">
+                      <Badge
+                        variant={ins.severity === 'high' ? 'danger' : ins.severity === 'medium' ? 'warning' : 'default'}
+                      >
+                        {ins.type}
+                      </Badge>
+                      <span className="text-muted-foreground flex-1">{ins.description}</span>
+                    </div>
+                    {ins.sourceMemoryIds.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pl-1">
+                        {ins.sourceMemoryIds.map((id) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => openMemory(id)}
+                            aria-label={t('settings.openMemoryTitle', { id })}
+                            className="font-mono text-[10px] text-muted-foreground bg-secondary/40 hover:bg-secondary/70 hover:text-foreground rounded px-1.5 py-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            title={id}
+                          >
+                            {id.slice(0, 8)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </Card>
@@ -266,7 +306,13 @@ export function SettingsPage() {
                       className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 border-b border-border pb-2 last:border-0"
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="text-muted-foreground line-clamp-2 break-words">{item.content}</p>
+                        <button
+                          type="button"
+                          onClick={() => openMemory(item.id)}
+                          className="text-left w-full text-muted-foreground line-clamp-2 break-words hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm transition-colors"
+                        >
+                          {item.content}
+                        </button>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <span
                             className={`tabular-nums text-[11px] ${item.confidence > 0.7 ? 'text-emerald-500' : item.confidence > 0.4 ? 'text-amber-500' : 'text-red-500'}`}

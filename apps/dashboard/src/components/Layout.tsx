@@ -1,10 +1,13 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet } from 'react-router';
+import { ConfirmDialogHost } from '@/components/ConfirmDialog';
 import { CommandPalette } from '@/components/layout/CommandPalette';
 import { KeyboardShortcutsDialog } from '@/components/layout/KeyboardShortcutsDialog';
+import { isInsideApplicationWidget, isTypingInEditable } from '@/components/layout/keyboard-router';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { RouteAnnouncer } from '@/components/RouteAnnouncer';
+import { useDialogStore } from '@/stores/dialogs';
 import { EVENT, track } from '@/stores/telemetry';
 
 // Lazy-loaded — the dialog pulls react-hook-form + zod which only matter
@@ -18,8 +21,13 @@ export function Layout() {
   const { t } = useTranslation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
-  const [addMemoryOpen, setAddMemoryOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // The Add-Memory dialog state lives in a shared store so empty-state CTAs
+  // on any page (and the command palette, eventually) can trigger it
+  // without re-routing through `window` events. See `stores/dialogs.ts`.
+  const addMemoryOpen = useDialogStore((s) => s.addMemoryOpen);
+  const openAddMemory = useDialogStore((s) => s.openAddMemory);
+  const closeAddMemory = useDialogStore((s) => s.closeAddMemory);
 
   useEffect(() => {
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keyboard router intentionally enumerates each chord linearly so reviewers can audit shortcut precedence at a glance; splitting per-chord would obscure the order
@@ -32,27 +40,27 @@ export function Layout() {
       // convention for "help".
       if ((e.metaKey || e.ctrlKey) && e.key === '/') {
         e.preventDefault();
-        setShortcutsOpen((prev) => {
-          if (!prev) track(EVENT.shortcuts_dialog_open, { trigger: 'cmd_slash' });
-          return !prev;
-        });
+        // Telemetry tracked BEFORE state mutation so StrictMode's double
+        // updater invocation in dev doesn't emit the event twice.
+        track(EVENT.shortcuts_dialog_open, { trigger: 'cmd_slash' });
+        setShortcutsOpen((prev) => !prev);
         return;
       }
 
-      const target = e.target as HTMLElement | null;
-      const typing =
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target?.isContentEditable === true;
+      const typing = isTypingInEditable(e.target);
+      // Yield single-character chords to widgets that ARIA-claim them:
+      // role="application" tells screen readers and us alike that the
+      // widget owns its keyboard map (Graph3D in particular ships its
+      // own `?` overlay). Without this guard `?` on the graph opened
+      // two help dialogs at once.
+      const inAppWidget = isInsideApplicationWidget(e.target);
 
       // Bare `?` only when the user isn't typing — same guard rationale
       // as the `'n'` handler below.
-      if (e.key === '?' && !typing) {
+      if (e.key === '?' && !typing && !inAppWidget) {
         e.preventDefault();
-        setShortcutsOpen((prev) => {
-          if (!prev) track(EVENT.shortcuts_dialog_open, { trigger: 'question_mark' });
-          return !prev;
-        });
+        track(EVENT.shortcuts_dialog_open, { trigger: 'question_mark' });
+        setShortcutsOpen((prev) => !prev);
         return;
       }
 
@@ -71,26 +79,12 @@ export function Layout() {
       // doesn't fight the browser.
       if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
         e.preventDefault();
-        setAddMemoryOpen(true);
-        track(EVENT.add_memory_open, { trigger: 'cmd_n' });
+        openAddMemory('cmd_n');
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // Custom event lets empty-state CTAs (e.g. on MemoriesPage) open the
-  // Add Memory dialog without prop-drilling through every page. The
-  // dialog state lives here because the ⌘N shortcut also lives here —
-  // single source of truth wins over multiple lazy clones.
-  useEffect(() => {
-    function onOpenAddMemory() {
-      setAddMemoryOpen(true);
-      track(EVENT.add_memory_open, { trigger: 'event' });
-    }
-    window.addEventListener('vestige:open-add-memory', onOpenAddMemory);
-    return () => window.removeEventListener('vestige:open-add-memory', onOpenAddMemory);
-  }, []);
+  }, [openAddMemory]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden relative">
@@ -170,10 +164,7 @@ export function Layout() {
           and offset by safe-area-inset on iOS. */}
       <button
         type="button"
-        onClick={() => {
-          setAddMemoryOpen(true);
-          track(EVENT.add_memory_open, { trigger: 'fab' });
-        }}
+        onClick={() => openAddMemory('fab')}
         className="fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full bg-primary text-primary-foreground shadow-2xl hover:scale-105 active:scale-95 transition-transform flex items-center justify-center text-2xl font-light focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
         style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}
         aria-label={t('addMemory.fabLabel')}
@@ -190,8 +181,13 @@ export function Layout() {
 
       {/* Add memory dialog — lazy chunk loads on first open */}
       <Suspense fallback={null}>
-        {addMemoryOpen && <AddMemoryDialog open={addMemoryOpen} onClose={() => setAddMemoryOpen(false)} />}
+        {addMemoryOpen && <AddMemoryDialog open={addMemoryOpen} onClose={closeAddMemory} />}
       </Suspense>
+
+      {/* Singleton confirm dialog — replaces window.confirm so destructive
+          flows get focus-on-cancel, ESC=cancel, themed styling, and are
+          testable from RTL without browser dialog plumbing. */}
+      <ConfirmDialogHost />
     </div>
   );
 }

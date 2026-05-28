@@ -50,8 +50,9 @@ pub async fn list_memories(
         // dashboard requests don't queue up on the reactor thread.
         let storage = state.storage.clone();
         let q = query.clone();
+        let (kw, sem) = vestige_core::default_hybrid_weights();
         let results =
-            tokio::task::spawn_blocking(move || storage.hybrid_search(&q, limit, 0.3, 0.7))
+            tokio::task::spawn_blocking(move || storage.hybrid_search(&q, limit, kw, sem))
                 .await
                 .map_err(log_join_err("hybrid_search task panicked"))?
                 .map_err(log_err("storage operation"))?;
@@ -82,34 +83,46 @@ pub async fn list_memories(
         }));
     }
 
-    // No search query — list all memories. `get_all_nodes` scans the full
-    // node table up to `limit`; per-row JSON deserialization makes it block
-    // longer than the 10ms reactor budget on large bases.
+    // No search query — list all memories. We push the optional
+    // `node_type`, `tag`, and `min_retention` filters into SQL so LIMIT is
+    // applied to the filtered result, not to the unfiltered prefix.
+    // Previously the handler did `get_all_nodes(LIMIT) → retain(...)`,
+    // which under-returned whenever the LIMIT prefix happened to be
+    // dominated by rows that the filter rejected. (Audit 2026-05-22.)
+    //
+    // `total` is the population matching the WHERE clause — separate
+    // from the page size. Previously the handler returned `memories.len()`,
+    // which capped the displayed total at the LIMIT and made pagination
+    // impossible. (Audit 2026-05-22.)
     let storage = state.storage.clone();
-    let mut nodes = tokio::task::spawn_blocking(move || storage.get_all_nodes(limit, offset))
-        .await
-        .map_err(log_join_err("get_all_nodes task panicked"))?
-        .map_err(log_err("storage operation"))?;
-
-    if let Some(ref node_type) = params.node_type {
-        nodes.retain(|n| n.node_type == *node_type);
-    }
-    if let Some(ref tag) = params.tag {
-        nodes.retain(|n| n.tags.iter().any(|t| t == tag));
-    }
-    if let Some(min_ret) = params.min_retention {
-        nodes.retain(|n| n.retention_strength >= min_ret);
-    }
+    let node_type_filter = params.node_type.clone();
+    let tag_filter = params.tag.clone();
+    let min_ret_filter = params.min_retention;
+    let (nodes, total) = tokio::task::spawn_blocking(move || -> vestige_core::Result<_> {
+        let total = storage.count_nodes_filtered(
+            node_type_filter.as_deref(),
+            tag_filter.as_deref(),
+            min_ret_filter,
+        )?;
+        let page = storage.get_all_nodes_filtered(
+            limit,
+            offset,
+            node_type_filter.as_deref(),
+            tag_filter.as_deref(),
+            min_ret_filter,
+        )?;
+        Ok((page, total))
+    })
+    .await
+    .map_err(log_join_err("list_memories task panicked"))?
+    .map_err(log_err("storage operation"))?;
 
     let memories: Vec<MemoryDto> = nodes
         .iter()
         .map(|n| MemoryDto::from(n).into_list_view())
         .collect();
 
-    Ok(Json(MemoryListResponseDto {
-        total: memories.len(),
-        memories,
-    }))
+    Ok(Json(MemoryListResponseDto { total, memories }))
 }
 
 /// Get a single memory by ID — returns the full `MemoryDto` (sentiment,
@@ -406,4 +419,138 @@ pub async fn update_memory(
         memory,
         field: field.to_string(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cognitive::CognitiveEngine;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+    use vestige_core::Storage;
+    use vestige_core::memory::IngestInput;
+
+    fn make_state() -> (AppState, tempfile::TempDir) {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let storage = Arc::new(Storage::new(Some(db_path)).unwrap());
+        let cognitive = Some(Arc::new(tokio::sync::Mutex::new(CognitiveEngine::new())));
+        (AppState::new(storage, cognitive), dir)
+    }
+
+    fn seed(state: &AppState, n: usize, node_type: &str) {
+        for i in 0..n {
+            state
+                .storage
+                .ingest(IngestInput {
+                    content: format!("memory {} {}", node_type, i),
+                    node_type: node_type.to_string(),
+                    tags: vec!["seed".to_string()],
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+    }
+
+    /// The previous handler returned `memories.len()` as `total`, which
+    /// silently capped the dashboard's "X of Y" at the page size.
+    /// Now `total` reflects the population for the matching filter.
+    #[tokio::test]
+    async fn list_memories_total_reflects_population_not_page_size() {
+        let (state, _dir) = make_state();
+        seed(&state, 25, "fact");
+
+        let resp = list_memories(
+            State(state),
+            Query(MemoryListParams {
+                q: None,
+                node_type: None,
+                tag: None,
+                min_retention: None,
+                sort: None,
+                limit: Some(10),
+                offset: Some(0),
+            }),
+        )
+        .await
+        .expect("list should succeed");
+
+        assert_eq!(resp.0.memories.len(), 10, "page respects LIMIT");
+        assert_eq!(resp.0.total, 25, "total reflects the full population");
+    }
+
+    /// The total must be filter-aware. Asking for `node_type=note` against a
+    /// 25-fact population must report 0, not 25.
+    #[tokio::test]
+    async fn list_memories_total_respects_filters() {
+        let (state, _dir) = make_state();
+        seed(&state, 25, "fact");
+        seed(&state, 4, "note");
+
+        let resp = list_memories(
+            State(state),
+            Query(MemoryListParams {
+                q: None,
+                node_type: Some("note".to_string()),
+                tag: None,
+                min_retention: None,
+                sort: None,
+                limit: Some(50),
+                offset: Some(0),
+            }),
+        )
+        .await
+        .expect("list should succeed");
+
+        assert_eq!(resp.0.memories.len(), 4);
+        assert_eq!(resp.0.total, 4);
+    }
+
+    /// Page 2 of an offset-based pagination — total stays constant, memories
+    /// shift to the next slice.
+    #[tokio::test]
+    async fn list_memories_paginates_with_offset() {
+        let (state, _dir) = make_state();
+        seed(&state, 15, "fact");
+
+        let page1 = list_memories(
+            State(state.clone()),
+            Query(MemoryListParams {
+                q: None,
+                node_type: None,
+                tag: None,
+                min_retention: None,
+                sort: None,
+                limit: Some(5),
+                offset: Some(0),
+            }),
+        )
+        .await
+        .expect("page1");
+        let page2 = list_memories(
+            State(state),
+            Query(MemoryListParams {
+                q: None,
+                node_type: None,
+                tag: None,
+                min_retention: None,
+                sort: None,
+                limit: Some(5),
+                offset: Some(5),
+            }),
+        )
+        .await
+        .expect("page2");
+
+        assert_eq!(page1.0.total, 15);
+        assert_eq!(page2.0.total, 15);
+        assert_eq!(page1.0.memories.len(), 5);
+        assert_eq!(page2.0.memories.len(), 5);
+        // No overlap — different ids on every page slot.
+        let p1_ids: std::collections::HashSet<_> =
+            page1.0.memories.iter().map(|m| m.id.clone()).collect();
+        let p2_ids: std::collections::HashSet<_> =
+            page2.0.memories.iter().map(|m| m.id.clone()).collect();
+        assert!(p1_ids.is_disjoint(&p2_ids), "pages must not overlap");
+    }
 }

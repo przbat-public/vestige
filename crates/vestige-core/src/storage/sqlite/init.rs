@@ -8,7 +8,9 @@ use lru::LruCache;
 use rusqlite::Connection;
 #[cfg(feature = "embeddings")]
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+#[cfg(feature = "vector-search")]
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 
 #[cfg(feature = "embeddings")]
@@ -18,6 +20,42 @@ use crate::fsrs::FSRSScheduler;
 use crate::search::VectorIndex;
 
 use super::error::{Result, StorageError};
+
+/// How the in-memory vector index was populated on startup.
+///
+/// Exposed for diagnostics: a healthy long-lived process should mostly see
+/// `Loaded` (HNSW sidecar restored), with occasional `Rebuilt` when row
+/// counts drift (e.g. crash before save, manual DB edit, migration).
+#[cfg(feature = "vector-search")]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VectorIndexSource {
+    /// No embeddings in DB — index legitimately empty.
+    Empty = 0,
+    /// Index re-built from `node_embeddings` table (slow path).
+    Rebuilt = 1,
+    /// Index restored from `vestige.hnsw` sidecar (fast path, post v3.6).
+    Loaded = 2,
+}
+
+#[cfg(feature = "vector-search")]
+impl VectorIndexSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::Rebuilt => "rebuilt",
+            Self::Loaded => "loaded",
+        }
+    }
+
+    fn from_u8(v: u8) -> Self {
+        match v {
+            2 => Self::Loaded,
+            1 => Self::Rebuilt,
+            _ => Self::Empty,
+        }
+    }
+}
 
 #[allow(
     clippy::field_scoped_visibility_modifiers,
@@ -35,6 +73,14 @@ pub struct Storage {
     /// LRU cache for query embeddings to avoid re-embedding repeated queries
     #[cfg(feature = "embeddings")]
     pub(super) query_cache: Mutex<LruCache<String, Vec<f32>>>,
+    /// Resolved DB path — kept so we can derive sidecar paths
+    /// (`vestige.hnsw`, `vestige.hnsw.meta.json`) for vector-index persistence
+    /// without re-deriving via ProjectDirs.
+    pub(super) db_path: PathBuf,
+    /// How the vector index was populated on the most recent (re)load.
+    /// Surfaced via [`Storage::vector_index_source`].
+    #[cfg(feature = "vector-search")]
+    pub(super) vector_index_source: AtomicU8,
 }
 
 impl Storage {
@@ -136,12 +182,86 @@ impl Storage {
             vector_index: Mutex::new(vector_index),
             #[cfg(feature = "embeddings")]
             query_cache,
+            db_path: path,
+            #[cfg(feature = "vector-search")]
+            vector_index_source: AtomicU8::new(VectorIndexSource::Empty as u8),
         };
 
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
         storage.load_embeddings_into_index()?;
 
+        // Pick up a previously-optimized w20 if consolidation has produced
+        // one. Best-effort: a missing column or a read error means we keep
+        // the FSRS-6 default and log a debug breadcrumb. This must NOT fail
+        // boot — operators with old DBs (pre-v14 schema) would be stuck.
+        if let Err(e) = storage.apply_personalized_weights() {
+            tracing::debug!(
+                error = %e,
+                "could not apply personalized FSRS weights at boot; falling back to defaults"
+            );
+        }
+
         Ok(storage)
+    }
+
+    /// Path to the HNSW sidecar binary next to the DB.
+    #[cfg(feature = "vector-search")]
+    pub(super) fn vector_index_path(&self) -> PathBuf {
+        // VectorIndex::save() also writes `vestige.hnsw.mappings.json` next to
+        // the binary — that file is paired by USearch with `with_extension`.
+        // We add our own `.meta.json` so we can validate the cache cheaply.
+        path_with_suffix(&self.db_path, "hnsw")
+    }
+
+    /// Sidecar metadata describing what's in the HNSW file. Versioned so we
+    /// can refuse to load older formats without crashing.
+    #[cfg(feature = "vector-search")]
+    pub(super) fn vector_index_meta_path(&self) -> PathBuf {
+        path_with_suffix(&self.db_path, "hnsw.meta.json")
+    }
+
+    /// How the vector index was populated on the most recent (re)load.
+    /// Defaults to `Empty` before [`Storage::new`] finishes.
+    #[cfg(feature = "vector-search")]
+    pub fn vector_index_source(&self) -> VectorIndexSource {
+        VectorIndexSource::from_u8(self.vector_index_source.load(Ordering::Relaxed))
+    }
+
+    /// Persist the current HNSW index to its sidecar.
+    ///
+    /// Safe to call frequently — it's a write, not a serialize-from-scratch.
+    /// On error returns `Err` but **also** removes the (now-stale) meta file
+    /// so a subsequent restart will rebuild from SQLite rather than load a
+    /// half-written binary. Best-effort: callers may ignore the error.
+    #[cfg(feature = "vector-search")]
+    pub fn persist_vector_index(&self) -> Result<()> {
+        let index = self
+            .vector_index
+            .lock()
+            .map_err(|_| StorageError::Init("Vector index lock poisoned".into()))?;
+        let row_count = index.len();
+        let path = self.vector_index_path();
+        index
+            .save(&path)
+            .map_err(|e| StorageError::Init(format!("vector index save failed: {}", e)))?;
+
+        let meta = serde_json::json!({
+            "schema": 1,
+            "row_count": row_count,
+            "dimensions": index.dimensions(),
+        });
+        let meta_path = self.vector_index_meta_path();
+        if let Err(e) = std::fs::write(
+            &meta_path,
+            serde_json::to_string(&meta)
+                .map_err(|e| StorageError::Init(format!("meta serialize: {}", e)))?,
+        ) {
+            // Roll back: a binary without metadata can't be safely loaded
+            // (we wouldn't be able to validate row count on next boot).
+            let _ = std::fs::remove_file(&path);
+            return Err(StorageError::Init(format!("meta write failed: {}", e)));
+        }
+        Ok(())
     }
 
     /// Load existing embeddings into vector index, migrating dimensions if needed.
@@ -151,6 +271,13 @@ impl Storage {
     /// - **larger stored** (768 → 384): Matryoshka truncate + L2-normalize.
     /// - **smaller stored** (256 → 384): must re-embed from content
     ///   (Matryoshka can't *extend* dimensions). Runs once, updates DB in-place.
+    ///
+    /// **Fast path (v3.6+):** if a `vestige.hnsw` sidecar exists whose meta
+    /// records the same row count as the current `node_embeddings` table, we
+    /// `VectorIndex::load` it and skip the per-row insert loop entirely. On
+    /// any mismatch, validation failure, or load error we fall back to the
+    /// rebuild path below — the sidecar is purely a cache, never the source
+    /// of truth.
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     fn load_embeddings_into_index(&self) -> Result<()> {
         let reader = self
@@ -158,6 +285,35 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
 
+        // Cheap row count first — lets us early-out for empty DBs and gives
+        // the sidecar-load path a checkable invariant.
+        let db_row_count: usize = reader
+            .query_row("SELECT COUNT(*) FROM node_embeddings", [], |row| row.get(0))
+            .map(|c: i64| c as usize)
+            .unwrap_or(0);
+
+        if db_row_count == 0 {
+            drop(reader);
+            self.vector_index_source
+                .store(VectorIndexSource::Empty as u8, Ordering::Relaxed);
+            return Ok(());
+        }
+
+        // Sidecar fast path. Errors here are non-fatal — log and fall through
+        // to the rebuild path. The cache file is recoverable but never
+        // authoritative.
+        drop(reader);
+        if self.try_load_vector_index_from_sidecar(db_row_count) {
+            self.vector_index_source
+                .store(VectorIndexSource::Loaded as u8, Ordering::Relaxed);
+            return Ok(());
+        }
+
+        // Slow path: rebuild from SQLite (also handles dimension migrations).
+        let reader = self
+            .reader
+            .lock()
+            .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         let mut stmt = reader.prepare("SELECT node_id, embedding FROM node_embeddings")?;
 
         let embeddings: Vec<(String, Vec<u8>)> = stmt
@@ -218,7 +374,109 @@ impl Storage {
             );
         }
 
+        self.vector_index_source
+            .store(VectorIndexSource::Rebuilt as u8, Ordering::Relaxed);
+
+        // Best-effort persist so the next startup hits the sidecar fast path.
+        // Failure to save the cache is never fatal — the rebuild has already
+        // succeeded, the index is usable, and we'll just rebuild again next
+        // time.
+        if let Err(e) = self.persist_vector_index() {
+            tracing::warn!(
+                error = %e,
+                "vector index sidecar save failed — next startup will rebuild from SQLite"
+            );
+        }
+
         Ok(())
+    }
+
+    /// Try to populate `self.vector_index` from the on-disk sidecar.
+    ///
+    /// Returns `true` only when:
+    /// 1. Both `vestige.hnsw` and `vestige.hnsw.meta.json` exist.
+    /// 2. Meta schema is recognized.
+    /// 3. `meta.row_count` matches the current DB row count.
+    /// 4. `VectorIndex::load` and the mappings sidecar both succeed.
+    /// 5. Loaded index reports the expected size.
+    ///
+    /// Any failure is logged and returns `false` so the caller falls through
+    /// to the rebuild path.
+    #[cfg(feature = "vector-search")]
+    fn try_load_vector_index_from_sidecar(&self, expected_rows: usize) -> bool {
+        use crate::search::VectorIndexConfig;
+
+        let bin = self.vector_index_path();
+        let meta = self.vector_index_meta_path();
+        if !bin.exists() || !meta.exists() {
+            return false;
+        }
+
+        // Validate meta first — cheaper than touching the binary.
+        let meta_str = match std::fs::read_to_string(&meta) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::debug!(error = %e, "no readable vector index meta — rebuilding");
+                return false;
+            }
+        };
+        let meta_val: serde_json::Value = match serde_json::from_str(&meta_str) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e, "vector index meta unparseable — rebuilding");
+                return false;
+            }
+        };
+        let schema = meta_val.get("schema").and_then(|v| v.as_u64()).unwrap_or(0);
+        if schema != 1 {
+            tracing::info!(schema, "vector index meta schema mismatch — rebuilding");
+            return false;
+        }
+        let meta_rows = meta_val
+            .get("row_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        if meta_rows != expected_rows {
+            tracing::info!(
+                meta_rows,
+                db_rows = expected_rows,
+                "vector index sidecar stale (row count drift) — rebuilding"
+            );
+            return false;
+        }
+
+        // Try the actual load. USearch's load is allocation-heavy but
+        // ~constant time, far cheaper than per-row insert + HNSW link
+        // construction.
+        let loaded = match VectorIndex::load(&bin, VectorIndexConfig::default()) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e, "vector index load failed — rebuilding from SQLite");
+                return false;
+            }
+        };
+        if loaded.len() != expected_rows {
+            tracing::warn!(
+                loaded = loaded.len(),
+                expected = expected_rows,
+                "loaded HNSW index size disagrees with DB — rebuilding"
+            );
+            return false;
+        }
+
+        // Swap in.
+        match self.vector_index.lock() {
+            Ok(mut slot) => *slot = loaded,
+            Err(_) => {
+                tracing::warn!("vector index lock poisoned — rebuilding");
+                return false;
+            }
+        }
+        tracing::info!(
+            rows = expected_rows,
+            "Vector index restored from sidecar — skipped per-row HNSW rebuild"
+        );
+        true
     }
 
     /// Re-embed a batch of memories and update both the DB and the vector index.
@@ -276,4 +534,11 @@ impl Storage {
 
         Ok(())
     }
+}
+
+/// Compute `<db_dir>/<db_stem>.<suffix>` so sidecar paths live next to the DB
+/// without colliding with other files. `with_extension` works because every
+/// supported DB extension is a single component.
+fn path_with_suffix(db: &Path, suffix: &str) -> PathBuf {
+    db.with_extension(suffix)
 }

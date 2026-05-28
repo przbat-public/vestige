@@ -112,10 +112,12 @@ mod tests {
 
     #[test]
     fn from_metadata_copies_all_fields() {
-        let mut node = KnowledgeNode::default();
-        node.id = "n1".into();
-        node.content = "Three OAuth bugs in a row".into();
-        node.tags = vec!["dream".into(), "insight".into(), "unvalidated".into()];
+        let node = KnowledgeNode {
+            id: "n1".into(),
+            content: "Three OAuth bugs in a row".into(),
+            tags: vec!["dream".into(), "insight".into(), "unvalidated".into()],
+            ..KnowledgeNode::default()
+        };
         let metadata = fixture_metadata();
 
         let dto = InsightDto::from_metadata(&node, &metadata);
@@ -133,8 +135,10 @@ mod tests {
 
     #[test]
     fn validated_metadata_serialises_timestamp() {
-        let mut node = KnowledgeNode::default();
-        node.id = "n2".into();
+        let node = KnowledgeNode {
+            id: "n2".into(),
+            ..KnowledgeNode::default()
+        };
         let mut metadata = fixture_metadata();
         let t = Utc::now();
         metadata.mark_validated(t);

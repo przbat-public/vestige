@@ -36,7 +36,17 @@ impl Storage {
             params![id],
         )? as i64;
 
-        erased += writer.execute("DELETE FROM access_log WHERE node_id = ?1", params![id])? as i64;
+        // Historical typo: the table is `memory_access_log` (see
+        // migrations/sql.rs and helpers::log_access). Every other site uses
+        // the correct name; this DELETE used to silently break the entire
+        // GDPR erasure path with `no such table: access_log` before any
+        // node row was actually removed. ON DELETE CASCADE on the FK would
+        // mop up the access rows anyway, but the explicit DELETE is kept
+        // here so the returned `erased` count reflects all artifacts.
+        erased += writer.execute(
+            "DELETE FROM memory_access_log WHERE node_id = ?1",
+            params![id],
+        )? as i64;
 
         erased += writer.execute(
             "DELETE FROM memory_states WHERE memory_id = ?1",

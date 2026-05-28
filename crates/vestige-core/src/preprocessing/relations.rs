@@ -6,8 +6,34 @@
 //! instead of waiting for dream consolidation.
 //!
 //! Heuristic-based: no model downloads, no ONNX.
+//!
+//! # Causality vs other relations
+//!
+//! Until 2026-05-22 every extracted triple was forced to
+//! [`LinkType::Causal`] when handed to the activation network — even
+//! when the verb was clearly non-causal (`manages`, `uses`, `contains`).
+//! That polluted causal-chain traversals with reporting/ownership links
+//! and made the "why X?" queries useless.
+//!
+//! Each predicate is now classified into a [`LinkType`] at extraction
+//! time so downstream code (post-ingest edge creation, the
+//! `explore_connections` tool, dream traversal) sees the right kind of
+//! relationship without re-parsing the verb. The taxonomy is small on
+//! purpose:
+//!
+//! | LinkType  | Predicates (examples)                          |
+//! |-----------|------------------------------------------------|
+//! | `Causal`  | causes, requires, enables, triggers, leads to  |
+//! | `PartOf`  | contains, includes, belongs to, is part of     |
+//! | `Temporal`| precedes, follows, before, after               |
+//! | `Semantic`| manages, leads, uses, depends on, implements…  |
+//!
+//! `Semantic` is the default — every predicate that doesn't fall into
+//! one of the more specific buckets is treated as a generic semantic
+//! association.
 
 use super::entities::{EntityType, ExtractedEntity};
+use crate::neuroscience::spreading_activation::LinkType;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -17,6 +43,36 @@ pub struct ExtractedRelation {
     pub subject: String,
     pub predicate: String,
     pub object: String,
+    /// Classified relationship type derived from the predicate.
+    ///
+    /// Defaulted to [`LinkType::Semantic`] for backwards compatibility
+    /// with callers that build `ExtractedRelation` literals manually.
+    pub link_type: LinkType,
+}
+
+/// Map a predicate verb phrase to the appropriate [`LinkType`].
+///
+/// Comparison is case-insensitive and tolerant of stray whitespace.
+/// Unknown verbs are classified as [`LinkType::Semantic`] — that's the
+/// safe default because the spreading-activation network treats Semantic
+/// edges as the baseline link and we don't want to over-claim causality.
+pub fn predicate_to_link_type(predicate: &str) -> LinkType {
+    let key = predicate.trim().to_lowercase();
+    match key.as_str() {
+        // Causal — A makes B happen, A is required for B, A enables B.
+        // "leads to" intentionally NOT included here: in business prose
+        // ("Alice leads the team") it's hierarchical, not causal.
+        "causes" | "requires" | "enables" | "triggers" => LinkType::Causal,
+        // Part–whole / containment.
+        "contains" | "includes" | "belongs to" | "is part of" => LinkType::PartOf,
+        // Temporal ordering. Currently only "precedes" / "follows" make
+        // it through the relation-verb regex; the others are listed for
+        // future verb-set expansion so the mapper stays exhaustive.
+        "precedes" | "follows" | "before" | "after" => LinkType::Temporal,
+        // Everything else (manages, leads, owns, uses, depends on,
+        // implements, extends, replaces, …) is a generic semantic link.
+        _ => LinkType::Semantic,
+    }
 }
 
 // Common relationship verbs that connect entities. The literal is constant
@@ -100,10 +156,12 @@ fn extract_from_sentence(
             };
 
             if !obj_text.is_empty() && subj != obj_text {
+                let link_type = predicate_to_link_type(&verb);
                 relations.push(ExtractedRelation {
                     subject: subj.to_string(),
                     predicate: verb.clone(),
                     object: obj_text,
+                    link_type,
                 });
             }
         }
@@ -265,5 +323,104 @@ mod tests {
             !rels.is_empty(),
             "Should extract relations from separate sentences"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Causality-graph classification (2026-05-22)
+    //
+    // Before the per-predicate mapping, every relation was forced to
+    // `LinkType::Causal` by the post-ingest edge writer. Asserting the
+    // mapping here pins the contract so that downstream code (the
+    // `explore_connections` tool, dream traversal) can rely on it.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn predicate_to_link_type_recognises_causal_verbs() {
+        for verb in ["causes", "requires", "enables", "triggers"] {
+            assert_eq!(
+                predicate_to_link_type(verb),
+                LinkType::Causal,
+                "`{verb}` must map to Causal — the causal-chain tool depends on this taxonomy",
+            );
+        }
+    }
+
+    #[test]
+    fn predicate_to_link_type_recognises_part_of_verbs() {
+        for verb in ["contains", "includes", "belongs to", "is part of"] {
+            assert_eq!(
+                predicate_to_link_type(verb),
+                LinkType::PartOf,
+                "`{verb}` must map to PartOf so containment isn't laundered as causality",
+            );
+        }
+    }
+
+    #[test]
+    fn predicate_to_link_type_defaults_to_semantic() {
+        // "manages" / "leads" / "uses" are common verbs whose old
+        // behaviour was to silently materialise as causal edges.
+        for verb in ["manages", "leads", "uses", "depends on", "implements"] {
+            assert_eq!(
+                predicate_to_link_type(verb),
+                LinkType::Semantic,
+                "`{verb}` is not causal — must default to Semantic",
+            );
+        }
+    }
+
+    #[test]
+    fn predicate_to_link_type_is_case_insensitive() {
+        assert_eq!(predicate_to_link_type("Causes"), LinkType::Causal);
+        assert_eq!(predicate_to_link_type("  CAUSES  "), LinkType::Causal);
+        assert_eq!(predicate_to_link_type("Belongs To"), LinkType::PartOf);
+    }
+
+    #[test]
+    fn extract_relations_propagates_link_type_for_causal_sentence() {
+        let entities = vec![proper("Stress"), proper("Insomnia")];
+        let relations = extract_relations("Stress causes Insomnia in many cases.", &entities);
+        assert!(
+            !relations.is_empty(),
+            "Should extract a relation for `Stress causes Insomnia`"
+        );
+        let causal = relations
+            .iter()
+            .find(|r| r.predicate.contains("causes"))
+            .expect("expected at least one `causes` relation");
+        assert_eq!(
+            causal.link_type,
+            LinkType::Causal,
+            "extract_relations must classify `causes` as Causal so the causal-chain MCP \
+             tool can filter on it without re-parsing the verb",
+        );
+    }
+
+    #[test]
+    fn extract_relations_does_not_mislabel_management_as_causal() {
+        let entities = vec![person("Alice"), org("Auth Team")];
+        let relations = extract_relations("Alice manages the Auth Team since January.", &entities);
+        assert!(!relations.is_empty());
+        for r in &relations {
+            assert_ne!(
+                r.link_type,
+                LinkType::Causal,
+                "`{}` was misclassified as causal — Alice managing a team is not causation. \
+                 Pre-fix, this triple polluted causal traversals with hierarchical links.",
+                r.predicate,
+            );
+        }
+    }
+
+    #[test]
+    fn extract_relations_classifies_containment_as_part_of() {
+        let entities = vec![proper("Sprint 5"), proper("Login feature")];
+        let relations =
+            extract_relations("Sprint 5 includes the Login feature this week.", &entities);
+        let containment = relations
+            .iter()
+            .find(|r| r.predicate.contains("includes"))
+            .expect("expected `includes` triple");
+        assert_eq!(containment.link_type, LinkType::PartOf);
     }
 }

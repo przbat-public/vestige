@@ -246,7 +246,7 @@ export class EdgeManager {
     }
   }
 
-  applyTemporalOpacities(nodeOpacities: Map<string, number>) {
+  applyTemporalOpacities(nodeOpacities: ReadonlyMap<string, number>) {
     for (const e of this.entries) {
       if (e.dissolving) continue;
       const srcOp = nodeOpacities.get(e.source) ?? 1;

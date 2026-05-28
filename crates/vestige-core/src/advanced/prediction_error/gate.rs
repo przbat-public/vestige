@@ -288,54 +288,19 @@ impl PredictionErrorGate {
         }
     }
 
-    /// Detect if two pieces of content appear contradictory
+    /// Detect if two pieces of content appear contradictory.
     ///
-    /// Uses simple heuristics; could be enhanced with NLI model
+    /// Delegates to [`crate::nlp::default_contradiction_detector`] — today
+    /// a heuristic (NegEx scope + correction phrases + asymmetric negation,
+    /// EN + PL). Going through the factory means a future ONNX / LLM
+    /// backend swaps in via one file, not three call sites.
+    ///
+    /// Every Vestige release runs an eval suite against the hand-curated
+    /// datasets in `nlp::eval::data` to detect regressions in this signal.
     pub(super) fn detect_contradiction(&self, new_content: &str, old_content: &str) -> bool {
-        let new_lower = new_content.to_lowercase();
-        let old_lower = old_content.to_lowercase();
-
-        // Check for explicit negation patterns
-        let negation_pairs = [
-            ("don't", "do"),
-            ("never", "always"),
-            ("avoid", "use"),
-            ("wrong", "right"),
-            ("bad", "good"),
-            ("incorrect", "correct"),
-            ("deprecated", "recommended"),
-            ("outdated", "current"),
-            ("instead of", ""),
-            ("rather than", ""),
-            ("not ", ""),
-        ];
-
-        for (neg, _pos) in negation_pairs.iter() {
-            if new_lower.contains(neg) && !old_lower.contains(neg) {
-                return true;
-            }
-        }
-
-        // Check for correction phrases
-        let correction_phrases = [
-            "actually",
-            "correction",
-            "update:",
-            "fixed",
-            "was wrong",
-            "should be",
-            "better approach",
-            "improved",
-            "the right way",
-        ];
-
-        for phrase in correction_phrases.iter() {
-            if new_lower.contains(phrase) {
-                return true;
-            }
-        }
-
-        false
+        crate::nlp::default_contradiction_detector()
+            .detect(new_content, old_content)
+            .positive
     }
 
     /// Get statistics

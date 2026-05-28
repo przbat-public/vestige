@@ -122,4 +122,11 @@ pub struct FourPhaseDreamResult {
     /// is expected to apply a small multiplicative decay (or schedule a
     /// review) on these in storage. Empty when triage replayed everything.
     pub downscaled_ids: Vec<String>,
+    /// Multiplicative retention factor to apply to `downscaled_ids` (e.g.
+    /// `0.90` = 10 % retention loss per cycle). Surfaces the dream
+    /// engine's own choice so the caller can't silently drift away from
+    /// it. Pre-2026-05-20 the engine reported `0.95` in log strings while
+    /// the MCP `dream` tool hard-coded `0.95` again on the storage side —
+    /// the two were trivially desyncable. Routed through the engine now.
+    pub downscale_factor: f64,
 }

@@ -130,6 +130,13 @@ pub mod preprocessing;
 /// - Spreading activation networks
 pub mod neuroscience;
 
+/// Natural language heuristics with a trait-based architecture, hand-curated
+/// EN/PL evaluation datasets, and metric runner. Replaces ad-hoc keyword
+/// scans for contradiction / opinion / future-relevance detection. See
+/// [`nlp`] for the architecture rationale and how to plug in NLI / LLM
+/// implementations.
+pub mod nlp;
+
 // Integration tests live in `tests/` (scientific_validation, benchmark_eval,
 // cognitive_journey_tests). They exercise the crate through its public API
 // and are not part of the library surface.
@@ -180,15 +187,17 @@ pub use fsrs::{
 
 // Storage layer
 pub use storage::{
-    ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,
-    IntentionRecord, Result, SmartIngestResult, StateTransitionRecord, Storage, StorageError,
+    ConnectionRecord, ConsolidationHistoryRecord, DEFAULT_HYBRID_KEYWORD_WEIGHT,
+    DEFAULT_HYBRID_SEMANTIC_WEIGHT, DreamHistoryRecord, InsightRecord, IntentionRecord, Result,
+    SmartIngestResult, StateTransitionRecord, Storage, StorageError, default_hybrid_weights,
 };
 
 // Consolidation (sleep-inspired memory processing)
 pub use consolidation::SleepConsolidation;
 pub use consolidation::{
-    CreativeConnection, CreativeConnectionType, DreamEngine, DreamInsight, DreamPhase,
-    FourPhaseDreamResult, PhaseResult, TriageCategory, TriagedMemory,
+    CreativeConnection, CreativeConnectionType, DEFAULT_NREM3_DOWNSCALE_FACTOR, DreamEngine,
+    DreamInsight, DreamPhase, FourPhaseDreamResult, PhaseResult, TriageCategory, TriagedMemory,
+    default_nrem3_downscale_factor,
 };
 
 // Advanced features

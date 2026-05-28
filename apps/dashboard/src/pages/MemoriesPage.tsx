@@ -14,6 +14,8 @@ import { SkeletonList } from '@/components/ui/skeleton';
 import { useMultiSelect } from '@/hooks/use-multi-select';
 import { runWithConcurrency } from '@/lib/concurrency';
 import { api } from '@/stores/api';
+import { confirm } from '@/stores/confirm';
+import { useDialogStore } from '@/stores/dialogs';
 import { usePinned } from '@/stores/pinned';
 import { queryKeys } from '@/stores/query';
 import { clearRecentSearches, getRecentSearches, pushRecentSearch } from '@/stores/recent-searches';
@@ -36,11 +38,25 @@ export function MemoriesPage() {
   const [tagFilter, setTagFilter] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
 
+  // Page size for the list view. Backend clamps server-side to 1..200 so
+  // raising this is cheap — we keep it at 100 to balance scroll length
+  // against round-trip cost.
+  const PAGE_SIZE = 100;
+  const [pageOffset, setPageOffset] = useState(0);
+
+  // Reset to page 0 whenever a filter changes — otherwise pagination
+  // would point at an offset that no longer exists in the filtered set.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: filters are the change triggers
+  useEffect(() => {
+    setPageOffset(0);
+  }, [typeFilter, tagFilter, activeQuery]);
+
   // Use `node_type` to match backend deserialization in `MemoryListParams`.
   // Sending `type` was a silent no-op for non-search list views — server only
   // accepts `node_type` (with a `type` serde alias for forward-compat).
   const listParams = {
-    limit: '100',
+    limit: String(PAGE_SIZE),
+    offset: String(pageOffset),
     ...(typeFilter && { node_type: typeFilter }),
     ...(tagFilter && { tag: tagFilter }),
   };
@@ -117,28 +133,36 @@ export function MemoriesPage() {
     qc.invalidateQueries({ queryKey: queryKeys.stats });
   }, [qc]);
 
-  // Selection plumbing for "open a specific memory" requests coming
-  // from outside the page (Cmd+K hit, graph node click, etc.). The
-  // emitter dispatches `vestige:select-memory` with `{ id }`; we fetch
-  // and show the drawer. Fetching individually (vs scanning the cached
-  // list) means the memory doesn't need to be in the current filter.
+  // "Open a specific memory" requests coming from outside the page
+  // (⌘K hit, graph node click, etc.) land in `useDialogStore.pendingSelectMemoryId`.
+  // We subscribe so the drawer opens whether the id was set before this
+  // page mounted (palette → navigate flow) or while it's already open.
+  // Fetching individually (vs scanning the cached list) means the memory
+  // doesn't need to be in the current filter.
+  const pendingSelectId = useDialogStore((s) => s.pendingSelectMemoryId);
+  const consumeSelectMemory = useDialogStore((s) => s.consumeSelectMemory);
   useEffect(() => {
-    function onSelect(e: Event) {
-      const id = (e as CustomEvent<{ id: string }>).detail?.id;
-      if (!id) return;
-      api.memories
-        .get(id)
-        .then(setSelected)
-        .catch(() => {
-          // Don't surface a toast — the drawer simply won't open. We
-          // log so dev tools still tell us what happened.
-          // biome-ignore lint/suspicious/noConsole: diagnostic in case the id is stale
-          console.warn('[vestige] select-memory: failed to load', id);
-        });
-    }
-    window.addEventListener('vestige:select-memory', onSelect);
-    return () => window.removeEventListener('vestige:select-memory', onSelect);
-  }, []);
+    if (!pendingSelectId) return;
+    let cancelled = false;
+    api.memories
+      .get(pendingSelectId)
+      .then((memory) => {
+        if (!cancelled) setSelected(memory);
+      })
+      .catch(() => {
+        // Don't surface a toast — the drawer simply won't open. Log so
+        // dev tools still tell us what happened (e.g. id was deleted
+        // between the palette selection and navigation landing).
+        // biome-ignore lint/suspicious/noConsole: diagnostic in case the id is stale
+        console.warn('[vestige] select-memory: failed to load', pendingSelectId);
+      });
+    // Clear the slot synchronously so a stale id can't replay if the
+    // user navigates away and back.
+    consumeSelectMemory();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingSelectId, consumeSelectMemory]);
 
   // Vim-style cursor for keyboard navigation through the list.
   // `null` = nothing focused yet; first `j` or `k` jumps to row 0.
@@ -289,9 +313,16 @@ export function MemoriesPage() {
     };
   }, []);
 
-  const onBulkDelete = () => {
+  const onBulkDelete = async () => {
     if (!multi.hasSelection) return;
-    const ok = window.confirm(t('bulk.deleteConfirm', { count: multi.count }));
+    // Themed, focusable, testable alertdialog — see `stores/confirm.ts`.
+    // We default focus onto the cancel button because this action is
+    // destructive and we don't want hasty Enter presses to wipe data.
+    const ok = await confirm({
+      message: t('bulk.deleteConfirm', { count: multi.count }),
+      destructive: true,
+      confirmLabel: t('common.delete'),
+    });
     if (!ok) return;
 
     // Commit any previous in-flight bulk delete first so we never have two
@@ -490,11 +521,9 @@ export function MemoriesPage() {
                   type="button"
                   variant="default"
                   size="sm"
-                  // Dispatching a window event lets the page request the
-                  // Add Memory dialog without holding a ref to the Layout
-                  // state. The Layout listens for this event and toggles
-                  // `addMemoryOpen` — same pathway as ⌘N.
-                  onClick={() => window.dispatchEvent(new CustomEvent('vestige:open-add-memory'))}
+                  // Same path the ⌘N shortcut and the FAB use — Layout
+                  // owns the dialog state via `useDialogStore`.
+                  onClick={() => useDialogStore.getState().openAddMemory('event')}
                 >
                   {t('memories.emptyCta')}
                 </Button>
@@ -513,6 +542,44 @@ export function MemoriesPage() {
               onToggleSelect={multi.toggle}
             />
           ))}
+          {/* Pagination — only shown when list mode is active (no active
+              search) and there's more than one page worth of data. Search
+              results come back as a flat top-K so they don't paginate. */}
+          {!activeQuery && total > PAGE_SIZE && (
+            <nav
+              className="flex items-center justify-between gap-2 pt-2 px-2 text-xs text-muted-foreground"
+              aria-label={t('memories.pagination', { defaultValue: 'Pagination' })}
+            >
+              <span>
+                {t('memories.pageRange', {
+                  defaultValue: '{{from}}–{{to}} of {{total}}',
+                  from: total === 0 ? 0 : pageOffset + 1,
+                  to: Math.min(total, pageOffset + memories.length),
+                  total,
+                })}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={pageOffset === 0 || loading}
+                  onClick={() => setPageOffset((o) => Math.max(0, o - PAGE_SIZE))}
+                >
+                  {t('common.previous', { defaultValue: 'Previous' })}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={pageOffset + memories.length >= total || loading}
+                  onClick={() => setPageOffset((o) => o + PAGE_SIZE)}
+                >
+                  {t('common.next', { defaultValue: 'Next' })}
+                </Button>
+              </div>
+            </nav>
+          )}
         </div>
       </div>
 

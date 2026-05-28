@@ -5,6 +5,7 @@ import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter } from 'react-router';
 import i18n from '@/lib/i18n';
 import { api } from '@/stores/api';
+import { useDialogStore } from '@/stores/dialogs';
 import { ToastProvider } from '@/stores/toast';
 import { CommandPalette } from './CommandPalette';
 
@@ -88,6 +89,63 @@ describe('CommandPalette', () => {
     await user.click(button);
 
     expect(await screen.findByText(/backend down/i, undefined, { timeout: 3000 })).toBeInTheDocument();
+  });
+
+  it('exposes every routable page in the navigation block', () => {
+    // The router (`App.tsx`) defines 16 page routes: graph, memories,
+    // review, briefing, timeline, feed, explore, reasoning, decisions,
+    // insights, hubs, intentions, temporal, stats, settings, tutorial.
+    // Power users live in the palette (Cmd+K), so missing routes here
+    // mean "this page is invisible to the keyboard". The original
+    // palette skipped six pages (temporal, reasoning, decisions,
+    // insights, hubs, tutorial) with full sidebar entries that the
+    // palette pretended didn't exist.
+    renderPalette();
+    // Names match the EN i18n labels (nav.* in `en.json`). The palette
+    // option's accessible name is the *translated* label, so we compare
+    // against rendered text — not against the route path.
+    const required = [
+      /graph/i,
+      /memories/i,
+      /review/i,
+      /briefing/i,
+      /timeline/i,
+      /activity/i, // nav.feed
+      /explore/i,
+      /reasoning/i,
+      /decisions/i,
+      /insights/i,
+      /topic hubs/i,
+      /reminders/i, // nav.intentions
+      /temporal/i,
+      /overview/i, // nav.stats
+      /settings/i,
+      /tutorial/i,
+    ];
+    for (const name of required) {
+      expect(screen.getByRole('option', { name })).toBeInTheDocument();
+    }
+  });
+
+  it('exposes "Add memory" as a palette action that opens the dialog store', async () => {
+    // Cmd+N opens the AddMemoryDialog from anywhere on the page, but
+    // power users live in Cmd+K — and the original palette had no
+    // way to trigger this most-used write action. Contract: typing
+    // "add" surfaces a single option whose click flips the dialog
+    // store flag (Layout subscribes to it) and closes the palette.
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    useDialogStore.setState({ addMemoryOpen: false, pendingSelectMemoryId: null });
+    renderPalette({ onClose });
+    const input = screen.getByRole('combobox');
+    await user.type(input, 'add');
+
+    const option = screen.getByRole('option', { name: /add memory/i });
+    const button = option.querySelector('button') as HTMLButtonElement;
+    await user.click(button);
+
+    expect(useDialogStore.getState().addMemoryOpen).toBe(true);
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('navigates via ArrowDown + Enter without arrow flip past the end', async () => {

@@ -162,12 +162,12 @@ async fn test_tools_list_returns_all_tools() {
     let result = response.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
 
-    // v3.2.1: 27 tools advertised. Authoritative list lives in
+    // v3.3.0: 28 tools advertised. Authoritative list lives in
     // `server::catalog::build_tools_list` (see b15 split). The
-    // `tools_list_has_exactly_27_entries` test there catches drift first
+    // `tools_list_has_exactly_28_entries` test there catches drift first
     // — this end-to-end test only verifies the JSON-RPC plumbing forwards
     // the catalog faithfully and asserts a few well-known tool names.
-    assert_eq!(tools.len(), 27, "Expected exactly 27 tools in v3.2.1+");
+    assert_eq!(tools.len(), 28, "Expected exactly 28 tools in v3.3.0+");
 
     let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
@@ -223,10 +223,11 @@ async fn test_tools_list_returns_all_tools() {
     assert!(tool_names.contains(&"importance_score"));
     assert!(tool_names.contains(&"find_duplicates"));
 
-    // Cognitive tools (v1.5)
+    // Cognitive tools (v1.5+)
     assert!(tool_names.contains(&"dream"));
     assert!(tool_names.contains(&"explore_connections"));
     assert!(tool_names.contains(&"predict"));
+    assert!(tool_names.contains(&"precompute_for_context"));
     assert!(tool_names.contains(&"restore"));
 
     // Context packets (v1.8)

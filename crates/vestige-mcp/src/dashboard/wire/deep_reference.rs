@@ -34,6 +34,13 @@ pub struct DeepRefEvidenceDto {
     pub updated_at: String,
     #[serde(default)]
     pub combined_score: f64,
+    /// Optional provenance marker. Empty for primary retrieval evidence;
+    /// set to `"spreading_activation"` for memories surfaced through the
+    /// activation network so the dashboard can render them as
+    /// "related — via connections" rather than direct hits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source: Option<String>,
 }
 
 /// A pair of memories that contradict each other (stage 5 of the
@@ -97,7 +104,7 @@ pub struct DeepRefInsightDto {
 /// unavailable → `dream_insights = false`. The dashboard uses these
 /// to grey out the relevant sections instead of pretending the data
 /// is "empty by design".
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "DeepRefStagesDto.ts", rename_all = "camelCase")]
 pub struct DeepRefStagesDto {
@@ -142,11 +149,3 @@ pub struct DeepReferenceResultDto {
     pub stages_completed: DeepRefStagesDto,
 }
 
-impl Default for DeepRefStagesDto {
-    fn default() -> Self {
-        Self {
-            spreading_activation: false,
-            dream_insights: false,
-        }
-    }
-}

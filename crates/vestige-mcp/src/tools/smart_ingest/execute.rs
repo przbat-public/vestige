@@ -170,17 +170,36 @@ pub async fn execute(
     if args.force_create.unwrap_or(false) {
         // Run duplicate-similarity probe + ingest together on the blocking
         // pool — both touch SQLite, both can briefly block the runtime.
+        //
+        // Embedding strategy: we embed `input.content` exactly once and
+        // hand that vector to both the nearest-neighbour probe and the
+        // ingest write. Pre-2026-05-20 this path did two full embeds
+        // back-to-back (one inside `semantic_search_raw`, one inside
+        // `ingest`) — a measurable cost when forced creation is used in
+        // bulk imports.
         let storage_fc = storage.clone();
         let input_fc = input.clone();
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
         let (nearest_sim, node) = tokio::task::spawn_blocking(
             move || -> Result<(Option<f64>, vestige_core::KnowledgeNode), String> {
-                let nearest_sim = storage_fc
-                    .semantic_search_raw(&input_fc.content, 1)
-                    .ok()
-                    .and_then(|results| results.into_iter().next())
-                    .map(|(_, score)| score as f64);
-                let node = storage_fc.ingest(input_fc).map_err(|e| e.to_string())?;
+                let embedding = if storage_fc.embedding_service_ready() {
+                    storage_fc.embed_text(&input_fc.content).ok()
+                } else {
+                    None
+                };
+                let nearest_sim = match embedding.as_ref() {
+                    Some(emb) => storage_fc
+                        .semantic_search_by_embedding(&emb.vector, 1)
+                        .ok()
+                        .and_then(|results| results.into_iter().next())
+                        .map(|(_, score)| score as f64),
+                    None => None,
+                };
+                let node = match embedding.as_ref() {
+                    Some(emb) => storage_fc.ingest_with_embedding(input_fc, emb),
+                    None => storage_fc.ingest(input_fc),
+                }
+                .map_err(|e| e.to_string())?;
                 Ok((nearest_sim, node))
             },
         )
@@ -207,6 +226,14 @@ pub async fn execute(
             &node_type,
             importance_composite,
         );
+
+        // Force-create has no prediction-error gate, but the relation
+        // extractor STILL needs to publish causal/semantic edges so the
+        // knowledge graph stays consistent with the smart-ingest path.
+        // Without this, force-created memories were invisible in the
+        // causal-chain tool until the next dream cycle.
+        #[cfg(feature = "preprocessing")]
+        create_relation_edges(cognitive, storage, &node_id, &_pp_relations).await;
 
         let mut response = serde_json::json!({
             "success": true,
@@ -235,26 +262,27 @@ pub async fn execute(
     // Use smart ingest with prediction error gating
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     {
-        // Run nearest-neighbor lookup + smart_ingest together on the
-        // blocking pool — both call into SQLite/vector-search.
+        // Run smart_ingest on the blocking pool — it touches SQLite and the
+        // vector index. `smart_ingest` now returns the nearest-neighbour IDs
+        // it already evaluated for the prediction-error gate, so we don't
+        // need a second `semantic_search_raw` here (which would embed
+        // `input.content` for a third time after the gate's own embed and
+        // the post-ingest write-side embed inside `ingest`).
         let storage_si = storage.clone();
         let input_si = input.clone();
-        let (neighbor_ids, result) = tokio::task::spawn_blocking(
-            move || -> Result<(Vec<String>, vestige_core::SmartIngestResult), String> {
-                let neighbor_ids: Vec<String> = storage_si
-                    .semantic_search_raw(&input_si.content, 5)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(id, _)| id)
-                    .collect();
-                let result = storage_si
-                    .smart_ingest(input_si)
-                    .map_err(|e| e.to_string())?;
-                Ok((neighbor_ids, result))
+        let result = tokio::task::spawn_blocking(
+            move || -> Result<vestige_core::SmartIngestResult, String> {
+                storage_si.smart_ingest(input_si).map_err(|e| e.to_string())
             },
         )
         .await
         .map_err(|e| format!("smart_ingest task panicked: {}", e))??;
+        // Trim to the 5 closest, matching the previous behaviour where the
+        // MCP layer requested `limit: 5` from `semantic_search_raw`. The
+        // gate considers up to 10 (for higher-quality merge/supersede
+        // decisions); the post-ingest cognitive side effects only care
+        // about the top 5.
+        let neighbor_ids: Vec<String> = result.neighbor_ids.iter().take(5).cloned().collect();
         let node_id = result.node.id.clone();
         let node_content = result.node.content.clone();
         let node_type = result.node.node_type.clone();

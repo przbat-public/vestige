@@ -25,6 +25,7 @@ use tracing::{info, warn};
 
 use crate::cognitive::CognitiveEngine;
 use crate::dashboard::events::VestigeEvent;
+use crate::protocol::timeout::with_timeout;
 use crate::protocol::types::JsonRpcRequest;
 use crate::server::McpServer;
 use vestige_core::Storage;
@@ -51,6 +52,26 @@ const CONCURRENCY_LIMIT: usize = 50;
 
 /// Maximum request body size (256 KB — JSON-RPC requests should be small).
 const MAX_BODY_SIZE: usize = 256 * 1024;
+
+/// Default per-request budget for JSON-RPC handlers.
+///
+/// Tuned for the *slowest* tool we expect to run synchronously inside a
+/// single request: `dream`, `consolidate`, `backup`, large `reflect`. A
+/// nominal `search` or `get` finishes in <50 ms, so this budget is several
+/// orders of magnitude above the steady-state SLO. The point is purely to
+/// recover from runaway handlers — never to bound user-visible latency.
+///
+/// Override per-deployment via `VESTIGE_REQUEST_TIMEOUT_SECS` (env var).
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Resolve the request budget, honouring `VESTIGE_REQUEST_TIMEOUT_SECS`.
+fn request_timeout() -> Duration {
+    std::env::var("VESTIGE_REQUEST_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_REQUEST_TIMEOUT)
+}
 
 /// A per-client session holding its own McpServer instance.
 struct Session {
@@ -227,6 +248,8 @@ async fn post_mcp(
     }
 
     let is_initialize = request.method == "initialize";
+    let method_for_logging = request.method.clone();
+    let budget = request_timeout();
 
     if is_initialize {
         // ── New session ──
@@ -249,10 +272,33 @@ async fn post_mcp(
             last_active: Instant::now(),
         }));
 
-        // Handle the initialize request
-        let response = {
+        // Handle the initialize request. Wrap in a hard timeout so a hung
+        // initialize (e.g. embedding model still loading and a blocking
+        // SQLite write contending) cannot pin a worker slot forever.
+        let response = match with_timeout(budget, async {
             let mut sess = session.lock().await;
             sess.server.handle_request(request).await
+        })
+        .await
+        {
+            Ok(r) => r,
+            Err(_elapsed) => {
+                warn!(
+                    method = %method_for_logging,
+                    budget_secs = budget.as_secs(),
+                    "Request exceeded budget — returning 504"
+                );
+                return (
+                    StatusCode::GATEWAY_TIMEOUT,
+                    HeaderMap::new(),
+                    format!(
+                        "Request '{}' exceeded {}s budget",
+                        method_for_logging,
+                        budget.as_secs()
+                    ),
+                )
+                    .into_response();
+            }
         };
 
         // Insert session while still holding write lock — atomic check-and-insert
@@ -307,10 +353,32 @@ async fn post_mcp(
             }
         };
 
-        let response = {
+        let response = match with_timeout(budget, async {
             let mut sess = session.lock().await;
             sess.last_active = Instant::now();
             sess.server.handle_request(request).await
+        })
+        .await
+        {
+            Ok(r) => r,
+            Err(_elapsed) => {
+                warn!(
+                    method = %method_for_logging,
+                    budget_secs = budget.as_secs(),
+                    session_prefix = %&session_id[..8],
+                    "Request exceeded budget — returning 504"
+                );
+                return (
+                    StatusCode::GATEWAY_TIMEOUT,
+                    HeaderMap::new(),
+                    format!(
+                        "Request '{}' exceeded {}s budget",
+                        method_for_logging,
+                        budget.as_secs()
+                    ),
+                )
+                    .into_response();
+            }
         };
 
         let session_header = match session_id.parse() {

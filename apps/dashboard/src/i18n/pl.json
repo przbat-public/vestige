@@ -23,7 +23,14 @@
     "reviewDueAria_one": "{{count}} wspomnienie do powtórki",
     "reviewDueAria_few": "{{count}} wspomnienia do powtórki",
     "reviewDueAria_many": "{{count}} wspomnień do powtórki",
-    "reviewDueAria_other": "{{count}} wspomnień do powtórki"
+    "reviewDueAria_other": "{{count}} wspomnień do powtórki",
+    "section": {
+      "daily": "Dzisiaj",
+      "memory": "Pamięć",
+      "explore": "Eksploracja",
+      "system": "System",
+      "help": "Pomoc"
+    }
   },
   "bulk": {
     "selectedCount_one": "{{count}} zaznaczone",
@@ -78,6 +85,7 @@
     "regenerateEmbeddingsSuccess": "Brakujące embeddingi uzupełnione.",
     "backup": "Utwórz kopię zapasową bazy",
     "backupSuccess": "Kopia zapasowa zapisana w ~/.vestige/backups.",
+    "addMemory": "Dodaj wspomnienie",
     "memoryResults": "Wspomnienia"
   },
   "maintenance": {
@@ -93,7 +101,7 @@
     "dupBtn": "Szukaj duplikatów",
     "dupSuccess": "Znaleziono {{count}} klastrów blisko-duplikatów.",
     "dupResult": "Przeskanowano {{clusters}} klastrów w {{memories}} wspomnieniach.",
-    "dupReviewWarning": "Przejrzyj każdy klaster ręcznie — wysokie podobieństwo często oznacza „dwie ważne notatki o tym samym temacie\", nie duplikaty. Masowe kasowanie przy tym progu jest ryzykowne.",
+    "dupReviewWarning": "Przejrzyj każdy klaster ręcznie — wysokie podobieństwo często oznacza „dwie ważne notatki o tym samym temacie”, nie duplikaty. Masowe kasowanie przy tym progu jest ryzykowne.",
     "dupClusterLabel": "Klaster {{size}}",
     "gcTitle": "Czyszczenie pamięci (GC)",
     "gcDesc": "Pokaż lub usuń wspomnienia, których zapamiętanie spadło poniżej 10% — i tak rzadko pojawiają się w wyszukiwaniu.",
@@ -147,7 +155,9 @@
     "menu": "Menu",
     "loading": "Ładowanie",
     "connected": "Połączono",
-    "disconnected": "Rozłączono"
+    "disconnected": "Rozłączono",
+    "notifications": "Powiadomienia",
+    "dismissNotification": "Zamknij"
   },
   "common": {
     "search": "Szukaj",
@@ -156,6 +166,8 @@
     "cancel": "Anuluj",
     "save": "Zapisz",
     "undo": "Cofnij",
+    "retry": "Spróbuj ponownie",
+    "confirm": "Potwierdź",
     "new": "+ Nowe",
     "clear": "wyczyść",
     "loading": "Ładowanie...",
@@ -175,7 +187,9 @@
     "errorDetails": "Pokaż szczegóły techniczne",
     "errorRetry": "Spróbuj ponownie",
     "yes": "tak",
-    "no": "nie"
+    "no": "nie",
+    "previous": "Poprzednia",
+    "next": "Następna"
   },
   "status": {
     "connected": "Połączono",
@@ -193,6 +207,9 @@
     "loadingGraph": "Budowanie mapy pamięci...",
     "emptyGraph": "Brak wspomnień do wizualizacji",
     "emptyHint": "Zacznij zapisywać wspomnienia, by zobaczyć swój graf wiedzy",
+    "noMatch": "Filtr nie pasuje do żadnego węzła",
+    "noMatchHint": "Wyczyść filtr tagu albo wybierz inny — graf wróci.",
+    "clearFilter": "Wyczyść filtr",
     "maxNodes": "Maksymalna liczba węzłów",
     "nodeOption": "{{count}} wspomnień",
     "dreamingBadge": "Śnienie…",
@@ -203,13 +220,44 @@
     "colorByType": "Typu",
     "colorByTag": "Tagu (klastra)",
     "tagLegendTitle": "Legenda tagów",
-    "tagLegendUntagged": "Bez tagu"
+    "tagLegendUntagged": "Bez tagu",
+    "canvasLabel": "Płótno grafu wspomnień — strzałki nawigują między węzłami, Enter otwiera, Escape czyści zaznaczenie",
+    "canvasRole": "Interaktywny graf wspomnień",
+    "focusAnnouncement": "Zaznaczony węzeł: {{label}}",
+    "focusCleared": "Brak zaznaczonego węzła",
+    "help": {
+      "title": "Skróty klawiszowe grafu",
+      "subtitle": "Poruszaj się po grafie bez myszy.",
+      "close": "Zamknij",
+      "sections": {
+        "navigate": "Nawigacja",
+        "frame": "Kamera",
+        "history": "Historia",
+        "general": "Ogólne"
+      },
+      "keys": {
+        "arrows": "Przesuń fokus do najbliższego węzła w danym kierunku",
+        "enter": "Otwórz zaznaczony węzeł",
+        "escape": "Wyczyść fokus i zaznaczenie",
+        "home": "Skocz do pierwszego węzła",
+        "end": "Skocz do ostatniego węzła",
+        "frameNode": "Wykadruj zaznaczony (lub fokusowany) węzeł",
+        "frameAll": "Wykadruj cały widoczny graf",
+        "reset": "Zresetuj kamerę do pozycji domyślnej",
+        "back": "Wstecz do poprzedniego zaznaczenia",
+        "forward": "Naprzód w historii zaznaczeń",
+        "help": "Pokaż tę pomoc",
+        "altClickDeselect": "Kliknij pustą przestrzeń, by wyczyścić zaznaczenie"
+      }
+    }
   },
   "memories": {
     "title": "Wspomnienia",
     "searchPlaceholder": "Szukaj wspomnień...",
     "filterByType": "Wszystkie typy",
     "filterByTag": "Filtruj po tagu...",
+    "pagination": "Paginacja",
+    "pageRange": "{{from}}–{{to}} z {{total}}",
     "noMemories": "Nie znaleziono wspomnień",
     "noMemoriesHint": "Spróbuj innego wyszukiwania lub filtra",
     "emptyCta": "+ Dodaj pierwsze wspomnienie",
@@ -497,6 +545,7 @@
     "nearDuplicateWarning": "Bliski duplikat",
     "toastCreated": "Wspomnienie zapisane.",
     "toastMerged": "Smart-ingest zdecydował: {{decision}} — szczegóły w oknie.",
+    "toastWithWarning": "Wspomnienie zapisane — przeczytaj ostrzeżenie w oknie przed zamknięciem.",
     "errors": {
       "contentRequired": "Treść wspomnienia jest wymagana.",
       "contentTooLarge": "Treść wspomnienia przekracza limit 1MB.",
@@ -561,7 +610,11 @@
   "error": {
     "title": "Coś poszło nie tak",
     "fallback": "Wystąpił nieoczekiwany błąd",
-    "reload": "Przeładuj dashboard"
+    "reload": "Przeładuj dashboard",
+    "sectionFailed": "Nie udało się załadować tej sekcji"
+  },
+  "confirm": {
+    "defaultTitle": "Na pewno?"
   },
   "timeSlider": {
     "timeline": "Oś czasu",
@@ -620,7 +673,8 @@
     "confidenceDone": "Audyt zakończony",
     "doubtModeHint": "Tryb wątpliwości: najmniej pewne wspomnienia na górze. Promuj, by zweryfikować, lub osłab, by zmniejszyć ich wagę.",
     "doubtModeVerify": "Zweryfikuj",
-    "doubtModeDemote": "Osłab"
+    "doubtModeDemote": "Osłab",
+    "openMemoryTitle": "Otwórz wspomnienie {{id}}"
   },
   "feed": {
     "title": "Aktywność",
@@ -629,6 +683,10 @@
     "noEventsHint": "Zdarzenia pojawią się tutaj w miarę korzystania z Vestige",
     "paused": "Wstrzymano",
     "live": "Na żywo",
+    "pause": "Wstrzymaj",
+    "resume": "Wznów",
+    "allTypes": "Wszystkie typy",
+    "filterByType": "Filtruj po typie",
     "clearAll": "Wyczyść"
   },
   "explore": {
@@ -728,6 +786,9 @@
     },
     "complete": "Oznacz jako wykonane",
     "snooze": "Odłóż",
+    "cancel": "Anuluj",
+    "reactivate": "Przywróć",
+    "statusChanged": "Status zaktualizowany",
     "deadline": "Termin",
     "triggerLabel": "Typ wyzwalacza",
     "triggerValue": "Wartość wyzwalacza",
@@ -756,12 +817,23 @@
     "todayLabel": "dziś {{value}}%",
     "heatmapCellTitle": "{{range}}: {{count}} z {{total}} wspomnień",
     "heatmapLow": "zanika",
-    "heatmapHigh": "stabilne"
+    "heatmapHigh": "stabilne",
+    "endangeredOpenAria": "Otwórz wspomnienie: {{preview}}",
+    "health": {
+      "healthy": "Zdrowy",
+      "degraded": "Pogorszony",
+      "critical": "Krytyczny",
+      "empty": "Pusty"
+    }
   },
   "timeline": {
     "title": "Oś czasu",
     "noActivity": "Brak aktywności w tym okresie",
     "memoriesOn": "{{count}} wspomnień dnia {{date}}",
+    "memoriesCount_one": "{{count}} wspomnienie",
+    "memoriesCount_few": "{{count}} wspomnienia",
+    "memoriesCount_many": "{{count}} wspomnień",
+    "memoriesCount_other": "{{count}} wspomnień",
     "moreCount_one": "+{{count}} więcej",
     "moreCount_few": "+{{count}} więcej",
     "moreCount_many": "+{{count}} więcej",
@@ -789,11 +861,11 @@
       },
       "brain": {
         "title": "Twój Mózg, Ale dla AI",
-        "desc": "Gdy śpisz, twój mózg odtwarza wydarzenia dnia i decyduje, co zachować. Vestige ma \"Cykl Snu\", który robi to samo — znajduje połączenia, wyłapuje sprzeczności i wzmacnia to, co ważne."
+        "desc": "Gdy śpisz, twój mózg odtwarza wydarzenia dnia i decyduje, co zachować. Vestige ma „Cykl Snu”, który robi to samo — znajduje połączenia, wyłapuje sprzeczności i wzmacnia to, co ważne."
       },
       "web": {
         "title": "Sieć Połączonych Idei",
-        "desc": "W twojej głowie myślenie o \"pizzy\" może przypomnieć ci o Włoszech, co przypomina o tamtej podróży, co przywołuje wspomnienie o przyjacielu Marco. Vestige łączy wspomnienia tak samo — przez znaczenie, nie przez słowa kluczowe."
+        "desc": "W twojej głowie myślenie o „pizzy” może przypomnieć ci o Włoszech, co przypomina o tamtej podróży, co przywołuje wspomnienie o przyjacielu Marco. Vestige łączy wspomnienia tak samo — przez znaczenie, nie przez słowa kluczowe."
       }
     },
     "howMemoryWorks": {
@@ -817,7 +889,7 @@
       },
       "s5": {
         "title": "Odrodzenie albo zgaśnięcie — twój wybór",
-        "desc": "Możesz ręcznie \"Wzmocnić\" blaknące wspomnienie z dashboardu albo pozwolić mu dalej spadać. Jeśli spadnie poniżej progu, staje się kandydatem do posprzątania. Nic nie jest usuwane automatycznie — zawsze masz kontrolę."
+        "desc": "Możesz ręcznie „Wzmocnić” blaknące wspomnienie z dashboardu albo pozwolić mu dalej spadać. Jeśli spadnie poniżej progu, staje się kandydatem do posprzątania. Nic nie jest usuwane automatycznie — zawsze masz kontrolę."
       }
     },
     "conceptsTitle": "Kluczowe pojęcia",
@@ -832,11 +904,11 @@
       },
       "dream": {
         "title": "Cykl Snu (Dream Cycle)",
-        "desc": "Tak jak mózg przetwarza wspomnienia podczas snu, Vestige ma tryb \"snu\". Odtwarza wspomnienia, szuka zaskakujących połączeń, wyłapuje sprzeczności (czy zapisałeś dwie sprzeczne rzeczy?) i generuje wnioski."
+        "desc": "Tak jak mózg przetwarza wspomnienia podczas snu, Vestige ma tryb „snu”. Odtwarza wspomnienia, szuka zaskakujących połączeń, wyłapuje sprzeczności (czy zapisałeś dwie sprzeczne rzeczy?) i generuje wnioski."
       },
       "connections": {
         "title": "Połączenia (Spreading Activation)",
-        "desc": "Wspomnienia łączą się przez znaczenie. Gdy szukasz jednego, powiązane też się \"rozświetlają\" — jak reakcja łańcuchowa. To bazuje na modelu ACT-R z nauk poznawczych (John Anderson, Carnegie Mellon)."
+        "desc": "Wspomnienia łączą się przez znaczenie. Gdy szukasz jednego, powiązane też się „rozświetlają” — jak reakcja łańcuchowa. To bazuje na modelu ACT-R z nauk poznawczych (John Anderson, Carnegie Mellon)."
       },
       "decay": {
         "title": "Naturalne zanikanie (krzywa zapominania)",
@@ -848,7 +920,7 @@
       },
       "intentions": {
         "title": "Przypomnienia (Pamięć Prospektywna)",
-        "desc": "Ustawiasz wyzwalacze na przyszłość: \"przypomnij mi, gdy będziemy rozmawiać o bazach danych\" (kontekst) lub \"przypomnij w piątek\" (czas). To bazuje na badaniach nad pamięcią prospektywną — psychologii pamiętania o pamiętaniu."
+        "desc": "Ustawiasz wyzwalacze na przyszłość: „przypomnij mi, gdy będziemy rozmawiać o bazach danych” (kontekst) lub „przypomnij w piątek” (czas). To bazuje na badaniach nad pamięcią prospektywną — psychologii pamiętania o pamiętaniu."
       },
       "search": {
         "title": "Wyszukiwanie hybrydowe",
@@ -860,7 +932,7 @@
       },
       "confidence": {
         "title": "Ocena Pewności",
-        "desc": "Nie wszystkie wspomnienia są jednakowo wiarygodne. \"Python 3.12 wyszedł w październiku 2023\" to twardy fakt. \"Wydaje mi się, że powinniśmy użyć Redisa\" to opinia. Vestige ocenia pewność w wielu wymiarach, żebyś wiedział, czemu ufać."
+        "desc": "Nie wszystkie wspomnienia są jednakowo wiarygodne. „Python 3.12 wyszedł w październiku 2023” to twardy fakt. „Wydaje mi się, że powinniśmy użyć Redisa” to opinia. Vestige ocenia pewność w wielu wymiarach, żebyś wiedział, czemu ufać."
       }
     },
     "science": {
@@ -879,11 +951,11 @@
       "memories": {
         "title": "Wspomnienia",
         "desc": "Lista wszystkiego, co Vestige zapamiętał, z wyszukiwarką. Filtruj po typie (fakty, decyzje, osoby…) lub szukaj po słowach. Kliknij wspomnienie, by zobaczyć szczegóły: procent zapamiętania, siły zapisu i przywołania, krzywą prognozy, datę utworzenia i wszystkie tagi.",
-        "tip": "Użyj \"Wzmocnij\" na wspomnieniach, które chcesz zachować. \"Osłab\" nieaktualne informacje. Możesz też usunąć wspomnienie na stałe lub kliknąć \"Eksploruj połączenia\"."
+        "tip": "Użyj „Wzmocnij” na wspomnieniach, które chcesz zachować. „Osłab” nieaktualne informacje. Możesz też usunąć wspomnienie na stałe lub kliknąć „Eksploruj połączenia”."
       },
       "timeline": {
         "title": "Oś czasu",
-        "desc": "Widok kalendarza pokazujący, kiedy powstały wspomnienia. Wybierz dzień, żeby zobaczyć, co zostało zapisane. Przydatne, gdy myślisz \"pamiętam, że AI nauczył się czegoś o tym w zeszłym tygodniu\" — znajdź dzień i przeglądaj."
+        "desc": "Widok kalendarza pokazujący, kiedy powstały wspomnienia. Wybierz dzień, żeby zobaczyć, co zostało zapisane. Przydatne, gdy myślisz „pamiętam, że AI nauczył się czegoś o tym w zeszłym tygodniu” — znajdź dzień i przeglądaj."
       },
       "feed": {
         "title": "Aktywność",
@@ -891,12 +963,12 @@
       },
       "explore": {
         "title": "Eksploruj",
-        "desc": "Narzędzie detektywistyczne. Trzy tryby: Asocjacje (co jest bezpośrednio połączone ze wspomnieniem), Łańcuchy (najkrótsza ścieżka między dwoma wspomnieniami — jak \"Sześć stopni separacji\") i Mosty (zaskakujące połączenia między odległymi ideami). Pod spodem pracuje sieć aktywacji rozprzestrzeniającej.",
+        "desc": "Narzędzie detektywistyczne. Trzy tryby: Asocjacje (co jest bezpośrednio połączone ze wspomnieniem), Łańcuchy (najkrótsza ścieżka między dwoma wspomnieniami — jak „Sześć stopni separacji”) i Mosty (zaskakujące połączenia między odległymi ideami). Pod spodem pracuje sieć aktywacji rozprzestrzeniającej.",
         "tip": "Spróbuj trybu Mosty z dwoma niepowiązanymi wspomnieniami — koncepcje pomostowe mogą dać prawdziwe odkrycia."
       },
       "intentions": {
         "title": "Przypomnienia",
-        "desc": "Ustaw przyszłe wyzwalacze. Wyzwalacz kontekstowy odpala się, gdy pojawi się temat (\"gdy rozmawiamy o uwierzytelnianiu, przypomnij o audycie bezpieczeństwa\"). Wyzwalacz czasowy odpala się w konkretnym dniu. Ustawiasz priorytet (wysoki/średni/niski) i termin. Spełnione przypomnienia trafiają do archiwum."
+        "desc": "Ustaw przyszłe wyzwalacze. Wyzwalacz kontekstowy odpala się, gdy pojawi się temat („gdy rozmawiamy o uwierzytelnianiu, przypomnij o audycie bezpieczeństwa”). Wyzwalacz czasowy odpala się w konkretnym dniu. Ustawiasz priorytet (wysoki/średni/niski) i termin. Spełnione przypomnienia trafiają do archiwum."
       },
       "stats": {
         "title": "Przegląd",
@@ -963,7 +1035,7 @@
       "q5": "Dlaczego niektóre wspomnienia blakną szybciej niż inne?",
       "a5": "Dwa powody: stabilność i użycie. Wspomnienie o wysokiej stabilności (dobrze nauczone, wielokrotnie przeglądane) blaknie powoli — mogą minąć miesiące. Wspomnienie o niskiej stabilności (nowe, nigdy nie przeglądane) blaknie w kilka dni. Matematyka podąża za krzywą zapominania FSRS-6.",
       "q6": "Czym są embeddingi?",
-      "a6": "Embedding to lista 384 liczb, które odzwierciedlają znaczenie tekstu. Podobne teksty mają podobne liczby. Dzięki temu Vestige znajduje wspomnienia po znaczeniu, nie tylko po słowach kluczowych. \"Jak zdeployować na produkcję?\" i \"Jaki jest proces wdrażania?\" miałyby bardzo podobne embeddingi, mimo że dzielą niewiele wspólnych słów.",
+      "a6": "Embedding to lista 384 liczb, które odzwierciedlają znaczenie tekstu. Podobne teksty mają podobne liczby. Dzięki temu Vestige znajduje wspomnienia po znaczeniu, nie tylko po słowach kluczowych. „Jak zdeployować na produkcję?” i „Jaki jest proces wdrażania?” miałyby bardzo podobne embeddingi, mimo że dzielą niewiele wspólnych słów.",
       "q7": "Czy mogę używać Vestige bez AI? Jako osobistą bazę wiedzy?",
       "a7": "Technicznie tak — możesz dodawać wspomnienia przez protokół MCP z dowolnego kompatybilnego klienta. Ale Vestige jest zaprojektowany tak, żeby najlepiej działać jako towarzysz w tle dla asystentów AI, którzy automatycznie zapisują i przywołują odpowiedni kontekst.",
       "q8": "Czym jest MCP?",
@@ -989,7 +1061,7 @@
       "fsrs": "Free Spaced Repetition Scheduler (wersja 6). Algorytm szacujący, kiedy wspomnienie zblaknie i kiedy warto je powtórzyć. Zespół FSRS publikuje otwarty benchmark porównujący go z SM-2 — Vestige używa ich domyślnych wag bez retreningu.",
       "embedding": "Wektor 384 liczb reprezentujący znaczenie tekstu. Generowany przez model nomic-embed-text-v1.5 działający lokalnie na twojej maszynie.",
       "dream": "Proces inspirowany neurobiologią, który odtwarza wspomnienia, szuka połączeń, wykrywa sprzeczności i generuje wnioski. Bazuje na odtwarzaniu hipokampalnym podczas snu.",
-      "activation": "Gdy myślisz o jednej rzeczy, powiązane przychodzą na myśl. W Vestige sięgnięcie po jedno wspomnienie \"aktywuje\" połączone — to ograniczony spacer po grafie, bliżej sieci semantycznej (Collins & Loftus, 1975) niż pełnego ACT-R.",
+      "activation": "Gdy myślisz o jednej rzeczy, powiązane przychodzą na myśl. W Vestige sięgnięcie po jedno wspomnienie „aktywuje” połączone — to ograniczony spacer po grafie, bliżej sieci semantycznej (Collins & Loftus, 1975) niż pełnego ACT-R.",
       "consolidation": "Rutynowa konserwacja: zastosowanie krzywej zapominania, generowanie brakujących embeddingów, łączenie duplikatów, obliczanie aktywacji.",
       "nodeType": "Kategoria wspomnienia: fakt, koncepcja, zdarzenie, osoba, miejsce, notatka, wzorzec lub decyzja. Określa, jak wspomnienie wygląda na grafie.",
       "mcp": "Model Context Protocol — standard komunikacji pozwalający asystentom AI czytać z i zapisywać do Vestige."
@@ -1036,7 +1108,7 @@
       "dismissAria": "Zamknij baner z nowościami",
       "v3_3": {
         "title": "Samouczek od nowa",
-        "body": "Spis treści, podpowiedzi nad terminami, interaktywna krywa zapominania i krótki test na koniec."
+        "body": "Spis treści, podpowiedzi nad terminami, interaktywna krzywa zapominania i krótki test na koniec."
       },
       "v3_1": {
         "title": "Narzędzia metapoznawcze",

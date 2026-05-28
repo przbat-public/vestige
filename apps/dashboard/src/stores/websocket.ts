@@ -70,9 +70,15 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 
 function getWsUrl(): string {
+  // Mirror the page protocol so the browser doesn't block the upgrade as
+  // Mixed Content when the dashboard is served over HTTPS. The Vite dev
+  // server (port 5173) is always plain HTTP, so we hardcode `ws:` for it;
+  // every other deploy target (preview, staging, prod behind a TLS proxy)
+  // honours `window.location.protocol`.
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return window.location.port === '5173'
     ? `ws://${window.location.hostname}:3927/ws`
-    : `ws://${window.location.host}/ws`;
+    : `${proto}//${window.location.host}/ws`;
 }
 
 function scheduleReconnect() {

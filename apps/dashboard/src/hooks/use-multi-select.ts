@@ -124,17 +124,34 @@ export function useMultiSelect<T>(items: T[], getId: (item: T) => string): Multi
     return n;
   }, [selected, visibleSet]);
 
-  return {
-    selected,
-    count: selected.size,
-    hasSelection: selected.size > 0,
-    allSelected: visibleIds.length > 0 && visibleSelectedCount === visibleIds.length,
-    partiallySelected: visibleSelectedCount > 0 && visibleSelectedCount < visibleIds.length,
-    toggle,
-    selectRange,
-    selectAll,
-    clear,
-    isSelected,
-    selectedItems,
-  };
+  // Memoize the public surface so callers can list `multi` in
+  // `useEffect`/`useMemo` deps without re-running on every parent render.
+  // Identity only changes when a real input changed (selection set, items,
+  // or any of the action callbacks).
+  return useMemo<MultiSelectAPI<T>>(
+    () => ({
+      selected,
+      count: selected.size,
+      hasSelection: selected.size > 0,
+      allSelected: visibleIds.length > 0 && visibleSelectedCount === visibleIds.length,
+      partiallySelected: visibleSelectedCount > 0 && visibleSelectedCount < visibleIds.length,
+      toggle,
+      selectRange,
+      selectAll,
+      clear,
+      isSelected,
+      selectedItems,
+    }),
+    [
+      selected,
+      visibleIds.length,
+      visibleSelectedCount,
+      toggle,
+      selectRange,
+      selectAll,
+      clear,
+      isSelected,
+      selectedItems,
+    ],
+  );
 }

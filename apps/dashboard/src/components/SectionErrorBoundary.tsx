@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import i18n from '@/lib/i18n';
 
 interface Props {
   children: ReactNode;
@@ -31,10 +32,14 @@ export class SectionErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      // Class component can't `useTranslation()`, but the i18next instance
+      // is module-level — bind once per render to keep `t()` calls clean.
+      // Mirrors the fallback used by the top-level ErrorBoundary.
+      const t = i18n.t.bind(i18n);
       return (
         <Alert variant="destructive" className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <div className="font-medium">{this.props.fallbackTitle ?? 'This section failed to load'}</div>
+            <div className="font-medium">{this.props.fallbackTitle ?? t('error.sectionFailed')}</div>
             {this.state.error?.message && (
               <div className="text-xs opacity-75 mt-1 truncate">{this.state.error.message}</div>
             )}
@@ -45,7 +50,7 @@ export class SectionErrorBoundary extends Component<Props, State> {
             onClick={() => this.setState({ hasError: false, error: null })}
             className="flex-shrink-0"
           >
-            Retry
+            {t('common.retry')}
           </Button>
         </Alert>
       );

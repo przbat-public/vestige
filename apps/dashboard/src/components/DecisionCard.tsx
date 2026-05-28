@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { useDialogStore } from '@/stores/dialogs';
 import type { Decision } from '@/types';
 
 /**
@@ -30,6 +32,7 @@ interface DecisionCardProps {
 
 export function DecisionCard({ decision }: DecisionCardProps) {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
 
   // Index score cells by `criterionId|choiceId` for O(1) lookup during
   // table render. The matrix is sparse so a row × column loop with
@@ -44,11 +47,35 @@ export function DecisionCard({ decision }: DecisionCardProps) {
   const validUntil = decision.validUntil ? new Date(decision.validUntil) : null;
   const locale = i18n.language;
 
+  // The decision is a memory: opening the question routes back to the
+  // host node so the user can read the raw content, retention, tags,
+  // edit history, and any related memories. Without this, the page
+  // showed a comparison matrix but the matrix itself was a dead end —
+  // no way to inspect the underlying memory or jump to its neighbours.
+  // Mirrors HubCard / TemporalEntryCard / InsightCard.
+  const openMemory = () => {
+    useDialogStore.getState().requestSelectMemory(decision.id);
+    navigate('/memories');
+  };
+
   return (
     <Card className="space-y-3">
       <div className="space-y-1">
         <div className="flex items-start justify-between gap-3 flex-wrap">
-          <h3 className="text-sm font-semibold text-foreground break-words">{decision.question}</h3>
+          {/* Heading wraps the button so screen readers still see this
+              as a per-decision section title while sighted users get a
+              visible, focusable click-target. <h3> + <button> nest
+              cleanly; the reverse (button containing heading) violates
+              "no interactive content inside interactive content". */}
+          <h3 className="text-sm font-semibold text-foreground break-words flex-1 min-w-0">
+            <button
+              type="button"
+              onClick={openMemory}
+              className="text-left hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm transition-colors"
+            >
+              {decision.question}
+            </button>
+          </h3>
           <div className="flex items-center gap-1.5 shrink-0">
             {decision.expired && <Badge variant="danger">{t('decisions.badge.expired')}</Badge>}
             {!decision.expired && validUntil && (

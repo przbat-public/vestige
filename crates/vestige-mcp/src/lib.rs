@@ -7,4 +7,5 @@ pub mod dashboard;
 pub mod protocol;
 pub mod resources;
 pub mod server;
+pub mod telemetry;
 pub mod tools;

@@ -34,7 +34,11 @@ export default function App() {
     <Suspense fallback={<PageFallback />}>
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<Navigate to="graph" replace />} />
+          {/* Default to /briefing — graph is the visually impressive page,
+              but new users land staring at a 3D blob and have no idea where
+              to click. Briefing grounds them in their own data (today's
+              summary, recent saves) before showing them the topology. */}
+          <Route index element={<Navigate to="briefing" replace />} />
           <Route path="graph" element={<GraphPage />} />
           <Route path="memories" element={<MemoriesPage />} />
           <Route path="review" element={<ReviewPage />} />

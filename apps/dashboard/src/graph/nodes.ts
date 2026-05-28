@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { type LabelCandidate, pickVisibleLabels } from '@/graph/pick-visible-labels';
 import { type GraphThemeConfig, getGraphTheme, isDarkMode } from '@/graph/theme';
 import type { GraphNode } from '@/types';
 import { NODE_TYPE_COLORS } from '@/types';
@@ -91,6 +92,19 @@ export class NodeManager {
   labelSprites = new Map<string, THREE.Sprite>();
   hoveredNode: string | null = null;
   selectedNode: string | null = null;
+  /**
+   * Keyboard cursor — fed from `useGraphKeyboard` through `Graph3D`.
+   * Independent from `hoveredNode` (mouse) and `selectedNode` (click)
+   * so label LOD can treat all three as "user attention" without
+   * conflating intent.
+   */
+  keyboardFocusedNode: string | null = null;
+  /**
+   * Soft cap on simultaneously-visible labels. The user can configure
+   * this through props later; for now it's tuned to ~150-node graphs
+   * where 25 labels still feels readable without crowding the canvas.
+   */
+  labelBudget = 25;
   focusNode: string | null = null;
   focusConnected = new Set<string>();
   private focusAlpha = new Map<string, number>();
@@ -348,7 +362,7 @@ export class NodeManager {
     time: number,
     nodeById: Map<string, GraphNode>,
     camera: THREE.PerspectiveCamera,
-    nodeOpacities?: Map<string, number>,
+    nodeOpacities?: ReadonlyMap<string, number>,
   ) {
     this.animateMaterializing();
     this.animateDissolving();
@@ -398,15 +412,49 @@ export class NodeManager {
       }
     }
 
+    // Level-of-detail for labels: with 500+ nodes the canvas turns into
+    // a wall of overlapping text. `pickVisibleLabels` reserves slots for
+    // the user's anchors (hovered/selected/keyboard-focused/connected)
+    // and fills the remaining budget with the strongest in-range
+    // memories by retention. Everything else fades out smoothly.
+    const candidates: LabelCandidate[] = [];
+    for (const [id, pos] of this.positions) {
+      if (this.animatingIdSet.has(id)) continue;
+      const node = nodeById.get(id);
+      if (!node) continue;
+      candidates.push({
+        id,
+        retention: node.retention,
+        distSq: camera.position.distanceToSquared(pos),
+      });
+    }
+    // 80 world-units is the legacy "fade-to-zero" radius; squaring once
+    // here saves a sqrt per node per frame.
+    const MAX_LABEL_DIST_SQ = 80 * 80;
+    const visible = pickVisibleLabels(candidates, {
+      hoveredId: this.hoveredNode,
+      selectedId: this.selectedNode,
+      focusedId: this.keyboardFocusedNode,
+      focusConnected: this.focusConnected,
+      maxLabels: this.labelBudget,
+      maxDistSq: MAX_LABEL_DIST_SQ,
+    });
+
     for (const [id, sprite] of this.labelSprites) {
       if (this.animatingIdSet.has(id)) continue;
       const pos = this.positions.get(id);
       if (!pos) continue;
+      const mat = sprite.material as THREE.SpriteMaterial;
+      // Pruned by LOD → ease to invisible. We don't snap because that
+      // would flicker every time the budget shuffles between frames.
+      if (!visible.has(id)) {
+        mat.opacity += (0 - mat.opacity) * 0.1;
+        continue;
+      }
       const dist = camera.position.distanceTo(pos);
       const focusA = this.focusAlpha.get(id) ?? 1.0;
-      const mat = sprite.material as THREE.SpriteMaterial;
       const rawTarget =
-        id === this.hoveredNode || id === this.selectedNode
+        id === this.hoveredNode || id === this.selectedNode || id === this.keyboardFocusedNode
           ? 1.0
           : dist < 40
             ? 0.9

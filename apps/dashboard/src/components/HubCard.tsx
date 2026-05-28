@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { useDialogStore } from '@/stores/dialogs';
 import type { Hub } from '@/types';
 
 interface HubCardProps {
@@ -10,8 +12,19 @@ interface HubCardProps {
 export function HubCard({ hub }: HubCardProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
+  const navigate = useNavigate();
   const lastRegenerated = new Date(hub.lastRegeneratedAt);
   const [rangeStart, rangeEnd] = hub.dateRange;
+
+  // Open a child memory through the same `pendingSelectMemoryId` channel
+  // the command palette uses, instead of a raw `<a href="/memories/:id">`
+  // (the dashboard has no such route — that link did a full reload to a
+  // 404). MemoriesPage picks up the id in its useEffect and opens the
+  // detail drawer for it.
+  const openMemory = (id: string) => {
+    useDialogStore.getState().requestSelectMemory(id);
+    navigate('/memories');
+  };
 
   return (
     <Card className="space-y-3">
@@ -67,9 +80,15 @@ export function HubCard({ hub }: HubCardProps) {
       {hub.childIds.length > 0 && (
         <div className="text-[11px] text-muted-foreground flex flex-wrap gap-1">
           {hub.childIds.slice(0, 8).map((id) => (
-            <a key={id} href={`/memories/${id}`} className="hover:underline font-mono" title={id}>
+            <button
+              key={id}
+              type="button"
+              onClick={() => openMemory(id)}
+              className="hover:underline font-mono cursor-pointer"
+              title={id}
+            >
               {id.slice(0, 8)}
-            </a>
+            </button>
           ))}
           {hub.childIds.length > 8 && <span>+{hub.childIds.length - 8}</span>}
         </div>

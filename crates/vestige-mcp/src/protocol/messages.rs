@@ -39,6 +39,14 @@ pub struct ClientCapabilities {
     pub roots: Option<HashMap<String, Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sampling: Option<HashMap<String, Value>>,
+    /// MCP `2025-06-18` elicitation capability. Clients advertise this
+    /// when they can render `elicitation/create` prompts inline. The
+    /// server still issues string-encoded confirmation errors today
+    /// (stdio transport is one-way), but recording the capability lets
+    /// us switch to genuine outbound prompts once bidirectional JSON-RPC
+    /// lands without breaking the wire format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elicitation: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

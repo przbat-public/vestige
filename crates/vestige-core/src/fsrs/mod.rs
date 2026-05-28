@@ -24,6 +24,7 @@ mod scheduler;
 
 pub use algorithm::{
     DEFAULT_DECAY,
+    DEFAULT_MAX_SENTIMENT_BOOST,
     DEFAULT_RETENTION,
     // Constants
     FSRS6_WEIGHTS,

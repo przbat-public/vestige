@@ -10,6 +10,8 @@ pub(crate) mod migrations;
 mod sqlite;
 
 pub use sqlite::{
-    ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,
-    IntentionRecord, Result, SmartIngestResult, StateTransitionRecord, Storage, StorageError,
+    ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord,
+    DEFAULT_HYBRID_KEYWORD_WEIGHT, DEFAULT_HYBRID_SEMANTIC_WEIGHT, InsightRecord, IntentionRecord,
+    Result, SmartIngestResult, StateTransitionRecord, Storage, StorageError,
+    default_hybrid_weights,
 };

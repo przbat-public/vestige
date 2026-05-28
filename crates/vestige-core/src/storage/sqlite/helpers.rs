@@ -11,6 +11,28 @@ use super::Storage;
 use super::error::{Result, StorageError};
 
 impl Storage {
+    /// Embed text using the storage's embedding service.
+    ///
+    /// Exposed so callers (e.g. the MCP `force_create` path) can compute
+    /// an embedding *once* and then hand it to both
+    /// [`Self::semantic_search_by_embedding`] and
+    /// [`Self::ingest_with_embedding`] instead of paying the embed cost
+    /// twice. Returns `None` when the embedding service is not ready, which
+    /// matches the silent fallback behaviour elsewhere in the storage layer.
+    #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+    pub fn embed_text(
+        &self,
+        text: &str,
+    ) -> std::result::Result<crate::embeddings::Embedding, crate::embeddings::EmbeddingError> {
+        self.embedding_service.embed(text)
+    }
+
+    /// Whether the embedding service is initialised and ready to serve calls.
+    #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+    pub fn embedding_service_ready(&self) -> bool {
+        self.embedding_service.is_ready()
+    }
+
     /// Acquire a reader connection from the pool.
     ///
     /// Tries the secondary reader first (via `try_lock`) so that the primary
@@ -25,7 +47,12 @@ impl Storage {
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))
     }
 
-    /// Generate embedding for a node
+    /// Generate embedding for a node by embedding `content` from scratch.
+    ///
+    /// This is the convenience path: callers that don't already have an
+    /// `Embedding` in hand just supply the source text. Internally we hand
+    /// off to [`Self::store_embedding_for_node`] once the vector is ready
+    /// so the persistence logic lives in exactly one place.
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     pub(super) fn generate_embedding_for_node(&self, node_id: &str, content: &str) -> Result<()> {
         if !self.embedding_service.is_ready() {
@@ -46,6 +73,24 @@ impl Storage {
             .embed(content)
             .map_err(|e| StorageError::Init(format!("Embedding failed: {}", e)))?;
 
+        self.store_embedding_for_node(node_id, &embedding)
+    }
+
+    /// Persist a *pre-computed* embedding for a node.
+    ///
+    /// Splitting this out from `generate_embedding_for_node` lets the smart
+    /// ingest path (`smart_ingest`, `ingest_with_embedding`) reuse the vector
+    /// it already paid for instead of re-embedding the same content a second
+    /// time inside `Storage::ingest`. The ML audit on 2026-05-20 measured
+    /// 2 redundant embed calls per `force_create` ingest and 1 per smart
+    /// ingest — embedding is by far the most expensive thing this code path
+    /// does, so this matters even for modest write volumes.
+    #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+    pub(super) fn store_embedding_for_node(
+        &self,
+        node_id: &str,
+        embedding: &crate::embeddings::Embedding,
+    ) -> Result<()> {
         let now = Utc::now();
 
         {

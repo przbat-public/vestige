@@ -30,6 +30,52 @@ use crate::search::reciprocal_rank_fusion;
 
 use super::{Result, Storage, StorageError};
 
+/// Default weight applied to the *keyword* (FTS5/BM25) channel when blending
+/// keyword and semantic scores inside [`Storage::hybrid_search`]. Tuned for
+/// general-purpose recall over LOCOMO-style conversational memory in
+/// May 2026 — paraphrase-heavy data benefits from a semantic-leaning blend.
+///
+/// Override at runtime with the env var `VESTIGE_HYBRID_KEYWORD_WEIGHT`.
+pub const DEFAULT_HYBRID_KEYWORD_WEIGHT: f32 = 0.3;
+
+/// Default weight applied to the *semantic* (HNSW cosine) channel. See
+/// [`DEFAULT_HYBRID_KEYWORD_WEIGHT`]. Override with
+/// `VESTIGE_HYBRID_SEMANTIC_WEIGHT`.
+pub const DEFAULT_HYBRID_SEMANTIC_WEIGHT: f32 = 0.7;
+
+/// Resolve the active hybrid-search weights, honouring runtime overrides.
+///
+/// Reads `VESTIGE_HYBRID_KEYWORD_WEIGHT` / `VESTIGE_HYBRID_SEMANTIC_WEIGHT`
+/// from the environment once per call (cheap; not on a hot loop). Returns
+/// `(keyword_weight, semantic_weight)`, both clamped to `[0.0, 1.0]`.
+///
+/// Falls back to the compiled defaults when either variable is unset or
+/// fails to parse. Negative or NaN inputs are silently replaced with the
+/// default to avoid feeding garbage into the rerank.
+pub fn default_hybrid_weights() -> (f32, f32) {
+    fn parse_clamped(var: &str, fallback: f32) -> f32 {
+        match std::env::var(var) {
+            Ok(raw) => raw
+                .trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|v| v.is_finite() && *v >= 0.0 && *v <= 1.0)
+                .unwrap_or(fallback),
+            Err(_) => fallback,
+        }
+    }
+    (
+        parse_clamped(
+            "VESTIGE_HYBRID_KEYWORD_WEIGHT",
+            DEFAULT_HYBRID_KEYWORD_WEIGHT,
+        ),
+        parse_clamped(
+            "VESTIGE_HYBRID_SEMANTIC_WEIGHT",
+            DEFAULT_HYBRID_SEMANTIC_WEIGHT,
+        ),
+    )
+}
+
 impl Storage {
     /// Recall memories matching a query
     pub fn recall(&self, input: RecallInput) -> Result<Vec<KnowledgeNode>> {
@@ -44,7 +90,8 @@ impl Storage {
             }
             #[cfg(all(feature = "embeddings", feature = "vector-search"))]
             SearchMode::Hybrid => {
-                let results = self.hybrid_search(&input.query, input.limit, 0.3, 0.7)?;
+                let (kw, sem) = default_hybrid_weights();
+                let results = self.hybrid_search(&input.query, input.limit, kw, sem)?;
                 results.into_iter().map(|r| r.node).collect()
             }
             #[cfg(not(all(feature = "embeddings", feature = "vector-search")))]
@@ -162,7 +209,30 @@ impl Storage {
         Ok(similarity_results)
     }
 
-    /// Hybrid search
+    /// Hybrid keyword + semantic search.
+    ///
+    /// Two-stage scoring:
+    /// 1. **Reciprocal Rank Fusion (k = 60)** picks the top candidates from
+    ///    the union of keyword (FTS5/BM25) and semantic (HNSW) result lists.
+    ///    RRF is rank-based and normalises across the incomparable raw score
+    ///    scales of BM25 and cosine similarity. See Cormack et al. 2009.
+    /// 2. **Weighted blending** of the *raw* keyword and semantic scores
+    ///    produces the final `combined_score` carried on each result. RRF
+    ///    decides *which* documents survive, the weighted blend decides
+    ///    *how strongly* downstream pipeline stages (temporal, emotional,
+    ///    competition) treat them.
+    ///
+    /// The two stages serve different purposes — RRF chooses the candidate
+    /// set, the weighted blend gives the pipeline a continuous relevance
+    /// signal it can multiply against. We deliberately do *not* propagate
+    /// the RRF score to `combined_score` because RRF saturates close to
+    /// `2/k` and would compress the dynamic range subsequent boosters need.
+    ///
+    /// Sensible weight ranges (see [`DEFAULT_HYBRID_KEYWORD_WEIGHT`] /
+    /// [`DEFAULT_HYBRID_SEMANTIC_WEIGHT`]):
+    /// - `(0.3, 0.7)` — default, biased toward semantic recall
+    /// - `(0.2, 0.8)` — temporal / reflection queries (paraphrase-heavy)
+    /// - `(0.4, 0.6)` — benchmark/LOCOMO (more keyword grounding)
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     pub fn hybrid_search(
         &self,
@@ -322,6 +392,34 @@ impl Storage {
         } else {
             Ok(results)
         }
+    }
+
+    /// Semantic search with a caller-supplied query embedding.
+    ///
+    /// `semantic_search_raw` re-embeds the query string and, for conceptual
+    /// intents, HyDE-expands it across several variants. That is the right
+    /// behaviour for user queries, but for `smart_ingest` we already paid the
+    /// embedding cost on `input.content` to feed the prediction-error gate —
+    /// re-embedding the exact same text just to look up neighbours was
+    /// doubling the work on every ingest call (and ~tripling it once HyDE
+    /// fired). This variant skips the embedding step and the HyDE expansion,
+    /// going straight to the vector index.
+    #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+    pub fn semantic_search_by_embedding(
+        &self,
+        query_embedding: &[f32],
+        limit: i32,
+    ) -> Result<Vec<(String, f32)>> {
+        if !self.embedding_service.is_ready() {
+            return Ok(vec![]);
+        }
+        let index = self
+            .vector_index
+            .lock()
+            .map_err(|_| StorageError::Init("Vector index lock poisoned".to_string()))?;
+        index
+            .search(query_embedding, limit as usize)
+            .map_err(|e| StorageError::Init(format!("Vector search failed: {}", e)))
     }
 
     /// Semantic search returning (node_id, similarity_score) pairs

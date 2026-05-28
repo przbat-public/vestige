@@ -51,6 +51,7 @@ impl Storage {
                 similarity: None,
                 prediction_error: Some(1.0),
                 reason: "Embeddings not available, falling back to regular ingest".to_string(),
+                neighbor_ids: Vec::new(),
             });
         }
 
@@ -59,7 +60,21 @@ impl Storage {
             .embed(&input.content)
             .map_err(|e| StorageError::Init(format!("Embedding failed: {}", e)))?;
 
-        let similar = self.semantic_search_raw(&input.content, 10)?;
+        // Reuse the embedding we just computed instead of going through
+        // `semantic_search_raw`, which would embed the exact same text a
+        // second time (and a third+ if HyDE expansion fires). The neighbour
+        // lookup here is for the prediction-error gate, not user-facing
+        // semantic search, so we don't want HyDE either — `smart_ingest`
+        // is asking "what is most similar to *this exact memory*", not
+        // "what is most relevant to this query intent".
+        let similar = self.semantic_search_by_embedding(&new_embedding.vector, 10)?;
+
+        // Capture the nearest-neighbour IDs once so we can return them on
+        // every decision branch. Lets MCP callers wire post-ingest cognitive
+        // updates without firing a second `semantic_search_raw` against the
+        // same embedding (the previous behaviour did two embed+search rounds
+        // per call — once here, once in the MCP layer).
+        let neighbor_ids: Vec<String> = similar.iter().map(|(id, _)| id.clone()).collect();
 
         let mut candidates: Vec<CandidateMemory> = Vec::new();
         for (node_id, _similarity) in similar.iter() {
@@ -93,7 +108,7 @@ impl Storage {
                 reason,
                 ..
             } => {
-                let node = self.ingest(input)?;
+                let node = self.ingest_with_embedding(input, &new_embedding)?;
 
                 // Memory evolution (A-Mem pattern): when a new memory is created,
                 // forge connections to related memories and give them a small
@@ -142,6 +157,7 @@ impl Storage {
                             reason, related_memory_ids
                         )
                     },
+                    neighbor_ids: neighbor_ids.clone(),
                 })
             }
             GateDecision::Update {
@@ -162,6 +178,7 @@ impl Storage {
                         similarity: Some(similarity),
                         prediction_error: Some(prediction_error),
                         reason: "Content nearly identical - reinforced existing memory".to_string(),
+                        neighbor_ids: neighbor_ids.clone(),
                     })
                 }
                 UpdateType::Merge | UpdateType::Append => {
@@ -190,6 +207,7 @@ impl Storage {
                         similarity: Some(similarity),
                         prediction_error: Some(prediction_error),
                         reason: "Merged with existing similar memory".to_string(),
+                        neighbor_ids: neighbor_ids.clone(),
                     })
                 }
                 UpdateType::Replace => {
@@ -205,6 +223,7 @@ impl Storage {
                         similarity: Some(similarity),
                         prediction_error: Some(prediction_error),
                         reason: "Replaced existing memory with new content".to_string(),
+                        neighbor_ids: neighbor_ids.clone(),
                     })
                 }
                 UpdateType::AddContext => {
@@ -227,6 +246,7 @@ impl Storage {
                         similarity: Some(similarity),
                         prediction_error: Some(prediction_error),
                         reason: "Added new content as context to existing memory".to_string(),
+                        neighbor_ids: neighbor_ids.clone(),
                     })
                 }
             },
@@ -249,7 +269,7 @@ impl Storage {
                     )?;
                 }
 
-                let node = self.ingest(input)?;
+                let node = self.ingest_with_embedding(input, &new_embedding)?;
 
                 Ok(SmartIngestResult {
                     decision: "supersede".to_string(),
@@ -258,6 +278,7 @@ impl Storage {
                     similarity: Some(similarity),
                     prediction_error: Some(prediction_error),
                     reason: format!("New memory supersedes old: {:?}", supersede_reason),
+                    neighbor_ids: neighbor_ids.clone(),
                 })
             }
             GateDecision::Merge {
@@ -265,7 +286,7 @@ impl Storage {
                 avg_similarity,
                 strategy,
             } => {
-                let node = self.ingest(input)?;
+                let node = self.ingest_with_embedding(input, &new_embedding)?;
 
                 // Memory evolution: link new memory to all merge candidates
                 let now = Utc::now();
@@ -293,6 +314,7 @@ impl Storage {
                         memory_ids.len(),
                         strategy
                     ),
+                    neighbor_ids,
                 })
             }
         }

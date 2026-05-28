@@ -24,7 +24,7 @@ import type { DashboardLimitsDto } from '@/types';
  */
 export const DEFAULT_LIMITS: DashboardLimitsDto = {
   graphMaxNodesDefault: 50,
-  graphMaxNodesMax: 500,
+  graphMaxNodesMax: 1000,
   graphDepthDefault: 1,
   graphDepthMax: 5,
   searchLimitDefault: 20,

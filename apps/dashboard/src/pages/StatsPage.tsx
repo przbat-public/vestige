@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { StatCard } from '@/components/ui/stat-card';
 import { api } from '@/stores/api';
+import { useDialogStore } from '@/stores/dialogs';
 import { queryKeys } from '@/stores/query';
 import { useTrackPageView } from '@/stores/telemetry';
 import { NODE_TYPE_COLORS, retentionColor } from '@/types';
@@ -13,6 +15,12 @@ import { NODE_TYPE_COLORS, retentionColor } from '@/types';
 export function StatsPage() {
   useTrackPageView('stats');
   const { t } = useTranslation();
+  const navigate = useNavigate();
+
+  const openMemory = (id: string) => {
+    useDialogStore.getState().requestSelectMemory(id);
+    navigate('/memories');
+  };
   const {
     data: stats,
     isError: statsError,
@@ -62,7 +70,9 @@ export function StatsPage() {
               className="w-3 h-3 rounded-full"
               style={{ backgroundColor: healthColor[health.status] || '#6b7280' }}
             />
-            <span className="text-sm font-medium text-foreground capitalize">{health.status}</span>
+            <span className="text-sm font-medium text-foreground">
+              {t(`stats.health.${health.status}`, { defaultValue: health.status })}
+            </span>
             <span className="text-xs text-muted-foreground">v{health.version}</span>
           </div>
         </Card>
@@ -103,12 +113,21 @@ export function StatsPage() {
           <CardContent>
             <p className="text-xs text-muted-foreground mb-2">{t('stats.endangeredHint')}</p>
             <div className="space-y-1">
-              {distribution.endangered.slice(0, 5).map((m) => (
-                <div key={m.id} className="text-xs text-muted-foreground truncate">
-                  {m.content.slice(0, 60)} —{' '}
-                  <span style={{ color: retentionColor(m.retention) }}>{(m.retention * 100).toFixed(0)}%</span>
-                </div>
-              ))}
+              {distribution.endangered.slice(0, 5).map((m) => {
+                const preview = m.content.slice(0, 60);
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => openMemory(m.id)}
+                    aria-label={t('stats.endangeredOpenAria', { preview })}
+                    className="block w-full text-left text-xs text-muted-foreground truncate hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm transition-colors"
+                  >
+                    {preview} —{' '}
+                    <span style={{ color: retentionColor(m.retention) }}>{(m.retention * 100).toFixed(0)}%</span>
+                  </button>
+                );
+              })}
             </div>
           </CardContent>
         </Card>

@@ -21,7 +21,14 @@
     "settings": "Settings",
     "tutorial": "Tutorial",
     "reviewDueAria_one": "{{count}} memory due for review",
-    "reviewDueAria_other": "{{count}} memories due for review"
+    "reviewDueAria_other": "{{count}} memories due for review",
+    "section": {
+      "daily": "Daily",
+      "memory": "Memory",
+      "explore": "Explore",
+      "system": "System",
+      "help": "Help"
+    }
   },
   "bulk": {
     "selectedCount_one": "{{count}} selected",
@@ -62,6 +69,7 @@
     "regenerateEmbeddingsSuccess": "Embeddings backfilled.",
     "backup": "Create database backup",
     "backupSuccess": "Backup written to ~/.vestige/backups.",
+    "addMemory": "Add memory",
     "memoryResults": "Memories"
   },
   "maintenance": {
@@ -107,7 +115,9 @@
     "menu": "Menu",
     "loading": "Loading",
     "connected": "Connected",
-    "disconnected": "Disconnected"
+    "disconnected": "Disconnected",
+    "notifications": "Notifications",
+    "dismissNotification": "Dismiss"
   },
   "shortcuts": {
     "title": "Keyboard shortcuts",
@@ -140,6 +150,8 @@
     "cancel": "Cancel",
     "save": "Save",
     "undo": "Undo",
+    "retry": "Retry",
+    "confirm": "Confirm",
     "new": "+ New",
     "clear": "clear",
     "loading": "Loading...",
@@ -159,7 +171,9 @@
     "errorDetails": "Show technical details",
     "errorRetry": "Try again",
     "yes": "yes",
-    "no": "no"
+    "no": "no",
+    "previous": "Previous",
+    "next": "Next"
   },
   "status": {
     "connected": "Connected",
@@ -177,6 +191,9 @@
     "loadingGraph": "Building your memory map...",
     "emptyGraph": "No memories to visualize yet",
     "emptyHint": "Start saving memories to see your knowledge graph grow",
+    "noMatch": "No nodes match the current filter",
+    "noMatchHint": "Clear the tag filter or pick a different tag to bring the graph back.",
+    "clearFilter": "Clear filter",
     "maxNodes": "Maximum nodes to display",
     "nodeOption": "{{count}} memories",
     "dreamingBadge": "Dreaming…",
@@ -187,13 +204,44 @@
     "colorByType": "Type",
     "colorByTag": "Tag (cluster)",
     "tagLegendTitle": "Tag legend",
-    "tagLegendUntagged": "Untagged"
+    "tagLegendUntagged": "Untagged",
+    "canvasLabel": "Memory graph canvas — use arrow keys to navigate nodes, Enter to open, Escape to clear focus",
+    "canvasRole": "Interactive memory graph",
+    "focusAnnouncement": "Focused node: {{label}}",
+    "focusCleared": "No node focused",
+    "help": {
+      "title": "Graph keyboard shortcuts",
+      "subtitle": "Navigate the memory graph without the mouse.",
+      "close": "Close",
+      "sections": {
+        "navigate": "Navigation",
+        "frame": "Camera",
+        "history": "History",
+        "general": "General"
+      },
+      "keys": {
+        "arrows": "Move focus to the nearest node in that direction",
+        "enter": "Open the focused node",
+        "escape": "Clear focus and selection",
+        "home": "Jump to the first node",
+        "end": "Jump to the last node",
+        "frameNode": "Frame the selected (or focused) node",
+        "frameAll": "Frame the entire visible graph",
+        "reset": "Reset camera to default position",
+        "back": "Back to previous selection",
+        "forward": "Forward in selection history",
+        "help": "Show this help",
+        "altClickDeselect": "Click the empty canvas to clear selection"
+      }
+    }
   },
   "memories": {
     "title": "Memories",
     "searchPlaceholder": "Search memories...",
     "filterByType": "All types",
     "filterByTag": "Filter by tag...",
+    "pagination": "Pagination",
+    "pageRange": "{{from}}–{{to}} of {{total}}",
     "noMemories": "No memories found",
     "noMemoriesHint": "Try a different search or filter",
     "emptyCta": "+ Add your first memory",
@@ -415,6 +463,7 @@
     "nearDuplicateWarning": "Near duplicate",
     "toastCreated": "Memory created.",
     "toastMerged": "Smart-ingest decided to {{decision}} — see dialog for details.",
+    "toastWithWarning": "Memory created — review the warning in the dialog before continuing.",
     "errors": {
       "contentRequired": "Memory content is required.",
       "contentTooLarge": "Memory content exceeds the 1MB limit.",
@@ -531,7 +580,11 @@
   "error": {
     "title": "Something went wrong",
     "fallback": "An unexpected error occurred",
-    "reload": "Reload Dashboard"
+    "reload": "Reload Dashboard",
+    "sectionFailed": "This section failed to load"
+  },
+  "confirm": {
+    "defaultTitle": "Are you sure?"
   },
   "timeSlider": {
     "timeline": "Timeline",
@@ -590,7 +643,8 @@
     "confidenceDone": "Audit complete",
     "doubtModeHint": "Doubt mode: lowest-confidence memories first. Promote to verify, or demote to weaken.",
     "doubtModeVerify": "Verify",
-    "doubtModeDemote": "Demote"
+    "doubtModeDemote": "Demote",
+    "openMemoryTitle": "Open memory {{id}}"
   },
   "feed": {
     "title": "Activity Feed",
@@ -599,6 +653,10 @@
     "noEventsHint": "Events will appear here as you use Vestige",
     "paused": "Paused",
     "live": "Live",
+    "pause": "Pause",
+    "resume": "Resume",
+    "allTypes": "All types",
+    "filterByType": "Filter by type",
     "clearAll": "Clear"
   },
   "explore": {
@@ -686,6 +744,9 @@
     },
     "complete": "Mark done",
     "snooze": "Snooze",
+    "cancel": "Cancel",
+    "reactivate": "Reactivate",
+    "statusChanged": "Status updated",
     "deadline": "Deadline",
     "triggerLabel": "Trigger type",
     "triggerValue": "Trigger value",
@@ -714,12 +775,21 @@
     "todayLabel": "today {{value}}%",
     "heatmapCellTitle": "{{range}}: {{count}} of {{total}} memories",
     "heatmapLow": "fading",
-    "heatmapHigh": "stable"
+    "heatmapHigh": "stable",
+    "endangeredOpenAria": "Open memory: {{preview}}",
+    "health": {
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "critical": "Critical",
+      "empty": "Empty"
+    }
   },
   "timeline": {
     "title": "Timeline",
     "noActivity": "No activity for this period",
     "memoriesOn": "{{count}} memories on {{date}}",
+    "memoriesCount_one": "{{count}} memory",
+    "memoriesCount_other": "{{count}} memories",
     "moreCount_one": "+{{count}} more",
     "moreCount_other": "+{{count}} more"
   },

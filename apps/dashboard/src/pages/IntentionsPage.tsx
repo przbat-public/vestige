@@ -89,6 +89,21 @@ export function IntentionsPage() {
     onError: () => toast(t('common.error'), 'error'),
   });
 
+  // Lifecycle update — fulfil, cancel, snooze, reactivate. Mounted as a
+  // single mutation rather than one-per-action so the optimistic-cache
+  // story stays simple: we just invalidate every filter the list query
+  // might be on (active / fulfilled / all / ...).
+  const updateStatusMutation = useMutation({
+    mutationFn: (input: { id: string; status: 'fulfilled' | 'cancelled' | 'snoozed' | 'active' }) =>
+      api.updateIntention(input.id, input.status),
+    onSuccess: () => {
+      toast(t('intentions.statusChanged'), 'success');
+      // Any open filter (active/fulfilled/all/...) could now be stale.
+      qc.invalidateQueries({ queryKey: ['intentions'] });
+    },
+    onError: (err) => toast(err instanceof Error ? err.message : t('common.error'), 'error'),
+  });
+
   const onSubmit = (data: IntentionForm) => {
     createMutation.mutate({
       ...data,
@@ -192,28 +207,81 @@ export function IntentionsPage() {
         <EmptyState icon="◌" title={t('intentions.noIntentions')} description={t('intentions.noIntentionsHint')} />
       ) : (
         <div className="space-y-2">
-          {intentions.map((item) => (
-            <Card key={item.id} className="space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm text-foreground break-words">{item.content}</p>
-                <Badge variant={priorityVariant(item.priority)}>
-                  {t(`intentions.priority.${item.priority}`, { defaultValue: item.priority })}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-                <Badge variant="secondary">
-                  {t(`intentions.triggerType.${item.triggerType}`, { defaultValue: item.triggerType })}:{' '}
-                  {item.triggerValue}
-                </Badge>
-                <Badge variant="outline">{t(`intentions.status.${item.status}`, { defaultValue: item.status })}</Badge>
-                {item.deadline && (
-                  <span>
-                    {t('intentions.deadline')}: {new Date(item.deadline).toLocaleDateString()}
-                  </span>
-                )}
-              </div>
-            </Card>
-          ))}
+          {intentions.map((item) => {
+            const isActive = item.status === 'active';
+            const isTerminal = item.status === 'fulfilled' || item.status === 'cancelled';
+            const isPending = updateStatusMutation.isPending && updateStatusMutation.variables?.id === item.id;
+            return (
+              <Card key={item.id} className="space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm text-foreground break-words">{item.content}</p>
+                  <Badge variant={priorityVariant(item.priority)}>
+                    {t(`intentions.priority.${item.priority}`, { defaultValue: item.priority })}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                  {item.triggerValue ? (
+                    <Badge variant="secondary">
+                      {t(`intentions.triggerType.${item.triggerType}`, { defaultValue: item.triggerType })}:{' '}
+                      {item.triggerValue}
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">
+                      {t(`intentions.triggerType.${item.triggerType}`, { defaultValue: item.triggerType })}
+                    </Badge>
+                  )}
+                  <Badge variant="outline">
+                    {t(`intentions.status.${item.status}`, { defaultValue: item.status })}
+                  </Badge>
+                  {item.deadline && (
+                    <span>
+                      {t('intentions.deadline')}: {new Date(item.deadline).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {isActive && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="success"
+                        disabled={isPending}
+                        onClick={() => updateStatusMutation.mutate({ id: item.id, status: 'fulfilled' })}
+                      >
+                        {t('intentions.complete')}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={isPending}
+                        onClick={() => updateStatusMutation.mutate({ id: item.id, status: 'snoozed' })}
+                      >
+                        {t('intentions.snooze')}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={isPending}
+                        onClick={() => updateStatusMutation.mutate({ id: item.id, status: 'cancelled' })}
+                      >
+                        {t('intentions.cancel')}
+                      </Button>
+                    </>
+                  )}
+                  {isTerminal && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={isPending}
+                      onClick={() => updateStatusMutation.mutate({ id: item.id, status: 'active' })}
+                    >
+                      {t('intentions.reactivate')}
+                    </Button>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
 

@@ -77,7 +77,12 @@ export function TimeSlider({ nodes, onDateChange, onToggle }: Props) {
 
   const togglePlay = () => {
     if (!playing) {
-      setSliderValue(0);
+      // Resume from the current cursor; only restart from the
+      // beginning when we're already at the end (otherwise users who
+      // scrubbed to inspect a specific point would lose their place).
+      // The 99.9 floor handles float-rounding from the input[range]
+      // step.
+      if (sliderValue >= 99.9) setSliderValue(0);
       setPlaying(true);
     } else {
       setPlaying(false);
@@ -141,6 +146,16 @@ export function TimeSlider({ nodes, onDateChange, onToggle }: Props) {
           value={sliderValue}
           onChange={(e) => setSliderValue(Number(e.target.value))}
           aria-label={t('timeSlider.timelinePosition')}
+          // Native <input type="range"> already exposes role="slider", but
+          // some screen readers (NVDA, JAWS) only announce the raw percent
+          // unless we provide `aria-valuetext` explicitly. The date is the
+          // meaningful value here; the percentage is an implementation
+          // detail. Pinning `aria-valuemin/max/now` makes the contract
+          // observable to tests too (WCAG 4.1.2 Name, Role, Value).
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={sliderValue}
+          aria-valuetext={formatDate(currentDate, locale)}
           className="w-full h-1.5 appearance-none bg-muted rounded-full cursor-pointer
             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
             [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary

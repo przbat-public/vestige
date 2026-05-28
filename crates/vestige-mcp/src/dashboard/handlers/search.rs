@@ -34,8 +34,9 @@ pub async fn search_memories(
     // soft-limit Tokio sets for its async reactor threads.
     let storage = state.storage.clone();
     let query = params.q.clone();
+    let (kw, sem) = vestige_core::default_hybrid_weights();
     let results =
-        tokio::task::spawn_blocking(move || storage.hybrid_search(&query, limit, 0.3, 0.7))
+        tokio::task::spawn_blocking(move || storage.hybrid_search(&query, limit, kw, sem))
             .await
             .map_err(log_join_err("hybrid_search task panicked"))?
             .map_err(log_err("storage operation"))?;

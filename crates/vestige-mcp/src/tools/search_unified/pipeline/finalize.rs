@@ -118,20 +118,51 @@ fn apply_spreading_activation(
     if activation_take == 0 {
         return;
     }
-    let Ok(mut cog) = cognitive.try_lock() else {
-        crate::cognitive::try_lock_metrics::record_miss("search_finalize");
-        return;
+    // Clone the activation-network Arc out of the engine and drop the
+    // engine lock immediately. Spreading activation then runs holding only
+    // its own write lock — other tools can grab the engine concurrently.
+    let net = {
+        let Ok(cog) = cognitive.try_lock() else {
+            crate::cognitive::try_lock_metrics::record_miss("search_finalize");
+            return;
+        };
+        Arc::clone(&cog.activation_network)
     };
     let Some(first) = scoring.results.first() else {
         return;
     };
 
-    let activated = cog.activation_network.activate(&first.node.id, 1.0);
+    let activated = match net.try_write() {
+        Ok(mut n) => n.activate(&first.node.id, 1.0),
+        Err(_) => {
+            crate::cognitive::try_lock_metrics::record_miss("search_finalize");
+            return;
+        }
+    };
     let activation_map: std::collections::HashMap<&str, f64> = activated
         .iter()
         .map(|a| (a.memory_id.as_str(), a.activation))
         .collect();
 
+    // ACT-R-flavoured boost. The activation network propagates from the
+    // top result outward in the Collins & Loftus model — neighbours with
+    // strong, fresh edges to the anchor get a multiplicative bump on the
+    // final search score. The 20 % ceiling is deliberately conservative:
+    //
+    //   * Anderson's ACT-R activation can dominate retrieval probability,
+    //     but that's *recall* probability, not a post-rank score scalar.
+    //     A 20 % bump on `combined_score` is loud enough to re-order
+    //     ties without overpowering the FTS/semantic ranking signal.
+    //   * Activation is normalised to `[0, 1.0]` by the network; values
+    //     above 1.0 occasionally appear at the anchor's direct
+    //     neighbours when multiple high-weight edges converge — the
+    //     `min(0.20)` clamp guarantees the bump is a re-rank, not a
+    //     re-rewrite, even in those cases.
+    //
+    // If you want to tune this, prefer changing the activation network's
+    // decay (in `ActivationNetwork::activate`) rather than this knob —
+    // it propagates the effect end-to-end and stays consistent with the
+    // dream / metacognition pipelines that also read activation.
     for result in scoring.results.iter_mut().skip(1) {
         if let Some(&act) = activation_map.get(result.node.id.as_str()) {
             result.combined_score *= 1.0 + (act as f32 * 0.20).min(0.20);
@@ -184,36 +215,38 @@ async fn record_side_effects(
     })
     .await;
 
-    if let Ok(mut cog) = cognitive.try_lock() {
-        let _ = cog.predictive_memory.record_query(&args.query, &[]);
+    let Ok(mut cog) = cognitive.try_lock() else {
+        crate::cognitive::try_lock_metrics::record_miss("search_finalize_side_effects");
+        return;
+    };
+    let _ = cog.predictive_memory.record_query(&args.query, &[]);
 
-        for result in &scoring.results {
-            let _ = cog.predictive_memory.record_memory_access(
-                &result.node.id,
-                &result.node.content.chars().take(100).collect::<String>(),
-                &result.node.tags,
-            );
+    for result in &scoring.results {
+        let _ = cog.predictive_memory.record_memory_access(
+            &result.node.id,
+            &result.node.content.chars().take(100).collect::<String>(),
+            &result.node.tags,
+        );
 
-            cog.speculative_retriever.record_access(
-                &result.node.id,
-                None,
-                Some(args.query.as_str()),
-                None,
-            );
+        cog.speculative_retriever.record_access(
+            &result.node.id,
+            None,
+            Some(args.query.as_str()),
+            None,
+        );
 
-            // 5-min reconsolidation window so subsequent edits update both
-            // the snapshot and the working memory.
-            let snapshot = MemorySnapshot {
-                content: result.node.content.clone(),
-                tags: result.node.tags.clone(),
-                retention_strength: result.node.retention_strength,
-                storage_strength: result.node.storage_strength,
-                retrieval_strength: result.node.retrieval_strength,
-                connection_ids: vec![],
-                captured_at: Utc::now(),
-            };
-            cog.reconsolidation.mark_labile(&result.node.id, snapshot);
-        }
+        // 5-min reconsolidation window so subsequent edits update both
+        // the snapshot and the working memory.
+        let snapshot = MemorySnapshot {
+            content: result.node.content.clone(),
+            tags: result.node.tags.clone(),
+            retention_strength: result.node.retention_strength,
+            storage_strength: result.node.storage_strength,
+            retrieval_strength: result.node.retrieval_strength,
+            connection_ids: vec![],
+            captured_at: Utc::now(),
+        };
+        cog.reconsolidation.mark_labile(&result.node.id, snapshot);
     }
 }
 

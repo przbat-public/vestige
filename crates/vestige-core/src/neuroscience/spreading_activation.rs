@@ -18,7 +18,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 // ============================================================================
 // CONSTANTS
@@ -288,6 +288,16 @@ impl ActivationNetwork {
     }
 
     /// Activate a node and spread activation through the network
+    ///
+    /// Uses **breadth-first** propagation (Collins & Loftus 1975): activation
+    /// saturates at distance 1 before propagating to distance 2. Earlier
+    /// revisions used a `Vec` as a stack (LIFO) which silently produced
+    /// depth-first order — for a memory graph where decay compounds per hop,
+    /// DFS biases the activated set toward whichever neighbour happened to be
+    /// inserted last instead of toward the most-reachable concepts. The
+    /// `visited` map already keeps the highest-activation arrival for each
+    /// node, so BFS gives the same result as best-first for well-formed
+    /// graphs without the extra `Ord` plumbing a priority queue would need.
     pub fn activate(&mut self, source_id: &str, initial_activation: f64) -> Vec<ActivatedMemory> {
         let mut results = Vec::new();
         let mut visited = HashMap::new();
@@ -297,15 +307,15 @@ impl ActivationNetwork {
             node.activate(initial_activation);
         }
 
-        // BFS to spread activation
-        let mut queue = vec![(
+        let mut queue: VecDeque<(String, f64, u32, Vec<String>)> = VecDeque::new();
+        queue.push_back((
             source_id.to_string(),
             initial_activation,
             0u32,
             vec![source_id.to_string()],
-        )];
+        ));
 
-        while let Some((current_id, current_activation, hops, path)) = queue.pop() {
+        while let Some((current_id, current_activation, hops, path)) = queue.pop_front() {
             // Skip if we've visited this node with higher activation
             if let Some(&prev_activation) = visited.get(&current_id)
                 && prev_activation >= current_activation
@@ -347,7 +357,7 @@ impl ActivationNetwork {
                             });
 
                             // Add to queue for further propagation
-                            queue.push((target_id.clone(), propagated, hops + 1, new_path));
+                            queue.push_back((target_id.clone(), propagated, hops + 1, new_path));
                         }
                     }
                 }

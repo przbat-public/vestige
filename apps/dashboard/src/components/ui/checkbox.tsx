@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
@@ -8,6 +8,7 @@ interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>
    * Used by bulk-select master checkboxes that show "some" vs "all" vs "none".
    */
   indeterminate?: boolean;
+  ref?: React.Ref<HTMLInputElement>;
 }
 
 /**
@@ -18,10 +19,11 @@ interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>
  * gymnastics. Visual styling matches the design system; we use accent-color
  * for the checked state which respects high-contrast mode automatically.
  */
-export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(function Checkbox(
-  { indeterminate = false, className, ...props },
-  ref,
-) {
+export function Checkbox({ indeterminate = false, className, ref, ...props }: CheckboxProps) {
+  // We need a local ref to drive the imperative `.indeterminate` property
+  // (the HTML attribute doesn't exist). When the parent also passes a ref
+  // we fan it out to both targets so consumers can still focus/measure
+  // the input.
   const innerRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -46,4 +48,4 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(function Che
       {...props}
     />
   );
-});
+}

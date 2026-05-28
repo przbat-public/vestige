@@ -53,14 +53,17 @@ interface AddMemoryDialogProps {
  * Accessibility:
  * - role="dialog" + aria-modal + aria-labelledby/described-by
  * - Escape closes
- * - Background click closes (acts as modal scrim)
+ * - Background click closes (a non-interactive div acts as the scrim,
+ *   wired with a keyboard handler so SR users can still dismiss)
  * - Initial focus lands on the textarea (autoFocus)
+ * - On close, focus returns to whatever triggered the dialog so the
+ *   user lands back where they were (WAI-ARIA APG modal pattern).
  *
  * We deliberately don't trap Tab focus — the dialog is short and adding a
  * focus trap pulls in either a dependency or 30 lines of edge-case
  * handling. If Tab leaves the dialog the user can shift+Tab back, and the
- * scrim swallow click is the primary dismiss path. Worth revisiting if a
- * dialog grows enough to make tab cycling material.
+ * scrim is the primary dismiss path. Worth revisiting if a dialog grows
+ * enough to make tab cycling material.
  */
 export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
   const { t } = useTranslation();
@@ -68,6 +71,23 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
   const titleId = useId();
   const descId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Capture the element that opened the dialog so we can restore focus
+  // when it closes — keyboard users who triggered via ⌘N expect to land
+  // back on the same DOM node they started on, not at the top of the page.
+  const triggerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (open) {
+      triggerRef.current = (document.activeElement as HTMLElement | null) ?? null;
+      return;
+    }
+    // Restore on close. Use rAF so React's commit phase finishes first
+    // (the dialog DOM has just unmounted; if we focus synchronously the
+    // browser sometimes scrolls the trigger out of view as a side effect).
+    const trigger = triggerRef.current;
+    if (trigger?.isConnected) {
+      requestAnimationFrame(() => trigger.focus({ preventScroll: true }));
+    }
+  }, [open]);
 
   const {
     register,
@@ -87,6 +107,19 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
       // case where the WS connection is degraded or in flight.
       qc.invalidateQueries({ queryKey: queryKeys.memories() });
       qc.invalidateQueries({ queryKey: queryKeys.stats });
+
+      // The backend may flag the write with a `compound_content_warning`
+      // or `near_duplicate_warning` that is actionable — the user should
+      // either split the memory into atomics or re-submit with
+      // `forceCreate` to acknowledge a near-duplicate. Auto-closing the
+      // dialog hides that advice behind a toast and forces the user to
+      // navigate to the new memory just to read it. Keep the dialog open
+      // so the inline Alert (rendered below) can deliver the message
+      // where the user can still act on it.
+      if (result.compound_content_warning || result.near_duplicate_warning) {
+        toast(t('addMemory.toastWithWarning'), 'info');
+        return;
+      }
 
       // Translate the engine's decision into a human message rather than
       // dumping the raw `decision` string. The decision shapes the toast:
@@ -149,17 +182,17 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
   };
 
   return (
-    // The button is a transparent scrim — it's the click-outside dismiss
-    // affordance. Marked aria-label so screen readers know it's
-    // dismissible, but the actual modal a11y comes from the inner div
-    // with role="dialog".
+    // The scrim is a non-interactive div (it can be clicked but it's not
+    // a button) — using `<button>` here flagged Lighthouse as wrong
+    // semantics (a button that wraps a dialog isn't meaningful to AT)
+    // and broke `aria-modal` semantics on some screen readers, which
+    // expect the dialog and scrim to live as siblings. Keyboard users
+    // dismiss with ESC; mouse/touch users still get click-outside.
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm cursor-default"
-        onClick={onClose}
-        aria-label={t('addMemory.dismiss')}
-      />
+      {/* Scrim — role="presentation" makes it transparent to AT, ESC is
+          handled by the window listener above. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: scrim is a click target, not an interactive control */}
+      <div role="presentation" className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div
         ref={dialogRef}
         role="dialog"

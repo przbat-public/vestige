@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Graph3D } from '@/components/Graph3D';
+import { GraphHelpOverlay } from '@/components/GraphHelpOverlay';
 import { MemoryDetail } from '@/components/memories/MemoryDetail';
 import { SectionErrorBoundary } from '@/components/SectionErrorBoundary';
 import { TagLegend } from '@/components/TagLegend';
@@ -17,11 +18,18 @@ import { Sheet } from '@/components/ui/sheet';
 import { filterByDate } from '@/graph/temporal';
 import { useDashboardLimits } from '@/hooks/use-dashboard-limits';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useSelectionHistory } from '@/hooks/use-selection-history';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { useTrackPageView } from '@/stores/telemetry';
 import { useWebSocket } from '@/stores/websocket';
 import type { GraphEdge, GraphNode } from '@/types';
+
+// Module-level frozen singleton — passing a fresh `new Map()` from inside
+// the component would change identity every render and bust Graph3D's
+// `useEffect` deps (the renderer keys off `nodeOpacities`). The frozen
+// empty Map is the same object forever.
+const EMPTY_OPACITIES: ReadonlyMap<string, number> = Object.freeze(new Map<string, number>());
 
 export function GraphPage() {
   useTrackPageView('graph');
@@ -42,8 +50,15 @@ export function GraphPage() {
   const [tagFilter, setTagFilter] = useState('');
   const [colorMode, setColorMode] = useState<'type' | 'tag'>('type');
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [keyboardFocusId, setKeyboardFocusId] = useState<string | null>(null);
   const [temporalEnabled, setTemporalEnabled] = useState(false);
   const [temporalDate, setTemporalDate] = useState<Date | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  // Selection history — back/forward through the user's exploration path.
+  // Distinct from the browser history (which we never touch). Capped at
+  // 50 because we're just an in-memory stack, not a paged audit log.
+  const history = useSelectionHistory({ maxEntries: 50 });
 
   const graphParams = { max_nodes: maxNodes, depth, query: activeQuery };
   const {
@@ -59,12 +74,18 @@ export function GraphPage() {
 
   const { data: selectedMemory } = useQuery({
     queryKey: queryKeys.memory(selectedNode ?? ''),
-    queryFn: () => api.memories.get(selectedNode as string),
+    // `selectedNode` is narrowed by `enabled` below, but TS can't see that
+    // through the queryFn boundary — use the non-null assertion inline so
+    // there's no `as string` cast hiding stale-null bugs.
+    queryFn: () => {
+      if (!selectedNode) throw new Error('queryFn called without selectedNode');
+      return api.memories.get(selectedNode);
+    },
     enabled: !!selectedNode,
   });
 
   const nodeOpacities = useMemo(() => {
-    if (!graphData || !temporalEnabled || !temporalDate) return new Map<string, number>();
+    if (!graphData || !temporalEnabled || !temporalDate) return EMPTY_OPACITIES;
     return filterByDate(graphData.nodes, graphData.edges, temporalDate).nodeOpacities;
   }, [graphData, temporalEnabled, temporalDate]);
 
@@ -92,9 +113,63 @@ export function GraphPage() {
     setActiveQuery(searchQuery || undefined);
   };
 
-  const onNodeSelect = useCallback((nodeId: string) => {
-    setSelectedNode(nodeId);
+  const onNodeSelect = useCallback(
+    (nodeId: string) => {
+      setSelectedNode(nodeId);
+      history.push(nodeId);
+    },
+    [history],
+  );
+
+  const onKeyboardFocus = useCallback((nodeId: string | null) => {
+    setKeyboardFocusId(nodeId);
   }, []);
+
+  const onDeselect = useCallback(() => {
+    // Clicking the void only clears the visible selection. We intentionally
+    // keep the history stack — the user can still Alt+Left to return to
+    // whatever they were inspecting. Matches browser semantics where
+    // closing a tab doesn't wipe its session history.
+    setSelectedNode(null);
+  }, []);
+
+  const onShowHelp = useCallback(() => setHelpOpen(true), []);
+  const onCloseHelp = useCallback(() => setHelpOpen(false), []);
+
+  // Alt+Arrow at the page level: graph-scoped back/forward. We intercept
+  // before the browser does because the canvas always has focus while
+  // the user is exploring. Bubbled from Graph3D's onKeyDown —
+  // useGraphKeyboard intentionally lets modifier+arrow events through.
+  // We only consume the event when the history can actually move; that
+  // way ⌥← in a search input (where canGoBack is false) still does the
+  // browser-default "back one word" the user expects.
+  const onPageKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!event.altKey) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+      if (event.key === 'ArrowLeft' && history.canGoBack) {
+        event.preventDefault();
+        history.back();
+      } else if (event.key === 'ArrowRight' && history.canGoForward) {
+        event.preventDefault();
+        history.forward();
+      }
+    },
+    [history],
+  );
+
+  // Sync history cursor → selection. This is the single source of truth
+  // for "what the user just navigated to". push() (called from
+  // onNodeSelect) makes the new id current; back()/forward() shift the
+  // cursor; in either case the selection follows.
+  useEffect(() => {
+    if (history.currentId !== null) setSelectedNode(history.currentId);
+  }, [history.currentId]);
+
+  const focusedNodeLabel = useMemo(() => {
+    if (!keyboardFocusId) return null;
+    return displayNodes.find((n) => n.id === keyboardFocusId)?.label ?? keyboardFocusId;
+  }, [keyboardFocusId, displayNodes]);
 
   const onDateChange = useCallback((date: Date) => {
     setTemporalDate(date);
@@ -122,7 +197,8 @@ export function GraphPage() {
   }
 
   return (
-    <div className="h-full flex flex-col relative">
+    // biome-ignore lint/a11y/noStaticElementInteractions: keyDown on a layout div is intentional — we capture page-level shortcuts (Alt+Arrow) that bubble from the focused canvas. Adding role would mis-describe semantics.
+    <div className="h-full flex flex-col relative" onKeyDown={onPageKeyDown}>
       {/* Screen-reader page title — the visible toolbar acts as the visual
           heading, but assistive tech still needs an h1 to anchor the
           document outline. */}
@@ -194,7 +270,7 @@ export function GraphPage() {
               aria-label={t('graph.maxNodes')}
               className="text-xs font-medium"
             >
-              {[50, 100, 150, 200, 300, 500]
+              {[50, 100, 150, 200, 300, 500, 1000]
                 .filter((n) => n <= limits.graphMaxNodesMax)
                 .map((n) => (
                   <option key={n} value={n}>
@@ -218,8 +294,38 @@ export function GraphPage() {
             reducedMotion={reducedMotion}
             colorMode={colorMode}
             onSelect={onNodeSelect}
+            onKeyboardFocus={onKeyboardFocus}
+            onDeselect={onDeselect}
+            onShowHelp={onShowHelp}
+            centerOnId={selectedNode}
           />
+          {/* Single aria-live region for the page — the canvas itself can't
+              host announcements because its DOM is just a Three.js host
+              <div>. We use polite so SR users aren't interrupted by every
+              arrow-key tick. */}
+          <div className="sr-only" role="status" aria-live="polite">
+            {focusedNodeLabel ? t('graph.focusAnnouncement', { label: focusedNodeLabel }) : t('graph.focusCleared')}
+          </div>
           {colorMode === 'tag' && <TagLegend nodes={displayNodes} />}
+          {tagFilter.trim().length > 0 && displayNodes.length === 0 && (
+            // Filter wiped every node. We keep the underlying graphData
+            // intact (so clearing the filter is instant), but tell the
+            // user explicitly what happened — a silent empty canvas is
+            // indistinguishable from a backend bug.
+            <div
+              className="absolute inset-0 flex items-center justify-center pointer-events-none z-10"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="pointer-events-auto bg-card/95 backdrop-blur-md border border-border rounded-2xl px-6 py-5 shadow-lg max-w-md text-center space-y-2">
+                <h2 className="text-sm font-semibold text-foreground">{t('graph.noMatch')}</h2>
+                <p className="text-xs text-muted-foreground">{t('graph.noMatchHint')}</p>
+                <Button variant="secondary" size="sm" onClick={() => setTagFilter('')}>
+                  {t('graph.clearFilter')}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </SectionErrorBoundary>
       {isDreaming && (
@@ -234,6 +340,8 @@ export function GraphPage() {
       )}
 
       <TimeSlider nodes={graphData.nodes} onDateChange={onDateChange} onToggle={onTemporalToggle} />
+
+      <GraphHelpOverlay open={helpOpen} onClose={onCloseHelp} />
 
       <Sheet open={!!selectedMemory} side="right" size="md" className="p-4">
         {selectedMemory && (

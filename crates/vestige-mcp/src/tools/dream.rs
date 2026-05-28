@@ -157,13 +157,21 @@ pub async fn execute(
     .map_err(|e| format!("dream embedding fetch task panicked: {}", e))?;
 
     let (extra_insights, hub_candidates) = {
-        let cog = cognitive.lock().await;
-        let insights = cog.dreamer.synthesize_insights(&dream_memories);
+        // Dreamer synthesis can take seconds on large memory sets. Clone
+        // the dreamer Arc out of the engine and drop the engine lock
+        // before doing the work — otherwise every other tool call stalls
+        // for the duration of synthesis.
+        let dreamer = {
+            let cog = cognitive.lock().await;
+            std::sync::Arc::clone(&cog.dreamer)
+        };
+        let dreamer = dreamer.read().await;
+        let insights = dreamer.synthesize_insights(&dream_memories);
         // Topic Hubs (Proposal A) — feed the same memories through the
         // hub generator so a single dream cycle materialises both insights
         // and hubs. The dreamer enforces MIN_HUB_CLUSTER_SIZE so this is a
         // no-op when clustering is sparse.
-        let hubs = cog.dreamer.synthesize_hubs(&dream_memories);
+        let hubs = dreamer.synthesize_hubs(&dream_memories);
         (insights, hubs)
     };
 
@@ -178,7 +186,11 @@ pub async fn execute(
         let storage_nrem3 = storage.clone();
         let strengthened: Vec<String> = dream_result.strengthened_ids.clone();
         let downscaled: Vec<String> = dream_result.downscaled_ids.clone();
-        let downscale_factor = 0.95_f64;
+        // Use the engine's own factor so MCP and core can't drift apart.
+        // The engine reads `VESTIGE_NREM3_DOWNSCALE_FACTOR` at construction
+        // time, so a fleet-wide change only needs the env var on the dream
+        // worker, not a recompile of the MCP binary.
+        let downscale_factor = dream_result.downscale_factor;
         let _ = tokio::task::spawn_blocking(move || {
             if !strengthened.is_empty() {
                 let refs: Vec<&str> = strengthened.iter().map(|s| s.as_str()).collect();
@@ -247,9 +259,15 @@ pub async fn execute(
         );
     }
 
-    // Hydrate live cognitive engine with newly persisted connections
+    // Hydrate live cognitive engine with newly persisted connections.
+    // The activation network is its own lock now — clone the Arc and
+    // drop the engine guard before the writes.
     if connections_persisted > 0 {
-        let mut cog = cognitive.lock().await;
+        let net = {
+            let cog = cognitive.lock().await;
+            std::sync::Arc::clone(&cog.activation_network)
+        };
+        let mut net = net.write().await;
         for conn in &dream_result.creative_connections {
             let link_type_enum = match conn.connection_type {
                 CreativeConnectionType::CrossDomain => LinkType::Semantic,
@@ -257,7 +275,7 @@ pub async fn execute(
                 CreativeConnectionType::Complementary => LinkType::Semantic,
                 CreativeConnectionType::Contradictory => LinkType::Semantic,
             };
-            cog.activation_network.add_edge(
+            net.add_edge(
                 conn.memory_a_id.clone(),
                 conn.memory_b_id.clone(),
                 link_type_enum,
@@ -802,9 +820,8 @@ mod tests {
             // Verify live cognitive engine was hydrated
             let cog = cognitive.lock().await;
             let first_conn = &all_conns[0];
-            let assocs = cog
-                .activation_network
-                .get_associations(&first_conn.source_id);
+            let net = cog.activation_network.read().await;
+            let assocs = net.get_associations(&first_conn.source_id);
             assert!(
                 !assocs.is_empty(),
                 "Live cognitive engine should have been hydrated with dream connections"

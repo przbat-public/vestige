@@ -93,10 +93,12 @@ mod tests {
 
     #[test]
     fn from_metadata_copies_all_fields() {
-        let mut node = KnowledgeNode::default();
-        node.id = "hub-1".into();
-        node.content = "Five OAuth memories cluster around session timeout".into();
-        node.tags = vec!["hub".into(), "auto-generated".into(), "oauth".into()];
+        let node = KnowledgeNode {
+            id: "hub-1".into(),
+            content: "Five OAuth memories cluster around session timeout".into(),
+            tags: vec!["hub".into(), "auto-generated".into(), "oauth".into()],
+            ..KnowledgeNode::default()
+        };
         let metadata = fixture_metadata();
 
         let dto = HubDto::from_metadata(&node, &metadata);

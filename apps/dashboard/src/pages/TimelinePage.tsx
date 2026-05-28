@@ -64,7 +64,12 @@ export function TimelinePage() {
                   })}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {t('timeline.memoriesOn', { count: day.count, date: '' }).replace(/ on $/, '')}
+                  {/* The day's count, pluralized per locale. We previously
+                      reused `timeline.memoriesOn` and stripped the trailing
+                      " on " — that hack only worked in English. The dedicated
+                      `memoriesCount` key with i18next plural forms (one/few/
+                      many/other) works correctly for Slavic languages too. */}
+                  {t('timeline.memoriesCount', { count: day.count })}
                 </span>
               </div>
               <ProgressBar

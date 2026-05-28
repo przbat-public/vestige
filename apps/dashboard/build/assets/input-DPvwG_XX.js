@@ -1,1 +1,0 @@
-import{r as t,j as n,c as s}from"./index-C2wELHXS.js";const u=t.forwardRef(({className:r,...o},e)=>n.jsx("input",{ref:e,className:s("w-full px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition",r),...o}));u.displayName="Input";export{u as I};

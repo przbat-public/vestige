@@ -56,6 +56,18 @@ pub const DEFAULT_RETENTION: f64 = 0.9;
 /// Default forgetting curve decay (w20)
 pub const DEFAULT_DECAY: f64 = 0.1542;
 
+/// Default upper bound on the emotional-memory stability multiplier.
+///
+/// `apply_sentiment_boost` interpolates between `1.0×` (no emotion) and this
+/// cap at `sentiment_intensity = 1.0`. The choice of `2.0×` sits inside the
+/// 1.5×–3.0× range typically reported in McGaugh-style amygdala/hippocampus
+/// modulation studies — strong enough to surface affective memories without
+/// dwarfing the unmodified FSRS curve. Both the ingest path
+/// (`Storage::ingest`) and the review path (`FSRSScheduler::review`) read
+/// this constant so a fresh ingest and a follow-up review can't disagree on
+/// how much sentiment is worth.
+pub const DEFAULT_MAX_SENTIMENT_BOOST: f64 = 2.0;
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================

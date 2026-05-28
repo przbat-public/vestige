@@ -263,6 +263,9 @@ impl Storage {
 
         // 13. FTS5 index optimization — merge segments for faster keyword search
         // 14. Run PRAGMA optimize to refresh query planner statistics
+        //     + best-effort INCREMENTAL_VACUUM (paired with V14 auto_vacuum)
+        //     + best-effort HNSW sidecar persistence (post v3.6) so the next
+        //       process boot skips the per-row rebuild.
         {
             let writer = self
                 .writer
@@ -271,6 +274,21 @@ impl Storage {
             let _ = writer
                 .execute_batch("INSERT INTO knowledge_fts(knowledge_fts) VALUES('optimize');");
             let _ = writer.execute_batch("PRAGMA optimize;");
+            // Reclaim pages freed by deletes/dedup. Bounded at 1 024 pages so
+            // a single consolidation never stalls the writer for minutes on
+            // pathological DBs. With page_size=8192 that's ~8 MB per pass.
+            let _ = writer.execute_batch("PRAGMA incremental_vacuum(1024);");
+        }
+
+        // 14b. Persist the HNSW sidecar (post v3.6). Failure is non-fatal:
+        // the index is fully reconstructible from `node_embeddings`. We log
+        // a warning and proceed.
+        #[cfg(feature = "vector-search")]
+        if let Err(e) = self.persist_vector_index() {
+            tracing::warn!(
+                error = %e,
+                "vector index sidecar persist failed in consolidation — next boot will rebuild"
+            );
         }
 
         // ====================================================================
@@ -642,7 +660,11 @@ impl Storage {
 
         let optimized_w20 = optimizer.optimize_decay();
 
-        // Save to config
+        // Persist via the canonical helper so the loader at next boot picks
+        // it up. Also continue writing the legacy `w20` key for backward
+        // compatibility with any external tooling that learned to read it
+        // — the two rows are kept in sync until we drop the legacy key.
+        self.save_personalized_w20(optimized_w20)?;
         {
             let writer = self
                 .writer
@@ -653,6 +675,17 @@ impl Storage {
                  VALUES ('w20', ?1, ?2)",
                 params![optimized_w20, Utc::now().to_rfc3339()],
             )?;
+        }
+
+        // Apply immediately to the in-memory scheduler so subsequent reviews
+        // in the same process use the personalized decay without waiting for
+        // a restart. Best-effort: a swap failure logs and continues; the
+        // optimized value still lands on disk for the next boot.
+        if let Err(e) = self.apply_personalized_weights() {
+            tracing::warn!(
+                error = %e,
+                "personalized w20 saved but could not be applied to running scheduler"
+            );
         }
 
         tracing::info!(

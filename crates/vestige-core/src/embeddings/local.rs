@@ -4,7 +4,7 @@
 //!
 //! ## Models
 //!
-//! - **Default**: Nomic Embed Text v1.5 (ONNX, 768d → 256d Matryoshka, 8192 context)
+//! - **Default**: Nomic Embed Text v1.5 (ONNX, 768d → 384d Matryoshka, 8192 context)
 //! - **Optional**: Nomic Embed Text v2 MoE (Candle, 475M params, 305M active, 8 experts)
 //!   Enable with `nomic-v2` feature flag + `metal` for Apple Silicon acceleration.
 
@@ -372,9 +372,14 @@ impl EmbeddingService {
 
 /// Apply Matryoshka truncation: truncate to EMBEDDING_DIMENSIONS and L2-normalize
 ///
-/// Nomic Embed v1.5 supports Matryoshka Representation Learning,
-/// meaning the first N dimensions of the 768-dim output ARE a valid
-/// N-dimensional embedding with minimal quality loss (~2% on MTEB for 256-dim).
+/// Nomic Embed v1.5 supports Matryoshka Representation Learning, meaning the
+/// first N dimensions of the 768-dim output ARE a valid N-dimensional
+/// embedding with minimal quality loss. We truncate to 384 dims, which costs
+/// ~1% MTEB versus the full 768 (the Nomic MRL card reports ~0.5–1% for 384
+/// vs ~2% for 256 — we picked 384 as the best quality/size knee for HNSW
+/// memory footprint). The L2-renormalisation below is what makes the
+/// truncated prefix a unit vector again so cosine similarity comparisons
+/// against full-dim queries stay correct.
 #[inline]
 pub fn matryoshka_truncate(mut vector: Vec<f32>) -> Vec<f32> {
     if vector.len() > EMBEDDING_DIMENSIONS {

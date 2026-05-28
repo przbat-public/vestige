@@ -207,8 +207,10 @@ mod tests {
 
     #[test]
     fn from_payload_orders_cells_deterministically() {
-        let mut node = KnowledgeNode::default();
-        node.id = "n1".into();
+        let node = KnowledgeNode {
+            id: "n1".into(),
+            ..KnowledgeNode::default()
+        };
         let payload = fixture_payload();
 
         let dto = DecisionDto::from_payload(&node, &payload, Utc::now());
@@ -221,8 +223,10 @@ mod tests {
 
     #[test]
     fn expired_flag_respects_valid_until() {
-        let mut node = KnowledgeNode::default();
-        node.id = "n2".into();
+        let node = KnowledgeNode {
+            id: "n2".into(),
+            ..KnowledgeNode::default()
+        };
         let mut payload = fixture_payload();
         let now = Utc::now();
         payload.valid_until = Some(now - chrono::Duration::days(1));

@@ -27,8 +27,17 @@
 //! types in this module are kept for the dual-strength bookkeeping and the
 //! historical journey tests; the curve here is a coarser approximation of
 //! the same shape and is **not** the source of truth for the engine.
+//!
+//! The sentiment boost in [`StrengthDecay`] is routed through
+//! [`crate::fsrs::apply_sentiment_boost`] with [`DEFAULT_MAX_SENTIMENT_BOOST`]
+//! so all parts of the system — ingest, FSRS review, and the dual-strength
+//! forgetting curve — agree on how much an emotional memory should resist
+//! decay. Pre-2026-05-20 this module hard-coded `1 + 0.5·magnitude`
+//! (cap 1.5×) while `fsrs::scheduler::review` already used the 2.0× cap.
 
 use serde::{Deserialize, Serialize};
+
+use crate::fsrs::{DEFAULT_MAX_SENTIMENT_BOOST, apply_sentiment_boost};
 
 // ============================================================================
 // CONSTANTS
@@ -122,24 +131,32 @@ impl DualStrength {
 
 /// Calculates strength decay over time
 pub struct StrengthDecay {
-    /// FSRS stability (affects decay rate)
-    stability: f64,
-    /// Sentiment intensity (emotional memories decay slower)
-    sentiment_boost: f64,
+    /// Pre-computed effective stability after emotional-memory boost.
+    /// Stored instead of the raw stability + multiplier so we go through
+    /// the same curve as `fsrs::scheduler::review` (which also caches the
+    /// boosted stability rather than the raw multiplier).
+    boosted_stability: f64,
 }
 
 impl StrengthDecay {
-    /// Create a new decay calculator
+    /// Create a new decay calculator.
+    ///
+    /// The emotional-memory boost is applied through the shared FSRS helper
+    /// (see [`crate::fsrs::apply_sentiment_boost`]) so all forgetting paths
+    /// agree on the same curve. `sentiment_magnitude` is expected in
+    /// `[0.0, 1.0]`; negative inputs are clamped to zero.
     pub fn new(stability: f64, sentiment_magnitude: f64) -> Self {
-        Self {
-            stability,
-            sentiment_boost: 1.0 + sentiment_magnitude * 0.5,
-        }
+        let boosted_stability = if sentiment_magnitude > 0.0 {
+            apply_sentiment_boost(stability, sentiment_magnitude, DEFAULT_MAX_SENTIMENT_BOOST)
+        } else {
+            stability
+        };
+        Self { boosted_stability }
     }
 
     /// Calculate effective stability with sentiment boost
     pub fn effective_stability(&self) -> f64 {
-        self.stability * self.sentiment_boost
+        self.boosted_stability
     }
 
     /// Calculate retrieval strength after elapsed time

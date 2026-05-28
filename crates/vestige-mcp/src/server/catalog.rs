@@ -22,14 +22,15 @@
 //! Migrating the tools to dual-format responses (text + structuredContent)
 //! is tracked separately.
 //!
-//! v3.2.1: 27 tools advertised in tools/list. Categories:
+//! v3.3.0: 28 tools advertised in tools/list. Categories:
 //!   - 4 unified  : search, memory, codebase, intention
 //!   - 1 core     : smart_ingest
 //!   - 2 temporal : memory_timeline, memory_changelog
 //!   - 7 maint    : system_status, consolidate, backup, export, gc,
 //!     split_memories, regenerate_embeddings
 //!   - 2 dedup    : importance_score, find_duplicates
-//!   - 3 cog      : dream, explore_connections, predict
+//!   - 4 cog      : dream, explore_connections, predict,
+//!     precompute_for_context (sleep-time compute)
 //!   - 1 restore  : restore
 //!   - 1 context  : session_context
 //!   - 2 autonom  : memory_health, memory_graph
@@ -111,7 +112,7 @@ fn tool(
 // Catalog
 // ---------------------------------------------------------------------------
 
-/// Build the canonical `tools/list` payload (27 entries).
+/// Build the canonical `tools/list` payload (28 entries).
 pub(super) fn build_tools_list() -> Vec<ToolDescription> {
     vec![
         // ================================================================
@@ -270,7 +271,7 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
         tool(
             "explore_connections",
             "Explore memory connections",
-            "Graph exploration tool for memory connections. Actions: 'chain' (build reasoning path between memories), 'associations' (find related memories via spreading activation + hippocampal index), 'bridges' (find connecting memories between two nodes).",
+            "Graph exploration tool for memory connections. Actions: 'chain' (build reasoning path between memories), 'associations' (find related memories via spreading activation + hippocampal index), 'bridges' (find connecting memories between two nodes), 'causal_chain' (BFS along persisted causal edges only — use for `why?` and root-cause questions; ignores semantic / part-of links so the walk stays focused on `X causes Y` chains).",
             tools::explore::schema(),
             read_only_safe("Explore memory connections"),
         ),
@@ -280,6 +281,14 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
             "Proactive memory prediction — predicts what memories you'll need next based on context, recent activity, and learned patterns. Returns predictions, suggestions, and speculative retrievals.",
             tools::predict::schema(),
             read_only_safe("Predict next memories"),
+        ),
+        tool(
+            "precompute_for_context",
+            "Precompute summary for upcoming context",
+            "Sleep-time compute: pre-fetch and summarize the top-K memories for an upcoming topic BEFORE the agent asks. Stores the digest as a `precomputed_summary` memory with a TTL (default 24h, max 168h) and tags `precomputed` + `topic:<slug>`, so the next search / session_context / deep_reference call hits a warm cache. Use at session start (\"I expect to work on X today\") or session end (\"tomorrow I'll continue on Y\"). Idempotent in spirit but each call mints a fresh memory — older summaries simply expire via the `temporal` machinery.",
+            tools::precompute::schema(),
+            // Writes a new memory; not destructive (additive, expires on its own).
+            mutating("Precompute summary for upcoming context", false),
         ),
         // ================================================================
         // RESTORE TOOL (v1.5+)
@@ -442,12 +451,12 @@ mod tests {
     /// b15 split guard: any drift in the catalog must update
     /// scripts/check-version-and-tools.sh and the comment above.
     #[test]
-    fn tools_list_has_exactly_27_entries() {
+    fn tools_list_has_exactly_28_entries() {
         let tools = build_tools_list();
         assert_eq!(
             tools.len(),
-            27,
-            "build_tools_list must advertise exactly 27 tools; update scripts/check-version-and-tools.sh if you add or remove one"
+            28,
+            "build_tools_list must advertise exactly 28 tools; update scripts/check-version-and-tools.sh if you add or remove one"
         );
     }
 

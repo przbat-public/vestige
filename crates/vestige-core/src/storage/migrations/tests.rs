@@ -45,3 +45,27 @@ fn test_partial_migration_rolls_back() {
     let version_after = get_current_version(&conn).unwrap();
     assert_eq!(version_before, version_after);
 }
+
+/// After all migrations apply, the database must run in
+/// `PRAGMA auto_vacuum = INCREMENTAL` (mode 2) so deleted pages are
+/// reclaimable via `PRAGMA incremental_vacuum` without a full table
+/// rewrite. Long-lived stores accumulate dead pages otherwise (the v3.5
+/// audit caught this).
+///
+/// The pragma can only be *changed* from NONE→INCREMENTAL by running
+/// `VACUUM` after toggling it, so this is necessarily a one-shot
+/// migration that uses the same "outside the txn" escape hatch as V7.
+#[test]
+fn test_auto_vacuum_is_incremental_after_migrations() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_migrations(&conn).unwrap();
+
+    let mode: i32 = conn
+        .query_row("PRAGMA auto_vacuum", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        mode, 2,
+        "auto_vacuum must be INCREMENTAL (2), got {} — long-lived databases will bloat without page reclamation",
+        mode
+    );
+}

@@ -42,4 +42,11 @@ pub struct SmartIngestResult {
     pub prediction_error: Option<f32>,
     /// Human-readable explanation of the decision
     pub reason: String,
+    /// Nearest neighbours considered by the prediction-error gate, ordered by
+    /// similarity (highest first). Exposed so callers — typically the MCP
+    /// layer that wires the new node into the cognitive engine — can avoid
+    /// re-running `semantic_search_raw` (and re-embedding the same content)
+    /// just to learn what was nearby.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub neighbor_ids: Vec<String>,
 }

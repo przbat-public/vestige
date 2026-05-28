@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 import { useDebounce } from '@/hooks/use-debounce';
 import { api } from '@/stores/api';
+import { confirm } from '@/stores/confirm';
+import { useDialogStore } from '@/stores/dialogs';
 import { EVENT, track } from '@/stores/telemetry';
 import { toast } from '@/stores/toast';
 
@@ -67,10 +69,43 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       { kind: 'navigate', id: 'nav-timeline', icon: '◎', labelKey: 'nav.timeline', to: 'timeline' },
       { kind: 'navigate', id: 'nav-feed', icon: '◊', labelKey: 'nav.feed', to: 'feed' },
       { kind: 'navigate', id: 'nav-explore', icon: '⬡', labelKey: 'nav.explore', to: 'explore' },
+      // Discovery → understanding → planning. Five pages were missing
+      // from the palette even though the sidebar routes them all; power
+      // users live behind Cmd+K, so a gap here means the page may as
+      // well not exist for the keyboard.
+      { kind: 'navigate', id: 'nav-hubs', icon: '⌬', labelKey: 'nav.hubs', to: 'hubs' },
+      { kind: 'navigate', id: 'nav-insights', icon: '◇', labelKey: 'nav.insights', to: 'insights' },
+      { kind: 'navigate', id: 'nav-decisions', icon: '◐', labelKey: 'nav.decisions', to: 'decisions' },
+      { kind: 'navigate', id: 'nav-temporal', icon: '⌛', labelKey: 'nav.temporal', to: 'temporal' },
+      { kind: 'navigate', id: 'nav-reasoning', icon: '⚖', labelKey: 'nav.reasoning', to: 'reasoning' },
       { kind: 'navigate', id: 'nav-intentions', icon: '◌', labelKey: 'nav.intentions', to: 'intentions' },
       { kind: 'navigate', id: 'nav-stats', icon: '▣', labelKey: 'nav.stats', to: 'stats' },
       { kind: 'navigate', id: 'nav-settings', icon: '⚙', labelKey: 'nav.settings', to: 'settings' },
+      // Tutorial is on the router (App.tsx) and in the sidebar but
+      // never made it into the keyboard surface — meaning anyone who
+      // lives in Cmd+K couldn't reach "How does this app work?"
+      // without grabbing the mouse. Place it last in nav so it
+      // doesn't crowd the daily-driver routes.
+      { kind: 'navigate', id: 'nav-tutorial', icon: '?', labelKey: 'nav.tutorial', to: 'tutorial' },
       // ===== Actions =====
+      // "Add memory" lives in the palette because Cmd+K is the only
+      // keyboard surface power users reach for outside individual
+      // pages. Cmd+N is the dedicated shortcut, but adding it here
+      // means a single discoverable surface ("what can I do?")
+      // covers both navigation and the dashboard's primary write
+      // action. Action is synchronous from the palette's POV — it
+      // just flips the shared dialog store flag and closes; the
+      // dialog UI itself opens via Layout's subscription.
+      {
+        kind: 'action',
+        id: 'action-add-memory',
+        icon: '+',
+        labelKey: 'commands.addMemory',
+        run: async () => {
+          useDialogStore.getState().openAddMemory('palette');
+          return '';
+        },
+      },
       {
         kind: 'action',
         id: 'action-dream',
@@ -199,17 +234,21 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const runAction = useCallback(
     async (cmd: Extract<CommandItem, { kind: 'action' }>) => {
       if (cmd.destructive && cmd.confirmKey) {
-        // Native confirm — synchronous, blocks the UI thread, but is
-        // accessible (announced as alert dialog by all major screen readers)
-        // and requires no extra component. Adequate for low-frequency
-        // destructive maintenance actions.
-        const confirmed = window.confirm(t(cmd.confirmKey));
+        // Themed alertdialog (`stores/confirm.ts`) — focuses cancel by
+        // default, accepts ESC/Enter, plays nicely with Playwright.
+        const confirmed = await confirm({
+          message: t(cmd.confirmKey),
+          destructive: true,
+        });
         if (!confirmed) return;
       }
       setRunningId(cmd.id);
       try {
         const successKey = await cmd.run();
-        toast(t(successKey), 'success');
+        // Some actions are silent on success — they open a dialog
+        // and the dialog itself is the user feedback. An empty
+        // string returned from `run()` opts out of the toast.
+        if (successKey) toast(t(successKey), 'success');
         onClose();
       } catch (err) {
         const message = err instanceof Error ? err.message : t('common.error');
@@ -230,17 +269,14 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         return;
       }
       if (cmd.kind === 'memory') {
-        // Navigate to /memories then emit a select event in the next
-        // microtask. We can't dispatch immediately because the route
-        // change may unmount the listener on the way out; deferring by a
-        // tick lands the event after Memories mounts. The page picks it
-        // up, fetches the memory by id, and opens the detail drawer.
+        // Stash the requested memory id in the shared dialog store *before*
+        // navigating. `MemoriesPage` reads the slot in a `useEffect` on
+        // mount/store-change and immediately clears it, so the open is
+        // idempotent — no timeouts, no missed-mount races, no listener
+        // teardown problems.
+        useDialogStore.getState().requestSelectMemory(cmd.memoryId);
         onClose();
         navigate('/memories');
-        const memoryId = cmd.memoryId;
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('vestige:select-memory', { detail: { id: memoryId } }));
-        }, 0);
         return;
       }
       await runAction(cmd);

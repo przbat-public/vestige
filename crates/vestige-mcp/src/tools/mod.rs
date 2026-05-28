@@ -4,7 +4,7 @@
 //!
 //! The unified tools (`codebase_unified`, `intention_unified`, `memory_unified`,
 //! `search_unified`) plus `smart_ingest` and the metacognitive/maintenance set
-//! make up the 27 tools advertised in `tools/list`. `review` is internal —
+//! make up the 28 tools advertised in `tools/list`. `review` is internal —
 //! used by the `mark_reviewed` dispatch in `server.rs::handle_tools_call` and
 //! exercised by e2e tests, but is not advertised in `tools/list`.
 
@@ -14,6 +14,9 @@ pub mod intention_unified;
 pub mod memory_unified;
 pub mod search_unified;
 pub mod smart_ingest;
+
+// Cross-cutting helpers (destructive-op confirmation gate, etc.)
+pub mod common;
 
 // v1.2: Temporal query tools
 pub mod changelog;
@@ -29,6 +32,7 @@ pub mod importance;
 // v1.5: Cognitive tools
 pub mod dream;
 pub mod explore;
+pub mod precompute;
 pub mod predict;
 pub mod restore;
 

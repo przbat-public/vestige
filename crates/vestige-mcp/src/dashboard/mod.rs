@@ -189,6 +189,14 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
             "/api/intentions",
             get(handlers::list_intentions).post(handlers::create_intention),
         )
+        // PATCH /api/intentions/{id} — change lifecycle status
+        // (fulfilled/cancelled/snoozed/active). Added in v3.5 to close the
+        // gap where the dashboard could only create intentions but not
+        // resolve them. Mirrors the MCP `intention(action="update")` tool.
+        .route(
+            "/api/intentions/{id}",
+            axum::routing::patch(handlers::update_intention),
+        )
         // Metacognitive tools (v2.1)
         .route("/api/reflect", post(handlers::trigger_reflect))
         .route("/api/temporal", post(handlers::query_temporal))

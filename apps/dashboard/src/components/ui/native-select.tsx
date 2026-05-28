@@ -1,8 +1,11 @@
-import { forwardRef } from 'react';
 import { cn } from '@/lib/utils';
 
-export const NativeSelect = forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
-  ({ className, ...props }, ref) => (
+interface NativeSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+  ref?: React.Ref<HTMLSelectElement>;
+}
+
+export function NativeSelect({ className, ref, ...props }: NativeSelectProps) {
+  return (
     <select
       ref={ref}
       className={cn(
@@ -11,7 +14,5 @@ export const NativeSelect = forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
       )}
       {...props}
     />
-  ),
-);
-
-NativeSelect.displayName = 'NativeSelect';
+  );
+}

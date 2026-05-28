@@ -70,4 +70,9 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "v3.5.0 Proposal A: partial indexes on extra_json.hub.clusterSignature for hub dedup",
         up: MIGRATION_V13_UP,
     },
+    Migration {
+        version: 14,
+        description: "v3.6.0 PRAGMA auto_vacuum=INCREMENTAL (page reclamation without full VACUUM)",
+        up: MIGRATION_V14_UP,
+    },
 ];

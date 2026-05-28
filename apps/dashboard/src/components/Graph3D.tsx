@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
-import type * as THREE from 'three';
+import { useTranslation } from 'react-i18next';
+import * as THREE from 'three';
 import { DreamMode } from '@/graph/dream-mode';
 import { EdgeParticleSystem } from '@/graph/edge-particles';
 import { EdgeManager } from '@/graph/edges';
@@ -8,10 +9,23 @@ import { type GraphMutation, type GraphMutationContext, mapEventToEffects } from
 import { ForceSimulation } from '@/graph/force-sim';
 import { NodeManager } from '@/graph/nodes';
 import { ParticleSystem } from '@/graph/particles';
-import { applyAutoRotate, applyTheme, createScene, disposeScene, resizeScene, type SceneContext } from '@/graph/scene';
+import {
+  applyAutoRotate,
+  applyTheme,
+  createScene,
+  disposeScene,
+  easeCameraToTarget,
+  frameAll,
+  frameNode,
+  resetCamera,
+  resizeScene,
+  type SceneContext,
+} from '@/graph/scene';
+import type { ScreenPos } from '@/graph/select-spatial-neighbor';
 import { createNebulaBackground, updateNebula } from '@/graph/shaders/nebula.frag';
 import { createPostProcessing, type PostProcessingStack, updatePostProcessing } from '@/graph/shaders/post-processing';
 import { isDarkMode } from '@/graph/theme';
+import { useGraphKeyboard } from '@/hooks/use-graph-keyboard';
 import type { GraphEdge, GraphNode, VestigeEvent } from '@/types';
 
 interface Props {
@@ -32,9 +46,34 @@ interface Props {
    * colours by primary tag — useful for visually separating semantic clusters.
    */
   colorMode?: 'type' | 'tag';
-  nodeOpacities?: Map<string, number>;
+  // Read-only — the parent passes a frozen empty Map when temporal filter
+  // is off, so we mustn't mutate this. Downstream `nodeManager.animate`
+  // already only calls `.get()`.
+  nodeOpacities?: ReadonlyMap<string, number>;
   onSelect?: (nodeId: string) => void;
+  /**
+   * Called whenever the keyboard cursor lands on a different node. The
+   * parent uses this to announce the focused node in an aria-live region —
+   * the canvas itself has no DOM tree to attach SR-friendly text to.
+   */
+  onKeyboardFocus?: (nodeId: string | null) => void;
   onGraphMutation?: (mutation: GraphMutation) => void;
+  /**
+   * Called when the user clicks the empty canvas (no node under cursor).
+   * Lets the parent clear its selection / collapse a detail panel.
+   */
+  onDeselect?: () => void;
+  /**
+   * `?` key — the parent owns the help overlay (it has the i18n strings).
+   */
+  onShowHelp?: () => void;
+  /**
+   * When this id changes, the camera eases its target to the matching
+   * node's position (preserving viewing angle / distance). Used by the
+   * parent to drive camera focus from breadcrumbs / history navigation
+   * without going through hover or click.
+   */
+  centerOnId?: string | null;
 }
 
 interface SceneState {
@@ -73,9 +112,75 @@ export function Graph3D({
   colorMode = 'type',
   nodeOpacities,
   onSelect,
+  onKeyboardFocus,
   onGraphMutation,
+  onDeselect,
+  onShowHelp,
+  centerOnId,
 }: Props) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Keyboard navigation is a separate concern from the WebGL renderer.
+  // It is its own hook so a screen-reader user can move through nodes
+  // without us trying to coerce Three.js meshes into an a11y tree.
+  const handleKeyboardSelect = useCallback(
+    (nodeId: string) => {
+      onSelect?.(nodeId);
+    },
+    [onSelect],
+  );
+
+  // Spatial neighbour navigation needs each node's NDC position. Compute
+  // them on demand — the camera moves every frame, so any cached value
+  // would be stale by the time the user pressed a key.
+  const getScreenPositions = useCallback((): ReadonlyMap<string, ScreenPos> => {
+    const s = stateRef.current;
+    if (!s) return new Map();
+    const out = new Map<string, ScreenPos>();
+    const tmp = new THREE.Vector3();
+    for (const [id, pos] of s.nodeManager.positions) {
+      tmp.copy(pos).project(s.ctx.camera);
+      out.set(id, { x: tmp.x, y: tmp.y });
+    }
+    return out;
+  }, []);
+
+  // Bubble Escape up to the parent. The keyboard hook also clears its
+  // own focusedNodeId, so by the time onDeselect runs both layers agree
+  // the user has dismissed: focus gone, drawer closed. Pre-v3.4.2 we
+  // only cleared focus, leaving an outdated MemoryDetail drawer open.
+  const handleEscape = useCallback(() => {
+    onDeselect?.();
+  }, [onDeselect]);
+
+  const {
+    focusedNodeId,
+    onKeyDown: keyboardOnKeyDown,
+    containerProps,
+  } = useGraphKeyboard(nodes, handleKeyboardSelect, {
+    getScreenPositions,
+    onEscape: handleEscape,
+  });
+
+  // Notify parent of cursor changes so it can update its aria-live region.
+  // We don't notify on each render — only when the id actually changes.
+  const lastFocusRef = useRef<string | null>(null);
+  // Mirror of `focusedNodeId` for callbacks/effects that need the latest
+  // value without re-running on every focus tick (the scene rebuild
+  // effect, in particular, would explode if it re-ran on each keystroke).
+  const focusedNodeIdRef = useRef<string | null>(null);
+  focusedNodeIdRef.current = focusedNodeId;
+  useEffect(() => {
+    if (lastFocusRef.current === focusedNodeId) return;
+    lastFocusRef.current = focusedNodeId;
+    onKeyboardFocus?.(focusedNodeId);
+    // Push the keyboard cursor down into NodeManager so the label-LOD
+    // picks it up as an "essential" node on the next frame. We don't
+    // wait for a render tick — the scene loop is decoupled from React.
+    const s = stateRef.current;
+    if (s) s.nodeManager.keyboardFocusedNode = focusedNodeId;
+  }, [focusedNodeId, onKeyboardFocus]);
   const stateRef = useRef<SceneState | null>(null);
   const propsRef = useRef({
     edges,
@@ -86,8 +191,19 @@ export function Graph3D({
     nodeOpacities,
     onSelect,
     onGraphMutation,
+    onDeselect,
   });
-  propsRef.current = { edges, events, isDreaming, reducedMotion, colorMode, nodeOpacities, onSelect, onGraphMutation };
+  propsRef.current = {
+    edges,
+    events,
+    isDreaming,
+    reducedMotion,
+    colorMode,
+    nodeOpacities,
+    onSelect,
+    onGraphMutation,
+    onDeselect,
+  };
   const dataRef = useRef({ nodes, edges });
   dataRef.current = { nodes, edges };
 
@@ -116,7 +232,18 @@ export function Graph3D({
       s.nodeManager.selectedNode = s.nodeManager.hoveredNode;
       propsRef.current.onSelect?.(s.nodeManager.hoveredNode);
       const pos = s.nodeManager.positions.get(s.nodeManager.hoveredNode);
-      if (pos) s.ctx.controls.target.lerp(pos.clone(), 0.5);
+      if (pos) {
+        // Eased camera target — preserves user's current viewing angle and
+        // distance. Under prefers-reduced-motion we snap instead of
+        // animating (still focuses the node, just without the swoop).
+        easeCameraToTarget(s.ctx, pos, { instant: propsRef.current.reducedMotion });
+      }
+    } else {
+      // Click on empty space: clear selection so the detail panel can
+      // collapse. We don't move the camera here — losing both selection
+      // AND focus at once is jarring.
+      s.nodeManager.selectedNode = null;
+      propsRef.current.onDeselect?.();
     }
   }, []);
 
@@ -383,6 +510,11 @@ export function Graph3D({
     s.nodeById = buildNodeById(nodes);
     s.processedEventCount = 0;
     s.lastHoveredNode = null;
+    // Restore keyboard cursor on the new NodeManager — the focused node
+    // survives a graph rebuild as long as the same id is still in the
+    // refreshed node list. Use a ref so this effect doesn't have to
+    // re-run on every cursor move.
+    freshNodeManager.keyboardFocusedNode = focusedNodeIdRef.current;
 
     // Re-apply colour mode after rebuild — createNodes() defaults to 'type'
     // because that's the constructor state, but the user may have switched
@@ -401,5 +533,94 @@ export function Graph3D({
     s.nodeManager.setColorMode(colorMode, s.nodeById, isDarkMode());
   }, [colorMode]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  // External camera focus driver (breadcrumbs, history). Watching the prop
+  // is intentional — we don't track _every_ selection change here, only
+  // explicit "go look at this node" gestures from the parent. Clicking a
+  // node already eases the camera in `onClick`.
+  useEffect(() => {
+    const s = stateRef.current;
+    if (!s || !centerOnId) return;
+    const pos = s.nodeManager.positions.get(centerOnId);
+    if (pos) {
+      easeCameraToTarget(s.ctx, pos, { instant: propsRef.current.reducedMotion });
+    }
+  }, [centerOnId]);
+
+  // Map an unmodified camera shortcut (`f`/`a`/`r`/`?`) to its action.
+  // Returns true if the key was handled — caller is responsible for
+  // calling preventDefault. Extracted so the parent dispatch stays
+  // linear and below the cognitive-complexity threshold.
+  const runCameraShortcut = useCallback(
+    (key: string, state: SceneState): boolean => {
+      const instant = propsRef.current.reducedMotion;
+      switch (key.toLowerCase()) {
+        case 'f': {
+          // Prefer the user's last *intent*: the selected node if there
+          // is one, otherwise the keyboard cursor. Without an anchor we
+          // can't know what to frame, so we leave the camera where it is.
+          const id = state.nodeManager.selectedNode ?? focusedNodeId;
+          const pos = id ? state.nodeManager.positions.get(id) : null;
+          if (pos) frameNode(state.ctx, pos, { instant });
+          return true;
+        }
+        case 'a':
+          frameAll(state.ctx, state.nodeManager.positions, { instant });
+          return true;
+        case 'r':
+          resetCamera(state.ctx, { instant });
+          return true;
+        case '?':
+          onShowHelp?.();
+          return true;
+        default:
+          return false;
+      }
+    },
+    [focusedNodeId, onShowHelp],
+  );
+
+  // Compose hot keys: useGraphKeyboard owns arrows/Home/End/Enter/Escape;
+  // we layer F (frame node), A (frame all), R (reset), ? (help) on top
+  // and let everything else through. Modifier-pressed shortcuts (Alt+F
+  // etc.) fall through so the browser / OS can keep them.
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      keyboardOnKeyDown(event);
+      if (event.defaultPrevented) return;
+      if (event.altKey || event.metaKey || event.ctrlKey) return;
+      const s = stateRef.current;
+      if (!s) return;
+      if (runCameraShortcut(event.key, s)) event.preventDefault();
+    },
+    [keyboardOnKeyDown, runCameraShortcut],
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      // role="application" tells screen readers to switch off browse mode
+      // and pass arrow keys directly to our keyboard handler. Without it
+      // NVDA/JAWS swallow the arrows for their virtual cursor and the
+      // graph becomes keyboard-unreachable.
+      role="application"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: role="application" makes the div a focusable widget for AT; tabIndex={0} is required so keyboard users can enter the graph
+      tabIndex={0}
+      aria-activedescendant={containerProps['aria-activedescendant']}
+      aria-label={t('graph.canvasLabel')}
+      aria-roledescription={t('graph.canvasRole')}
+      className="w-full h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      onKeyDown={onKeyDown}
+    >
+      {/* Mirror the node list as a hidden SR-only ul. The canvas itself
+          has no DOM tree, so aria-activedescendant needs real ids to
+          point at. NVDA/VoiceOver will read these on focus change. */}
+      <ul className="sr-only" aria-hidden="false">
+        {nodes.map((n) => (
+          <li key={n.id} id={`graph-node-${n.id}`}>
+            {n.label || n.id}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }

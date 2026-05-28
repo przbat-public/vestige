@@ -332,7 +332,7 @@ impl Storage {
     /// instead of the previous flat `stability * 1.5` heuristic — see
     /// `mark_reviewed` for the same code path with explicit grading.
     pub fn promote_memory(&self, id: &str) -> Result<KnowledgeNode> {
-        let _ = self.fsrs_user_feedback(id, Rating::Good, 0.20, 0.10, true)?;
+        self.fsrs_user_feedback(id, Rating::Good, 0.20, 0.10, true)?;
         let _ = self.log_access(id, "promote");
         let _ = self.set_waking_tag(id);
         self.get_node(id)?
@@ -344,7 +344,7 @@ impl Storage {
     /// `× 0.5` heuristic, then applies the user-feedback retrieval/retention
     /// penalty so better alternatives surface. The memory is not deleted.
     pub fn demote_memory(&self, id: &str) -> Result<KnowledgeNode> {
-        let _ = self.fsrs_user_feedback(id, Rating::Again, -0.30, -0.15, false)?;
+        self.fsrs_user_feedback(id, Rating::Again, -0.30, -0.15, false)?;
         let _ = self.log_access(id, "demote");
         self.get_node(id)?
             .ok_or_else(|| StorageError::NotFound(id.to_string()))

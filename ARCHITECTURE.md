@@ -17,13 +17,15 @@ Vestige is a single Rust binary (`vestige-mcp`) that runs three concurrent subsy
 │  JSON-RPC     │  JSON-RPC     │  Axum REST + WS + SPA     │
 │  stdin/stdout │  POST /mcp    │  React 19 + Three.js      │
 ├───────────────┴───────────────┴───────────────────────────┤
-│  McpServer — 27 tools, event emission                     │
+│  McpServer — 28 tools, event emission                     │
 ├───────────────────────────────────────────────────────────┤
 │  CognitiveEngine (Arc<Mutex<_>>)                          │
-│  29 modules: FSRS-6, spreading activation, dreaming, ...  │
+│  Stateful cognitive modules: FSRS-6, spreading            │
+│  activation, dreaming, synaptic tagging, …                │
 ├───────────────────────────────────────────────────────────┤
 │  Storage (Arc<_>)                                         │
 │  SQLite WAL + FTS5 + USearch HNSW + Nomic Embed v1.5      │
+│  Jina Reranker v2 Base Multilingual cross-encoder         │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -48,59 +50,76 @@ vestige/
 │   ├── vestige-core/          # Cognitive engine, storage, embeddings, search, FSRS
 │   │   └── src/
 │   │       ├── storage/       # SQLite (sqlite/ submodules: nodes, states, history,
-│   │       │                  # intentions, maintenance, embeddings, review, consolidation,
-│   │       │                  # search, graph, gdpr, temporal, smart_ingest, insights,
-│   │       │                  # records, stats), migrations v1-v11, WAL, FTS5
+│   │       │                  # intentions, maintenance, embeddings, fsrs_personalization,
+│   │       │                  # review, consolidation, search, graph, gdpr, temporal,
+│   │       │                  # smart_ingest, insights, records, stats),
+│   │       │                  # migrations v1–v13, WAL, FTS5
 │   │       ├── memory/        # Node types, FSRS strength, temporal, typed-memory MemoryKind
 │   │       ├── fsrs/          # Algorithm, scheduler, optimizer
 │   │       ├── embeddings/    # Nomic v1.5 local ONNX, hybrid, code embeddings
-│   │       ├── preprocessing/  # Content intelligence pipeline (entities, coref, temporal, relations, provenance)
+│   │       ├── preprocessing/ # Content intelligence pipeline (entities, coref, temporal, relations, provenance)
+│   │       ├── nlp/           # Pluggable detectors: ContradictionDetector, OpinionDetector,
+│   │       │                  # FutureRelevanceDetector. NegEx scope, EN/PL lexicons,
+│   │       │                  # eval harness, baseline tests.
 │   │       ├── search/        # Hybrid, vector, keyword (BM25), reranker, temporal, HyDE, decompose
 │   │       ├── neuroscience/  # Spreading activation, memory states, hippocampal index,
 │   │       │                  # synaptic tagging, importance signals, predictive retrieval,
 │   │       │                  # emotional memory, context memory, prospective memory
-│   │       ├── advanced/      # Dreams, reconsolidation, prediction error, intent detection,
-│   │       │                  # importance, compression, chains, cross-project, adaptive embedding,
-│   │       │                  # speculative retrieval
+│   │       ├── advanced/      # Dreams (6 sub-modules: lifecycle, clustering, connections,
+│   │       │                  # contradictions, hubs, insights), reconsolidation,
+│   │       │                  # prediction error, intent detection, importance, compression,
+│   │       │                  # chains, cross-project, adaptive embedding, speculative retrieval
 │   │       ├── consolidation/ # Phases, sleep
 │   │       ├── codebase/      # Code patterns, git, relationships, watcher
 │   │       └── fts.rs         # FTS5 query sanitization
-│   └── vestige-mcp/           # MCP server binary + dashboard embedding
-│       └── src/
-│           ├── main.rs        # CLI, init, startup sequence
-│           ├── server.rs      # McpServer — JSON-RPC dispatch, tool routing, event emission
-│           ├── server/        # catalog.rs — canonical 27-tool/11-resource list (b15 split)
-│           ├── cognitive.rs   # CognitiveEngine wrapper
-│           ├── protocol/      # stdio.rs, http.rs, messages.rs, types.rs, auth.rs
-│           ├── dashboard/     # mod.rs (Axum router), handlers/ (memory, search, graph,
-│           │                  # history, intentions, maintenance, review, cognitive,
-│           │                  # metacognitive, observability, pages), websocket.rs,
-│           │                  # events.rs, state.rs, static_files.rs
-│           ├── tools/         # One file per MCP tool (27 tools)
-│           ├── resources/     # MCP resources (memory.rs, codebase.rs)
-│           └── bin/           # cli.rs (vestige CLI). vestige-restore is its own crate.
+│   ├── vestige-mcp/           # MCP server binary + dashboard embedding
+│   │   └── src/
+│   │       ├── main.rs        # CLI, init, startup sequence
+│   │       ├── lib.rs         # Public crate surface
+│   │       ├── server.rs      # McpServer — JSON-RPC dispatch, tool routing, event emission
+│   │       ├── server/        # catalog.rs — canonical 28-tool / 11-resource list
+│   │       │                  # (b15 split, drift-guarded by check-version-and-tools.sh)
+│   │       ├── cognitive.rs   # CognitiveEngine wrapper
+│   │       ├── telemetry.rs   # OTLP scaffolding behind `telemetry` feature (no-op default)
+│   │       ├── protocol/      # stdio.rs, http.rs, messages.rs, auth.rs, timeout.rs
+│   │       ├── dashboard/     # mod.rs (Axum router), wire/ (ts-rs DTOs — the contract),
+│   │       │                  # handlers/ (memory, search, graph, history, intentions,
+│   │       │                  # maintenance, review, cognitive, metacognitive,
+│   │       │                  # observability, decisions, hubs, insights, pages),
+│   │       │                  # websocket.rs, events.rs, state.rs, static_files.rs
+│   │       ├── tools/         # One file (or submodule) per MCP tool (28 tools)
+│   │       ├── resources/     # MCP resources (memory.rs, codebase.rs)
+│   │       └── bin/           # cli/ (vestige CLI). vestige-restore is its own crate.
+│   └── vestige-restore/       # Standalone restore binary (no fastembed/USearch deps)
 ├── apps/
 │   └── dashboard/             # React 19 + Vite 6 + React Router 7 + Three.js
 │       ├── src/
 │       │   ├── main.tsx       # Entry point
-│       │   ├── App.tsx        # React Router setup
-│       │   ├── app.css        # Global styles (Tailwind 4)
-│       │   ├── pages/         # 10 pages: Graph, Memories, Timeline, Feed,
-│       │   │                  # Explore, Intentions, Stats, Settings, Tutorial, NotFound
-│       │   ├── components/    # Layout, Graph3D, PipelineVisualizer,
-│       │   │                  # TimeSlider, RetentionCurve
-│       │   ├── stores/        # api.ts, websocket.ts (Zustand)
-│       │   ├── types/         # Shared TypeScript types
-│       │   └── graph/         # Three.js graph engine (9 files)
-│       ├── build/             # Production build (embedded in Rust binary)
+│       │   ├── App.tsx        # React Router setup (16 user-facing routes + 404 fallback)
+│       │   ├── app.css        # Global styles (Tailwind 4, OKLCH design tokens)
+│       │   ├── pages/         # 16 user-facing pages + NotFound — see "Pages" section below
+│       │   ├── components/    # Layout, Graph3D, PipelineVisualizer, TimeSlider,
+│       │   │                  # DecisionCard, HubCard, InsightCard, ConfirmDialog,
+│       │   │                  # GraphHelpOverlay, RetentionCurve, MaintenancePanel, …
+│       │   ├── stores/        # api.ts, websocket.ts, toast.tsx, telemetry.ts,
+│       │   │                  # confirm.ts, dialogs.ts (Zustand)
+│       │   ├── types/         # generated/ (ts-rs from Rust DTOs) + runtime.ts (Zod) + index.ts
+│       │   ├── hooks/         # useMemoryMutations, use-dashboard-limits, use-graph-keyboard,
+│       │   │                  # use-multi-select, use-selection-history, …
+│       │   ├── i18n/          # en.json, pl.json (i18next)
+│       │   └── graph/         # Three.js graph engine — see "Three.js Graph Engine" below
+│       ├── build/             # Production build (embedded in Rust binary via include_dir!)
 │       └── vite.config.ts     # Aliases: @ → src, @graph → src/graph
-├── tests/e2e/                 # E2E test crate (cognitive, journeys, extreme, mcp)
-├── packages/                  # NPM distribution packages
-├── docs/                      # FAQ, science, storage, integrations
-└── .github/                   # CI workflows (test.yml, release.yml)
+├── tests/e2e/                 # E2E test crate (cognitive, journeys, extreme, mcp protocol)
+├── benchmarks/locomo/         # LoCoMo benchmark harness (vestige-locomo-bench)
+├── packages/                  # NPM distribution + .mcpb bundle
+├── docs/                      # FAQ, science, storage, integrations, design RFCs
+└── .github/                   # CI workflows (test.yml, release.yml, supply-chain.yml)
 ```
 
 > **Dashboard layout note:** `apps/dashboard/src/lib/` holds framework-agnostic TypeScript helpers (`utils.ts`, `i18n.ts`, `concurrency.ts`) shared across pages and components. React-specific code lives in `src/graph/`, `src/components/`, and `src/stores/`. Do not remove `src/lib/` — it is actively imported via the `@/lib/...` alias.
+>
+> **Wire contract:** `apps/dashboard/src/types/generated/` is **auto-generated** from `crates/vestige-mcp/src/dashboard/wire/` via ts-rs. Never edit by hand. The CI gate `scripts/check-generated-types.sh` fails any PR that changes a Rust DTO without committing the regenerated `.ts` companion. See [AGENTS.md → "Adding a Type-Safe Dashboard Endpoint"](AGENTS.md#adding-a-type-safe-dashboard-endpoint).
 
 ---
 
@@ -139,15 +158,19 @@ vestige/
 - Dual-strength model (Bjork & Bjork 1992): storage strength (grows) + retrieval strength (decays)
 - Accessibility = retention×0.5 + retrieval×0.3 + storage×0.2
 
-### 29 Cognitive Modules
+### Cognitive Modules
 
-**Neuroscience (16):**
-ActivationNetwork (Collins & Loftus 1975), SynapticTaggingSystem (Frey & Morris 1997), HippocampalIndex (Teyler & Rudy 2007), ContextMatcher (Tulving 1973), AccessibilityCalculator, CompetitionManager (Anderson 1994), StateUpdateService, ImportanceSignals, NoveltySignal, ArousalSignal, RewardSignal, AttentionSignal, EmotionalMemory (Brown & Kulik 1977), PredictiveMemory, ProspectiveMemory, IntentionParser
+`CognitiveEngine` holds the stateful modules; the engine is shared as `Arc<Mutex<_>>` across MCP and dashboard call sites. Modules group into three families:
 
-**Advanced (11):**
-ImportanceTracker, ReconsolidationManager (Nader — 5min labile window), IntentDetector (9 intent types), ActivityTracker, MemoryDreamer (5-stage consolidation), MemoryChainBuilder (A*-like), MemoryCompressor (30-day min age), CrossProjectLearner (6 pattern types), AdaptiveEmbedder, SpeculativeRetriever (6 trigger types), ConsolidationScheduler
+**Neuroscience:**
+ActivationNetwork (Collins & Loftus 1975), SynapticTaggingSystem (Frey & Morris 1997), HippocampalIndex (Teyler & Rudy 2007), ContextMatcher (Tulving 1973), AccessibilityCalculator, CompetitionManager (Anderson 1994), StateUpdateService, ImportanceSignals (Novelty / Arousal / Reward / Attention sub-signals), EmotionalMemory (Brown & Kulik 1977), PredictiveMemory, ProspectiveMemory, IntentionParser.
 
-**Search (2):** Reranker, TemporalSearcher
+**Advanced:**
+ImportanceTracker, ReconsolidationManager (Nader — 5-minute labile window), IntentDetector, ActivityTracker, MemoryDreamer (4-phase NREM1 → NREM3 → REM → Integration cycle with six sub-modules — lifecycle, clustering, connections, contradictions, hubs, insights), MemoryChainBuilder, MemoryCompressor, CrossProjectLearner, AdaptiveEmbedder, SpeculativeRetriever, ConsolidationScheduler, PredictionErrorGate.
+
+**Search:** Reranker (Jina Reranker v2), TemporalSearcher, CompoundQueryDecomposer.
+
+> The exact module count drifts across releases as sub-modules split or merge — the canonical list lives in `crates/vestige-mcp/src/cognitive.rs::CognitiveEngine`. The CI metadata gate verifies the **MCP tool count** (28); module counts are intentionally not pinned.
 
 ### Memory States
 
@@ -170,7 +193,7 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 |-----------|---------|
 | **SQLite** | WAL mode, reader/writer connection split, PRAGMA optimizations |
 | **FTS5** | Full-text search with porter tokenizer, page_size tuning |
-| **Migrations** | Versions 1-11 (FSRS, embeddings, neuroscience tables, graph/scopes, FSRS-6 upgrade, dream history, FTS5, autonomic fields, emotional/temporal hierarchy, V10 provenance tracking, V11 typed memory `MemoryKind`) |
+| **Migrations** | Versions 1–13. FSRS, embeddings, neuroscience tables, graph/scopes, FSRS-6 upgrade, dream history, FTS5, autonomic fields, emotional/temporal hierarchy, V10 provenance tracking, V11 typed memory `MemoryKind`, V12 typed-memory tables (`decisions`, `hubs`, `insights` + foreign-key indexes), V13 tier/confidence columns on `insights` and `decisions`. All forward-only and idempotent. |
 | **Vector index** | USearch HNSW, feature-gated behind `vector-search` |
 | **Embeddings** | Nomic Embed v1.5 via fastembed (local ONNX), feature-gated behind `embeddings` |
 | **FTS sanitization** | `fts.rs` — strips injection patterns, length limits, always available |
@@ -195,39 +218,84 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 
 **Port 3927** (configurable via `VESTIGE_DASHBOARD_PORT`). Built with Axum.
 
-### REST API Endpoints (28 operations across 26 paths)
+### REST API Endpoints
+
+39 routes total. Every response body is a `Json<T>` of a ts-rs DTO from `dashboard/wire/`; the dashboard re-validates the five highest-blast-radius endpoints with Zod at runtime.
+
+**Memory CRUD**
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/memories` | List memories (paginated) |
+| GET | `/api/memories` | List memories (paginated, filterable) |
 | GET | `/api/memories/{id}` | Get single memory |
 | DELETE | `/api/memories/{id}` | Delete memory |
 | PATCH | `/api/memories/{id}` | Update memory content/tags (preserves FSRS state) |
+| POST | `/api/smart_ingest` | Smart ingest with Prediction Error Gating |
 | POST | `/api/memories/{id}/promote` | Promote memory (thumbs up) |
-| POST | `/api/memories/{id}/demote` | Demote memory (thumbs down, no delete) |
-| GET | `/api/memories/{id}/changelog` | Per-memory state-transition audit trail |
+| POST | `/api/memories/{id}/demote` | Demote memory (thumbs down — does NOT delete) |
+| GET  | `/api/memories/{id}/changelog` | Per-memory state-transition audit trail |
 | POST | `/api/memories/{id}/review` | Record an FSRS review rating |
-| GET | `/api/review/queue` | Items due for review |
+| GET  | `/api/review/queue` | Items due for review |
+
+**Search & Discovery**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET  | `/api/search?q=...` | 8-stage cognitive search |
+| GET  | `/api/timeline` | Timeline data |
+| GET  | `/api/graph` | Graph data (nodes + edges) |
+| POST | `/api/explore` | Explore connections (chain, associations, bridges, causal_chain) |
+| POST | `/api/predict` | Proactive prediction |
+| GET  | `/api/retention-distribution` | FSRS retention buckets |
+
+**Typed Memory (v3.4)**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET  | `/api/decisions` | Decision Matrix entries (v2 structured decisions) |
+| GET  | `/api/insights` | Tentative insights from dream + reflect |
+| GET  | `/api/hubs` | Auto-detected topic clusters |
+| POST | `/api/deep_reference` | Cognitive reasoning engine (cross_reference alias) |
+
+**Intentions**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET  | `/api/intentions` | List intentions |
+| POST | `/api/intentions` | Create intention |
+
+**Cognitive Engine**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/dream` | Trigger dream consolidation (per-phase breakdown) |
+| POST | `/api/consolidate` | Run FSRS consolidation cycle |
+| POST | `/api/importance` | Score importance (4-channel model) |
+
+**Metacognitive (v3.1)**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/reflect` | Metacognitive self-reflection |
+| POST | `/api/temporal` | Temporal fact versioning |
+| POST | `/api/confidence` | Confidence scoring and audit |
+
+**Maintenance**
+
+| Method | Path | Description |
+|--------|------|-------------|
 | POST | `/api/maintenance/regenerate-embeddings` | Backfill/rebuild embeddings |
 | POST | `/api/maintenance/find-duplicates` | Cluster near-duplicates by cosine |
 | POST | `/api/maintenance/gc` | Garbage-collect low-retention memories |
 | POST | `/api/maintenance/backup` | SQLite backup (WAL checkpoint + copy) |
-| GET | `/api/search?q=...` | Search memories |
-| GET | `/api/stats` | System statistics |
-| GET | `/api/health` | Health check |
-| GET | `/api/timeline` | Timeline data |
-| GET | `/api/graph` | Graph data (nodes + edges) |
-| POST | `/api/dream` | Trigger dream consolidation |
-| POST | `/api/explore` | Explore connections |
-| POST | `/api/predict` | Proactive prediction |
-| POST | `/api/importance` | Score importance |
-| POST | `/api/consolidate` | Run FSRS consolidation |
-| GET | `/api/retention-distribution` | FSRS retention buckets |
-| GET | `/api/intentions` | List intentions |
-| POST | `/api/intentions` | Create intention |
-| POST | `/api/reflect` | Metacognitive self-reflection (v3.1) |
-| POST | `/api/temporal` | Temporal fact versioning (v3.1) |
-| POST | `/api/confidence` | Confidence scoring and audit (v3.1) |
+
+**Observability & Meta**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET  | `/api/stats` | System statistics |
+| GET  | `/api/health` | Health check |
+| GET  | `/api/_meta/limits` | Dashboard caps (page sizes, search timeouts, fetch budgets) |
 
 ### Static SPA
 - `GET /dashboard` and `GET /dashboard/{*path}` — Embedded React build via `include_dir!`
@@ -269,19 +337,26 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 
 **Stack:** React 19, Vite 6, React Router 7, Three.js, Tailwind CSS 4, TypeScript
 
-### Pages (10)
+### Pages (16 user-facing + 404 fallback)
 
 | Page | Route | Description |
 |------|-------|-------------|
-| `GraphPage` | `/graph` | 3D neural graph with node selection, detail panel, explore connections |
-| `MemoriesPage` | `/memories` | Searchable memory list with FSRS state indicators |
+| `GraphPage` | `/graph` | 3D neural graph with node selection, detail panel, explore connections, keyboard navigation |
+| `MemoriesPage` | `/memories` | Searchable memory list with FSRS state indicators, multi-select |
+| `ReviewPage` | `/review` | FSRS review queue — rate memories due for retention |
+| `BriefingPage` | `/briefing` | Session-start briefing — recent activity, due intentions, decaying memories |
 | `TimelinePage` | `/timeline` | Chronological memory browse grouped by day |
 | `FeedPage` | `/feed` | Real-time event feed via WebSocket |
-| `ExplorePage` | `/explore` | Connection explorer (associations, chains, bridges) + importance scorer |
+| `ExplorePage` | `/explore` | Connection explorer (associations, chains, bridges, causal chains) + importance scorer |
+| `ReasoningPage` | `/reasoning` | `deep_reference` cognitive reasoning engine — evidence, contradictions, supersession, evolution timeline |
+| `DecisionsPage` | `/decisions` | Decision Matrix entries (v2 structured decisions: question, choices, criteria, 1–5 scoring, validUntil) |
+| `InsightsPage` | `/insights` | Tentative insights emitted by dream cycles and `reflect` runs (validate/dismiss workflow) |
+| `HubsPage` | `/hubs` | Auto-detected topic clusters — high in-degree concepts in the knowledge graph |
 | `IntentionsPage` | `/intentions` | Prospective memory management |
+| `TemporalPage` | `/temporal` | Bi-temporal fact versioning UI — current / expired / history / invalidate |
 | `StatsPage` | `/stats` | System statistics, retention distribution, pipeline visualizer |
 | `SettingsPage` | `/settings` | Configuration, backup/restore, maintenance, metacognitive tools (reflect, confidence) |
-| `TutorialPage` | `/tutorial` | Beginner-friendly guide with analogies, lifecycle, science, FAQ, glossary (EN/PL) |
+| `TutorialPage` | `/tutorial` | Beginner-friendly guide — 12 modular components, interactive FSRS curve, glossary tooltips, EN/PL |
 | `NotFoundPage` | `*` | 404 fallback |
 
 ### Three.js Graph Engine

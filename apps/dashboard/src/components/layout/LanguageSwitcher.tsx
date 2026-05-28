@@ -9,10 +9,15 @@ export function LanguageSwitcher() {
   // switch only needs to swap i18n bundles client-side. The previous
   // unconditional invalidation forced a full dashboard refetch (≥10 round
   // trips) on every language change.
+  //
+  // `document.documentElement.lang` is no longer set here — `lib/i18n.ts`
+  // owns the side effect via an `on('languageChanged')` listener so it
+  // also runs at initial hydration (when a returning user lands with a
+  // persisted non-English locale). Keeping both producers would risk
+  // drift if one path is updated and the other is forgotten.
   const changeLanguage = (lang: string) => {
     i18n.changeLanguage(lang);
     localStorage.setItem('vestige-language', lang);
-    document.documentElement.lang = lang;
   };
 
   return (

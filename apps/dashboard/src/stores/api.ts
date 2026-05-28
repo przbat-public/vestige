@@ -239,6 +239,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  /**
+   * PATCH /api/intentions/{id} — flip the lifecycle status.
+   *
+   * Allowed statuses: `fulfilled` | `cancelled` | `snoozed` | `active`.
+   * Anything else returns 400 from the server (the dashboard never
+   * sends those, but if it ever does the user gets a toast).
+   */
+  updateIntention: (id: string, status: 'fulfilled' | 'cancelled' | 'snoozed' | 'active') =>
+    fetcher<{ id: string; status: string; updated: boolean }>(`/intentions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
   reflect: async (focus?: string, depth: 'quick' | 'standard' | 'deep' = 'standard') =>
     wire.reflect(
       await fetcher<unknown>('/reflect', {

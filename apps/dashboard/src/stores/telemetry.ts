@@ -98,6 +98,7 @@ export const EVENT = {
   tutorial_section_explored: 'tutorial_section_explored',
   tutorial_glossary_open: 'tutorial_glossary_open',
   tutorial_page_cta: 'tutorial_page_cta',
+  fatal_render_error: 'fatal_render_error',
   tutorial_tour_start: 'tutorial_tour_start',
   tutorial_tour_complete: 'tutorial_tour_complete',
   tutorial_tour_skip: 'tutorial_tour_skip',

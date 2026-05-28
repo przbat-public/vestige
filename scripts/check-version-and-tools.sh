@@ -66,7 +66,7 @@ if [[ -z "${TOOL_COUNT:-}" || "$TOOL_COUNT" -eq 0 ]]; then
 fi
 note "server.rs exposes ${TOOL_COUNT} tools"
 
-EXPECTED_TOOL_COUNT=27
+EXPECTED_TOOL_COUNT=28
 [[ "$TOOL_COUNT" == "$EXPECTED_TOOL_COUNT" ]] || fail \
   "server.rs exposes ${TOOL_COUNT} tools but the docs claim ${EXPECTED_TOOL_COUNT}. Update either."
 

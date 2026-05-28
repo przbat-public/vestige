@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { I18nextProvider } from 'react-i18next';
+import { ConfirmDialogHost } from '@/components/ConfirmDialog';
 import i18n from '@/lib/i18n';
 import { api } from '@/stores/api';
 import { ToastProvider } from '@/stores/toast';
@@ -16,6 +17,7 @@ function renderPanel() {
       <QueryClientProvider client={client}>
         <ToastProvider>
           <MaintenancePanel />
+          <ConfirmDialogHost />
         </ToastProvider>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -136,16 +138,19 @@ describe('MaintenancePanel', () => {
     await user.click(screen.getByRole('button', { name: /preview candidates/i }));
     await screen.findByText(/3 memories below the retention threshold/i);
 
-    // First confirm: user cancels — no second call.
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    // First attempt: cancel via the in-app ConfirmDialog (replaces the
+    // old window.confirm path). The dialog renders an alertdialog with
+    // Cancel/Confirm; we click Cancel and expect no API delete to fire.
     await user.click(screen.getByRole('button', { name: /^delete 3/i }));
-    expect(confirmSpy).toHaveBeenCalled();
+    const cancelButton = await screen.findByRole('button', { name: /cancel/i });
+    await user.click(cancelButton);
     expect(gcSpy).toHaveBeenCalledTimes(1); // Only the preview, no delete.
 
-    // Second confirm: user accepts — call goes through.
-    confirmSpy.mockReturnValue(true);
+    // Second attempt: accept — the dialog reopens and we confirm.
     gcSpy.mockResolvedValueOnce({ dryRun: false, candidateCount: 3, deleted: 3 });
     await user.click(screen.getByRole('button', { name: /^delete 3/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /delete/i }));
 
     await waitFor(() => expect(gcSpy).toHaveBeenCalledTimes(2));
     expect(gcSpy.mock.calls[1][0]).toEqual({ dry_run: false, min_retention: 0.1 });

@@ -1,9 +1,11 @@
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { useMemoryMutations } from '@/hooks/useMemoryMutations';
+import { useDialogStore } from '@/stores/dialogs';
 import type { Insight } from '@/types';
 
 /**
@@ -41,6 +43,7 @@ interface InsightCardProps {
 
 export function InsightCard({ insight }: InsightCardProps) {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const createdAt = new Date(insight.createdAt);
   const validatedAt = insight.validatedAt ? new Date(insight.validatedAt) : null;
   const locale = i18n.language;
@@ -52,11 +55,31 @@ export function InsightCard({ insight }: InsightCardProps) {
   const validatePending = promote.isPending && promote.variables === insight.id;
   const demotePending = demote.isPending && demote.variables === insight.id;
 
+  // Same pattern as HubCard / CommandPalette: stash the id and navigate to
+  // /memories, where MemoriesPage drains the slot and opens the drawer.
+  // The dashboard has no /memories/:id route — a raw anchor reloaded into
+  // a 404 and dropped the user out of context.
+  const openMemory = (id: string) => {
+    useDialogStore.getState().requestSelectMemory(id);
+    navigate('/memories');
+  };
+
   return (
     <Card className={insight.validated ? 'space-y-3 ring-1 ring-emerald-500/40' : 'space-y-3'}>
       <div className="space-y-1">
         <div className="flex items-start justify-between gap-3 flex-wrap">
-          <p className="text-sm text-foreground break-words flex-1 min-w-0">{insight.content}</p>
+          {/* The insight is itself a KnowledgeNode — clicking the
+              content routes back to the host memory so the user can
+              inspect tags, retention, edit history, and the graph
+              neighborhood. Source-id chips below open *their* memories;
+              this button opens the insight's own memory. */}
+          <button
+            type="button"
+            onClick={() => openMemory(insight.id)}
+            className="text-sm text-foreground break-words flex-1 min-w-0 text-left hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm transition-colors"
+          >
+            {insight.content}
+          </button>
           <div className="flex items-center gap-1.5 shrink-0">
             {insight.validated ? (
               <Badge variant="success">{t('insights.badge.validated', 'Validated')}</Badge>
@@ -129,9 +152,15 @@ export function InsightCard({ insight }: InsightCardProps) {
       {insight.sourceMemoryIds.length > 0 && (
         <div className="text-[11px] text-muted-foreground space-x-1 flex flex-wrap gap-1">
           {insight.sourceMemoryIds.slice(0, 6).map((id) => (
-            <a key={id} href={`/memories/${id}`} className="hover:underline font-mono" title={id}>
+            <button
+              key={id}
+              type="button"
+              onClick={() => openMemory(id)}
+              className="hover:underline font-mono cursor-pointer"
+              title={id}
+            >
               {id.slice(0, 8)}
-            </a>
+            </button>
           ))}
           {insight.sourceMemoryIds.length > 6 && <span>+{insight.sourceMemoryIds.length - 6}</span>}
         </div>

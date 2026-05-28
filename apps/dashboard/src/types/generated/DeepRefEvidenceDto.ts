@@ -5,4 +5,11 @@
  * `evidence[]` entries the tool emits — content + FSRS trust signals
  * + the combined retrieval score that surfaced it.
  */
-export type DeepRefEvidenceDto = { id: string, content: string, trust: number, retention: number, stability: number, reps: number, lapses: number, tags: Array<string>, nodeType: string, createdAt: string, updatedAt: string, combinedScore: number, };
+export type DeepRefEvidenceDto = { id: string, content: string, trust: number, retention: number, stability: number, reps: number, lapses: number, tags: Array<string>, nodeType: string, createdAt: string, updatedAt: string, combinedScore: number, 
+/**
+ * Optional provenance marker. Empty for primary retrieval evidence;
+ * set to `"spreading_activation"` for memories surfaced through the
+ * activation network so the dashboard can render them as
+ * "related — via connections" rather than direct hits.
+ */
+source?: string, };

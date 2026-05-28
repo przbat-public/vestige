@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn skips_clusters_below_min_size() {
         let dreamer = MemoryDreamer::new();
-        let pool = vec![
+        let pool = [
             mem("a", "Rust async is hard.", &["rust"], 1),
             mem("b", "Tokio runtime quirks.", &["rust"], 2),
         ];

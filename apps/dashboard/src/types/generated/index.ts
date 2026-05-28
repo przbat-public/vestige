@@ -43,6 +43,8 @@ export * from './HubListResponseDto';
 export * from './InsightDto';
 export * from './InsightListResponseDto';
 export * from './IntentionItemDto';
+export * from './UpdateIntentionRequestDto';
+export * from './UpdateIntentionResponseDto';
 export * from './IntentionListResponseDto';
 export * from './MemoryChangelogDto';
 export * from './MemoryChangelogEntryDto';

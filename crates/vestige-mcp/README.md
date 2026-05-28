@@ -10,7 +10,7 @@ A Rust [Model Context Protocol](https://modelcontextprotocol.io) server that giv
 - **HNSW vector search** — USearch index, in-memory (persistence is on the roadmap).
 - **Hybrid retrieval** — BM25 + semantic, fused with Reciprocal Rank Fusion (RRF), wrapped in an 8-stage cognitive pipeline (compound-query decomposition, Jina Reranker v2, temporal boosting, accessibility filtering, context matching, retrieval competition, spreading activation).
 - **Content Intelligence Pipeline** — entity extraction, coreference rewriting, temporal anchoring, relation extraction, and provenance tracking before storage.
-- **27 MCP tools** with `readOnlyHint` / `destructiveHint` annotations so clients can decide auto-approval per the MCP `2025-03-26` spec.
+- **28 MCP tools** with `readOnlyHint` / `destructiveHint` annotations so clients can decide auto-approval per the MCP `2025-03-26` spec.
 - **Cargo features**: `embeddings`, `vector-search`, `preprocessing` (default); optional `encryption`, `metal` (Apple Silicon GPU).
 
 ## Installation
@@ -39,7 +39,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 To pin a custom database location, pass `--data-dir <PATH>` (or `--data-dir=<PATH>`) in the `args` array; without it the server uses the platform-default directory listed below.
 
-## Available Tools (27)
+## Available Tools (28)
 
 The catalog is built in [`server/catalog.rs`](src/server/catalog.rs); every entry ships an `inputSchema`, a `title`, and behavior `annotations`. Every tool is local-only (`openWorldHint=false`).
 
@@ -49,7 +49,7 @@ The catalog is built in [`server/catalog.rs`](src/server/catalog.rs); every entr
 | `search` | hybrid retrieval + 8-stage cognitive pipeline | read-only, idempotent |
 | `smart_ingest` | single (`content`) or batch (`items`, max 20) ingestion with Prediction Error Gating + Content Intelligence Pipeline | mutating, can SUPERSEDE → destructive |
 | `memory` | `get`, `get_batch` (≤20 ids), `state`, `promote`, `demote`, `edit`, `delete` | destructive (delete + edit live alongside reads) |
-| `codebase` | `remember_pattern`, `remember_decision`, `get_context` | mutating, additive |
+| `codebase` | `remember_pattern`, `remember_decision`, `remember_decision_v2` (structured Decision Matrix), `get_context` | mutating, additive |
 | `intention` | `set`, `check`, `update` (complete/snooze/cancel), `list` | mutating, additive |
 | `session_context` | one-call session bootstrap (search + status + intentions + predictions + codebase) | read-only, idempotent |
 
@@ -57,8 +57,9 @@ The catalog is built in [`server/catalog.rs`](src/server/catalog.rs); every entr
 | Tool | What it does | Annotations |
 |------|--------------|-------------|
 | `dream` | replay recent memories, discover connections, synthesize insights, persist graph | mutating, additive |
-| `explore_connections` | `chain` (reasoning paths) / `associations` (spreading activation) / `bridges` | read-only, idempotent |
+| `explore_connections` | `chain` (reasoning paths) / `associations` (spreading activation) / `bridges` / `causal_chain` (BFS along persisted causal edges for `why?` questions) | read-only, idempotent |
 | `predict` | proactive retrieval based on context + activity history | read-only, idempotent |
+| `precompute_for_context` | sleep-time compute — pre-fetch and summarise top-K memories for an upcoming topic, store as a `precomputed_summary` with TTL (1–168h) so the next session hits a warm cache | mutating, additive |
 | `deep_reference` | full reasoning engine — hybrid retrieval + FSRS trust + intent classification + temporal supersession + contradiction analysis + dream-insight integration. `cross_reference` is a backward-compatible alias. | read-only, idempotent |
 
 ### Metacognitive (v3.1+)
@@ -131,10 +132,11 @@ For per-project, multi-instance, and shared setups, see [`docs/STORAGE.md`](../.
 
 ## Protocol
 
-- JSON-RPC 2.0 over stdio (primary transport) and HTTP (secondary).
-- MCP protocol version: `2024-11-05` baseline; tools advertise `annotations` from the `2025-03-26` revision.
+- JSON-RPC 2.0 over stdio (primary transport) and HTTP (secondary, port `3928`).
+- MCP protocol version: `2024-11-05` baseline; tools advertise `annotations` from the `2025-03-26` revision and display `title`s from `2025-11-25`.
+- The HTTP transport requires a bearer token (`VESTIGE_AUTH_TOKEN`, auto-generated if unset) and uses session IDs (`Mcp-Session-Id`) after the initial handshake.
 - Logging via `tracing` to stderr (stdout reserved for JSON-RPC).
 
 ## License
 
-MIT
+AGPL-3.0-only — see the workspace `LICENSE`.

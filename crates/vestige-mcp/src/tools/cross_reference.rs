@@ -19,7 +19,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::cognitive::CognitiveEngine;
-use vestige_core::Storage;
+use vestige_core::{KnowledgeNode, Storage};
 
 pub fn schema() -> Value {
     serde_json::json!({
@@ -247,6 +247,78 @@ fn has_negation_signal(a: &str, b: &str) -> bool {
     false
 }
 
+/// Build the JSON value the dashboard expects for one evidence entry.
+/// Used for both the primary `evidence[]` array (stage 2 — direct
+/// retrieval hits) and `related_insights[]` (stage 3 — surfaced via
+/// spreading activation). Centralised here so the two emit identical
+/// shapes; the dashboard `DeepRefEvidenceDto` is the source of truth
+/// and requires `retention`, `stability`, `reps`, `lapses`, `tags`,
+/// `nodeType`, `createdAt`, `updatedAt` to be present.
+///
+/// The `source` argument is `None` for direct retrieval and
+/// `Some("spreading_activation")` for activation hits. The dashboard
+/// uses this to label related memories as "via connections" rather
+/// than mixing them with primary evidence.
+///
+/// Regression: before this helper existed, `related_insights` only
+/// emitted 4 fields (id, content, trust, source) which failed
+/// `DeepRefEvidenceDto` deserialization with `missing field "retention"`
+/// → 502 Bad Gateway on every query that triggered activation.
+fn build_evidence_value(
+    node: &KnowledgeNode,
+    trust: f64,
+    combined_score: f64,
+    source: Option<&str>,
+) -> Value {
+    let mut v = serde_json::json!({
+        "id": node.id,
+        "content": node.content,
+        "trust": (trust * 100.0).round() / 100.0,
+        "retention": node.retention_strength,
+        "stability": node.stability,
+        "reps": node.reps,
+        "lapses": node.lapses,
+        "tags": node.tags,
+        "nodeType": node.node_type,
+        "createdAt": node.created_at.to_rfc3339(),
+        "updatedAt": node.updated_at.to_rfc3339(),
+        "combinedScore": combined_score,
+    });
+    if let Some(s) = source {
+        v["source"] = Value::String(s.to_string());
+    }
+    v
+}
+
+/// Build the JSON value the dashboard expects for one contradictory
+/// pair. Extracted from the main `execute()` body so unit tests can
+/// pin the shape of the contract independently of the classifier — a
+/// missing/renamed field breaks `DeepRefContradictionDto` parsing
+/// (502 BAD GATEWAY) and we used to learn about it from production.
+///
+/// Contents are clipped to the first sentence so the payload stays
+/// readable in the dashboard side panel without pulling multi-kB
+/// compound memories across the wire for every pair.
+fn build_contradiction_value(
+    id_a: &str,
+    id_b: &str,
+    content_a: &str,
+    content_b: &str,
+    trust_a: f64,
+    trust_b: f64,
+    relation: &Relation,
+) -> Value {
+    serde_json::json!({
+        "memoryA": id_a,
+        "memoryB": id_b,
+        "contentA": first_sentence(content_a),
+        "contentB": first_sentence(content_b),
+        "relation": relation.to_string(),
+        "trustA": (trust_a * 100.0).round() / 100.0,
+        "trustB": (trust_b * 100.0).round() / 100.0,
+    })
+}
+
 fn assess_relation(
     a_content: &str,
     a_trust: f64,
@@ -296,8 +368,9 @@ pub async fn execute(
     let storage_search = storage.clone();
     let query_owned = args.query.clone();
     let results = tokio::task::spawn_blocking(move || {
+        let (kw, sem) = vestige_core::default_hybrid_weights();
         storage_search
-            .hybrid_search(&query_owned, overfetch as i32, 0.3, 0.7)
+            .hybrid_search(&query_owned, overfetch as i32, kw, sem)
             .map_err(|e| format!("Search failed: {}", e))
     })
     .await
@@ -332,20 +405,12 @@ pub async fn execute(
             r.node.content.clone(),
             r.node.updated_at,
         ));
-        evidence.push(serde_json::json!({
-            "id": r.node.id,
-            "content": r.node.content,
-            "trust": (trust * 100.0).round() / 100.0,
-            "retention": r.node.retention_strength,
-            "stability": r.node.stability,
-            "reps": r.node.reps,
-            "lapses": r.node.lapses,
-            "tags": r.node.tags,
-            "nodeType": r.node.node_type,
-            "createdAt": r.node.created_at.to_rfc3339(),
-            "updatedAt": r.node.updated_at.to_rfc3339(),
-            "combinedScore": r.combined_score,
-        }));
+        evidence.push(build_evidence_value(
+            &r.node,
+            trust,
+            r.combined_score as f64,
+            None,
+        ));
     }
 
     // Sort evidence by trust descending
@@ -356,20 +421,42 @@ pub async fn execute(
     });
 
     // STAGE 3: Spreading activation expansion
+    //
+    // Clone the network Arc out of the engine and drop the engine lock
+    // before doing the propagation — keeps the engine free for unrelated
+    // work while activation runs.
     let mut activation_ids: Vec<String> = Vec::new();
-    let activation_available = if let Ok(mut cog) = cognitive.try_lock() {
+    let net = match cognitive.try_lock() {
+        Ok(cog) => Some(std::sync::Arc::clone(&cog.activation_network)),
+        Err(_) => {
+            crate::cognitive::try_lock_metrics::record_miss("deep_reference");
+            tracing::warn!(
+                "deep_reference: cognitive engine locked, spreading activation skipped"
+            );
+            None
+        }
+    };
+    let activation_available = if let Some(net) = net {
         if let Some(top) = trust_scores.first() {
-            let activated = cog.activation_network.activate(&top.0, 1.0);
-            for a in activated.iter().take(5) {
-                if !trust_scores.iter().any(|(id, _, _, _)| id == &a.memory_id) {
-                    activation_ids.push(a.memory_id.clone());
+            match net.try_write() {
+                Ok(mut net) => {
+                    let activated = net.activate(&top.0, 1.0);
+                    for a in activated.iter().take(5) {
+                        if !trust_scores.iter().any(|(id, _, _, _)| id == &a.memory_id) {
+                            activation_ids.push(a.memory_id.clone());
+                        }
+                    }
+                    true
+                }
+                Err(_) => {
+                    crate::cognitive::try_lock_metrics::record_miss("deep_reference");
+                    false
                 }
             }
+        } else {
+            true
         }
-        true
     } else {
-        crate::cognitive::try_lock_metrics::record_miss("deep_reference");
-        tracing::warn!("deep_reference: cognitive engine locked, spreading activation skipped");
         false
     };
     let mut related_insights: Vec<Value> = Vec::new();
@@ -393,12 +480,12 @@ pub async fn execute(
                 node.reps,
                 node.lapses,
             );
-            related_insights.push(serde_json::json!({
-                "id": node.id,
-                "content": node.content,
-                "trust": (trust * 100.0).round() / 100.0,
-                "source": "spreading_activation",
-            }));
+            related_insights.push(build_evidence_value(
+                &node,
+                trust,
+                0.0,
+                Some("spreading_activation"),
+            ));
         }
     }
 
@@ -433,13 +520,9 @@ pub async fn execute(
             let relation = assess_relation(content_a, trust_a, time_a, content_b, trust_b, time_b);
             match relation {
                 Relation::Contradicts => {
-                    contradictions.push(serde_json::json!({
-                        "memoryA": id_a,
-                        "memoryB": id_b,
-                        "relation": relation.to_string(),
-                        "trustA": (trust_a * 100.0).round() / 100.0,
-                        "trustB": (trust_b * 100.0).round() / 100.0,
-                    }));
+                    contradictions.push(build_contradiction_value(
+                        id_a, id_b, content_a, content_b, trust_a, trust_b, &relation,
+                    ));
                 }
                 Relation::Supersedes if !superseded.iter().any(|s| s["supersededId"] == *id_b) => {
                     let (newer_id, older_id) = if time_a > time_b {
@@ -738,5 +821,273 @@ mod tests {
         let now = Utc::now();
         let rel = assess_relation("Cats are cute", 0.8, now, "Rust is fast", 0.7, now);
         assert!(matches!(rel, Relation::Irrelevant));
+    }
+
+    // ---- Integration tests against real storage ----
+    //
+    // These exist because the unit tests above only cover the leaf
+    // helpers (intent classifier, trust formula, relation classifier).
+    // They never exercise the JSON-shape contract the dashboard
+    // depends on, which is exactly where the deep_reference 502 bug
+    // hid for three releases: contradictions were missing
+    // contentA/contentB in the tool output but the wire DTO required
+    // them, so every multi-memory query failed to deserialize.
+
+    use crate::cognitive::CognitiveEngine;
+    use tempfile::TempDir;
+
+    fn test_cognitive() -> Arc<Mutex<CognitiveEngine>> {
+        Arc::new(Mutex::new(CognitiveEngine::new()))
+    }
+
+    async fn test_storage() -> (Arc<Storage>, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let storage = Storage::new(Some(dir.path().join("test.db"))).unwrap();
+        (Arc::new(storage), dir)
+    }
+
+    async fn ingest(storage: &Arc<Storage>, content: &str) -> String {
+        storage
+            .ingest(vestige_core::IngestInput {
+                content: content.into(),
+                node_type: "fact".into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .id
+    }
+
+    /// Force two memories with shared topic words + negation so the
+    /// relation classifier returns `Contradicts`. Without this setup
+    /// the contradiction branch never runs and the missing-fields bug
+    /// stays hidden.
+    async fn seed_contradictory_pair(storage: &Arc<Storage>) -> (String, String) {
+        let a = ingest(
+            storage,
+            "We use PostgreSQL for primary storage in the dashboard pipeline.",
+        )
+        .await;
+        let b = ingest(
+            storage,
+            "We don't use PostgreSQL for primary storage in the dashboard pipeline.",
+        )
+        .await;
+        (a, b)
+    }
+
+    /// Unit-pin the shape of one contradiction entry. This is the
+    /// regression test for the 502 bug — before the fix the helper
+    /// did not exist and the inline `json!` macro forgot contentA /
+    /// contentB, which the dashboard's `DeepRefContradictionDto`
+    /// required. We test the helper directly instead of forcing the
+    /// classifier into a `Contradicts` branch because the trust
+    /// threshold inside `assess_relation` routes most freshly-ingested
+    /// pairs to `Supersedes`, hiding the field-drift bug.
+    #[test]
+    fn test_build_contradiction_value_has_all_dashboard_required_fields() {
+        let v = build_contradiction_value(
+            "id-a",
+            "id-b",
+            "We use PostgreSQL for primary storage.",
+            "We don't use PostgreSQL for primary storage.",
+            0.42,
+            0.31,
+            &Relation::Contradicts,
+        );
+        // Each assertion names the field that broke production when
+        // it was missing — keep these specific so the failure message
+        // points at the contract gap, not at a generic JSON shape.
+        assert_eq!(v["memoryA"], "id-a");
+        assert_eq!(v["memoryB"], "id-b");
+        assert!(
+            v["contentA"].is_string() && !v["contentA"].as_str().unwrap().is_empty(),
+            "contentA must be present (DeepRefContradictionDto required field)"
+        );
+        assert!(
+            v["contentB"].is_string() && !v["contentB"].as_str().unwrap().is_empty(),
+            "contentB must be present (DeepRefContradictionDto required field)"
+        );
+        assert_eq!(v["relation"], "contradicts");
+        assert!((v["trustA"].as_f64().unwrap() - 0.42).abs() < 1e-9);
+        assert!((v["trustB"].as_f64().unwrap() - 0.31).abs() < 1e-9);
+    }
+
+    /// First-sentence clipping: long compound memories must not drag
+    /// multi-kB content into every contradiction pair. We assert the
+    /// helper trims at the first sentence boundary like `first_sentence`
+    /// does for the evolution timeline — the two paths are visually
+    /// adjacent in the dashboard.
+    #[test]
+    fn test_build_contradiction_value_clips_content_to_first_sentence() {
+        let long = "Decision: migrate to OIDC. \
+                    [Updated 2026-04-05] After three months we reverted. \
+                    [Updated 2026-04-12] Now migrating again with a new provider.";
+        let v = build_contradiction_value(
+            "id-a",
+            "id-b",
+            long,
+            "Short statement.",
+            0.5,
+            0.5,
+            &Relation::Contradicts,
+        );
+        let ca = v["contentA"].as_str().unwrap();
+        assert!(
+            !ca.contains("[Updated"),
+            "first-sentence clip must strip update markers from compound memories; got {ca:?}"
+        );
+        assert!(ca.starts_with("Decision: migrate to OIDC"));
+    }
+
+    /// Parity gate: a hand-built contradiction value (mirroring what
+    /// `execute()` would emit) must round-trip through the wire DTO.
+    /// This is the *minimal* contract test — independent of the
+    /// classifier, independent of storage state — that would have
+    /// failed before the fix and now serves as a regression guard.
+    #[test]
+    fn test_contradiction_value_round_trips_through_wire_dto() {
+        use crate::dashboard::wire::DeepRefContradictionDto;
+        let v = build_contradiction_value(
+            "id-a",
+            "id-b",
+            "We use PostgreSQL.",
+            "We don't use PostgreSQL.",
+            0.5,
+            0.4,
+            &Relation::Contradicts,
+        );
+        let parsed: Result<DeepRefContradictionDto, _> = serde_json::from_value(v.clone());
+        if let Err(e) = &parsed {
+            panic!(
+                "DeepRefContradictionDto rejected our payload — this is the 502 bug.\nerror: {e}\npayload: {v:#}"
+            );
+        }
+        let dto = parsed.unwrap();
+        assert_eq!(dto.memory_a, "id-a");
+        assert_eq!(dto.content_a, "We use PostgreSQL");
+        assert_eq!(dto.content_b, "We don't use PostgreSQL");
+    }
+
+    /// Unit-pin the shape of one evidence entry. Regression test for
+    /// the second 502 bug — `related_insights` was missing every FSRS
+    /// field (`retention`, `stability`, `reps`, `lapses`, `tags`,
+    /// `nodeType`, `createdAt`, `updatedAt`) because the activation
+    /// stage's `serde_json::json!` block only emitted 4 fields. Each
+    /// assertion names a field that broke production when missing —
+    /// keep them granular so a failure points at the exact contract
+    /// gap, not at a generic "JSON shape" error.
+    #[test]
+    fn test_build_evidence_value_has_all_dashboard_required_fields() {
+        let mut node = KnowledgeNode::new("Vestige uses FSRS-6 for trust scoring.");
+        node.id = "node-1".into();
+        node.retention_strength = 0.83;
+        node.stability = 12.4;
+        node.reps = 5;
+        node.lapses = 1;
+        node.tags = vec!["vestige".into(), "fsrs".into()];
+        node.node_type = "fact".into();
+
+        let v = build_evidence_value(&node, 0.91, 0.74, Some("spreading_activation"));
+
+        assert_eq!(v["id"], "node-1");
+        assert!(
+            v["retention"].is_number(),
+            "retention must be present (DeepRefEvidenceDto required field)"
+        );
+        assert!(
+            v["stability"].is_number(),
+            "stability must be present (DeepRefEvidenceDto required field)"
+        );
+        assert!(
+            v["reps"].is_number(),
+            "reps must be present (DeepRefEvidenceDto required field)"
+        );
+        assert!(
+            v["lapses"].is_number(),
+            "lapses must be present (DeepRefEvidenceDto required field)"
+        );
+        assert!(
+            v["tags"].is_array(),
+            "tags must be an array (DeepRefEvidenceDto required field)"
+        );
+        assert_eq!(v["nodeType"], "fact");
+        assert!(
+            v["createdAt"].is_string(),
+            "createdAt must be present (DeepRefEvidenceDto required field)"
+        );
+        assert!(
+            v["updatedAt"].is_string(),
+            "updatedAt must be present (DeepRefEvidenceDto required field)"
+        );
+        assert!((v["combinedScore"].as_f64().unwrap() - 0.74).abs() < 1e-9);
+        assert_eq!(v["source"], "spreading_activation");
+    }
+
+    /// Primary-evidence entries (no `source` annotation) must omit the
+    /// field entirely so the dashboard can distinguish direct hits
+    /// from activation-derived "related" memories.
+    #[test]
+    fn test_build_evidence_value_omits_source_when_none() {
+        let node = KnowledgeNode::new("Primary retrieval hit.");
+        let v = build_evidence_value(&node, 0.5, 0.42, None);
+        assert!(
+            v.get("source").is_none(),
+            "primary evidence must not carry a `source` field; got {v:#}"
+        );
+    }
+
+    /// Parity gate: every evidence value we emit — primary or via
+    /// activation — must round-trip through `DeepRefEvidenceDto`.
+    /// This is the regression test that would have failed before
+    /// `related_insights` was upgraded to use `build_evidence_value`.
+    #[test]
+    fn test_evidence_value_round_trips_through_wire_dto() {
+        use crate::dashboard::wire::DeepRefEvidenceDto;
+
+        let mut node = KnowledgeNode::new("Anything goes.");
+        node.id = "id".into();
+        node.tags = vec!["a".into()];
+
+        // Both annotated and unannotated variants must parse cleanly.
+        for source in [None, Some("spreading_activation")] {
+            let v = build_evidence_value(&node, 0.5, 0.3, source);
+            let parsed: Result<DeepRefEvidenceDto, _> = serde_json::from_value(v.clone());
+            if let Err(e) = &parsed {
+                panic!(
+                    "DeepRefEvidenceDto rejected our payload (source={source:?}).\n\
+                     error: {e}\npayload: {v:#}"
+                );
+            }
+            let dto = parsed.unwrap();
+            assert_eq!(dto.id, "id");
+            assert_eq!(dto.source.as_deref(), source);
+        }
+    }
+
+    /// Integration parity gate: a real `execute()` payload (even
+    /// without contradictions) must deserialize through the full
+    /// `DeepReferenceResultDto`. Catches field-name drift across the
+    /// other stages (evidence, evolution, dreamInsights, stagesCompleted).
+    #[tokio::test]
+    async fn test_execute_payload_round_trips_through_wire_dto() {
+        use crate::dashboard::wire::DeepReferenceResultDto;
+
+        let (storage, _dir) = test_storage().await;
+        let _ = seed_contradictory_pair(&storage).await;
+
+        let args = Some(serde_json::json!({
+            "query": "Do we use PostgreSQL for primary storage?",
+            "depth": 5,
+        }));
+        let raw = execute(&storage, &test_cognitive(), args)
+            .await
+            .expect("execute should succeed");
+
+        let result: Result<DeepReferenceResultDto, _> = serde_json::from_value(raw.clone());
+        if let Err(e) = &result {
+            panic!(
+                "DeepReferenceResultDto rejected execute() payload.\nerror: {e}\npayload: {raw:#}"
+            );
+        }
     }
 }

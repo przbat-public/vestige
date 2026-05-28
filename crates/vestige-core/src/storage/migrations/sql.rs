@@ -674,3 +674,17 @@ CREATE INDEX IF NOT EXISTS idx_nodes_hub_extra
 
 UPDATE schema_version SET version = 13, applied_at = datetime('now');
 "#;
+
+/// V14: switch to `auto_vacuum=INCREMENTAL` so deleted pages can be reclaimed
+/// without a full `VACUUM`. Mirrors V7's "outside the transaction" handling
+/// because `PRAGMA auto_vacuum` only takes effect after a `VACUUM`, which
+/// itself cannot run inside a transaction.
+///
+/// The actual `PRAGMA auto_vacuum=2` + `VACUUM` + version bump live in the
+/// runner. This constant exists for symmetry — the registry entry needs
+/// *something* to point at, even though the runner ignores the body.
+pub(super) const MIGRATION_V14_UP: &str = r#"
+-- Body intentionally empty. See migrations/runner.rs for the V14 special
+-- case: `PRAGMA auto_vacuum=2; VACUUM; UPDATE schema_version ...`.
+SELECT 1;
+"#;

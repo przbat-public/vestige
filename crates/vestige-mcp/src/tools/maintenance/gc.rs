@@ -8,6 +8,8 @@ use serde_json::Value;
 
 use vestige_core::Storage;
 
+use crate::tools::common;
+
 pub fn gc_schema() -> Value {
     serde_json::json!({
         "type": "object",
@@ -28,6 +30,11 @@ pub fn gc_schema() -> Value {
                 "type": "boolean",
                 "description": "If true (default), only report what would be deleted without actually deleting",
                 "default": true
+            },
+            "confirmed": {
+                "type": "boolean",
+                "description": "Required to be `true` when `dry_run` is `false`. Acts as an explicit acknowledgement that the destructive action has been authorised. Mirrors the MCP `elicitation/create` flow for transports that cannot prompt mid-call.",
+                "default": false
             }
         }
     })
@@ -46,7 +53,12 @@ struct GcArgs {
 
 /// Garbage collection tool
 pub async fn execute_gc(storage: &Arc<Storage>, args: Option<Value>) -> Result<Value, String> {
-    let args: GcArgs = match args {
+    // Keep the raw value around for the confirmation gate — Serde-typed
+    // `GcArgs` deliberately ignores the `confirmed` field so it can never
+    // accidentally become a typed param that turns up in logs.
+    let raw = args.clone().unwrap_or_else(|| serde_json::json!({}));
+
+    let parsed: GcArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => GcArgs {
             min_retention: None,
@@ -55,9 +67,20 @@ pub async fn execute_gc(storage: &Arc<Storage>, args: Option<Value>) -> Result<V
         },
     };
 
-    let min_retention = args.min_retention.unwrap_or(0.1).clamp(0.0, 1.0);
-    let max_age_days = args.max_age_days;
-    let dry_run = args.dry_run.unwrap_or(true); // Default to dry_run for safety
+    let min_retention = parsed.min_retention.unwrap_or(0.1).clamp(0.0, 1.0);
+    let max_age_days = parsed.max_age_days;
+    let dry_run = parsed.dry_run.unwrap_or(true); // Default to dry_run for safety
+
+    // Destructive-op gate. `dry_run=true` is safe by construction (it
+    // never deletes), so we only require explicit confirmation when the
+    // caller asks for the actual destructive variant. See `tools::common`
+    // for the rationale (MCP elicitation prep).
+    if !dry_run && !common::is_confirmed(&raw) {
+        return Err(common::missing_confirmation_error(
+            "gc",
+            "Running gc with `dry_run: false` permanently deletes every memory below the retention threshold.",
+        ));
+    }
 
     let now = Utc::now();
 

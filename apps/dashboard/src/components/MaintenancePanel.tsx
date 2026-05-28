@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/stores/api';
+import { confirm } from '@/stores/confirm';
 import { queryKeys } from '@/stores/query';
 import { toast } from '@/stores/toast';
 
@@ -99,9 +100,13 @@ export function MaintenancePanel() {
     onError: handleError('common.error'),
   });
 
-  const onConfirmDelete = () => {
+  const onConfirmDelete = async () => {
     if (!gcResult || gcResult.candidateCount === 0) return;
-    const ok = window.confirm(t('maintenance.gcConfirm', { count: gcResult.candidateCount }));
+    const ok = await confirm({
+      message: t('maintenance.gcConfirm', { count: gcResult.candidateCount }),
+      destructive: true,
+      confirmLabel: t('common.delete'),
+    });
     if (ok) gcDelete.mutate();
   };
 

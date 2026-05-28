@@ -1,22 +1,34 @@
-# Setting Up CLAUDE.md for Vestige
+# Setting Up Agent Instructions for Vestige
 
-> Make Claude use Vestige automatically
+> Make your AI assistant use Vestige automatically.
+>
+> **Note:** the repository's own [`AGENTS.md`](../AGENTS.md) is the canonical operational instructions for AI agents working **on Vestige itself** (Codex, Cursor, Copilot, Claude Code, …). This file documents user-side templates for proactive memory use in your **own** projects — copy-paste into your global or project-level agent instructions file (`AGENTS.md` / `CLAUDE.md` / `GEMINI.md` / `.cursor/rules/*.mdc` / `.github/copilot-instructions.md`).
 
 ---
 
 ## Quick Setup
 
-Add this to your global `~/.claude/CLAUDE.md` or project-level `CLAUDE.md`:
+Add this to your global agent instructions file (e.g. `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.cursor/rules/vestige.mdc`):
 
 ```markdown
 ## Vestige Memory System
 
-At the start of every conversation, check Vestige for context:
-1. Recall user preferences and instructions
-2. Recall relevant project context
-3. Operate in proactive memory mode - save important info without being asked
+At the start of every conversation, call `session_context` (one MCP call replaces 5):
 
-Query: `search` with "user preferences" and "instructions"
+```json
+{
+  "queries": ["user preferences", "[current project] context"],
+  "context": { "codebase": "[project]", "topics": ["[current topics]"] },
+  "token_budget": 2000
+}
+```
+
+Then act on `automationTriggers` in the response:
+- `needsDream` → call `dream`
+- `needsBackup` → call `backup`
+- `needsGc` → call `gc` with `dry_run: true`, review, then delete
+
+Operate in proactive memory mode — save important info via `smart_ingest` without being asked.
 ```
 
 ---
@@ -28,17 +40,25 @@ For comprehensive automatic memory use:
 ```markdown
 # Vestige Memory System
 
-You have access to Vestige, a cognitive memory system. USE IT AUTOMATICALLY.
+You have access to Vestige, a cognitive memory system. USE IT AUTOMATICALLY. Retrieve context silently — do not announce memory operations to the user.
 
 ---
 
 ## 1. SESSION START — Always Do This
 
-1. Search Vestige: "user preferences instructions"
-2. Search Vestige: "[current project name] context"
-3. Check intentions: Look for triggered reminders
+Call `session_context` once at the start of every conversation:
 
-Say "Remembering..." then retrieve context before responding.
+```json
+{
+  "queries": ["user preferences", "[current project] context"],
+  "context": { "codebase": "[project]", "topics": ["[current topics]"] },
+  "token_budget": 2000
+}
+```
+
+This single call returns: relevant memories + active intentions + system status + predictions + codebase context. Replaces 5 separate calls.
+
+Then check `automationTriggers` in the response and act on them silently.
 
 ---
 

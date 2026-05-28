@@ -178,6 +178,24 @@ async fn main() {
         env!("CARGO_PKG_VERSION")
     );
 
+    // Optional OTLP exporter (opt-in via `--features telemetry`). Logged once
+    // so operators can confirm whether spans will actually be shipped.
+    let telemetry_status = vestige_mcp::telemetry::init(&vestige_mcp::telemetry::TelemetryConfig::from_env());
+    match &telemetry_status {
+        vestige_mcp::telemetry::TelemetryStatus::Initialized { endpoint } => {
+            info!(otlp_endpoint = %endpoint, "telemetry exporter initialized");
+        }
+        vestige_mcp::telemetry::TelemetryStatus::Disabled => {
+            info!(
+                "telemetry feature compiled in but no endpoint set; export disabled"
+            );
+        }
+        vestige_mcp::telemetry::TelemetryStatus::FeatureDisabled => {
+            // Stay quiet by default — this is the most common production path
+            // and we already log at higher levels of importance elsewhere.
+        }
+    }
+
     // Initialize storage with optional custom data directory
     let storage = match Storage::new(config.data_dir) {
         Ok(s) => {

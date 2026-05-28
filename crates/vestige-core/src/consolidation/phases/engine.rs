@@ -27,12 +27,50 @@ pub struct DreamEngine {
     pub(super) validation_threshold: f64,
 }
 
+/// Default NREM3 synaptic downscaling factor — a multiplicative retention
+/// loss applied per dream cycle to unreplayed low-importance memories.
+///
+/// Pre-2026-05-20 this was `0.95` (5 % loss per cycle). The synaptic
+/// homeostasis hypothesis (Tononi & Cirelli, *Sleep & Brain Plasticity*,
+/// 2014; Diekelmann & Born 2010) reports 10-25 % weakening of weak,
+/// unreplayed synapses per slow-wave-rich sleep cycle. Five percent sat
+/// at the very low end of that range and effectively turned downscaling
+/// into a slow, almost imperceptible nudge; the consolidation pass
+/// happens at most a couple of times a day in our deployment, so 5 %
+/// would take ~14 cycles to halve retention.
+///
+/// `0.90` sits at the conservative mid-band of biological estimates and
+/// halves retention in ~7 cycles — closer to the observable "if I never
+/// touch this for a week, the system stops surfacing it" behaviour we
+/// actually want for the long tail. Override at runtime with
+/// `VESTIGE_NREM3_DOWNSCALE_FACTOR` if you want to tighten / loosen the
+/// curve without recompiling. Out-of-range values (≤0, >1, NaN) fall
+/// back to this default.
+pub const DEFAULT_NREM3_DOWNSCALE_FACTOR: f64 = 0.90;
+
+/// Resolve the NREM3 downscale factor honoured by this build.
+///
+/// Reads `VESTIGE_NREM3_DOWNSCALE_FACTOR` from the environment with the
+/// usual `(0.0, 1.0]` clamp; falls back to
+/// [`DEFAULT_NREM3_DOWNSCALE_FACTOR`] otherwise.
+pub fn default_nrem3_downscale_factor() -> f64 {
+    match std::env::var("VESTIGE_NREM3_DOWNSCALE_FACTOR") {
+        Ok(raw) => raw
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v > 0.0 && *v <= 1.0)
+            .unwrap_or(DEFAULT_NREM3_DOWNSCALE_FACTOR),
+        Err(_) => DEFAULT_NREM3_DOWNSCALE_FACTOR,
+    }
+}
+
 impl Default for DreamEngine {
     fn default() -> Self {
         Self {
             high_value_ratio: 0.7,
             wave_batch_size: 15,
-            downscale_factor: 0.95,
+            downscale_factor: default_nrem3_downscale_factor(),
             min_insight_confidence: 0.3,
             validation_threshold: 0.4,
         }
@@ -85,6 +123,7 @@ impl DreamEngine {
             phases,
             strengthened_ids,
             downscaled_ids,
+            downscale_factor: self.downscale_factor,
         }
     }
 
@@ -107,13 +146,14 @@ impl DreamEngine {
             return TriageCategory::Emotional;
         }
 
-        // Future-relevant (intentions, TODOs)
-        let content_lower = node.content.to_lowercase();
-        if content_lower.contains("todo")
-            || content_lower.contains("remind")
-            || content_lower.contains("intention")
-            || content_lower.contains("next time")
-            || content_lower.contains("plan to")
+        // Future-relevant (intentions, TODOs).
+        //
+        // Routed through [`crate::nlp::default_future_relevance_detector`]
+        // so this call site stays untouched if/when we swap in an ONNX
+        // classifier behind a feature flag.
+        if crate::nlp::default_future_relevance_detector()
+            .detect(&node.content)
+            .positive
         {
             return TriageCategory::FutureRelevant;
         }

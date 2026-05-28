@@ -93,8 +93,19 @@ pub async fn execute(
 
     let now = Utc::now();
 
-    // 1. Contradiction detection — find memories with opposing content on same topic
+    // 1. Contradiction detection — find memories with opposing content on
+    //    same topic.
+    //
+    // The outer loop walks per-tag buckets, so a pair that shares N tags
+    // would otherwise be checked (and pushed) N times. Production
+    // surfaced this as "Detected 69 contradictions" while only 54 of
+    // them were distinct (a, b) pairs — a 28 % inflation that misled
+    // the briefing card. We dedup by the unordered id pair (min, max)
+    // so the count, the structured-insight `sourceMemoryIds`, and the
+    // summary line all agree on what "one contradiction" means.
     let mut contradictions = Vec::new();
+    let mut seen_pairs: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
     let tags_map: std::collections::HashMap<String, Vec<usize>> = {
         let mut m = std::collections::HashMap::new();
         for (i, mem) in memories.iter().enumerate() {
@@ -113,14 +124,26 @@ pub async fn execute(
             for j in (i + 1)..indices.len().min(10) {
                 let a = &memories[indices[i]];
                 let b = &memories[indices[j]];
-                if content_conflicts(&a.content, &b.content) {
-                    contradictions.push(serde_json::json!({
-                        "memory_a": a.id,
-                        "memory_b": b.id,
-                        "snippet_a": truncate(&a.content, 120),
-                        "snippet_b": truncate(&b.content, 120),
-                    }));
+                if !content_conflicts(&a.content, &b.content) {
+                    continue;
                 }
+                // Order-independent identity for the pair. We canonicalise
+                // by `min/max` so (A,B) and (B,A) hash to the same slot
+                // regardless of which tag bucket surfaced them first.
+                let key = if a.id <= b.id {
+                    (a.id.clone(), b.id.clone())
+                } else {
+                    (b.id.clone(), a.id.clone())
+                };
+                if !seen_pairs.insert(key) {
+                    continue;
+                }
+                contradictions.push(serde_json::json!({
+                    "memory_a": a.id,
+                    "memory_b": b.id,
+                    "snippet_a": truncate(&a.content, 120),
+                    "snippet_b": truncate(&b.content, 120),
+                }));
             }
         }
     }
@@ -236,12 +259,19 @@ pub async fn execute(
         })
         .collect();
 
-    // 5. Pattern clusters — use spreading activation to find dense regions
+    // 5. Pattern clusters — use spreading activation to find dense regions.
+    // Take the activation-network Arc out of the engine and drop the
+    // engine guard so the read-only association lookups don't block
+    // unrelated tools.
     let patterns = {
-        let cog = cognitive.lock().await;
+        let net = {
+            let cog = cognitive.lock().await;
+            std::sync::Arc::clone(&cog.activation_network)
+        };
+        let net = net.read().await;
         let mut found = Vec::new();
         for mem in memories.iter().take(20) {
-            let associations = cog.activation_network.get_associations(&mem.id);
+            let associations = net.get_associations(&mem.id);
             if associations.len() >= 3 {
                 found.push(serde_json::json!({
                     "hub_memory": mem.id,
@@ -852,6 +882,99 @@ mod tests {
             .find(|i| i["type"] == "stale_decision")
             .expect("stale_decision insight should be present");
         assert_eq!(stale_insight["severity"], "high");
+    }
+
+    /// Regression test for the briefing-page "69 contradictions / 54 unique
+    /// pairs" bug. The contradiction loop iterates per tag, so a pair that
+    /// shares N tags was pushed N times — the dashboard summary said
+    /// "Detected 69 contradictions" while only 54 of them were distinct
+    /// pairs (a 28% inflation). We pin this with two memories that share
+    /// three tags and a clear stance + entity overlap. Without the
+    /// deduplication step the contradiction array contains the same
+    /// (memory_a, memory_b) entry three times.
+    #[tokio::test]
+    async fn test_contradiction_pairs_are_deduped_across_shared_tags() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let storage = Arc::new(
+            vestige_core::Storage::new(Some(dir.path().join("test.db"))).unwrap(),
+        );
+
+        // Noise so reflect's `memories.len() < 3` guard doesn't bail.
+        for _ in 0..3 {
+            storage
+                .ingest(vestige_core::IngestInput {
+                    content: "noise memory".to_string(),
+                    node_type: "fact".to_string(),
+                    tags: vec!["noise".to_string()],
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+
+        // Two memories with opposing stances on the same entity ("Redis"),
+        // sharing three tags. Three tags → without dedup the inner loop
+        // pushes the pair three times.
+        let shared_tags = vec![
+            "redis".to_string(),
+            "cache".to_string(),
+            "infra".to_string(),
+        ];
+        let a = storage
+            .ingest(vestige_core::IngestInput {
+                content: "You should use Redis for caching in production.".to_string(),
+                node_type: "fact".to_string(),
+                tags: shared_tags.clone(),
+                ..Default::default()
+            })
+            .unwrap();
+        let b = storage
+            .ingest(vestige_core::IngestInput {
+                content: "You should not use Redis for caching in production.".to_string(),
+                node_type: "fact".to_string(),
+                tags: shared_tags.clone(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let cognitive = Arc::new(Mutex::new(CognitiveEngine::new()));
+        let result = execute(&storage, &cognitive, None).await.unwrap();
+
+        let contradictions = result["contradictions"].as_array().unwrap();
+        assert_eq!(
+            contradictions.len(),
+            1,
+            "contradiction pair appeared once per shared tag instead of being deduped; \
+             got {} entries: {:#?}",
+            contradictions.len(),
+            contradictions
+        );
+
+        // The single surviving entry must point at the two ingested memories.
+        let pair = &contradictions[0];
+        let ids: std::collections::HashSet<&str> = [
+            pair["memory_a"].as_str().unwrap_or(""),
+            pair["memory_b"].as_str().unwrap_or(""),
+        ]
+        .into_iter()
+        .collect();
+        assert!(
+            ids.contains(a.id.as_str()) && ids.contains(b.id.as_str()),
+            "deduped pair must reference both ingested memories"
+        );
+
+        // The summary's count must match the deduplicated length. The
+        // pre-fix code reported "Detected 3 contradictions" here, which is
+        // exactly the inflation the dashboard surfaced as 69-vs-54.
+        let summary = result["summary"].as_str().unwrap_or("");
+        assert!(
+            summary.contains("1 contradiction") && !summary.contains("1 contradictions"),
+            "summary must use singular form for a single contradiction; got {summary:?}"
+        );
+        assert_eq!(
+            result["stats"]["contradictions_found"].as_i64().unwrap(),
+            1,
+            "stats counter must mirror the deduplicated contradictions length"
+        );
     }
 
     #[tokio::test]

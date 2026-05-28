@@ -57,8 +57,9 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
             let memories: Vec<vestige_core::KnowledgeNode> =
                 tokio::task::spawn_blocking(move || -> Result<Vec<_>, String> {
                     if let Some(query) = topic_owned {
+                        let (kw, sem) = vestige_core::default_hybrid_weights();
                         let results = storage_clone
-                            .hybrid_search(&query, limit, 0.3, 0.7)
+                            .hybrid_search(&query, limit, kw, sem)
                             .map_err(|e| e.to_string())?;
                         Ok(results
                             .into_iter()
@@ -108,8 +109,9 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
             let all: Vec<vestige_core::KnowledgeNode> =
                 tokio::task::spawn_blocking(move || -> Result<Vec<_>, String> {
                     if let Some(query) = topic_owned {
+                        let (kw, sem) = vestige_core::default_hybrid_weights();
                         let results = storage_clone
-                            .hybrid_search(&query, limit * 3, 0.3, 0.7)
+                            .hybrid_search(&query, limit * 3, kw, sem)
                             .map_err(|e| e.to_string())?;
                         Ok(results
                             .into_iter()
@@ -165,11 +167,21 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
             memories.sort_by_key(|m| m.created_at);
 
             let now = Utc::now();
+            // The dashboard wire DTO (`TemporalResultDto`) consumes one
+            // shape across all four actions: `memories: [TemporalEntryDto]`
+            // with `id`, `content`, `retention`, `tags` (+ optional
+            // validFrom / validUntil). The history branch used to emit
+            // `timeline` with `status`/`createdAt` instead, which silently
+            // produced `count = N` with an empty list on the dashboard
+            // (the array name didn't match) and would also have 502-ed
+            // because `retention` was missing. Keep `createdAt` and the
+            // `status` chip embedded under names the DTO ignores — the
+            // wire layer is forwards-compatible on extra fields.
             Ok(serde_json::json!({
                 "action": "history",
                 "topic": query,
                 "count": memories.len(),
-                "timeline": memories.iter().map(|m| {
+                "memories": memories.iter().map(|m| {
                     let is_current = m.valid_until.is_none_or(|t| t > now);
                     serde_json::json!({
                         "id": m.id,
@@ -177,6 +189,7 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
                         "created_at": m.created_at.to_rfc3339(),
                         "valid_from": m.valid_from.map(|d| d.to_rfc3339()),
                         "valid_until": m.valid_until.map(|d| d.to_rfc3339()),
+                        "retention": format!("{:.2}", m.retention_strength),
                         "status": if is_current { "current" } else { "superseded" },
                         "tags": m.tags,
                     })
@@ -263,5 +276,114 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..s.floor_char_boundary(max)])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use vestige_core::{IngestInput, Storage};
+
+    /// Regression test for the temporal `history` action wire-shape bug.
+    ///
+    /// The dashboard wire contract (`TemporalResultDto`) consumes
+    /// `memories: Vec<TemporalEntryDto>` for all four actions. The
+    /// `current` and `expired` branches emit `"memories"`, but the
+    /// `history` branch used to emit `"timeline"`, so the dashboard saw
+    /// `count = N` with an empty `memories` array — a silent split
+    /// between the headline number and the list rendered beneath it.
+    ///
+    /// We pin the contract here: history MUST emit `memories` (same
+    /// field name as the other actions), and that array MUST have
+    /// `count` entries.
+    #[tokio::test]
+    async fn history_action_emits_memories_field_matching_count() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let storage = Arc::new(Storage::new(Some(dir.path().join("test.db"))).unwrap());
+
+        // A handful of memories the hybrid search will pick up under
+        // the topic "redis caching".
+        for content in [
+            "Redis caching gives sub-ms reads when the working set fits in RAM",
+            "Redis caching can silently mask stale data when TTLs are wrong",
+            "Switching from Redis caching to in-memory LRU dropped tail latency",
+        ] {
+            storage
+                .ingest(IngestInput {
+                    content: content.to_string(),
+                    node_type: "fact".to_string(),
+                    tags: vec!["redis".to_string(), "caching".to_string()],
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+
+        let args = Some(serde_json::json!({
+            "action": "history",
+            "topic": "redis caching",
+            "limit": 10,
+        }));
+
+        let result = execute(&storage, args).await.unwrap();
+
+        // The wire-shape invariant the bug violated.
+        let memories = result
+            .get("memories")
+            .and_then(|v| v.as_array())
+            .expect("history response must expose a `memories` array (not `timeline`)");
+        let count = result["count"].as_u64().unwrap() as usize;
+
+        assert_eq!(
+            memories.len(),
+            count,
+            "history `count` must equal `memories.len()` (was {} vs {})",
+            count,
+            memories.len(),
+        );
+        assert!(
+            count > 0,
+            "history search for an indexed topic should return at least one memory"
+        );
+    }
+
+    /// Each entry in the `memories` array must carry every field
+    /// `TemporalEntryDto` declares as non-optional or the dashboard
+    /// renderer 502s on parse. We keep this guard tight on `id`,
+    /// `content`, `retention`, and `tags`.
+    #[tokio::test]
+    async fn history_entries_match_temporal_entry_dto_shape() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let storage = Arc::new(Storage::new(Some(dir.path().join("test.db"))).unwrap());
+
+        storage
+            .ingest(IngestInput {
+                content: "Redis caching tip about TTLs".to_string(),
+                node_type: "fact".to_string(),
+                tags: vec!["redis".to_string()],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let args = Some(serde_json::json!({
+            "action": "history",
+            "topic": "redis",
+            "limit": 5,
+        }));
+        let result = execute(&storage, args).await.unwrap();
+        let memories = result["memories"].as_array().expect("memories array");
+        let entry = memories
+            .first()
+            .expect("at least one history entry for this topic");
+
+        assert!(entry.get("id").and_then(|v| v.as_str()).is_some());
+        assert!(entry.get("content").and_then(|v| v.as_str()).is_some());
+        assert!(entry.get("tags").and_then(|v| v.as_array()).is_some());
+        // `retention` is required by the DTO; missing it makes the
+        // dashboard parse layer return 502 for history.
+        assert!(
+            entry.get("retention").is_some(),
+            "history entries must include `retention` (TemporalEntryDto requires it)"
+        );
     }
 }

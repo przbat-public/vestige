@@ -14,7 +14,7 @@
 //! - Tulving (1972): Episodic vs semantic memory distinction
 //! - Collins & Loftus (1975): semantic network / spreading activation
 //!   (the implementation here is a bounded graph walk inspired by their model,
-//!    not the full ACT-R activation equation from Anderson 2007)
+//!   not the full ACT-R activation equation from Anderson 2007)
 //! - Nelson & Narens (1990): Metamemory monitoring
 //! - Cepeda et al. (2006): Spacing effect
 

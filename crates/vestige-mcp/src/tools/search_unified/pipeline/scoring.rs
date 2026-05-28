@@ -74,21 +74,21 @@ fn apply_temporal_boost(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     filtered_results: &mut [SearchResult],
 ) {
-    if let Ok(cog) = cognitive.try_lock() {
-        for result in filtered_results.iter_mut() {
-            let recency = cog.temporal_searcher.recency_boost(result.node.created_at);
-            let validity = cog.temporal_searcher.validity_boost(
-                result.node.valid_from,
-                result.node.valid_until,
-                None,
-            );
-            // Blend: 85% relevance + 15% temporal signal.
-            let temporal_factor = recency * validity;
-            result.combined_score = result.combined_score * 0.85
-                + (result.combined_score * temporal_factor as f32) * 0.15;
-        }
-    } else {
-        crate::cognitive::try_lock_metrics::record_miss("search_scoring");
+    let Ok(cog) = cognitive.try_lock() else {
+        crate::cognitive::try_lock_metrics::record_miss("search_scoring_temporal");
+        return;
+    };
+    for result in filtered_results.iter_mut() {
+        let recency = cog.temporal_searcher.recency_boost(result.node.created_at);
+        let validity = cog.temporal_searcher.validity_boost(
+            result.node.valid_from,
+            result.node.valid_until,
+            None,
+        );
+        // Blend: 85% relevance + 15% temporal signal.
+        let temporal_factor = recency * validity;
+        result.combined_score = result.combined_score * 0.85
+            + (result.combined_score * temporal_factor as f32) * 0.15;
     }
 }
 
@@ -136,26 +136,28 @@ fn apply_state_accessibility(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     filtered_results: &mut [SearchResult],
 ) {
-    if let Ok(cog) = cognitive.try_lock() {
-        for result in filtered_results.iter_mut() {
-            let mut lifecycle = MemoryLifecycle::new();
-            lifecycle.last_access = result.node.last_accessed;
-            lifecycle.access_count = result.node.reps as u32;
-            lifecycle.state = if result.node.retention_strength > 0.7 {
-                MemoryState::Active
-            } else if result.node.retention_strength > 0.3 {
-                MemoryState::Dormant
-            } else if result.node.retention_strength > 0.1 {
-                MemoryState::Silent
-            } else {
-                MemoryState::Unavailable
-            };
+    let Ok(cog) = cognitive.try_lock() else {
+        crate::cognitive::try_lock_metrics::record_miss("search_scoring_state");
+        return;
+    };
+    for result in filtered_results.iter_mut() {
+        let mut lifecycle = MemoryLifecycle::new();
+        lifecycle.last_access = result.node.last_accessed;
+        lifecycle.access_count = result.node.reps as u32;
+        lifecycle.state = if result.node.retention_strength > 0.7 {
+            MemoryState::Active
+        } else if result.node.retention_strength > 0.3 {
+            MemoryState::Dormant
+        } else if result.node.retention_strength > 0.1 {
+            MemoryState::Silent
+        } else {
+            MemoryState::Unavailable
+        };
 
-            let adjusted = cog
-                .accessibility_calc
-                .calculate(&lifecycle, result.combined_score as f64);
-            result.combined_score = adjusted as f32;
-        }
+        let adjusted = cog
+            .accessibility_calc
+            .calculate(&lifecycle, result.combined_score as f64);
+        result.combined_score = adjusted as f32;
     }
 }
 
@@ -172,39 +174,49 @@ fn apply_context_matching(
     {
         let retrieval_ctx =
             EncodingContext::new().with_topical(TopicalContext::with_topics(topics.clone()));
-        if let Ok(cog) = cognitive.try_lock() {
-            for result in filtered_results.iter_mut() {
-                let encoding_ctx = EncodingContext::new()
-                    .with_topical(TopicalContext::with_topics(result.node.tags.clone()));
-                let context_score = cog
-                    .context_matcher
-                    .match_contexts(&encoding_ctx, &retrieval_ctx);
-                // Blend: context match boosts relevance up to +30%.
-                result.combined_score *= 1.0 + (context_score as f32 * 0.3);
+        match cognitive.try_lock() {
+            Ok(cog) => {
+                for result in filtered_results.iter_mut() {
+                    let encoding_ctx = EncodingContext::new()
+                        .with_topical(TopicalContext::with_topics(result.node.tags.clone()));
+                    let context_score = cog
+                        .context_matcher
+                        .match_contexts(&encoding_ctx, &retrieval_ctx);
+                    // Blend: context match boosts relevance up to +30%.
+                    result.combined_score *= 1.0 + (context_score as f32 * 0.3);
+                }
+            }
+            Err(_) => {
+                crate::cognitive::try_lock_metrics::record_miss("search_scoring_context_match");
             }
         }
     }
 
     // Reinstatement for the top result helps the agent see WHY this
     // memory matched — temporal/topical/session hints + related ids.
-    if let Ok(cog) = cognitive.try_lock()
-        && let Some(first) = filtered_results.first()
-    {
-        let current_ctx = if let Some(ref topics) = args.context_topics {
-            EncodingContext::new().with_topical(TopicalContext::with_topics(topics.clone()))
-        } else {
-            EncodingContext::new()
-        };
-        let reinstatement = cog
-            .context_matcher
-            .reinstate_context(&first.node.id, &current_ctx);
-        return Some(serde_json::json!({
-            "memoryId": reinstatement.memory_id,
-            "temporalHint": reinstatement.temporal_hint,
-            "topicalHint": reinstatement.topical_hint,
-            "sessionHint": reinstatement.session_hint,
-            "relatedMemories": reinstatement.related_memories,
-        }));
+    match cognitive.try_lock() {
+        Ok(cog) => {
+            if let Some(first) = filtered_results.first() {
+                let current_ctx = if let Some(ref topics) = args.context_topics {
+                    EncodingContext::new().with_topical(TopicalContext::with_topics(topics.clone()))
+                } else {
+                    EncodingContext::new()
+                };
+                let reinstatement = cog
+                    .context_matcher
+                    .reinstate_context(&first.node.id, &current_ctx);
+                return Some(serde_json::json!({
+                    "memoryId": reinstatement.memory_id,
+                    "temporalHint": reinstatement.temporal_hint,
+                    "topicalHint": reinstatement.topical_hint,
+                    "sessionHint": reinstatement.session_hint,
+                    "relatedMemories": reinstatement.related_memories,
+                }));
+            }
+        }
+        Err(_) => {
+            crate::cognitive::try_lock_metrics::record_miss("search_scoring_context_reinstate");
+        }
     }
     None
 }
@@ -243,26 +255,28 @@ async fn apply_retrieval_competition(
         vec![None; filtered_results.len()]
     };
 
-    if let Ok(mut cog) = cognitive.try_lock() {
-        let candidates: Vec<CompetitionCandidate> = filtered_results
-            .iter()
-            .zip(embeddings)
-            .map(|(r, embedding)| CompetitionCandidate {
-                memory_id: r.node.id.clone(),
-                relevance_score: r.combined_score as f64,
-                similarity_to_query: r.semantic_score.unwrap_or(0.0) as f64,
-                embedding,
-            })
-            .collect();
-        if let Some(result) = cog.competition_mgr.run_competition(&candidates, 0.7) {
-            for suppressed_id in &result.suppressed_ids {
-                if let Some(r) = filtered_results
-                    .iter_mut()
-                    .find(|r| &r.node.id == suppressed_id)
-                {
-                    r.combined_score *= 0.85;
-                    suppressed_count += 1;
-                }
+    let Ok(mut cog) = cognitive.try_lock() else {
+        crate::cognitive::try_lock_metrics::record_miss("search_scoring_competition");
+        return Ok(suppressed_count);
+    };
+    let candidates: Vec<CompetitionCandidate> = filtered_results
+        .iter()
+        .zip(embeddings)
+        .map(|(r, embedding)| CompetitionCandidate {
+            memory_id: r.node.id.clone(),
+            relevance_score: r.combined_score as f64,
+            similarity_to_query: r.semantic_score.unwrap_or(0.0) as f64,
+            embedding,
+        })
+        .collect();
+    if let Some(result) = cog.competition_mgr.run_competition(&candidates, 0.7) {
+        for suppressed_id in &result.suppressed_ids {
+            if let Some(r) = filtered_results
+                .iter_mut()
+                .find(|r| &r.node.id == suppressed_id)
+            {
+                r.combined_score *= 0.85;
+                suppressed_count += 1;
             }
         }
     }
@@ -290,20 +304,22 @@ fn apply_emotional_boost(
     args: &SearchArgs,
     filtered_results: &mut [SearchResult],
 ) {
-    if let Ok(mut cog) = cognitive.try_lock() {
-        cog.emotional_memory.evaluate_content(&args.query);
+    let Ok(mut cog) = cognitive.try_lock() else {
+        crate::cognitive::try_lock_metrics::record_miss("search_scoring_emotional");
+        return;
+    };
+    cog.emotional_memory.evaluate_content(&args.query);
 
-        for result in filtered_results.iter_mut() {
-            let arousal = result.node.sentiment_magnitude.abs() as f32;
-            if arousal > 0.3 {
-                result.combined_score *= 1.0 + (arousal * 0.10).min(0.10);
-            }
+    for result in filtered_results.iter_mut() {
+        let arousal = result.node.sentiment_magnitude.abs() as f32;
+        if arousal > 0.3 {
+            result.combined_score *= 1.0 + (arousal * 0.10).min(0.10);
+        }
 
-            let valence = result.node.sentiment_score;
-            let mood_boost = cog.emotional_memory.mood_congruence_boost(valence);
-            if mood_boost > 0.0 {
-                result.combined_score *= 1.0 + mood_boost as f32;
-            }
+        let valence = result.node.sentiment_score;
+        let mood_boost = cog.emotional_memory.mood_congruence_boost(valence);
+        if mood_boost > 0.0 {
+            result.combined_score *= 1.0 + mood_boost as f32;
         }
     }
 }

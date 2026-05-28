@@ -12,6 +12,9 @@
 //!   self-assessment. Track hit/miss ratio per query type to adjust search
 //!   parameters (similarity threshold, RRF k-factor) dynamically.
 
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
 use vestige_core::neuroscience::predictive_retrieval::PredictiveMemory;
 use vestige_core::neuroscience::prospective_memory::{IntentionParser, ProspectiveMemory};
 use vestige_core::search::TemporalSearcher;
@@ -93,7 +96,14 @@ use vestige_core::{
 /// activations look flat. Added 2026-05-19.
 pub struct CognitiveEngine {
     // -- Neuroscience --
-    pub activation_network: ActivationNetwork,
+    //
+    // `activation_network` and `dreamer` live behind their own `RwLock` so
+    // hot paths can clone the `Arc`, drop the engine guard, then lock the
+    // inner network/dreamer independently. This removes them from the
+    // serialization chokepoint that the rest of the engine still uses (see
+    // CHANGELOG `[3.2.1]`). The other modules stay protected by the engine
+    // `Mutex` until their APIs settle.
+    pub activation_network: Arc<RwLock<ActivationNetwork>>,
     pub synaptic_tagging: SynapticTaggingSystem,
     pub hippocampal_index: HippocampalIndex,
     pub context_matcher: ContextMatcher,
@@ -115,7 +125,7 @@ pub struct CognitiveEngine {
     pub reconsolidation: ReconsolidationManager,
     pub intent_detector: IntentDetector,
     pub activity_tracker: ActivityTracker,
-    pub dreamer: MemoryDreamer,
+    pub dreamer: Arc<RwLock<MemoryDreamer>>,
     pub chain_builder: MemoryChainBuilder,
     pub compressor: MemoryCompressor,
     pub cross_project: CrossProjectLearner,
@@ -159,8 +169,15 @@ impl CognitiveEngine {
     /// shorter than typical downtime).
     pub fn hydrate(&mut self, storage: &Storage) {
         // 1. Connections → ActivationNetwork
+        //
+        // `hydrate` runs synchronously from `spawn_blocking` (see main.rs).
+        // `blocking_write()` is the right primitive here: it'd panic from
+        // an async task, but in a blocking context it just acquires the
+        // write lock. Since nothing else has the Arc yet there's no
+        // contention.
         match storage.get_all_connections() {
             Ok(connections) => {
+                let mut net = self.activation_network.blocking_write();
                 for conn in &connections {
                     let link_type = match conn.link_type.as_str() {
                         "semantic" => LinkType::Semantic,
@@ -170,7 +187,7 @@ impl CognitiveEngine {
                         "shared_concepts" | "complementary" => LinkType::Semantic,
                         _ => LinkType::Semantic,
                     };
-                    self.activation_network.add_edge(
+                    net.add_edge(
                         conn.source_id.clone(),
                         conn.target_id.clone(),
                         link_type,
@@ -245,7 +262,7 @@ impl CognitiveEngine {
     pub fn new() -> Self {
         Self {
             // Neuroscience
-            activation_network: ActivationNetwork::new(),
+            activation_network: Arc::new(RwLock::new(ActivationNetwork::new())),
             synaptic_tagging: SynapticTaggingSystem::new(),
             hippocampal_index: HippocampalIndex::new(),
             context_matcher: ContextMatcher::new(),
@@ -267,7 +284,7 @@ impl CognitiveEngine {
             reconsolidation: ReconsolidationManager::new(),
             intent_detector: IntentDetector::new(),
             activity_tracker: ActivityTracker::new(),
-            dreamer: MemoryDreamer::new(),
+            dreamer: Arc::new(RwLock::new(MemoryDreamer::new())),
             chain_builder: MemoryChainBuilder::new(),
             compressor: MemoryCompressor::new(),
             cross_project: CrossProjectLearner::new(),
@@ -388,8 +405,11 @@ mod tests {
         let (storage, _dir) = create_test_storage();
         let mut engine = CognitiveEngine::new();
         engine.hydrate(&storage);
-        // Should succeed with 0 connections
-        let assocs = engine.activation_network.get_associations("nonexistent");
+        // Should succeed with 0 connections. No async runtime in this
+        // test, so use `try_read()` which is non-blocking and never panics
+        // outside a reactor.
+        let net = engine.activation_network.try_read().unwrap();
+        let assocs = net.get_associations("nonexistent");
         assert!(assocs.is_empty());
     }
 
@@ -420,7 +440,8 @@ mod tests {
         engine.hydrate(&storage);
 
         // Verify activation network has the connection
-        let assocs = engine.activation_network.get_associations(&id1);
+        let net = engine.activation_network.try_read().unwrap();
+        let assocs = net.get_associations(&id1);
         assert!(
             !assocs.is_empty(),
             "Hydrated engine should have associations for {}",
@@ -452,6 +473,69 @@ mod tests {
 
         // Sanity: the indexed memory IDs are reachable through the index
         let _ = (id1, id2);
+    }
+
+    /// activation_network must expose an `Arc<RwLock<…>>` handle so callers
+    /// can clone it out of the engine, drop the engine guard, then lock the
+    /// network independently. Without that pattern every search/ingest path
+    /// serializes through the giant engine mutex — exactly the contention
+    /// the audit flagged in CHANGELOG `[3.2.1]`.
+    #[tokio::test(start_paused = false)]
+    async fn activation_network_handle_can_outlive_engine_guard() {
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        let engine = Arc::new(Mutex::new(CognitiveEngine::new()));
+
+        // Clone the handle out of the engine, then drop the engine guard.
+        let net_handle = {
+            let cog = engine.lock().await;
+            Arc::clone(&cog.activation_network)
+        };
+
+        // Now hold a read lock on the activation network while ANOTHER task
+        // acquires the engine. The point of splitting locks is that the two
+        // operations don't deadlock or serialize. A second engine lock must
+        // be obtainable within a few ms even while we hold the network
+        // lock.
+        let read_guard = net_handle.read().await;
+        let other = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            engine.lock(),
+        )
+        .await;
+        assert!(
+            other.is_ok(),
+            "engine lock must be obtainable while a separate \
+             activation_network read lock is held — otherwise the split is cosmetic"
+        );
+        drop(read_guard);
+    }
+
+    /// Same guarantee for the dreamer — its `synthesize_*` paths are read-
+    /// only and used during dream cycles that can take seconds. Holding the
+    /// engine mutex for that long would block every other tool call.
+    #[tokio::test(start_paused = false)]
+    async fn dreamer_handle_can_outlive_engine_guard() {
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        let engine = Arc::new(Mutex::new(CognitiveEngine::new()));
+        let dreamer_handle = {
+            let cog = engine.lock().await;
+            Arc::clone(&cog.dreamer)
+        };
+        let read_guard = dreamer_handle.read().await;
+        let other = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            engine.lock(),
+        )
+        .await;
+        assert!(
+            other.is_ok(),
+            "engine lock must be obtainable while a separate dreamer read lock is held"
+        );
+        drop(read_guard);
     }
 
     #[test]
@@ -489,7 +573,8 @@ mod tests {
         let mut engine = CognitiveEngine::new();
         engine.hydrate(&storage);
 
-        let assocs = engine.activation_network.get_associations(&id1);
+        let net = engine.activation_network.try_read().unwrap();
+        let assocs = net.get_associations(&id1);
         assert!(
             assocs.len() >= 2,
             "Should have at least 2 associations, got {}",

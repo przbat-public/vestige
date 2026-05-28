@@ -55,8 +55,9 @@ pub async fn execute(
         tokio::task::spawn_blocking(move || -> Result<_, String> {
             let mut out = Vec::with_capacity(queries_for_task.len());
             for query in &queries_for_task {
+                let (kw, sem) = vestige_core::default_hybrid_weights();
                 let results = storage_search
-                    .hybrid_search(query, 5, 0.3, 0.7)
+                    .hybrid_search(query, 5, kw, sem)
                     .map_err(|e| e.to_string())?;
                 out.push(results);
             }

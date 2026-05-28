@@ -317,26 +317,18 @@ fn classify_evidence(content: &str, node_type: &str) -> String {
     }
 }
 
+/// Quick lexical guess at whether `content` reads like an opinion.
+///
+/// Routes through [`vestige_core::nlp::default_opinion_detector`] — today a
+/// heuristic (EN + PL first-person frames + hedges), swappable to a
+/// subjectivity classifier behind a feature flag via the same factory.
+/// A false positive just drops the confidence floor slightly; a false
+/// negative leaves a stronger confidence claim than warranted, so the
+/// detector defaults to recall-biased lexicons.
 fn is_opinion(content: &str) -> bool {
-    let lower = content.to_lowercase();
-    let markers = [
-        "i think",
-        "i believe",
-        "probably",
-        "might be",
-        "could be",
-        "seems like",
-        "in my opinion",
-        "i prefer",
-        "i feel",
-        "arguably",
-        "maybe",
-        "possibly",
-        "i suspect",
-        "likely",
-        "unlikely",
-    ];
-    markers.iter().any(|m| lower.contains(m))
+    vestige_core::nlp::default_opinion_detector()
+        .detect(content)
+        .positive
 }
 
 fn confidence_recommendation(score: &ConfidenceScore) -> String {

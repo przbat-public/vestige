@@ -11,7 +11,8 @@ pub mod phases;
 mod sleep;
 
 pub use phases::{
-    CreativeConnection, CreativeConnectionType, DreamEngine, DreamInsight, DreamPhase,
-    FourPhaseDreamResult, PhaseResult, TriageCategory, TriagedMemory,
+    CreativeConnection, CreativeConnectionType, DEFAULT_NREM3_DOWNSCALE_FACTOR, DreamEngine,
+    DreamInsight, DreamPhase, FourPhaseDreamResult, PhaseResult, TriageCategory, TriagedMemory,
+    default_nrem3_downscale_factor,
 };
 pub use sleep::SleepConsolidation;

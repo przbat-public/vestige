@@ -188,6 +188,172 @@ async fn test_smart_ingest_default_node_type_is_fact() {
     assert_eq!(node.node_type, "fact");
 }
 
+// ========================================================================
+// Causality graph — relation-derived edges are persisted with the right
+// `link_type` so the `explore_connections` / causal-chain tools survive
+// restarts. Pre 2026-05-22 these edges only ever lived in the in-memory
+// activation network AND every link was forced to `Causal` regardless of
+// the source verb. (Both bugs were RED-tested before fixing.)
+// ========================================================================
+
+/// Helper: ingest one piece of content and return its node id.
+async fn ingest_content(storage: &Arc<Storage>, cognitive: &Arc<Mutex<CognitiveEngine>>, content: &str) -> String {
+    let args = serde_json::json!({ "content": content });
+    let result = execute(storage, cognitive, Some(args)).await.expect("ingest");
+    result["nodeId"].as_str().expect("nodeId").to_string()
+}
+
+/// Helper: force-create a memory so the prediction-error gate doesn't
+/// silently merge it into a semantically similar existing memory. Used
+/// by the causality-graph tests where we need two DISTINCT node ids to
+/// observe edge persistence between them.
+async fn ingest_force_create(
+    storage: &Arc<Storage>,
+    cognitive: &Arc<Mutex<CognitiveEngine>>,
+    content: &str,
+) -> String {
+    let args = serde_json::json!({ "content": content, "forceCreate": true });
+    let result = execute(storage, cognitive, Some(args)).await.expect("ingest");
+    result["nodeId"].as_str().expect("nodeId").to_string()
+}
+
+/// Diagnostic: verify the preprocessing pipeline actually classifies
+/// "Stress causes Insomnia" as a Causal relation BEFORE we rely on the
+/// post-ingest edge writer.
+#[cfg(feature = "preprocessing")]
+#[test]
+fn preprocess_classifies_causes_as_causal_at_pipeline_layer() {
+    use vestige_core::preprocessing::{PreprocessingConfig, preprocess};
+    use vestige_core::neuroscience::spreading_activation::LinkType;
+
+    let result = preprocess(
+        "The Stress causes the Insomnia disorder.",
+        &PreprocessingConfig::default(),
+    );
+    let entity_names: Vec<&str> = result.entities.iter().map(|e| e.text.as_str()).collect();
+    let predicates: Vec<(&str, LinkType)> =
+        result.relations.iter().map(|r| (r.predicate.as_str(), r.link_type)).collect();
+    assert!(
+        result.relations.iter().any(|r| r.link_type == LinkType::Causal),
+        "preprocess() must classify `causes` as Causal; entities={:?} relations={:?}",
+        entity_names,
+        predicates,
+    );
+}
+
+#[cfg(feature = "preprocessing")]
+#[tokio::test]
+async fn keyword_search_finds_ingested_insomnia_node() {
+    let (storage, _dir) = test_storage().await;
+    let cognitive = test_cognitive();
+    let insomnia_id = ingest_content(
+        &storage,
+        &cognitive,
+        "The Insomnia disorder is widespread among knowledge workers.",
+    )
+    .await;
+    let hits = storage
+        .keyword_search("Insomnia", 5, 0.0)
+        .expect("keyword_search must not error");
+    let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+    assert!(
+        ids.contains(&insomnia_id.as_str()),
+        "keyword_search('Insomnia') must find the ingested node; \
+         this is the prerequisite for create_relation_edges to attach \
+         an edge to it. got ids={:?}",
+        ids,
+    );
+}
+
+#[cfg(feature = "preprocessing")]
+#[tokio::test]
+async fn smart_ingest_persists_causal_edges_to_storage() {
+    let (storage, _dir) = test_storage().await;
+    let cognitive = test_cognitive();
+
+    // The proper-noun regex requires a prefix (`the`, `a`, `is`, punctuation, …)
+    // so capitalised words MID-SENTENCE aren't laundered by the
+    // start-of-sentence guard. Hence "the Insomnia disorder" rather than
+    // "Insomnia" — both entities must be reachable to the SVO extractor
+    // or the relation collapses to a noun-phrase fallback that
+    // `keyword_search` can't resolve.
+    let insomnia_id = ingest_force_create(
+        &storage,
+        &cognitive,
+        "The Insomnia disorder is widespread among knowledge workers.",
+    )
+    .await;
+    // forceCreate to skip the prediction-error gate, which would otherwise
+    // merge the second ingest INTO the first (high semantic similarity)
+    // and we'd never get a distinct stress_id to attach an edge to.
+    let stress_id = ingest_force_create(
+        &storage,
+        &cognitive,
+        "The Stress causes the Insomnia disorder.",
+    )
+    .await;
+    assert_ne!(
+        stress_id, insomnia_id,
+        "forceCreate must yield distinct node ids — the rest of the test is meaningless otherwise"
+    );
+
+    let connections = storage
+        .get_connections_for_memory(&stress_id)
+        .expect("get_connections_for_memory must not error");
+    let causal: Vec<&vestige_core::ConnectionRecord> = connections
+        .iter()
+        .filter(|c| c.link_type == "causal")
+        .collect();
+    assert!(
+        !causal.is_empty(),
+        "expected at least one persisted edge with link_type=causal after \
+         `The Stress causes the Insomnia disorder.`, got: {:?}",
+        connections.iter().map(|c| &c.link_type).collect::<Vec<_>>()
+    );
+    assert!(
+        causal.iter().any(|c| c.target_id == insomnia_id || c.source_id == insomnia_id),
+        "causal edge must connect stress → insomnia; got: {:?}",
+        causal,
+    );
+}
+
+#[cfg(feature = "preprocessing")]
+#[tokio::test]
+async fn smart_ingest_does_not_mislabel_management_as_causal() {
+    let (storage, _dir) = test_storage().await;
+    let cognitive = test_cognitive();
+
+    // Anchor for keyword resolution — "Auth Team" must already exist
+    // for the post-ingest relation walker to find a target. forceCreate
+    // on both ingests so the prediction-error gate doesn't merge them.
+    let _team_id =
+        ingest_force_create(&storage, &cognitive, "The Auth Team owns authentication.").await;
+    let alice_id = ingest_force_create(
+        &storage,
+        &cognitive,
+        "Alice manages the Auth Team since January.",
+    )
+    .await;
+
+    let connections = storage
+        .get_connections_for_memory(&alice_id)
+        .expect("get_connections_for_memory must not error");
+    for conn in &connections {
+        assert_ne!(
+            conn.link_type, "causal",
+            "`manages` must not produce a Causal edge — pre-fix it did, polluting \
+             causal traversals with hierarchical links. Got connection: {:?}",
+            conn,
+        );
+    }
+    // And the relation IS expected to exist — as semantic.
+    assert!(
+        connections.iter().any(|c| c.link_type == "semantic"),
+        "expected a semantic edge for `Alice manages the Auth Team`; got: {:?}",
+        connections.iter().map(|c| &c.link_type).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn test_schema_has_optional_fields() {
     let schema_value = schema();

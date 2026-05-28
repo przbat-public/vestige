@@ -7,6 +7,7 @@ use vestige_core::Storage;
 
 use crate::cognitive::CognitiveEngine;
 
+use super::gc::{execute_gc, gc_schema};
 use super::split_memories::{detect_compound_content_reason, execute_split_memories};
 use super::system_status::{execute_system_status, system_status_schema};
 
@@ -92,6 +93,45 @@ async fn test_system_status_has_automation_triggers() {
     );
     // lastBackupTimestamp depends on filesystem state, just check it exists
     assert!(triggers.get("lastBackupTimestamp").is_some());
+}
+
+#[tokio::test]
+async fn test_system_status_reports_reranker_readiness() {
+    // The reranker is loaded lazily in main.rs after startup. Dashboards
+    // need a way to tell "search results are using the cross-encoder"
+    // vs "still warming up". A default CognitiveEngine has no model
+    // loaded, so this must report `false`.
+    let (storage, _dir) = test_storage().await;
+    let result = execute_system_status(&storage, &test_cognitive(), None).await;
+    assert!(result.is_ok());
+    let value = result.unwrap();
+    assert!(
+        value["rerankerReady"].is_boolean(),
+        "rerankerReady must be a boolean flag (operators rely on it for monitoring)"
+    );
+    assert_eq!(
+        value["rerankerReady"],
+        false,
+        "default CognitiveEngine has no cross-encoder loaded"
+    );
+}
+
+#[tokio::test]
+async fn test_system_status_reranker_status_string() {
+    // A boolean is fine for machines, but the dashboard wants a human
+    // readable status too. Three states: ready | warming | disabled.
+    // Disabled = embeddings feature off; warming = feature on but model
+    // not loaded yet (the common case during the first minute of uptime).
+    let (storage, _dir) = test_storage().await;
+    let result = execute_system_status(&storage, &test_cognitive(), None).await;
+    let value = result.unwrap();
+    let status = value["rerankerStatus"]
+        .as_str()
+        .expect("rerankerStatus must be a string label");
+    assert!(
+        matches!(status, "ready" | "warming" | "disabled"),
+        "rerankerStatus must be ready|warming|disabled, got {status}"
+    );
 }
 
 #[tokio::test]
@@ -204,4 +244,125 @@ fn test_detect_compound_reason_multi_bullet() {
     let result = detect_compound_content_reason(content);
     assert!(result.is_some());
     assert!(result.unwrap().contains("multi-item list"));
+}
+
+// ------------------------------------------------------------------
+// Destructive-operation confirmation gate (#5 MCP elicitation prep).
+// `gc` is the highest-blast-radius maintenance op: when an over-eager
+// agent calls it with `dry_run: false` and we silently delete every
+// memory below the retention threshold, there is no recovery short of
+// `restore`. These tests pin the gate.
+// ------------------------------------------------------------------
+
+#[test]
+fn test_gc_schema_exposes_confirmed_flag() {
+    let schema = gc_schema();
+    let props = schema["properties"]
+        .as_object()
+        .expect("gc schema must have properties");
+    assert!(
+        props.contains_key("confirmed"),
+        "gc schema must advertise the `confirmed` confirmation flag so clients can prompt for it before retry"
+    );
+    assert_eq!(
+        props["confirmed"]["type"], "boolean",
+        "`confirmed` must be a boolean"
+    );
+    assert_eq!(
+        props["confirmed"]["default"], false,
+        "`confirmed` must default to false; otherwise the gate is no-op"
+    );
+}
+
+#[tokio::test]
+async fn test_gc_dry_run_does_not_require_confirmation() {
+    let (storage, _dir) = test_storage().await;
+    // dry_run=true is documented as safe and used by automation triggers.
+    // Forcing confirmation here would break every existing client.
+    let args = serde_json::json!({ "dry_run": true });
+    let result = execute_gc(&storage, Some(args)).await;
+    assert!(
+        result.is_ok(),
+        "dry_run=true must NEVER require confirmation; got: {:?}",
+        result.err()
+    );
+    let value = result.unwrap();
+    assert_eq!(value["dryRun"], true);
+}
+
+#[tokio::test]
+async fn test_gc_destructive_call_without_confirmation_is_blocked() {
+    let (storage, _dir) = test_storage().await;
+    // Seed a low-retention memory so a non-confirmed delete would have
+    // observable effect. The gate must fire BEFORE the delete is queued.
+    storage
+        .ingest(vestige_core::IngestInput {
+            content: "weak memory ripe for gc".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let args = serde_json::json!({ "dry_run": false });
+    let result = execute_gc(&storage, Some(args)).await;
+    let err = result.expect_err("destructive gc without confirmation must error out");
+    assert!(
+        err.contains("`gc`"),
+        "error must name the operation: `{}`",
+        err
+    );
+    assert!(
+        err.contains("confirmed: true"),
+        "error must show the required flag: `{}`",
+        err
+    );
+    assert!(
+        err.contains("requestedSchema"),
+        "error must include the structured elicitation schema for clients to consume: `{}`",
+        err
+    );
+
+    // CRITICAL: the gate must NOT mutate state. If we already started
+    // deleting and only THEN errored, the user just lost data.
+    let stats = storage.get_stats().unwrap();
+    assert_eq!(
+        stats.total_nodes, 1,
+        "blocked gc must not delete anything: stats={:?}",
+        stats
+    );
+}
+
+#[tokio::test]
+async fn test_gc_destructive_call_with_confirmation_proceeds() {
+    let (storage, _dir) = test_storage().await;
+
+    let args = serde_json::json!({
+        "dry_run": false,
+        "confirmed": true,
+        // Set min_retention very high so even fresh memories count as candidates;
+        // we want the destructive path to actually execute.
+        "min_retention": 1.0,
+    });
+    let result = execute_gc(&storage, Some(args)).await;
+    assert!(
+        result.is_ok(),
+        "confirmed destructive gc must proceed: {:?}",
+        result.err()
+    );
+    let value = result.unwrap();
+    assert_eq!(value["dryRun"], false, "must record that this WAS destructive");
+}
+
+#[tokio::test]
+async fn test_gc_rejects_string_confirmed_to_avoid_hallucinated_flags() {
+    let (storage, _dir) = test_storage().await;
+    // An over-eager agent might hallucinate `"confirmed": "true"` (string).
+    // The boolean-only contract MUST block this.
+    let args = serde_json::json!({
+        "dry_run": false,
+        "confirmed": "true",
+    });
+    let result = execute_gc(&storage, Some(args)).await;
+    let err = result.expect_err("string `confirmed` must NOT be accepted as a boolean");
+    assert!(err.contains("`gc`"), "expected gc-mentioning error: `{}`", err);
 }

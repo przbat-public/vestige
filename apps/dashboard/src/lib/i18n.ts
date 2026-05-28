@@ -31,6 +31,21 @@ i18n
     interpolation: { escapeValue: false },
   });
 
+// Keep `<html lang>` in sync with the active locale. Previously this
+// was only set inside `LanguageSwitcher` on click — meaning a
+// returning user with `localStorage["vestige-language"]="pl"`
+// hydrated with `<html lang="en">` until they re-picked their
+// language. The attribute drives screen-reader pronunciation,
+// CSS `:lang()` selectors, and the browser's hyphenation rules,
+// so the gap was a real accessibility regression.
+if (typeof document !== 'undefined') {
+  const syncHtmlLang = (lng: string) => {
+    document.documentElement.lang = lng;
+  };
+  syncHtmlLang(i18n.language);
+  i18n.on('languageChanged', syncHtmlLang);
+}
+
 function preloadFallback() {
   const current = i18n.language.slice(0, 2);
   if (current !== 'en') {

@@ -136,6 +136,9 @@ impl McpServer {
             "predict" => {
                 tools::predict::execute(&self.storage, &self.cognitive, effective_args).await
             }
+            "precompute_for_context" => {
+                tools::precompute::execute(&self.storage, &self.cognitive, effective_args).await
+            }
             "restore" => tools::restore::execute(&self.storage, effective_args).await,
 
             // ---- Context packets (v1.8+) -----------------------------------

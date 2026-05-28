@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -11,6 +11,7 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { api } from '@/stores/api';
+import { useDialogStore } from '@/stores/dialogs';
 import { queryKeys } from '@/stores/query';
 import { EVENT, track, useTrackPageView } from '@/stores/telemetry';
 import { toast } from '@/stores/toast';
@@ -101,6 +102,21 @@ export function TemporalPage() {
 
   const memories = data?.memories ?? [];
 
+  // Same drawer-open contract as HubCard / InsightCard / CommandPalette:
+  // stash the requested memory id and route to /memories so the
+  // MemoriesPage useEffect drains the slot and opens the detail
+  // drawer. Previously the temporal entries were inert — the inline
+  // TODO on this page admitted the gap and asked users to copy short
+  // ids by hand. That's no longer needed.
+  const navigate = useNavigate();
+  const openMemory = useCallback(
+    (id: string) => {
+      useDialogStore.getState().requestSelectMemory(id);
+      navigate('/memories');
+    },
+    [navigate],
+  );
+
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full w-full">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -155,6 +171,7 @@ export function TemporalPage() {
               tab={tab}
               onInvalidate={() => invalidateMutation.mutate(m.id)}
               invalidating={invalidateMutation.isPending && invalidateMutation.variables === m.id}
+              onOpen={() => openMemory(m.id)}
             />
           ))}
         </div>
@@ -168,9 +185,10 @@ interface TemporalEntryCardProps {
   tab: TemporalAction;
   onInvalidate: () => void;
   invalidating: boolean;
+  onOpen: () => void;
 }
 
-function TemporalEntryCard({ entry, tab, onInvalidate, invalidating }: TemporalEntryCardProps) {
+function TemporalEntryCard({ entry, tab, onInvalidate, invalidating, onOpen }: TemporalEntryCardProps) {
   const { t } = useTranslation();
 
   // Badge logic mirrors `MemoryMetadataFooter` — expired vs expiring vs
@@ -194,11 +212,19 @@ function TemporalEntryCard({ entry, tab, onInvalidate, invalidating }: TemporalE
   return (
     <Card className="space-y-2">
       <div className="flex items-start justify-between gap-3">
-        {/* MemoriesPage uses a drawer rather than per-id routing, so deep
-            linking to a single memory needs a separate refactor. For now
-            we surface the content inline and let users copy the short id
-            from the footer if they want to find it in Memories. */}
-        <p className="flex-1 text-sm text-foreground break-words">{entry.content}</p>
+        {/* Click-through into the standard MemoriesPage detail drawer.
+            Pre-v3.4.2 this was inert — the page rendered the snippet as
+            a static `<p>` and the inline TODO asked users to copy short
+            ids out of the footer by hand. Now we stash the id in the
+            dialog store and route through, same pattern as HubCard /
+            InsightCard / CommandPalette. */}
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex-1 text-sm text-foreground break-words text-left cursor-pointer hover:underline"
+        >
+          {entry.content}
+        </button>
         <div className="flex flex-col items-end gap-1 shrink-0">
           {badge && <Badge variant={badge.variant}>{badge.label}</Badge>}
           <span className="text-[10px] text-muted-foreground/80 tabular-nums">r{entry.retention.toFixed(2)}</span>

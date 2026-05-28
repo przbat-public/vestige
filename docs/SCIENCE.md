@@ -166,24 +166,54 @@ RRF_score(d) = Σ 1/(k + rank_i(d))
 ```
 
 In Vestige:
-1. BM25 keyword search produces ranking
-2. Semantic search produces ranking
-3. RRF fuses them into final ranking
-4. Retention strength provides additional weighting
+1. BM25 keyword search produces a ranking.
+2. Semantic search (Nomic v1.5 + USearch HNSW) produces a ranking.
+3. RRF fuses them into the final ranking.
+4. Jina Reranker v2 then cross-encodes the top-K candidates — the model has access to the full query and document text at once, not just their embeddings.
+5. Retention strength provides additional weighting via the FSRS-6 trust score.
 
-This gives you exact keyword matching AND semantic understanding in one search.
+This gives you exact keyword matching, semantic understanding, **and** cross-encoder rescoring in one search.
+
+## Compound Query Decomposition
+
+A single dense embedding cannot represent two unrelated topics well. Vestige automatically splits queries containing semicolons, question chains, or conjunctions into sub-queries, runs each independently, and merges the results via max-score dedup.
+
+Example: `"auth security; infrastructure costs"` → two searches, merged. `"Who worked on FSRS? And dream consolidation?"` → two searches, merged.
+
+Effect size on production traffic has not been formally benchmarked outside the internal LoCoMo subset; treat the gain as workload-dependent.
+
+## Metacognitive Tools (v3.1)
+
+Three tools that go beyond automatic consolidation to enable deliberate self-examination:
+
+| Tool | Purpose | Scientific Basis |
+|------|---------|------------------|
+| `reflect` | Active self-examination — contradictions, gaps, stale decisions, overconfident memories, pattern clusters | Flavell 1979 (metacognition), Schön 1983 (reflection-in-action), Nelson & Narens 1990 (metamemory) |
+| `temporal` | Bi-temporal fact versioning — current, expired, history, invalidate | Snodgrass 1999 (bi-temporal), Graphiti/Zep 2024 (temporal knowledge graphs) |
+| `confidence` | Heuristic multi-dimensional confidence (encoding / retrieval / temporal / evidence); `calibrate` is a retention-based consistency check, **not** Brier-score calibration | Inspired by Kahneman 2011 (dual process), Tetlock 2015 (superforecasting), Mercier & Sperber 2017 |
+
+## Cognitive Reasoning (`deep_reference`)
+
+Beyond search, `deep_reference` runs a full reasoning pipeline across memories: hybrid retrieval → FSRS-6 trust scoring → intent classification (FactCheck / Timeline / RootCause / Comparison / Synthesis) → temporal supersession → contradiction analysis → dream-insight integration → structured synthesis. Use it for "why?", "when did X change?", "what conflicts with this?" — anything that needs evidence, not just relevance.
 
 ---
 
 ## Embedding Model
 
 **Nomic Embed Text v1.5** (via fastembed):
-- 768-dimensional vectors
-- ~130MB model size
-- Runs 100% local (after first download)
-- Competitive with OpenAI's ada-002
+- 768-dimensional vectors, truncated to 384D via Matryoshka representation learning (sub-linear quality loss, ~2× faster vector search).
+- 8,192-token context window.
+- ~130 MB model size.
+- Runs 100% local (after first download).
+- Competitive with OpenAI's `text-embedding-3-small` on MTEB.
 
-The model is cached at `~/.cache/huggingface/` after first run.
+## Reranker
+
+**Jina Reranker v2 Base Multilingual** (278 M params, ~600 MB) cross-encodes the top-K candidates after hybrid retrieval. Multilingual coverage (100+ languages) and longer effective context than older bge-reranker variants.
+
+## Cache Location
+
+Models are cached by `fastembed` in platform-specific directories — see [`CONFIGURATION.md`](CONFIGURATION.md#model-cache-location) for paths.
 
 ---
 

@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter } from 'react-router';
+import { ConfirmDialogHost } from '@/components/ConfirmDialog';
 import i18n from '@/lib/i18n';
 import { api } from '@/stores/api';
 import { ToastProvider } from '@/stores/toast';
@@ -55,6 +56,7 @@ function renderPage() {
         <MemoryRouter>
           <ToastProvider>
             <MemoriesPage />
+            <ConfirmDialogHost />
           </ToastProvider>
         </MemoryRouter>
       </QueryClientProvider>
@@ -174,10 +176,54 @@ describe('MemoriesPage — bulk selection', () => {
     await waitFor(() => expect(toolbar.textContent ?? '').toMatch(/4 selected/i));
   });
 
+  it('shows pagination controls when total exceeds the page size and calls list with the right offset', async () => {
+    const user = userEvent.setup();
+
+    // Total of 200, page of 100. UI must render Previous (disabled) + Next.
+    const page1: Memory[] = Array.from({ length: 100 }, (_, i) =>
+      makeMemory({ id: `p1-${i}`, content: `Page1 mem ${i}` }),
+    );
+    const page2: Memory[] = Array.from({ length: 100 }, (_, i) =>
+      makeMemory({ id: `p2-${i}`, content: `Page2 mem ${i}` }),
+    );
+    const listSpy = vi.spyOn(api.memories, 'list').mockImplementation(async (params?: Record<string, string>) => {
+      const offset = Number(params?.offset ?? '0');
+      return {
+        total: 200,
+        memories: offset === 0 ? page1 : page2,
+      };
+    });
+
+    renderPage();
+    await screen.findByText('Page1 mem 0');
+
+    const nav = await screen.findByRole('navigation', { name: /pagination|paginacja/i });
+    const previousBtn = within(nav).getByRole('button', { name: /previous|poprzedni/i });
+    const nextBtn = within(nav).getByRole('button', { name: /next|następn/i });
+
+    expect(previousBtn).toBeDisabled();
+    expect(nextBtn).toBeEnabled();
+    expect(nav.textContent ?? '').toMatch(/1\s*[–-]\s*100.*200/);
+
+    await user.click(nextBtn);
+    await screen.findByText('Page2 mem 0');
+
+    // Inspect the last call's offset — that's the page advance the user
+    // just triggered.
+    const lastCall = listSpy.mock.calls.at(-1)?.[0] as Record<string, string> | undefined;
+    expect(lastCall?.offset).toBe('100');
+    expect(lastCall?.limit).toBe('100');
+  });
+
+  it('hides pagination when total fits in a single page', async () => {
+    renderPage();
+    await screen.findByText('Alpha memory');
+    expect(screen.queryByRole('navigation', { name: /pagination|paginacja/i })).not.toBeInTheDocument();
+  });
+
   it('delete asks for confirmation and skips when the user cancels', async () => {
     const user = userEvent.setup();
     const deleteSpy = vi.spyOn(api.memories, 'delete');
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     renderPage();
     await screen.findByText('Alpha memory');
@@ -188,7 +234,12 @@ describe('MemoriesPage — bulk selection', () => {
     // The label includes a leading "✕" glyph; match by name fragment.
     await user.click(within(toolbar).getByRole('button', { name: /delete/i }));
 
-    expect(confirmSpy).toHaveBeenCalled();
+    // The in-app ConfirmDialog (replaces window.confirm). Cancel it and
+    // assert the destructive API never fired.
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     expect(deleteSpy).not.toHaveBeenCalled();
   });
 });

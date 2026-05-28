@@ -101,7 +101,7 @@ pub struct ImportanceRequest {
 
 /// Score content importance using the 4-channel model
 /// (novelty/arousal/reward/attention). Falls back to a simple word-count
-/// + code-detection heuristic when the cognitive engine is unavailable
+/// and code-detection heuristic when the cognitive engine is unavailable
 /// (e.g. dashboard launched without `--with-cognitive`).
 pub async fn score_importance(
     State(state): State<AppState>,

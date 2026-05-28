@@ -29,14 +29,24 @@ function makeErrorHandler(fallback: () => string) {
  */
 const UNDO_WINDOW_MS = 5000;
 
-export function useMemoryMutations(options?: {
+export interface MemoryMutationsCallbacks {
   onPromote?: () => void;
   onDemote?: () => void;
   onDelete?: () => void;
   onUpdate?: () => void;
-}) {
+}
+
+export function useMemoryMutations(options?: MemoryMutationsCallbacks) {
   const { t } = useTranslation();
   const qc = useQueryClient();
+
+  // Hoist the options bag into a ref so consumers can pass freshly-created
+  // callback objects (which is the React-idiomatic style) without breaking
+  // the memoisation of `removeMutate`. Without this, every parent re-render
+  // recreates `removeMutate` (because `options` would be in its dep array),
+  // which in turn invalidates downstream `useCallback`/`memo` chains.
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const invalidate = useCallback(() => {
     qc.invalidateQueries({ queryKey: ['memories'] });
@@ -51,7 +61,7 @@ export function useMemoryMutations(options?: {
     onSuccess: () => {
       toast(t('memories.promoted'), 'success');
       invalidate();
-      options?.onPromote?.();
+      optionsRef.current?.onPromote?.();
     },
     onError,
   });
@@ -75,7 +85,7 @@ export function useMemoryMutations(options?: {
         },
       });
       invalidate();
-      options?.onDemote?.();
+      optionsRef.current?.onDemote?.();
     },
     onError,
   });
@@ -173,7 +183,7 @@ export function useMemoryMutations(options?: {
           .delete(id)
           .then(() => {
             invalidate();
-            options?.onDelete?.();
+            optionsRef.current?.onDelete?.();
           })
           .catch((err) => {
             const msg = err instanceof Error ? err.message : t('common.error');
@@ -204,7 +214,10 @@ export function useMemoryMutations(options?: {
         },
       });
     },
-    [qc, invalidate, options, t, bumpInFlight],
+    // `optionsRef` is read through `.current`, so it doesn't belong in deps;
+    // the rest are genuinely stable (`qc`, `invalidate`, `bumpInFlight`) or
+    // change with the user's locale (`t`).
+    [qc, invalidate, t, bumpInFlight],
   );
 
   const remove = { mutate: removeMutate, isPending: removePending };
@@ -218,7 +231,7 @@ export function useMemoryMutations(options?: {
       // detail panel reflects new content/tags without a round-trip.
       qc.setQueryData(queryKeys.memory(memory.id), memory);
       invalidate();
-      options?.onUpdate?.();
+      optionsRef.current?.onUpdate?.();
     },
     onError,
   });

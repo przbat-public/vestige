@@ -6,4 +6,5 @@ pub mod auth;
 pub mod http;
 pub mod messages;
 pub mod stdio;
+pub mod timeout;
 pub mod types;
