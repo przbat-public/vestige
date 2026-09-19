@@ -149,7 +149,7 @@ fn classify_intent(query: &str) -> QueryIntent {
 // Relation Assessment
 // ============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum Relation {
     Supports,
     Contradicts,
@@ -196,6 +196,18 @@ fn contains_word(text: &str, word: &str) -> bool {
 }
 
 fn has_negation_signal(a: &str, b: &str) -> bool {
+    // Ask the calibrated detector first — the same one the ingest gate uses
+    // (`nlp::default_contradiction_detector`, NegEx scope + EN/PL lexicons, F1 0.955 on the
+    // eval set). This function used to be the *only* check, and its antonym table ("don't"
+    // vs "do", "deprecated" vs "recommended") cannot see a disagreement phrased as ordinary
+    // prose ("the deploy is on Friday" / "the deploy moved to Monday"). That is why
+    // `deep_reference` reported zero contradictions while the ingest gate was flagging
+    // corrections, and why the MemConflict CRS columns measured 0.0000 in every arm.
+    let detector = crate::cognitive::contradiction_detector();
+    if detector.detect(a, b).positive || detector.detect(b, a).positive {
+        return true;
+    }
+
     let negation_pairs: &[(&str, &str)] = &[
         ("don't", "do"),
         ("doesn't", "does"),
@@ -528,6 +540,19 @@ pub async fn execute(
                     } else {
                         (id_b, id_a)
                     };
+
+                    // Supersession is how the conflict was *resolved*, not a reason to hide
+                    // it. Reporting only the resolution is why `contradictions` came back
+                    // empty on stores that plainly disagreed with themselves: any pair whose
+                    // newer side had trust > 0.5 was routed here and nowhere else. The pair
+                    // is listed in both places, with the resolution named.
+                    let mut value = build_contradiction_value(
+                        id_a, id_b, content_a, content_b, trust_a, trust_b, &relation,
+                    );
+                    value["resolvedBy"] = serde_json::json!("supersession");
+                    value["supersededId"] = serde_json::json!(older_id);
+                    contradictions.push(value);
+
                     superseded.push(serde_json::json!({
                         "supersededId": older_id,
                         "supersededBy": newer_id,
@@ -871,6 +896,54 @@ mod tests {
         )
         .await;
         (a, b)
+    }
+
+    /// A disagreement phrased as ordinary prose must be detected. The old signal was an
+    /// antonym table ("don't"/"do", "deprecated"/"recommended"), which sees none of these —
+    /// so `deep_reference` reported zero contradictions on stores that visibly disagreed
+    /// with themselves.
+    #[test]
+    fn prose_contradictions_are_detected_by_the_calibrated_detector() {
+        use chrono::Utc;
+
+        let now = Utc::now();
+        let earlier = now - chrono::Duration::hours(2);
+
+        let pairs = [
+            ("The deploy is on Friday", "The deploy is not on Friday"),
+            (
+                "Use the legacy authentication flow for the admin console",
+                "Do not use the legacy authentication flow for the admin console",
+            ),
+        ];
+
+        for (a, b) in pairs {
+            let relation = assess_relation(a, 0.4, earlier, b, 0.9, now);
+            assert!(
+                matches!(relation, Relation::Contradicts | Relation::Supersedes),
+                "expected a conflict for {a:?} vs {b:?}, got {relation:?}"
+            );
+        }
+    }
+
+    /// Agreement stays agreement: no false positives from the detector.
+    #[test]
+    fn agreeing_memories_are_not_reported_as_conflicts() {
+        use chrono::Utc;
+
+        let now = Utc::now();
+        let earlier = now - chrono::Duration::hours(2);
+
+        let relation = assess_relation(
+            "The deploy pipeline runs every Friday evening",
+            0.8,
+            earlier,
+            "The deploy pipeline runs on Friday evening after the tests pass",
+            0.8,
+            now,
+        );
+
+        assert_eq!(relation, Relation::Supports);
     }
 
     /// Unit-pin the shape of one contradiction entry. This is the

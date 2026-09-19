@@ -94,6 +94,17 @@ use vestige_core::{
 /// `cognitive.tryLockMisses`, so we can tell *which* enrichment was being
 /// skipped instead of staring at a constant retention number wondering why
 /// activations look flat. Added 2026-05-19.
+/// The process-wide contradiction detector.
+///
+/// One accessor so tool code cannot grow its own detection rules — `deep_reference` used to
+/// carry a private antonym table while the ingest gate used the calibrated NLP detector, and
+/// the two disagreed about what a contradiction even is. Both now go through
+/// `vestige_core::nlp`'s factory; a future NLI backend swaps in one file.
+#[must_use]
+pub fn contradiction_detector() -> &'static dyn vestige_core::nlp::ContradictionDetector {
+    vestige_core::nlp::default_contradiction_detector()
+}
+
 pub struct CognitiveEngine {
     // -- Neuroscience --
     //
