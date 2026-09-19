@@ -299,8 +299,16 @@ impl Storage {
         let auto_promoted = self.auto_promote_frequent_access().unwrap_or(0);
         promoted += auto_promoted;
 
-        // 16. Retention Target System — auto-GC if avg retention below target
-        let mut gc_triggered = false;
+        // 16. Retention Target System — report, never delete.
+        //
+        // This block used to call `gc_below_retention(0.3, 30)`, so a consolidation
+        // cycle silently hard-deleted every memory below 30% retention that was older
+        // than 30 days whenever the store average dipped under `VESTIGE_RETENTION_TARGET`.
+        // Nothing checked pins, nothing wrote a tombstone, nothing could undo it.
+        // Automatic deletion is gone: consolidation only *surfaces* the backlog and the
+        // user decides. GC stays an explicit action (`gc` tool / dashboard panel, both
+        // dry-run first) — "nothing deletes your memories except you".
+        let gc_triggered = false;
         {
             let retention_target: f64 = std::env::var("VESTIGE_RETENTION_TARGET")
                 .ok()
@@ -312,17 +320,14 @@ impl Storage {
             let below_target = self.count_memories_below_retention(0.3).unwrap_or(0);
 
             if avg_retention < retention_target && below_target > 0 {
-                let gc_count = self.gc_below_retention(0.3, 30).unwrap_or(0);
-                if gc_count > 0 {
-                    gc_triggered = true;
-                    tracing::info!(
-                        avg_retention = avg_retention,
-                        target = retention_target,
-                        gc_count = gc_count,
-                        "Retention target auto-GC: removed {} low-retention memories",
-                        gc_count
-                    );
-                }
+                tracing::warn!(
+                    avg_retention = avg_retention,
+                    target = retention_target,
+                    candidates = below_target,
+                    "Retention below target with {} candidate(s); consolidation no longer \
+                     deletes anything — run the `gc` tool with dry_run first to review them",
+                    below_target
+                );
             }
 
             // 17. Save retention snapshot for trend tracking

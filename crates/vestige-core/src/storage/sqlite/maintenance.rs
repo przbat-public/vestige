@@ -62,7 +62,16 @@ impl Storage {
         Ok(())
     }
 
-    /// Auto-GC memories below threshold (used by retention target system)
+    /// Hard-delete memories below `threshold` retention that are older than
+    /// `min_age_days`. **Destructive and irreversible** — the rows are `DELETE`d, no
+    /// tombstone is written and nothing here can be undone.
+    ///
+    /// This primitive is for *explicit* garbage collection only, where the caller has
+    /// shown the user the candidates first (the `gc` MCP tool and the dashboard panel
+    /// both default to a dry run). It must never be called from an automatic path:
+    /// consolidation used to call it on every cycle and silently deleted user
+    /// memories, which is why that call site is gone (see
+    /// `consolidation.rs`, step 16).
     pub fn gc_below_retention(&self, threshold: f64, min_age_days: i64) -> Result<i64> {
         let cutoff = (Utc::now() - Duration::days(min_age_days)).to_rfc3339();
 
