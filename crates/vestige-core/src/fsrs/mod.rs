@@ -20,6 +20,7 @@
 
 mod algorithm;
 mod optimizer;
+mod retention;
 mod scheduler;
 
 pub use algorithm::{
@@ -55,6 +56,16 @@ pub use algorithm::{
 
 pub use scheduler::{
     FSRSParameters, FSRSScheduler, FSRSState, LearningState, PreviewResults, Rating, ReviewResult,
+};
+
+// Canonical `retention_strength` semantics. Every writer of that column and
+// every reader that classifies a memory must go through these — see the module
+// docs for the definition, the unit and the composition order.
+pub use retention::{
+    ACTIVE_MIN_RETENTION, DORMANT_MIN_RETENTION, RETENTION_MAX, RETENTION_MIN, RETRIEVAL_WEIGHT,
+    SILENT_MIN_RETENTION, STORAGE_SATURATION, STORAGE_WEIGHT, WEAKENING_FLOOR,
+    boosted_retrievability, canonical_retention, canonical_retention_at, clamp_retention,
+    composite_retention, downscale_retention, memory_state_for, reinforce_retention,
 };
 
 pub use optimizer::{FSRSOptimizer, ReviewLog};

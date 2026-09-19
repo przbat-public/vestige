@@ -6,14 +6,25 @@
 //! - [`Storage::apply_decay`]: the batched FSRS-6 retrievability pass that
 //!   runs every consolidation cycle. Uses personalized `w20` and the
 //!   emotional-memory stability boost.
+//! - [`Storage::reconciled_retention`]: the same value recomputed on demand for
+//!   a single memory, for readers that must not depend on which writer touched
+//!   the cached column last (lifecycle state, ranking tie-breaks).
+//!
+//! Decay is the *overwriting* writer of `retention_strength`: it recomposes the
+//! canonical value from the memory's own FSRS ingredients (`crate::fsrs`) and
+//! never accumulates on top of an event. Every other writer modulates that
+//! value additively or multiplicatively, in the same unit and range.
 //!
 //! `get_fsrs_w20` is kept local — it's only read by [`Storage::apply_decay`]
-//! today (the writer side lives in `consolidation`).
+//! and [`Storage::reconciled_retention`] today (the writer side lives in
+//! `consolidation`).
 
 use chrono::{DateTime, Utc};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
-use crate::fsrs::{DEFAULT_DECAY, retrievability_with_decay};
+use crate::fsrs::{
+    DEFAULT_DECAY, boosted_retrievability, canonical_retention, composite_retention,
+};
 use crate::memory::KnowledgeNode;
 
 use super::{Result, Storage, StorageError};
@@ -139,10 +150,14 @@ impl Storage {
     /// Uses the real FSRS-6 retrievability formula: R = (1 + factor * t / S)^(-w20)
     /// with personalized w20 from fsrs_config table. Sentiment boost extends
     /// effective stability for emotional memories.
+    ///
+    /// The write is an *overwrite* of the canonical composite
+    /// (`fsrs::retention`), not a decrement: whatever an event writer added to
+    /// the row since the previous pass is discarded here, which is what bounds
+    /// every additive bump to one consolidation window.
     pub fn apply_decay(&self) -> Result<i32> {
         // Read personalized w20 from config (falls back to default 0.1542)
-        let w20 = self.get_fsrs_w20().unwrap_or(DEFAULT_DECAY);
-        let sleep = crate::SleepConsolidation::new();
+        let w20 = self.fsrs_w20();
 
         const BATCH_SIZE: i64 = 500;
         let now = Utc::now();
@@ -203,16 +218,14 @@ impl Storage {
                     let days_since = (now - last).num_seconds() as f64 / 86400.0;
 
                     if days_since > 0.0 {
-                        // Sentiment boost: emotional memories decay slower (up to 1.5x stability)
-                        let effective_stability = stability * (1.0 + sentiment_mag * 0.5);
-
-                        // Real FSRS-6 retrievability with personalized w20
+                        // Sentiment boost + FSRS-6 retrievability, then the
+                        // canonical composite — the same two steps every other
+                        // writer and reader uses, so `retrieval_strength` and
+                        // `retention_strength` can never be composed from
+                        // different curves.
                         let new_retrieval =
-                            retrievability_with_decay(effective_stability, days_since, w20);
-
-                        // Use SleepConsolidation for retention calculation
-                        let new_retention =
-                            sleep.calculate_retention(*storage_strength, new_retrieval);
+                            boosted_retrievability(*stability, *sentiment_mag, days_since, w20);
+                        let new_retention = composite_retention(*storage_strength, new_retrieval);
 
                         tx.execute(
                             "UPDATE knowledge_nodes SET retrieval_strength = ?1, retention_strength = ?2 WHERE id = ?3",
@@ -229,6 +242,56 @@ impl Storage {
         }
 
         Ok(count)
+    }
+
+    /// The reconciled retention value for one memory, recomputed right now.
+    ///
+    /// `retention_strength` in the row is a *cache*: [`Storage::apply_decay`]
+    /// overwrites it and event writers modulate it (`+0.02` per search hit,
+    /// `±delta` on promote/demote). This recomputes the canonical value from the
+    /// memory's own FSRS ingredients, so a reader that must not depend on write
+    /// ordering — the lifecycle state, a ranking tie-break, a `min_retention`
+    /// policy — sees the same probability no matter which writer ran last.
+    ///
+    /// Returns `Ok(None)` when the id has no node.
+    pub fn reconciled_retention(&self, id: &str) -> Result<Option<f64>> {
+        let w20 = self.fsrs_w20();
+        let row: Option<(f64, f64, f64, String)> = {
+            let reader = self
+                .reader
+                .lock()
+                .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
+            reader
+                .query_row(
+                    "SELECT storage_strength, stability, sentiment_magnitude, last_accessed
+                     FROM knowledge_nodes WHERE id = ?1",
+                    params![id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .optional()?
+        };
+
+        Ok(row.map(
+            |(storage_strength, stability, sentiment_magnitude, last_accessed)| {
+                let last = DateTime::parse_from_rfc3339(&last_accessed)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                canonical_retention(
+                    storage_strength,
+                    stability,
+                    sentiment_magnitude,
+                    last,
+                    Utc::now(),
+                    w20,
+                )
+            },
+        ))
+    }
+
+    /// Personalized forgetting-curve decay (`w20`), falling back to the FSRS-6
+    /// default when the config row is missing or unreadable.
+    pub(super) fn fsrs_w20(&self) -> f64 {
+        self.get_fsrs_w20().unwrap_or(DEFAULT_DECAY)
     }
 
     /// Read personalized w20 from fsrs_config table

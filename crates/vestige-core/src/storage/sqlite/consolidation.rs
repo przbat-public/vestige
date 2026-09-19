@@ -222,35 +222,37 @@ impl Storage {
         }
 
         // 10. Memory State Transitions (Active→Dormant→Silent→Unavailable)
-        let _state_transitions: i64;
-        {
-            let service = crate::neuroscience::memory_states::StateUpdateService::new();
+        //
+        // The state is a pure function of `retention_strength`
+        // (`fsrs::memory_state_for`), which step 1 has just overwritten with the
+        // reconciled value — never of the order in which the writers ran. This
+        // step used to classify from the stored column after the same decay
+        // pass, so a memory whose column was bumped by a search hit (+0.02 per
+        // hit) was Active at classification time regardless of how long ago it
+        // had actually been retrieved. The derived state is now persisted, so a
+        // memory that decays while nothing touches it moves Active→Dormant with
+        // no access at all instead of keeping a stale Active row.
+        let state_transitions = {
             let all_nodes = self.get_all_nodes(500, 0).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "Consolidation: failed to load nodes for state transitions");
                 vec![]
             });
-            let mut lifecycles: Vec<crate::neuroscience::memory_states::MemoryLifecycle> =
-                all_nodes
-                    .iter()
-                    .map(|n| {
-                        let mut lc = crate::neuroscience::memory_states::MemoryLifecycle::new();
-                        lc.last_access = n.last_accessed;
-                        lc.access_count = n.reps as u32;
-                        lc.state = if n.retention_strength > 0.7 {
-                            crate::neuroscience::memory_states::MemoryState::Active
-                        } else if n.retention_strength > 0.3 {
-                            crate::neuroscience::memory_states::MemoryState::Dormant
-                        } else if n.retention_strength > 0.1 {
-                            crate::neuroscience::memory_states::MemoryState::Silent
-                        } else {
-                            crate::neuroscience::memory_states::MemoryState::Unavailable
-                        };
-                        lc
-                    })
-                    .collect();
-            let batch_result = service.batch_update(&mut lifecycles);
-            _state_transitions = batch_result.total_transitions as i64;
-        }
+            let mut changed = 0i64;
+            for node in &all_nodes {
+                match self.refresh_memory_state_from_retention(&node.id) {
+                    Ok(true) => changed += 1,
+                    Ok(false) => {}
+                    Err(e) => {
+                        tracing::debug!(error = %e, memory_id = %node.id, "lifecycle refresh skipped")
+                    }
+                }
+            }
+            changed
+        };
+        tracing::debug!(
+            state_transitions,
+            "consolidation lifecycle states re-derived from retention"
+        );
 
         // 11. Importance Evolution (decay stale importance)
         {

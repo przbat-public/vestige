@@ -89,6 +89,9 @@ mod temporal;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod tests_retention;
+
 pub use error::{Result, SmartIngestResult, StorageError};
 pub use init::Storage;
 pub use records::{
