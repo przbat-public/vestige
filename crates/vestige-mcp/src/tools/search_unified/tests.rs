@@ -823,3 +823,223 @@ async fn superseded_statement_does_not_win_a_query_that_matches_it_better() {
         "reported score must be non-increasing: {reported:?}"
     );
 }
+
+// ========================================================================
+// RETRIEVAL HOT PATH — token-set reuse, concurrent sub-queries, merge order
+// ========================================================================
+
+use std::cell::Cell;
+
+use super::helpers::content_overlap;
+use super::pipeline::retrieval::{
+    candidate_token_sets, merge_search_batches, mmr_reorder, suppress_near_duplicates,
+};
+
+fn ids_of(results: &[SearchResult]) -> Vec<String> {
+    results.iter().map(|r| r.node.id.clone()).collect()
+}
+
+#[test]
+fn near_duplicate_suppression_is_unchanged_by_reusing_token_sets() {
+    // The stage used to call `content_overlap` per pair, which rebuilds two HashSets
+    // per comparison. It now tokenises each candidate once. The selection — which
+    // members survive and in which order — must not move.
+    let results = vec![
+        fixture(
+            "a",
+            "alpha beta gamma delta epsilon",
+            1.0,
+            "2024-01-01T00:00:00Z",
+        ),
+        fixture(
+            "dup-of-a",
+            "alpha beta gamma delta epsilon",
+            0.9,
+            "2024-01-02T00:00:00Z",
+        ),
+        fixture(
+            "b",
+            "zeta eta theta iota kappa",
+            0.8,
+            "2024-01-03T00:00:00Z",
+        ),
+        fixture("c", "lambda mu nu xi omicron", 0.7, "2024-01-04T00:00:00Z"),
+        fixture(
+            "near-b",
+            "zeta eta theta iota lambda",
+            0.6,
+            "2024-01-05T00:00:00Z",
+        ),
+    ];
+
+    // Oracle: the previous implementation, pair by pair over the raw strings.
+    let naive_builds = Cell::new(0usize);
+    let comparisons = Cell::new(0usize);
+    let n = results.len();
+    let mut keep = vec![true; n];
+    for i in 0..n {
+        if !keep[i] {
+            continue;
+        }
+        for j in (i + 1)..n {
+            if !keep[j] {
+                continue;
+            }
+            comparisons.set(comparisons.get() + 1);
+            naive_builds.set(naive_builds.get() + 2); // two HashSets per comparison
+            if content_overlap(&results[i].node.content, &results[j].node.content) > 0.85 {
+                keep[j] = false;
+            }
+        }
+    }
+    let expected: Vec<String> = ids_of(&results)
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(_, id)| id)
+        .collect();
+
+    // Counted before the results are consumed: one set per candidate.
+    let set_count = candidate_token_sets(&results).len();
+    let (survivors, removed) = suppress_near_duplicates(results);
+
+    assert_eq!(ids_of(&survivors), expected, "same members, same order");
+    assert_eq!(removed, 1, "the duplicate of `a` is the only removal");
+    // n(n-1) builds before, n after: one token set per candidate.
+    assert_eq!(
+        set_count, n,
+        "one token set per candidate, not two per comparison"
+    );
+    assert_eq!(
+        naive_builds.get(),
+        2 * comparisons.get(),
+        "the per-pair form really did build two sets per comparison"
+    );
+    assert!(
+        naive_builds.get() > set_count,
+        "the reuse must build strictly fewer sets ({} vs {set_count})",
+        naive_builds.get()
+    );
+}
+
+#[test]
+fn mmr_selection_is_unchanged_by_reusing_token_sets() {
+    let results = vec![
+        fixture(
+            "apple",
+            "alpha beta gamma delta",
+            0.95,
+            "2024-01-01T00:00:00Z",
+        ),
+        fixture(
+            "apricot",
+            "alpha beta gamma epsilon",
+            0.90,
+            "2024-01-02T00:00:00Z",
+        ),
+        fixture(
+            "banana",
+            "zeta eta theta iota",
+            0.60,
+            "2024-01-03T00:00:00Z",
+        ),
+        fixture("cherry", "kappa lambda mu nu", 0.50, "2024-01-04T00:00:00Z"),
+    ];
+
+    // Oracle: the closure form, which rebuilt two sets per similarity call.
+    let naive_builds = Cell::new(0usize);
+    let scored: Vec<(SearchResult, f32)> = results
+        .iter()
+        .map(|r| (r.clone(), r.combined_score))
+        .collect();
+    let expected = ids_of(&vestige_core::search::mmr_select(
+        scored,
+        |a, b| {
+            naive_builds.set(naive_builds.get() + 2);
+            content_overlap(&a.node.content, &b.node.content) as f32
+        },
+        0.5,
+        3,
+    ));
+
+    let set_count = candidate_token_sets(&results).len();
+    let selected = mmr_reorder(results, 0.5, 3);
+
+    assert_eq!(ids_of(&selected), expected, "same members, same order");
+    assert_eq!(set_count, 4, "one token set per candidate");
+    assert!(
+        naive_builds.get() >= 8,
+        "the closure form rebuilt sets on every similarity call, got {}",
+        naive_builds.get()
+    );
+}
+
+#[test]
+fn merged_sub_query_batches_tie_break_on_id_not_hash_order() {
+    // The local merge drained a HashMap (randomised iteration order) into a stable
+    // score sort, so equally scored hits came back in a different order per run —
+    // the same defect the core merge fixed in `1cfdf45`. It now delegates there.
+    let batch = |skip: usize| -> Vec<SearchResult> {
+        (0..12)
+            .skip(skip)
+            .map(|i| {
+                fixture(
+                    &format!("node-{i:02}"),
+                    &format!("content {i}"),
+                    1.0,
+                    "2024-01-01T00:00:00Z",
+                )
+            })
+            .collect()
+    };
+    let expected: Vec<String> = (0..12).map(|i| format!("node-{i:02}")).collect();
+
+    let merged = merge_search_batches(vec![batch(0), batch(3)]);
+    assert_eq!(ids_of(&merged), expected, "ties break on the id, ascending");
+    for _ in 0..8 {
+        assert_eq!(
+            ids_of(&merge_search_batches(vec![batch(0), batch(3)])),
+            expected,
+            "same input, same order"
+        );
+    }
+}
+
+#[tokio::test]
+async fn compound_query_returns_the_same_union_and_order_on_every_run() {
+    // End-to-end shape of the concurrent sub-query path: the batches are joined
+    // concurrently but collected in sub-query order, so the merged union keeps the
+    // semantics (union, max score per id) and the order is reproducible.
+    let (storage, _dir) = test_storage().await;
+    ingest_test_content(&storage, "alpha topic covers the cache key rotation.").await;
+    ingest_test_content(&storage, "beta topic covers the index rebuild.").await;
+
+    let args = serde_json::json!({ "query": "alpha topic; beta topic", "limit": 5 });
+    let first = execute(&storage, &test_cognitive(), Some(args.clone()))
+        .await
+        .unwrap();
+    let second = execute(&storage, &test_cognitive(), Some(args))
+        .await
+        .unwrap();
+
+    let ids = |v: &serde_json::Value| -> Vec<String> {
+        v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(ids(&first), ids(&second), "same input, same union");
+    assert!(!ids(&first).is_empty(), "the union must not be empty");
+    let reported: Vec<f64> = first["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["combinedScore"].as_f64().unwrap())
+        .collect();
+    assert!(
+        reported.windows(2).all(|w| w[0] >= w[1]),
+        "reported score must be non-increasing: {reported:?}"
+    );
+}
