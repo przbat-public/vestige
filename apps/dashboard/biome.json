@@ -94,10 +94,6 @@
       "!**/*.html",
       "!**/*.svg",
       "!**/*.svelte",
-      "!src/routes",
-      "!src/lib",
-      "!src/app.html",
-      "!.svelte-kit",
       "!e2e",
       "!src/types/generated"
     ]
