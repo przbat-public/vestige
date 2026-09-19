@@ -31,7 +31,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 directories = "6"
-rusqlite = { version = "0.39", features = ["chrono", "serde_json"] }
+rusqlite = { version = "0.40", features = ["chrono", "serde_json"] }
 regex = "1"
 tempfile = "3"
 
