@@ -26,6 +26,83 @@ pub const MAX_TEXT_LENGTH: usize = 8192;
 /// Batch size for efficient embedding generation
 pub const BATCH_SIZE: usize = 32;
 
+// ----------------------------------------------------------------------------
+// Nomic task-instruction prefixes
+// ----------------------------------------------------------------------------
+//
+// nomic-embed-text-v1.5 is trained as an *asymmetric* bi-encoder: the model
+// card states the input MUST carry a task-instruction prefix, and fastembed
+// does NOT add one. Documents are embedded as `search_document: …` and
+// queries as `search_query: …` so the model can break query/document
+// symmetry — exactly what it was fine-tuned to do.
+//
+// This is gated behind `VESTIGE_NOMIC_PREFIXES` and OFF by default because
+// turning it on changes the embedding space: any embedding stored under the
+// old (raw, prefix-less) regime is NOT comparable to a query embedded with a
+// prefix. Enabling it is therefore a coupled operation — flip the flag AND
+// re-embed the store with the `regenerate_embeddings` MCP tool. The
+// `embedding_model` column records which regime each vector was built under
+// (`nomic-embed-text-v1.5` vs `…+prefix`) so the mismatch is observable.
+
+/// Prefix applied to query text when prefixes are enabled.
+pub const NOMIC_QUERY_PREFIX: &str = "search_query: ";
+
+/// Prefix applied to stored/indexed document text when prefixes are enabled.
+pub const NOMIC_DOCUMENT_PREFIX: &str = "search_document: ";
+
+/// Which side of the asymmetric bi-encoder a piece of text represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbedTask {
+    /// Content being stored/indexed (`search_document:`).
+    Document,
+    /// A retrieval query (`search_query:`).
+    Query,
+}
+
+impl EmbedTask {
+    /// The prefix to prepend for this task, or `""` when prefixes are disabled.
+    fn prefix(self) -> &'static str {
+        if !nomic_prefixes_enabled() {
+            return "";
+        }
+        match self {
+            EmbedTask::Document => NOMIC_DOCUMENT_PREFIX,
+            EmbedTask::Query => NOMIC_QUERY_PREFIX,
+        }
+    }
+}
+
+/// Whether Nomic task prefixes are enabled (env `VESTIGE_NOMIC_PREFIXES`).
+///
+/// Read once and cached for the process lifetime so the regime cannot drift
+/// mid-run (which would corrupt the query cache). Truthy values: `1`, `true`,
+/// `yes`, `on` (case-insensitive). Default: `false`.
+#[must_use]
+pub fn nomic_prefixes_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("VESTIGE_NOMIC_PREFIXES")
+            .map(|v| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// The `embedding_model` tag to persist alongside each vector, encoding the
+/// active prefix regime so a later read can detect a raw-vs-prefixed mismatch.
+#[must_use]
+pub fn embedding_model_tag() -> &'static str {
+    if nomic_prefixes_enabled() {
+        "nomic-embed-text-v1.5+prefix"
+    } else {
+        "nomic-embed-text-v1.5"
+    }
+}
+
 // ============================================================================
 // GLOBAL MODEL (with Mutex for fastembed v5 API)
 // ============================================================================
@@ -274,8 +351,29 @@ impl EmbeddingService {
         EMBEDDING_DIMENSIONS
     }
 
-    /// Generate embedding for a single text
+    /// Generate embedding for a single piece of stored/indexed content.
+    ///
+    /// Applies the `search_document:` prefix when prefixes are enabled. Most
+    /// call sites (ingest, regeneration) want this; queries must use
+    /// [`Self::embed_query`] so the asymmetric bi-encoder works as trained.
     pub fn embed(&self, text: &str) -> Result<Embedding, EmbeddingError> {
+        self.embed_task(text, EmbedTask::Document)
+    }
+
+    /// Generate embedding for a retrieval query.
+    ///
+    /// Applies the `search_query:` prefix when prefixes are enabled. Pairs
+    /// with [`Self::embed`] for documents.
+    pub fn embed_query(&self, text: &str) -> Result<Embedding, EmbeddingError> {
+        self.embed_task(text, EmbedTask::Query)
+    }
+
+    /// Generate an embedding for `text` under the given [`EmbedTask`].
+    ///
+    /// The task prefix is prepended *before* length truncation so the prefix
+    /// is never the thing that gets clipped. The empty-input guard checks the
+    /// caller's text, not the prefixed form.
+    pub fn embed_task(&self, text: &str, task: EmbedTask) -> Result<Embedding, EmbeddingError> {
         if text.is_empty() {
             return Err(EmbeddingError::InvalidInput(
                 "Text cannot be empty".to_string(),
@@ -284,19 +382,21 @@ impl EmbeddingService {
 
         let mut model = get_model()?;
 
+        let prefixed = apply_prefix(task, text);
+
         // Truncate if too long (char-boundary safe)
-        let text = if text.len() > MAX_TEXT_LENGTH {
+        let input = if prefixed.len() > MAX_TEXT_LENGTH {
             let mut end = MAX_TEXT_LENGTH;
-            while !text.is_char_boundary(end) && end > 0 {
+            while !prefixed.is_char_boundary(end) && end > 0 {
                 end -= 1;
             }
-            &text[..end]
+            &prefixed[..end]
         } else {
-            text
+            &prefixed
         };
 
         let embeddings = model
-            .embed(vec![text], None)
+            .embed(vec![input], None)
             .map_err(|e| EmbeddingError::EmbeddingFailed(e.to_string()))?;
 
         if embeddings.is_empty() {
@@ -317,9 +417,16 @@ impl EmbeddingService {
         let mut model = get_model()?;
         let mut all_embeddings = Vec::with_capacity(texts.len());
 
-        // Process in batches for efficiency
+        // Process in batches for efficiency. Batch embedding is only used for
+        // stored content (ingest/regeneration), so every item is a document.
         for chunk in texts.chunks(BATCH_SIZE) {
-            let truncated: Vec<&str> = chunk
+            // Prefix first, then truncate, so the prefix is never clipped.
+            let prefixed: Vec<String> = chunk
+                .iter()
+                .map(|t| apply_prefix(EmbedTask::Document, t))
+                .collect();
+
+            let truncated: Vec<&str> = prefixed
                 .iter()
                 .map(|t| {
                     if t.len() > MAX_TEXT_LENGTH {
@@ -329,7 +436,7 @@ impl EmbeddingService {
                         }
                         &t[..end]
                     } else {
-                        *t
+                        t.as_str()
                     }
                 })
                 .collect();
@@ -369,6 +476,21 @@ impl EmbeddingService {
 // ============================================================================
 // SIMILARITY FUNCTIONS
 // ============================================================================
+
+/// Prepend the Nomic task prefix to `text` for the given task.
+///
+/// Returns an owned `String`. When prefixes are disabled (the default) this is
+/// just `text.to_string()`, so the only cost in the common path is one
+/// allocation — negligible next to the ONNX forward pass.
+#[inline]
+fn apply_prefix(task: EmbedTask, text: &str) -> String {
+    let prefix = task.prefix();
+    if prefix.is_empty() {
+        text.to_string()
+    } else {
+        format!("{prefix}{text}")
+    }
+}
 
 /// Apply Matryoshka truncation: truncate to EMBEDDING_DIMENSIONS and L2-normalize
 ///
@@ -592,6 +714,32 @@ mod tests {
         // Should still be normalized
         let norm: f32 = result.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn nomic_prefix_constants_match_model_card() {
+        // The exact strings the nomic-embed-text-v1.5 model card mandates.
+        assert_eq!(NOMIC_QUERY_PREFIX, "search_query: ");
+        assert_eq!(NOMIC_DOCUMENT_PREFIX, "search_document: ");
+    }
+
+    #[test]
+    fn nomic_prefixes_default_off() {
+        // Unit-test process does not set VESTIGE_NOMIC_PREFIXES, so the regime
+        // is the backward-compatible raw one and the model tag is unchanged.
+        assert!(!nomic_prefixes_enabled());
+        assert_eq!(embedding_model_tag(), "nomic-embed-text-v1.5");
+    }
+
+    #[test]
+    fn apply_prefix_is_noop_when_disabled() {
+        // With prefixes off (default), document and query text pass through
+        // unchanged — guarantees byte-for-byte backward compatibility.
+        assert_eq!(
+            apply_prefix(EmbedTask::Document, "hello world"),
+            "hello world"
+        );
+        assert_eq!(apply_prefix(EmbedTask::Query, "hello world"), "hello world");
     }
 
     #[test]

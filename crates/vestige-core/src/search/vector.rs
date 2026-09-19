@@ -9,9 +9,11 @@
 //! - Sub-millisecond query times for the in-memory index
 //! - Cosine similarity by default
 //! - Incremental index updates
-//! - On-disk persistence is supported by USearch but **not yet** wired into
-//!   Vestige's lifecycle — the index is rebuilt from SQLite on startup. See
-//!   the "Known Issues" section of CHANGELOG for the planned remediation.
+//! - On-disk persistence: the index is saved to a `vestige.hnsw` sidecar (+
+//!   meta JSON) and loaded on startup via a row-count-validated fast path. If
+//!   the sidecar is missing, stale, or fails to load, the index is rebuilt
+//!   from SQLite (which is always the source of truth). See `storage/sqlite/
+//!   init.rs::load_embeddings_into_index` and `persist_vector_index`.
 
 use std::collections::HashMap;
 use std::path::Path;

@@ -28,12 +28,21 @@ encryption = ["rusqlite/bundled-sqlcipher"]
 # Core embeddings with fastembed (ONNX-based, local inference)
 embeddings = ["dep:fastembed"]
 
-# HNSW vector search with USearch (in-memory ANN; persistence is a known gap)
+# HNSW vector search with USearch (in-memory ANN; persisted to a sidecar + loaded on startup, rebuild-from-SQLite fallback)
 vector-search = ["dep:usearch"]
 
 # Nomic Embed Text v2 MoE (475M params, 305M active, Candle backend)
 # Requires: fastembed with nomic-v2-moe feature
 nomic-v2 = ["embeddings", "fastembed/nomic-v2-moe"]
+
+# ColBERT late-interaction reranking (token-level MaxSim over the top-K
+# candidates from hybrid retrieval). fastembed cannot emit ColBERT's per-token
+# matrix (it pools to one vector), so we run the ONNX model directly via `ort`
+# and tokenize with `tokenizers`. Depends on `embeddings` so fastembed provides
+# the shared, already-downloaded ort runtime — pulling a second ort build would
+# bloat the binary and risk a TLS-backend clash. Inert unless
+# VESTIGE_LATE_INTERACTION is set at runtime.
+late-interaction = ["embeddings", "dep:ort", "dep:tokenizers"]
 
 # Qwen3 Reranker (Candle backend, high-precision cross-encoder)
 qwen3-reranker = ["embeddings", "fastembed/qwen3"]
@@ -82,6 +91,15 @@ fastembed = { version = "5.13", default-features = false, features = [
 # OPTIONAL: Vector Search (USearch HNSW; in-memory only for now)
 # ============================================================================
 usearch = { version = "2", optional = true }
+
+# Late-interaction (ColBERT) reranker. `ort` is pinned to the EXACT version
+# fastembed uses so cargo unifies them into a single ONNX runtime build;
+# default-features = false because the download-binaries + rustls runtime feature
+# is supplied (and unified) by fastembed's `ort-download-binaries-rustls-tls`.
+# `tokenizers` loads the ColBERT tokenizer.json from a local file (no `http`/`onig`
+# pre-tokenizer needed for the BERT WordPiece path).
+ort = { version = "=2.0.0-rc.12", default-features = false, optional = true }
+tokenizers = { version = "0.22", default-features = false, optional = true }
 
 # LRU cache for query embeddings
 lru = "0.16"

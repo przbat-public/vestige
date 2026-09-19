@@ -157,10 +157,12 @@ impl Storage {
             }
         }
 
-        // Not in cache, compute embedding
+        // Not in cache, compute embedding. Queries use the `search_query:`
+        // regime (when prefixes are enabled) so the asymmetric bi-encoder
+        // matches documents embedded as `search_document:`.
         let embedding = self
             .embedding_service
-            .embed(query)
+            .embed_query(query)
             .map_err(|e| StorageError::Init(format!("Failed to embed query: {}", e)))?;
 
         // Store in cache

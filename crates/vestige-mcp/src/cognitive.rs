@@ -138,6 +138,11 @@ pub struct CognitiveEngine {
 
     // -- Search --
     pub reranker: Reranker,
+    /// ColBERT late-interaction reranker. Loaded on demand in `main` when
+    /// `VESTIGE_LATE_INTERACTION` + `VESTIGE_COLBERT_MODEL_DIR` are set; `None`
+    /// otherwise, in which case the Jina cross-encoder remains the reranker.
+    #[cfg(feature = "late-interaction")]
+    pub colbert: Option<vestige_core::search::ColbertEmbedder>,
     pub temporal_searcher: TemporalSearcher,
 
     // -- Metacognition (Nelson & Narens 1990) --
@@ -297,6 +302,8 @@ impl CognitiveEngine {
 
             // Search
             reranker: Reranker::new(RerankerConfig::default()),
+            #[cfg(feature = "late-interaction")]
+            colbert: None,
             temporal_searcher: TemporalSearcher::new(),
 
             // Metacognition
@@ -499,11 +506,7 @@ mod tests {
         // be obtainable within a few ms even while we hold the network
         // lock.
         let read_guard = net_handle.read().await;
-        let other = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            engine.lock(),
-        )
-        .await;
+        let other = tokio::time::timeout(std::time::Duration::from_millis(50), engine.lock()).await;
         assert!(
             other.is_ok(),
             "engine lock must be obtainable while a separate \
@@ -526,11 +529,7 @@ mod tests {
             Arc::clone(&cog.dreamer)
         };
         let read_guard = dreamer_handle.read().await;
-        let other = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            engine.lock(),
-        )
-        .await;
+        let other = tokio::time::timeout(std::time::Duration::from_millis(50), engine.lock()).await;
         assert!(
             other.is_ok(),
             "engine lock must be obtainable while a separate dreamer read lock is held"

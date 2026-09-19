@@ -9,9 +9,9 @@ use rusqlite::Connection;
 #[cfg(feature = "embeddings")]
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 #[cfg(feature = "vector-search")]
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Mutex;
 
 #[cfg(feature = "embeddings")]
 use crate::embeddings::{EMBEDDING_DIMENSIONS, Embedding, EmbeddingService, matryoshka_truncate};
@@ -272,7 +272,7 @@ impl Storage {
     /// - **smaller stored** (256 → 384): must re-embed from content
     ///   (Matryoshka can't *extend* dimensions). Runs once, updates DB in-place.
     ///
-    /// **Fast path (v3.6+):** if a `vestige.hnsw` sidecar exists whose meta
+    /// **Fast path:** if a `vestige.hnsw` sidecar exists whose meta
     /// records the same row count as the current `node_embeddings` table, we
     /// `VectorIndex::load` it and skip the per-row insert loop entirely. On
     /// any mismatch, validation failure, or load error we fall back to the

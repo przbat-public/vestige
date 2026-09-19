@@ -5,7 +5,7 @@
 //! - **FSRS-6**: 21-parameter spaced repetition (see <https://github.com/open-spaced-repetition/srs-benchmark> for FSRS-vs-SM-2 effect sizes)
 //! - **Dual-Strength Model**: Bjork & Bjork (1992) storage/retrieval strength
 //! - **Semantic Embeddings**: Local fastembed v5 (nomic-embed-text-v1.5, 768 dimensions)
-//! - **HNSW Vector Search**: USearch (in-memory; persistence is a known gap — see CHANGELOG)
+//! - **HNSW Vector Search**: USearch (in-memory ANN; persisted to a `vestige.hnsw` sidecar and loaded on startup, with rebuild-from-SQLite fallback)
 //! - **Temporal Memory**: Bi-temporal model with validity periods
 //! - **Hybrid Search**: RRF fusion of keyword (BM25/FTS5) + semantic
 //!
@@ -236,12 +236,12 @@ pub use advanced::{
     // DreamMemory - input type for dreaming
     DreamMemory,
     DreamResult,
-    // Topic Hub candidate (Proposal A) — draft hub emitted by MemoryDreamer
-    HubCandidate,
     EmbeddingStrategy,
     EvaluationIntent,
     GateDecision,
     GateStats,
+    // Topic Hub candidate (Proposal A) — draft hub emitted by MemoryDreamer
+    HubCandidate,
     ImportanceDecayConfig,
     ImportanceScore,
     // Importance tracking

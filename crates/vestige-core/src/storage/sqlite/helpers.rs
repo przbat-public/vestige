@@ -98,6 +98,9 @@ impl Storage {
                 .writer
                 .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+            // Tag the regime the vector was built under so a raw-vs-prefixed
+            // mismatch (prefixes enabled without re-embedding) is observable.
+            let model_tag = crate::embeddings::embedding_model_tag();
             writer.execute(
                 "INSERT OR REPLACE INTO node_embeddings (node_id, embedding, dimensions, model, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -105,14 +108,14 @@ impl Storage {
                     node_id,
                     embedding.to_bytes(),
                     EMBEDDING_DIMENSIONS as i32,
-                    "nomic-embed-text-v1.5",
+                    model_tag,
                     now.to_rfc3339(),
                 ],
             )?;
 
             writer.execute(
-                "UPDATE knowledge_nodes SET has_embedding = 1, embedding_model = 'nomic-embed-text-v1.5' WHERE id = ?1",
-                params![node_id],
+                "UPDATE knowledge_nodes SET has_embedding = 1, embedding_model = ?2 WHERE id = ?1",
+                params![node_id, model_tag],
             )?;
         }
 

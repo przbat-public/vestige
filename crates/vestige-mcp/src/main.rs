@@ -10,7 +10,7 @@
 //!   FSRS-vs-SM-2 comparisons — we do not requote a single percentage here)
 //! - Bjork dual-strength memory model
 //! - Local semantic embeddings (nomic-embed-text-v1.5, 384D Matryoshka, no external API)
-//! - HNSW vector search via USearch (in-memory; persistence still pending)
+//! - HNSW vector search via USearch (in-memory; persisted to a sidecar and loaded on startup, rebuild-from-SQLite fallback)
 //! - Hybrid search (BM25 + semantic + RRF fusion)
 //!
 //! Neuroscience Features:
@@ -180,15 +180,14 @@ async fn main() {
 
     // Optional OTLP exporter (opt-in via `--features telemetry`). Logged once
     // so operators can confirm whether spans will actually be shipped.
-    let telemetry_status = vestige_mcp::telemetry::init(&vestige_mcp::telemetry::TelemetryConfig::from_env());
+    let telemetry_status =
+        vestige_mcp::telemetry::init(&vestige_mcp::telemetry::TelemetryConfig::from_env());
     match &telemetry_status {
         vestige_mcp::telemetry::TelemetryStatus::Initialized { endpoint } => {
             info!(otlp_endpoint = %endpoint, "telemetry exporter initialized");
         }
         vestige_mcp::telemetry::TelemetryStatus::Disabled => {
-            info!(
-                "telemetry feature compiled in but no endpoint set; export disabled"
-            );
+            info!("telemetry feature compiled in but no endpoint set; export disabled");
         }
         vestige_mcp::telemetry::TelemetryStatus::FeatureDisabled => {
             // Stay quiet by default — this is the most common production path
@@ -416,6 +415,39 @@ async fn main() {
             let mut cog = cog_clone.lock().await;
             cog.reranker.init_cross_encoder();
         });
+    }
+
+    // ColBERT late-interaction reranker: load the ONNX model when the feature is
+    // compiled in AND enabled at runtime. Failure falls back to the Jina
+    // cross-encoder — never breaks search.
+    #[cfg(feature = "late-interaction")]
+    if vestige_core::search::late_interaction_enabled() {
+        match vestige_core::search::ColbertEmbedder::from_env(Default::default()) {
+            Ok(Some(embedder)) => {
+                cognitive.lock().await.colbert = Some(embedder);
+                info!("ColBERT late-interaction reranker loaded");
+            }
+            Ok(None) => warn!(
+                "VESTIGE_LATE_INTERACTION is on but VESTIGE_COLBERT_MODEL_DIR is unset — \
+                 ColBERT disabled, using the Jina cross-encoder"
+            ),
+            Err(e) => warn!("ColBERT load failed ({e}) — falling back to the Jina cross-encoder"),
+        }
+    }
+
+    // Nomic task prefixes are a coupled operation: enabling them changes the
+    // embedding space, so any vector stored under the old raw regime must be
+    // regenerated or queries (now prefixed) compare across incompatible
+    // spaces. Warn loudly so the operator runs `regenerate_embeddings`.
+    #[cfg(feature = "embeddings")]
+    if vestige_core::embeddings::nomic_prefixes_enabled() {
+        warn!(
+            "VESTIGE_NOMIC_PREFIXES is ON: queries and new memories use Nomic \
+             search_query:/search_document: prefixes. If you enabled this on an \
+             existing database, run the `regenerate_embeddings` tool now — until \
+             you do, previously stored embeddings remain in the raw regime and \
+             retrieval will be inconsistent."
+        );
     }
 
     // Create MCP server with shared event channel for dashboard broadcasts

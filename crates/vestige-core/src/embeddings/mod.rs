@@ -15,8 +15,9 @@ mod local;
 
 pub(crate) use local::get_cache_dir;
 pub use local::{
-    BATCH_SIZE, EMBEDDING_DIMENSIONS, Embedding, EmbeddingError, EmbeddingService, MAX_TEXT_LENGTH,
-    cosine_similarity, dot_product, euclidean_distance, matryoshka_truncate,
+    BATCH_SIZE, EMBEDDING_DIMENSIONS, EmbedTask, Embedding, EmbeddingError, EmbeddingService,
+    MAX_TEXT_LENGTH, NOMIC_DOCUMENT_PREFIX, NOMIC_QUERY_PREFIX, cosine_similarity, dot_product,
+    embedding_model_tag, euclidean_distance, matryoshka_truncate, nomic_prefixes_enabled,
 };
 
 pub use code::CodeEmbedding;

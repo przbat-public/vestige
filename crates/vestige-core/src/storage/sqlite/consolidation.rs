@@ -264,8 +264,8 @@ impl Storage {
         // 13. FTS5 index optimization — merge segments for faster keyword search
         // 14. Run PRAGMA optimize to refresh query planner statistics
         //     + best-effort INCREMENTAL_VACUUM (paired with V14 auto_vacuum)
-        //     + best-effort HNSW sidecar persistence (post v3.6) so the next
-        //       process boot skips the per-row rebuild.
+        //     + best-effort HNSW sidecar persistence so the next process boot
+        //       skips the per-row rebuild.
         {
             let writer = self
                 .writer

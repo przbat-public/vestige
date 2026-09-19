@@ -97,7 +97,26 @@ pub(in crate::tools::search_unified) async fn run(
             .map(|r| (r.clone(), r.node.content.clone()))
             .collect();
 
-        if let Ok(reranked) =
+        // Prefer ColBERT late-interaction reranking when it is loaded; the Jina
+        // cross-encoder is the fallback (and the default when the feature is off
+        // or the model failed to load).
+        #[cfg(feature = "late-interaction")]
+        let colbert_ranked: Option<Vec<SearchResult>> = cog.colbert.as_ref().and_then(|colbert| {
+            vestige_core::search::rerank_late_interaction(
+                colbert,
+                &args.query,
+                candidates.clone(),
+                config.limit as usize,
+            )
+            .ok()
+            .map(|ranked| ranked.into_iter().map(|r| r.item).collect())
+        });
+        #[cfg(not(feature = "late-interaction"))]
+        let colbert_ranked: Option<Vec<SearchResult>> = None;
+
+        if let Some(ranked) = colbert_ranked {
+            filtered_results = ranked;
+        } else if let Ok(reranked) =
             cog.reranker
                 .rerank(&args.query, candidates, Some(config.limit as usize))
         {
@@ -147,10 +166,70 @@ pub(in crate::tools::search_unified) async fn run(
     }
     let dedup_removed = pre_dedup_count - filtered_results.len();
 
+    // ====================================================================
+    // STAGE 2C: MMR diversity (multi-hop synthesis substrate)
+    //
+    // A pure relevance ranking can hand the answerer K near-duplicate
+    // memories about the single most-relevant fact, starving multi-hop
+    // synthesis of the *other* facts it must combine. MMR (Carbonell &
+    // Goldstein 1998) reorders the survivors to balance relevance against
+    // novelty, so the downstream context budget keeps a diverse set.
+    // Opt-in + tunable so it can be A/B'd against the plain ranking:
+    //   VESTIGE_MMR=on, VESTIGE_MMR_LAMBDA ∈ [0,1] (default 0.7).
+    // ====================================================================
+    if mmr_enabled() && filtered_results.len() > 2 {
+        let lambda = mmr_lambda();
+        let scored: Vec<(SearchResult, f32)> = filtered_results
+            .into_iter()
+            .map(|r| {
+                let score = r.combined_score;
+                (r, score)
+            })
+            .collect();
+        let keep = scored.len();
+        filtered_results = vestige_core::search::mmr_select(
+            scored,
+            |a, b| content_overlap(&a.node.content, &b.node.content) as f32,
+            lambda,
+            keep,
+        );
+    }
+
     Ok(Ok(RetrievalOutput {
         results: filtered_results,
         dedup_removed,
     }))
+}
+
+/// Whether MMR diversity reordering is enabled (`VESTIGE_MMR`). Off by default
+/// so the plain relevance ranking is the measurable baseline.
+fn mmr_enabled() -> bool {
+    use std::sync::OnceLock;
+    static E: OnceLock<bool> = OnceLock::new();
+    *E.get_or_init(|| {
+        std::env::var("VESTIGE_MMR")
+            .map(|v| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// MMR relevance/diversity trade-off `λ` from `VESTIGE_MMR_LAMBDA` (default
+/// 0.7 — relevance-leaning). Clamped to `[0,1]`; bad values fall back.
+fn mmr_lambda() -> f32 {
+    use std::sync::OnceLock;
+    static L: OnceLock<f32> = OnceLock::new();
+    *L.get_or_init(|| {
+        std::env::var("VESTIGE_MMR_LAMBDA")
+            .ok()
+            .and_then(|s| s.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
+            .unwrap_or(0.7)
+    })
 }
 
 /// Issue the hybrid search, decomposing compound queries when supported.

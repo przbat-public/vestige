@@ -22,6 +22,9 @@ preprocessing = ["vestige-core/preprocessing"]
 encryption = ["vestige-core/encryption"]
 # Apple Silicon Metal GPU acceleration for embeddings (fastembed)
 metal = ["vestige-core/metal"]
+# ColBERT late-interaction reranker (token-level MaxSim). Forwards to vestige-core;
+# inert at runtime unless VESTIGE_LATE_INTERACTION + VESTIGE_COLBERT_MODEL_DIR are set.
+late-interaction = ["vestige-core/late-interaction"]
 # OpenTelemetry / OTLP export. OFF by default so the binary stays lean —
 # turn on when shipping to an environment with an OTLP collector. With the
 # feature off, `telemetry::init` is a no-op and reports `FeatureDisabled`.
