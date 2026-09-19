@@ -28,17 +28,28 @@ VESTIGE_MMR=on python3 benchmarks/memconflict/run.py --instances 2 --sessions 25
 `balanced` mode. Raw output: `results/ab-mmr-off-20260919.json`,
 `results/ab-mmr-on-20260919.json`.
 
-| arm | n | macro AA | micro AA | dyn AA | UOCS | CRS-lex | static AA | cond AA | retrieved |
+| arm | n | macroAA | microAA | dynAA | UOCS | statAA | CRSlex | condAA | reader chars |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `nomem` | 98 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0 |
 | `random` | 98 | 0.0322 | 0.0867 | 0.0966 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 687 |
 | `bm25` | 98 | 0.4881 | 0.2704 | 0.2500 | 0.1932 | 0.2143 | 0.0000 | 1.0000 | 736 |
-| `vestige` (A) | 98 | 0.5766 | 0.3316 | 0.3011 | 0.3295 | 0.4286 | 0.0000 | 1.0000 | 798 |
+| `vestige` (A) | 98 | 0.5766 | 0.3316 | 0.3011 | 0.3295 | 0.4286 | 0.0000 | 1.0000 | 799 |
 | `vestige` + MMR (B) | 98 | 0.5766 | 0.3316 | 0.3011 | 0.3295 | 0.4286 | 0.0000 | 1.0000 | 800 |
 
-`vestige` beats BM25 by **+8.85 pp macro AA** / **+6.12 pp micro AA** in both runs.
-CRS-struct reads 0.0000 in every arm because the harness has no
-`recall(mode="contradictions")` to drive it (see PORTING-NOTES §3).
+Column order and names follow the harness's own header (`run.py:758`); the last column
+is `reader_chars_mean`, the blob-inflation confound the harness warns about, not a
+retrieval count. `vestige` beats BM25 by **+8.85 pp macro AA** / **+6.12 pp micro AA**
+in both runs, while handing the judge 799 chars/question against BM25's 736
+(1.09×, under the harness's 1.25× warning threshold — the comparison is not a blob
+artefact).
+
+`CRSlex` is 0.0000 in every arm, and `crs_struct` is 0.0000 for `vestige`: the
+harness *did* run the contradiction probe — 7 questions, 50 memories analyzed each,
+**0 pairs found** (`results/ab-mmr-off-20260919.json`, `contradiction_probe` in every
+probe record). So this is not a missing channel in the harness, it is a measured
+product result: on static-conflict questions `deep_reference` surfaces no
+contradiction pairs at all, even though the same arm answers 42.86% of those
+questions correctly. Closing that gap is tracked in `docs/review/`.
 
 ### What the MMR arm actually shows
 

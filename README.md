@@ -253,7 +253,7 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 
 **Waking SWR Tagging** — Promoted memories get sharp-wave ripple tags for preferential replay during dream consolidation. 70/30 tagged-to-random ratio. Based on [Buzsaki, 2015](https://doi.org/10.1038/nn.3963).
 
-**Autonomic Regulation** — Self-regulating memory health. Auto-promotes frequently accessed memories. Auto-GCs low-retention memories. Consolidation triggers on 6h staleness or 2h active use.
+**Autonomic Regulation** — Self-regulating memory health. Auto-promotes frequently accessed memories. Consolidation reports low-retention memories but never deletes them: garbage collection is an explicit, dry-run-first action (`gc` tool / dashboard panel), because nothing should erase your memories as a side effect of maintenance. Consolidation triggers on 6h staleness or 2h active use.
 
 [Full science documentation ->](docs/SCIENCE.md)
 
