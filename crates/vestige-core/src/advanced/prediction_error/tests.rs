@@ -1,7 +1,7 @@
 //! Tests for the prediction-error gate pipeline.
 
 use super::candidate::CandidateMemory;
-use super::decision::{CreateReason, GateDecision, UpdateType};
+use super::decision::{CreateReason, GateDecision, SupersedeReason, UpdateType};
 use super::gate::{EvaluationIntent, PredictionErrorGate};
 use super::similarity::cosine_similarity;
 
@@ -198,4 +198,57 @@ fn test_stats() {
     assert_eq!(stats.total_evaluations, 2);
     assert_eq!(stats.creates, 1);
     assert_eq!(stats.updates, 1);
+}
+
+#[test]
+fn near_identical_correction_supersedes_instead_of_reinforcing() {
+    let mut gate = PredictionErrorGate::new();
+    let embedding = make_embedding(1.0);
+
+    // Identical embedding → similarity 1.0, i.e. above `near_identical_threshold`.
+    // A correction is by construction very similar to the memory it corrects, so
+    // similarity alone must not decide. Regression: the near-identical short-circuit
+    // used to run first and returned `Update { Reinforce }`, leaving the stale
+    // memory in place and `correction_threshold` unreachable.
+    // The content pair is the one `test_contradiction_detection` pins as a
+    // contradiction, so this test fails for the ordering bug and nothing else.
+    let mut candidate = make_candidate("mem-1", 1.0);
+    candidate.embedding = embedding.clone();
+    candidate.content = "Use synchronous code for simplicity".to_string();
+
+    let decision = gate.evaluate("Don't use synchronous code", &embedding, &[candidate]);
+
+    assert!(
+        matches!(
+            decision,
+            GateDecision::Supersede {
+                supersede_reason: SupersedeReason::Correction,
+                ..
+            }
+        ),
+        "a near-identical contradiction must supersede, got {decision:?}"
+    );
+}
+
+#[test]
+fn near_identical_agreement_still_reinforces() {
+    let mut gate = PredictionErrorGate::new();
+    let embedding = make_embedding(1.0);
+
+    let mut candidate = make_candidate("mem-1", 1.0);
+    candidate.embedding = embedding.clone();
+    candidate.content = "The deploy is on Friday".to_string();
+
+    let decision = gate.evaluate("The deploy is on Friday", &embedding, &[candidate]);
+
+    assert!(
+        matches!(
+            decision,
+            GateDecision::Update {
+                update_type: UpdateType::Reinforce,
+                ..
+            }
+        ),
+        "an agreeing near-identical memory must still reinforce, got {decision:?}"
+    );
 }

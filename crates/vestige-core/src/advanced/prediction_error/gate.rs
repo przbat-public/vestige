@@ -137,10 +137,24 @@ impl PredictionErrorGate {
             .take(self.config.max_candidates)
             .collect();
 
-        // Check for near-identical match
+        // Check the best candidate. Order matters: contradiction is tested *before*
+        // the near-identical short-circuit below. A correction is by definition very
+        // similar to the memory it corrects ("deploy is Friday" → "deploy moved to
+        // Monday"), so testing similarity first swallowed every correction into
+        // `Update { Reinforce }` and left `correction_threshold` unreachable.
         if let Some(best) = top_candidates.first() {
+            if best.appears_contradictory && best.similarity >= self.config.correction_threshold {
+                self.stats.supersedes += 1;
+                return GateDecision::Supersede {
+                    old_memory_id: best.memory_id.clone(),
+                    similarity: best.similarity,
+                    supersede_reason: SupersedeReason::Correction,
+                    prediction_error: best.prediction_error,
+                };
+            }
+
             if best.similarity >= self.config.near_identical_threshold {
-                // Nearly identical - reinforce existing
+                // Nearly identical and not contradictory — reinforce existing
                 self.stats.updates += 1;
                 return GateDecision::Update {
                     target_id: best.memory_id.clone(),
@@ -167,19 +181,8 @@ impl PredictionErrorGate {
                     };
                 }
 
-                // Check for correction (similar but contradictory)
-                if best.similarity >= self.config.correction_threshold && best.appears_contradictory
-                {
-                    self.stats.supersedes += 1;
-                    return GateDecision::Supersede {
-                        old_memory_id: c.id.clone(),
-                        similarity: best.similarity,
-                        supersede_reason: SupersedeReason::Correction,
-                        prediction_error: best.prediction_error,
-                    };
-                }
-
-                // Regular update for similar content
+                // Regular update for similar content (corrections are handled above,
+                // before the near-identical short-circuit)
                 if best.similarity >= self.config.similarity_threshold && self.config.prefer_updates
                 {
                     self.stats.updates += 1;
