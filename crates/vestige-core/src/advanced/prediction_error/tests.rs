@@ -252,3 +252,24 @@ fn near_identical_agreement_still_reinforces() {
         "an agreeing near-identical memory must still reinforce, got {decision:?}"
     );
 }
+
+#[test]
+fn equal_similarity_candidates_resolve_by_memory_id_not_input_order() {
+    let mut gate = PredictionErrorGate::new();
+    let embedding = make_embedding(1.0);
+
+    // Two candidates the gate cannot separate by similarity. Before the shared
+    // identity tiebreak the winner was simply the first row the storage layer
+    // returned, so one unchanged database produced different ingest decisions
+    // depending on the order candidates arrived in.
+    let mut aaa = make_candidate("aaa", 1.0);
+    aaa.embedding = embedding.clone();
+    let mut zzz = make_candidate("zzz", 1.0);
+    zzz.embedding = embedding.clone();
+
+    let forward = gate.evaluate("Content", &embedding, &[aaa.clone(), zzz.clone()]);
+    let backward = gate.evaluate("Content", &embedding, &[zzz, aaa]);
+
+    assert_eq!(forward.target_id(), Some("zzz"));
+    assert_eq!(backward.target_id(), Some("zzz"));
+}

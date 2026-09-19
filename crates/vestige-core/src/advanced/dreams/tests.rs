@@ -1,6 +1,10 @@
 //! Tests for the dreams module.
 
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
+
+use crate::advanced::prediction_error::{CandidateMemory, PredictionErrorGate};
+use crate::memory::freshness::newest;
+use crate::memory::{FreshnessKey, KnowledgeNode};
 
 use super::activity::ActivityTracker;
 use super::connection_graph::{ConnectionGraph, ConnectionReason};
@@ -11,7 +15,10 @@ use super::scheduler::ConsolidationScheduler;
 use super::similarity::{
     calculate_memory_similarity, content_word_similarity, cosine_similarity, tag_similarity,
 };
-use super::types::{DiscoveredConnectionType, DreamMemory, DreamStats, InsightType};
+use super::types::{
+    ContradictionPair, DiscoveredConnection, DiscoveredConnectionType, DreamMemory, DreamStats,
+    InsightType,
+};
 
 fn make_memory(id: &str, content: &str, tags: Vec<&str>) -> DreamMemory {
     DreamMemory {
@@ -471,4 +478,172 @@ fn test_connection_type_contradiction_variant() {
 
     let deserialized: DiscoveredConnectionType = serde_json::from_str(&serialized).unwrap();
     assert_eq!(deserialized, DiscoveredConnectionType::Contradiction);
+}
+
+// ========== Deterministic Contradiction Resolution ==========
+
+fn make_dream_memory(
+    id: &str,
+    content: &str,
+    created_at: DateTime<Utc>,
+    access_count: u32,
+) -> DreamMemory {
+    DreamMemory {
+        id: id.to_string(),
+        content: content.to_string(),
+        embedding: None,
+        tags: vec![],
+        created_at,
+        access_count,
+    }
+}
+
+/// Resolve a pair through an already-discovered contradiction. Using an explicit
+/// connection isolates the survivor choice from the discovery heuristic, so the
+/// assertions below pin only the resolution rule.
+fn resolve_contradiction(first: &DreamMemory, second: &DreamMemory) -> Vec<ContradictionPair> {
+    let connection = DiscoveredConnection {
+        from_id: first.id.clone(),
+        to_id: second.id.clone(),
+        similarity: 0.99,
+        connection_type: DiscoveredConnectionType::Contradiction,
+        reasoning: "fixture: pair already discovered as contradictory".to_string(),
+    };
+    MemoryDreamer::new().detect_contradictions(&[first, second], &[connection])
+}
+
+#[test]
+fn contradiction_survivor_is_the_newer_memory_not_the_most_accessed_one() {
+    let dreamer = MemoryDreamer::new();
+
+    // The stale claim was retrieved far more often than its correction — the
+    // shape that made `access_count` win. Popularity is not freshness: keeping
+    // the stale side demotes the correction and lets the corrected fact return.
+    let stale = DreamMemory {
+        id: "stale".to_string(),
+        content: "The service does not support authentication and cannot verify users".to_string(),
+        embedding: Some(vec![1.0, 0.0, 0.0]),
+        tags: vec!["auth".to_string()],
+        created_at: Utc::now() - Duration::days(60),
+        access_count: 100,
+    };
+    let correction = DreamMemory {
+        id: "correction".to_string(),
+        content: "The service supports JWT authentication and verifies users properly".to_string(),
+        embedding: Some(vec![0.95, 0.1, 0.0]),
+        tags: vec!["auth".to_string()],
+        created_at: Utc::now(),
+        access_count: 1,
+    };
+
+    let memories = [&stale, &correction];
+    let connections = dreamer.discover_connections(&memories, &mut DreamStats::default());
+    let contradictions = dreamer.detect_contradictions(&memories, &connections);
+
+    assert_eq!(
+        contradictions.len(),
+        1,
+        "fixture must be discovered as a contradiction, got {contradictions:?}"
+    );
+    assert_eq!(contradictions[0].survivor_id, "correction");
+    assert_eq!(contradictions[0].demoted_id, "stale");
+}
+
+#[test]
+fn contradiction_tie_is_broken_by_memory_id_not_by_connection_direction() {
+    let now = Utc::now();
+    // Equal timestamps and equal access counts: nothing but the documented
+    // tiebreak may decide. The old fall-through returned whichever memory the
+    // connection named second, so the same store produced a different demotion
+    // list depending on the order the caller handed the memories over.
+    let aaa = make_dream_memory("aaa", "Deploy is on Friday", now, 3);
+    let zzz = make_dream_memory("zzz", "Deploy moved to Monday", now, 3);
+
+    let forward = resolve_contradiction(&aaa, &zzz);
+    let backward = resolve_contradiction(&zzz, &aaa);
+
+    assert_eq!(forward[0].survivor_id, "zzz");
+    assert_eq!(backward[0].survivor_id, "zzz");
+    assert_eq!(forward[0].demoted_id, "aaa");
+    assert_eq!(backward[0].demoted_id, "aaa");
+}
+
+/// The stored-node view of a dream input, with no valid-time anchor — the shape
+/// the read path sees for a memory the temporal extractor never anchored.
+fn stored_node(memory: &DreamMemory) -> KnowledgeNode {
+    KnowledgeNode {
+        id: memory.id.clone(),
+        content: memory.content.clone(),
+        created_at: memory.created_at,
+        ..KnowledgeNode::default()
+    }
+}
+
+/// The invariant that was violated: one pair of conflicting memories must leave
+/// the write path (ingest gate), the consolidation path (dream cycle) and the
+/// read path (the shared freshness rule) naming the same loser. The dream cycle
+/// ranked by `access_count` first, so a stale-but-popular memory survived there
+/// while every read path called that same memory superseded — a `reflect` pass
+/// and a `search` disagreeing about the same database.
+#[test]
+fn write_path_and_read_path_agree_on_which_memory_is_superseded() {
+    let stale = DreamMemory {
+        id: "stale".to_string(),
+        content: "The service does not support authentication and cannot verify users".to_string(),
+        embedding: Some(vec![1.0, 0.0, 0.0]),
+        tags: vec!["auth".to_string()],
+        created_at: Utc::now() - Duration::days(60),
+        access_count: 100,
+    };
+    let correction = DreamMemory {
+        id: "correction".to_string(),
+        content: "The service supports JWT authentication and verifies users properly".to_string(),
+        embedding: Some(vec![0.95, 0.1, 0.0]),
+        tags: vec!["auth".to_string()],
+        created_at: Utc::now(),
+        access_count: 1,
+    };
+
+    // Write path: filing the correction against the memory it contradicts.
+    let mut gate = PredictionErrorGate::new();
+    let decision = gate.evaluate(
+        &correction.content,
+        &[1.0, 0.0, 0.0],
+        &[CandidateMemory {
+            id: stale.id.clone(),
+            content: stale.content.clone(),
+            embedding: vec![1.0, 0.0, 0.0],
+            retrieval_strength: 0.9,
+            retention_strength: 0.9,
+            tags: stale.tags.clone(),
+            source: None,
+            was_demoted: false,
+            was_promoted: false,
+        }],
+    );
+    assert_eq!(decision.target_id(), Some(stale.id.as_str()));
+
+    // Consolidation path: the dream cycle resolves the same pair.
+    let dreamer = MemoryDreamer::new();
+    let memories = [&stale, &correction];
+    let connections = dreamer.discover_connections(&memories, &mut DreamStats::default());
+    let contradictions = dreamer.detect_contradictions(&memories, &connections);
+    assert_eq!(
+        contradictions.len(),
+        1,
+        "fixture must be discovered as a contradiction, got {contradictions:?}"
+    );
+
+    // Read path: the same pair as stored nodes, through the shared rule.
+    let stale_key = FreshnessKey::from_node(&stored_node(&stale));
+    let correction_key = FreshnessKey::from_node(&stored_node(&correction));
+    let current = newest([&stale_key, &correction_key]).expect("non-empty candidate set");
+
+    assert_eq!(current.memory_id, "correction");
+    assert_eq!(contradictions[0].survivor_id, current.memory_id);
+    assert_eq!(contradictions[0].demoted_id, stale.id);
+    assert_eq!(
+        decision.target_id(),
+        Some(contradictions[0].demoted_id.as_str())
+    );
 }

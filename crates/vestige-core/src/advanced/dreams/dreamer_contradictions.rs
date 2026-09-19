@@ -13,9 +13,12 @@ use super::types::{
 impl MemoryDreamer {
     /// Detect contradictions and pick which memory to demote.
     ///
-    /// Heuristic: when two memories share high similarity (same topic)
-    /// but diverge in negation markers, the newer or more-accessed one
-    /// is the "survivor" and the other becomes the demotion candidate.
+    /// The survivor is the current version by
+    /// [`FreshnessKey`](crate::memory::FreshnessKey) — newer wins, and an exact
+    /// tie falls to the id tiebreak. Neither `access_count` nor the direction
+    /// the connection was discovered in takes part: ranking a stale memory up
+    /// for being retrieved often is how the dream cycle used to demote the
+    /// correction and keep the fact it replaced.
     pub(super) fn detect_contradictions(
         &self,
         memories: &[&DreamMemory],
@@ -30,14 +33,13 @@ impl MemoryDreamer {
             .filter_map(|c| {
                 let a = mem_map.get(c.from_id.as_str())?;
                 let b = mem_map.get(c.to_id.as_str())?;
-                let (survivor, demoted) = if a.access_count > b.access_count {
-                    (a, b)
-                } else if b.access_count > a.access_count {
+                // Both sides are reduced to the same key before comparing, so
+                // swapping `from_id`/`to_id` swaps the verdict, never changes
+                // it. Distinct ids can never compare `Equal`.
+                let (survivor, demoted) = if b.freshness_key().is_fresher_than(&a.freshness_key()) {
                     (b, a)
-                } else if a.created_at > b.created_at {
-                    (a, b)
                 } else {
-                    (b, a)
+                    (a, b)
                 };
                 Some(ContradictionPair {
                     survivor_id: survivor.id.clone(),

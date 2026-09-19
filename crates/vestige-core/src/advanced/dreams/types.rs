@@ -66,9 +66,11 @@ pub struct HubCandidate {
 /// A detected contradiction between two memories
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContradictionPair {
-    /// The newer / more-accessed memory (likely correct)
+    /// The current version, decided by [`crate::memory::FreshnessKey`]: the
+    /// greater of the two memories' valid-time anchor and recording time, with
+    /// the id tiebreak when those are equal.
     pub survivor_id: String,
-    /// The older / less-accessed memory (candidate for demotion)
+    /// The superseded version — the survivor's opponent in the same comparison
     pub demoted_id: String,
     /// Similarity between the two (high sim + different content = contradiction)
     pub similarity: f64,
@@ -195,6 +197,19 @@ pub struct DreamMemory {
     pub created_at: DateTime<Utc>,
     /// Access count
     pub access_count: u32,
+}
+
+impl DreamMemory {
+    /// Freshness key for contradiction resolution.
+    ///
+    /// `valid_from` is `None` because [`DreamMemory`] carries no valid-time
+    /// anchor — the dream tool that builds these values has only `created_at`
+    /// to hand. A stored node whose anchor lies after its recording time is
+    /// therefore fresher to the read path than to the dream cycle; passing the
+    /// anchor through here is what closes that gap.
+    pub fn freshness_key(&self) -> crate::memory::FreshnessKey {
+        crate::memory::FreshnessKey::new(self.id.clone(), None, Some(self.created_at))
+    }
 }
 
 /// A discovered connection between memories

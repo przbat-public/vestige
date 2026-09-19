@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::memory::freshness::compare_memory_ids;
+
 use super::candidate::{CandidateMemory, SimilarityResult};
 use super::constants::{
     CORRECTION_THRESHOLD, DEFAULT_SIMILARITY_THRESHOLD, MAX_UPDATE_CANDIDATES,
@@ -124,11 +126,16 @@ impl PredictionErrorGate {
             })
             .collect();
 
-        // Sort by similarity (highest first)
+        // Sort by similarity (highest first). Equal similarities — and NaN
+        // similarities, which used to leave the comparison `Equal` — are broken
+        // by the shared identity tiebreak in `memory::freshness`, so the memory
+        // named in an Update/Supersede/Merge decision is a property of the
+        // candidate set rather than of the storage layer's row order.
         similarities.sort_by(|a, b| {
             b.similarity
                 .partial_cmp(&a.similarity)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| compare_memory_ids(&b.memory_id, &a.memory_id))
         });
 
         // Take top candidates
