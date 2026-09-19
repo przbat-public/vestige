@@ -47,6 +47,62 @@ done
 note "All crates inherit version from workspace"
 
 # ----------------------------------------------------------------------------
+# 1b. Published package manifests (npm + MCPB)
+# ----------------------------------------------------------------------------
+# Section 1 covers package.json and apps/dashboard/package.json only, so the
+# manifests under packages/ drifted silently for months: vestige-init shipped
+# 2.0.1 and the MCPB bundle 1.5.0 while the workspace was at 3.4.0 (caught
+# 2026-09-19). Every package manifest must now track the workspace version.
+#
+# DOCUMENTED EXCEPTION — packages/vestige-mcp-npm/package.json:
+#   That package is a *binary distribution wrapper*, not a workspace build
+#   artifact: scripts/postinstall.js downloads the GitHub release archives for
+#   tag `v<version>`, so its version is tied to the GitHub release it installs
+#   (the published vestige-mcp-server@3.0.0 trails the 3.4.0 workspace on
+#   purpose) and is bumped together with that release. This is not a silent
+#   skip: the check below asserts that the wrapper version and the release tag
+#   its postinstall downloads always agree, so bumping one without the other
+#   fails right here.
+NPM_WRAPPER="packages/vestige-mcp-npm/package.json"
+POSTINSTALL="packages/vestige-mcp-npm/scripts/postinstall.js"
+
+# Reads the first top-level "version" field (manifest_version etc. do not match
+# because the pattern anchors on the opening quote).
+manifest_version() {
+  awk -F'"' '/^[[:space:]]*"version"[[:space:]]*:/{print $4; exit}' "$1"
+}
+
+shopt -s nullglob
+for manifest in packages/*/package.json packages/*/manifest.json; do
+  if [[ "$manifest" == "$NPM_WRAPPER" ]]; then
+    note "${manifest}: exempt from the workspace version (binary distribution wrapper — see comment above)"
+    continue
+  fi
+  pkg_version="$(manifest_version "$manifest")"
+  [[ -n "${pkg_version:-}" ]] || fail "Could not read \"version\" from ${manifest}"
+  [[ "$pkg_version" == "$WS_VERSION" ]] || fail \
+    "${manifest} version (${pkg_version}) ≠ workspace version (${WS_VERSION}). Bump it together with the release."
+  note "${manifest} version matches (${pkg_version})"
+done
+shopt -u nullglob
+
+# The npm wrapper must install the release tag it advertises: either
+# postinstall.js hardcodes a tag that equals its own version, or it derives the
+# tag from package.json (what the published vestige-mcp-server@3.0.0 does).
+NPM_WRAPPER_VERSION="$(manifest_version "$NPM_WRAPPER")"
+[[ -n "${NPM_WRAPPER_VERSION:-}" ]] || fail "Could not read \"version\" from ${NPM_WRAPPER}"
+if [[ -f "$POSTINSTALL" ]]; then
+  BINARY_VERSION_LITERAL="$(sed -nE "s/^[[:space:]]*const[[:space:]]+BINARY_VERSION[[:space:]]*=[[:space:]]*['\"]([^'\"]*)['\"].*/\1/p" "$POSTINSTALL" | head -n 1)"
+  if [[ -n "${BINARY_VERSION_LITERAL:-}" ]]; then
+    [[ "$BINARY_VERSION_LITERAL" == "$NPM_WRAPPER_VERSION" ]] || fail \
+      "${POSTINSTALL} hardcodes BINARY_VERSION='${BINARY_VERSION_LITERAL}' but ${NPM_WRAPPER} declares ${NPM_WRAPPER_VERSION}. Bump both together, or set BINARY_VERSION = VERSION."
+    note "npm wrapper ${NPM_WRAPPER_VERSION} ↔ release tag it downloads (v${BINARY_VERSION_LITERAL})"
+  else
+    note "npm wrapper derives its release tag from package.json (${NPM_WRAPPER_VERSION})"
+  fi
+fi
+
+# ----------------------------------------------------------------------------
 # 2. Tool count (advertised in tools/list)
 # ----------------------------------------------------------------------------
 # Counts the ToolDescription entries in build_tools_list — the canonical list

@@ -26,7 +26,30 @@ echo "→ regenerating ts-rs declarations…"
 cargo test -p vestige-mcp --lib dashboard --quiet
 
 echo "→ checking for drift in apps/dashboard/src/types/generated/…"
-if ! git diff --exit-code --stat -- apps/dashboard/src/types/generated/; then
+
+GENERATED_DIR="apps/dashboard/src/types/generated/"
+
+# `git diff` only reports tracked files, so a brand-new DTO declaration that the
+# test emitted but nobody committed would slip through this gate silently.
+untracked="$(git ls-files --others --exclude-standard -- "$GENERATED_DIR")"
+if [[ -n "$untracked" ]]; then
+    {
+        echo ""
+        echo "✗ Generated TypeScript declarations are untracked."
+        echo ""
+        echo "  The dashboard test emitted files under ${GENERATED_DIR}"
+        echo "  that were never committed:"
+        echo ""
+        echo "$untracked" | sed 's/^/    /'
+        echo ""
+        echo "  Fix locally:"
+        echo "    git add ${GENERATED_DIR}"
+        echo ""
+    } >&2
+    exit 1
+fi
+
+if ! git diff --exit-code --stat -- "$GENERATED_DIR"; then
     cat <<'EOF' >&2
 
 ✗ Generated TypeScript declarations are out of date.

@@ -7,7 +7,10 @@ const os = require('os');
 const { execSync } = require('child_process');
 
 const VERSION = require('../package.json').version;
-const BINARY_VERSION = '2.0.3'; // GitHub release version for binaries
+// Release tag whose archives this wrapper installs. Derived from package.json, exactly
+// like the published vestige-mcp-server@3.0.0: a hardcoded tag silently installs stale
+// binaries the moment the wrapper is bumped (this file had drifted to 2.0.3).
+const BINARY_VERSION = VERSION;
 const PLATFORM = os.platform();
 const ARCH = os.arch();
 

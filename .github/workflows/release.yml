@@ -9,8 +9,9 @@ on:
         description: 'Release tag to build (e.g., v2.0.0)'
         required: true
 
+# Least privilege: only the build job publishes assets, so only it gets write.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,6 +20,12 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      # Required by softprops/action-gh-release (and the `gh release upload`
+      # retry below) to attach assets to the release.
+      contents: write
+    # Fail loudly instead of burning the default 6 h on a hung build.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -40,10 +47,17 @@ jobs:
             os: windows-latest
             archive: zip
             cargo_flags: ""
+          # Intel macOS. This used to run on `macos-14` (which is an *arm64*
+          # label) with `--no-default-features`, i.e. a cross-compiled,
+          # keyword-only binary shipped to a target that README.md and the npm
+          # wrapper both point Intel users at — no embeddings, no vector search,
+          # no preprocessing, no warning. `macos-15-intel` is the current x64
+          # macOS image, so the default feature set (the tested one) builds
+          # natively here.
           - target: x86_64-apple-darwin
-            os: macos-14
+            os: macos-15-intel
             archive: tar.gz
-            cargo_flags: "--no-default-features"
+            cargo_flags: ""
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
@@ -51,12 +65,23 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Replaces dtolnay/rust-toolchain@stable (a moving branch). This action
+      # reads rust-toolchain.toml, so release binaries are built with the same
+      # pinned 1.91.0 the rest of CI validates against.
+      - name: Install Rust (pinned via rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
-          targets: ${{ matrix.target }}
+          target: ${{ matrix.target }}
+
+      - name: Show toolchain
+        run: rustc --version --verbose
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-${{ matrix.target }}
 
       - name: Build vestige-mcp + vestige CLI
         run: cargo build --package vestige-mcp --release --target ${{ matrix.target }} ${{ matrix.cargo_flags }}
@@ -79,10 +104,60 @@ jobs:
           cd target/${{ matrix.target }}/release
           Compress-Archive -Path vestige-mcp.exe,vestige.exe,vestige-restore.exe -DestinationPath ../../../vestige-mcp-${{ matrix.target }}.zip
 
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
+      # Integrity: every archive ships with a `<archive>.sha256` sibling in
+      # sha256sum format (`<hex>  <filename>`), so users (and, once
+      # postinstall.js is updated, the npm wrapper) can verify what they
+      # downloaded instead of trusting the transport.
+      - name: Generate SHA-256 checksum (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          set -euo pipefail
+          artifact="vestige-mcp-${{ matrix.target }}.${{ matrix.archive }}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$artifact" > "$artifact.sha256"
+          else
+            shasum -a 256 "$artifact" > "$artifact.sha256"
+          fi
+          cat "$artifact.sha256"
+
+      - name: Generate SHA-256 checksum (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $artifact = "vestige-mcp-${{ matrix.target }}.${{ matrix.archive }}"
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $artifact).Hash.ToLower()
+          [System.IO.File]::WriteAllText("${artifact}.sha256", "$hash  $artifact`n")
+          Get-Content "${artifact}.sha256"
+
+      - name: Upload archive + checksum to Release
+        id: release-upload
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: vestige-mcp-${{ matrix.target }}.${{ matrix.archive }}
+          files: |
+            vestige-mcp-${{ matrix.target }}.${{ matrix.archive }}
+            vestige-mcp-${{ matrix.target }}.${{ matrix.archive }}.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # With fail-fast: false a single network blip would otherwise leave the
+      # release without one target's archive — and postinstall.js maps every
+      # target to a URL, so a missing asset is a 404 for those users.
+      - name: Retry upload with the GitHub CLI (3 attempts)
+        if: steps.release-upload.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          artifact="vestige-mcp-${{ matrix.target }}.${{ matrix.archive }}"
+          for attempt in 1 2 3; do
+            echo "::notice::upload attempt ${attempt} for ${artifact}"
+            if gh release upload "$tag" "$artifact" "$artifact.sha256" --clobber; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::could not upload ${artifact} after 3 attempts"
+          exit 1

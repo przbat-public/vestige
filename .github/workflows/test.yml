@@ -7,25 +7,41 @@ on:
     branches: [main]
   schedule:
     # Daily security audit so new advisories surface even without code changes.
+    # Only the security jobs (metadata / audit / deny) run on this schedule —
+    # everything else is gated with `github.event_name != 'schedule'` so the
+    # nightly run does not rebuild the whole workspace and the release binaries.
     - cron: "0 5 * * *"
+
+# Least privilege for every job. The GITHUB_TOKEN needs to read the repo and
+# nothing else; `audit` opts into checks/issues write (rustsec/audit-check
+# publishes a check-run and can open an issue with its findings) and no other
+# job widens this.
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  VESTIGE_TEST_MOCK_EMBEDDINGS: "1"
+  # NOTE: VESTIGE_TEST_MOCK_EMBEDDINGS used to be set here. No code path ever
+  # read it (0 hits outside docs), so it only advertised a mock-embedding mode
+  # that does not exist. Re-add it only together with the code that reads it
+  # (embedding init under cfg(test), or an explicit mock provider).
 
 # Cancel previous runs on the same ref to save CI minutes.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Actions are pinned to full commit SHAs (the tag is kept as a trailing comment
+# so Dependabot for `github-actions` can still bump them). A moving tag can be
+# re-pointed by whoever controls the action.
 jobs:
   metadata:
     name: Metadata Consistency
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: ./scripts/check-version-and-tools.sh
 
   fmt:
@@ -33,11 +49,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [metadata]
+    if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # actions-rust-lang/setup-rust-toolchain auto-detects rust-toolchain.toml,
       # so the workflow always uses the same compiler the repo pins (1.91.0).
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
@@ -46,44 +63,87 @@ jobs:
     name: Check & Clippy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: [metadata]
+    if: github.event_name != 'schedule'
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo check --workspace --all-targets --all-features
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  check-minimal:
+    name: Check (--no-default-features)
+    runs-on: ubuntu-latest
+    needs: [metadata]
+    if: github.event_name != 'schedule'
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: no-default-features
+      # `--no-default-features` (keyword-only: no embeddings / vector search /
+      # preprocessing) is a documented, supported build — AGENTS.md and README
+      # both advertise it, and release.yml shipped exactly this feature set for
+      # macOS Intel until the Intel target moved to a native runner. Nothing in
+      # CI compiled it, so a cfg-gating regression could only surface at release
+      # time. `cargo check` covers the library + binary targets of that exact
+      # configuration without paying for a full release build; tests and benches
+      # are deliberately excluded because they are not what ships.
+      - run: cargo check -p vestige-mcp -p vestige-restore --no-default-features
 
   doc:
     name: Rustdoc
     runs-on: ubuntu-latest
     needs: [metadata]
+    if: github.event_name != 'schedule'
     timeout-minutes: 15
     env:
       # Treat any warning (broken intra-doc links, unclosed HTML tags, etc.)
       # as a CI failure so we don't accumulate the kind of drift we just cleaned up.
       RUSTDOCFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo doc --workspace --no-deps --all-features
+
+  wire-contract:
+    name: Wire DTO → Generated TypeScript
+    runs-on: ubuntu-latest
+    needs: [metadata]
+    if: github.event_name != 'schedule'
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: wire-contract
+      # scripts/check-generated-types.sh regenerates the ts-rs declarations and
+      # fails on any drift (`git diff --exit-code`). README, ARCHITECTURE,
+      # AGENTS, CONTRIBUTING and wire/mod.rs all advertise it as a CI gate, but
+      # no workflow ever called it — this step is that gate.
+      - run: ./scripts/check-generated-types.sh
 
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [check]
+    if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo test --workspace --lib
 
   mcp-tests:
@@ -91,10 +151,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [check]
+    if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo build --release --package vestige-mcp
       - run: cargo test --package vestige-e2e-tests --test mcp_protocol -- --test-threads=1
 
@@ -103,10 +164,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [unit-tests]
+    if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo test --package vestige-e2e-tests --test journey_tests -- --test-threads=1
 
   audit:
@@ -114,10 +176,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Run on its own — independent of other jobs so a single advisory
-    # doesn't block the rest of CI before maintainers can triage it.
+    # doesn't block the rest of CI before maintainers can triage it. This is
+    # also the job the nightly schedule exists for, so it is never gated.
+    #
+    # rustsec/audit-check is the only consumer that needs more than the
+    # workflow-default `contents: read`: it publishes a check-run and can file
+    # an issue for the advisories it finds.
+    permissions:
+      contents: read
+      checks: write
+      issues: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -125,9 +196,10 @@ jobs:
     name: Cargo Deny (licenses, bans, sources)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Deterministic checks, cheap enough to keep in the nightly security run.
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           # `advisories` runs in the dedicated `audit` job above so we don't
           # double-report. Here we enforce only the deterministic checks.
@@ -136,38 +208,63 @@ jobs:
   dashboard:
     name: Dashboard Build & Test
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
       # The package name is `vestige-dashboard` (apps/dashboard/package.json),
-      # not `dashboard` — using the wrong filter silently turned this job into
-      # a no-op for months ("No projects matched the filters", exit 0). Belt
-      # and braces: filter by package name AND verify the filter found a
-      # workspace member by failing the step if pnpm reports zero matches.
-      - run: pnpm --filter vestige-dashboard check
-      - run: pnpm --filter vestige-dashboard test
+      # not `dashboard` — using the wrong filter silently turned this job into a
+      # no-op for months ("No projects matched the filters", exit 0). Belt and
+      # braces: actually resolve the filter to a directory and fail when it
+      # matches nothing, which is the guard the old comment promised.
+      - name: Guard — filter must resolve to apps/dashboard
+        run: |
+          if ! pnpm --filter vestige-dashboard exec pwd | grep -q '/apps/dashboard$'; then
+            echo "::error::pnpm --filter vestige-dashboard did not resolve to apps/dashboard — refusing to run a silent no-op"
+            exit 1
+          fi
+      # `run ci` (note the explicit `run`) expands to
+      # `tsc --noEmit && biome check . && vitest run`, i.e. the gate AGENTS.md
+      # documents. A bare `pnpm ci` would hit pnpm's built-in `ci` command
+      # (alias of `install --frozen-lockfile`) and never run the script — which
+      # is why Biome never ran in CI.
+      - run: pnpm --filter vestige-dashboard run ci
       - run: pnpm --filter vestige-dashboard build
+      # apps/dashboard/build/ is committed and embedded into the binary with
+      # include_dir!, so a stale bundle ships an old UI while the sources look
+      # current (CONTRIBUTING.md asks for a manual `pnpm build` before commit).
+      - name: Guard — committed bundle must match a fresh build
+        run: |
+          if ! git diff --exit-code --stat -- apps/dashboard/build/; then
+            echo "::error::apps/dashboard/build/ is out of date — run 'pnpm --filter vestige-dashboard build' and commit the rebuilt bundle"
+            exit 1
+          fi
 
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
     needs: [unit-tests]
+    if: github.event_name != 'schedule'
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           components: llvm-tools-preview
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      # `tool: cargo-llvm-cov` replaces the floating `@cargo-llvm-cov` ref with
+      # the same tool requested through a pinned action version.
+      - uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2.87.16
+        with:
+          tool: cargo-llvm-cov
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
         with:
           files: lcov.info
           fail_ci_if_error: false
@@ -175,7 +272,7 @@ jobs:
   release-build:
     name: Release Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
     needs: [unit-tests, mcp-tests]
     timeout-minutes: 45
     strategy:
@@ -194,11 +291,11 @@ jobs:
             target: aarch64-unknown-linux-gnu
             cargo_flags: ""
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           target: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ matrix.target }}
       - name: Build release (mcp + restore)
@@ -209,7 +306,43 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../vestige-mcp-${{ matrix.target }}.tar.gz vestige-mcp vestige vestige-restore
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vestige-mcp-${{ matrix.target }}
           path: vestige-mcp-${{ matrix.target }}.tar.gz
+
+  glibc-smoke:
+    name: glibc Smoke (Ubuntu 22.04, glibc 2.35)
+    runs-on: ubuntu-latest
+    needs: [release-build]
+    # release-build only runs on main; this job consumes the exact tarball it
+    # produced (no second compilation) and inherits that gate.
+    if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+    steps:
+      # The Linux archives are built on ubuntu-latest (glibc 2.39) but are
+      # downloaded by users on Ubuntu 22.04 / Debian 12. Running the shipped
+      # binary inside ubuntu:22.04 catches a dependency that started requiring
+      # a newer glibc symbol — a failure mode that only shows up on user
+      # machines. `docker run` (not a job container) keeps the runner's Node.js
+      # available for the actions above.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vestige-mcp-x86_64-unknown-linux-gnu
+      - name: Run shipped Linux binaries on glibc 2.35
+        run: |
+          set -euo pipefail
+          tar -xzf vestige-mcp-x86_64-unknown-linux-gnu.tar.gz
+          chmod +x vestige-mcp vestige vestige-restore
+          docker run --rm -v "$PWD:/art:ro" ubuntu:22.04 sh -c '
+            set -e
+            ldd --version | head -n 1
+            /art/vestige-mcp --version
+            /art/vestige --version
+            # vestige-restore has no --version flag: it prints usage and exits 1.
+            # Assert that usage text instead — a glibc symbol mismatch fails in
+            # the dynamic loader, before main() ever runs.
+            restore_out="$(/art/vestige-restore 2>&1 || true)"
+            echo "$restore_out"
+            echo "$restore_out" | grep -q "Usage: vestige-restore"
+          '
