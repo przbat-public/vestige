@@ -1,0 +1,166 @@
+{
+  "id": "ci-release",
+  "dimension": "CI/CD, wydania, pakowanie, obserwowalnosc",
+  "summary": "Sprawdzilem oba workflowy (.github/workflows/test.yml, release.yml), skrypty w scripts/, trzy pakiety w packages/ oraz warstwe obserwowalnosci w crates/vestige-mcp (tracing/telemetry, health, metryki). Bramki, ktore istnieja, sa solidne: check-version-and-tools.sh realnie przechodzi (exit=0) i pilnuje wersji workspace, liczby narzedzi 28, zakresu migracji v1-v15, liczby 40 route'ow i licencji. Co najmniej dwie deklarowane bramki nie istnieja jednak w CI: scripts/check-generated-types.sh nie jest wywolywany przez zaden workflow (mimo ze README/ARCHITECTURE/AGENTS/CONTRIBUTING i wire/mod.rs oglaszaja go jako dzialajacy), a commitowany bundle apps/dashboard/build nie jest porownywany z git diff. Wydania powstaja poza pinowanym toolchainem (dtolnay/rust-toolchain@stable), bez --locked, bez cache/timeoutow i bez weryfikacji integralnosci pobieranych binarek, a wersje pakietow npm/MCPB/init (2.0.3 / 1.5.0 / 2.0.1) sa o kilka wydan za workspace 3.4.0 i gate wersji ich nie obejmuje. Obserwowalnosc jest szczatkowa: telemetria OTLP to atrapa, ktora loguje sukces eksportu, nie ma endpointu /metrics ani zadnych spanow, a /api/health zwraca HTTP 200 takze dla statusu critical.",
+  "strengths": [
+    "Metadata gate jest realny i przechodzi: uruchomienie ./scripts/check-version-and-tools.sh zwraca 'All metadata checks passed' (exit=0) i porownuje workspace version z package.json + apps/dashboard/package.json, wymusza version.workspace = true w 3 crate'ach, liczy narzedzia w catalog.rs (28) i porownuje z README.md + ARCHITECTURE.md, pilnuje zakresu migracji v1-v15 w 4 dokumentach, liczy route'y w dashboard/mod.rs (40) i pilnuje licencji w 3 manifestach (scripts/check-version-and-tools.sh:22-172).",
+    "test.yml ma timeout-minutes na kazdym jobie, concurrency z cancel-in-progress dla PR-ow (test.yml:18-20) oraz fail-fast: false w obu macierzach (test.yml:51, 182), a kolejnosc bramek jest sensowna: metadata -> fmt/check/doc -> unit-tests/mcp-tests -> journey-tests/coverage.",
+    "Joby bezpieczenstwa sa rozdzielone swiadomie: rustsec/audit-check w osobnym jobie bez needs, z komentarzem o nieblokowaniu reszty CI przy advisory (test.yml:112-122), a cargo-deny celowo bez 'advisories', zeby nie raportowac dwa razy (test.yml:124-134).",
+    "release.yml pokrywa 5 targetow, w tym natywny runner ubuntu-24.04-arm dla aarch64-unknown-linux-gnu (bez QEMU) oraz Windows jako zip, a mapa platform w postinstall.js:20-31 (PLATFORM_MAP/ARCH_MAP) odpowiada nazwom archiwow produkowanym przez macierz release.yml:24-50.",
+    "rust-toolchain.toml:5 pinuje channel = '1.91.0' ze components rustfmt/clippy, CI uzywa actions-rust-lang/setup-rust-toolchain@v1, ktory czyta ten plik automatycznie (komentarz test.yml:38-39), a metadata gate sprawdza zgodnosc channel z [workspace.package].rust-version (check-version-and-tools.sh:165-172).",
+    "Dependabot jest skonfigurowany dla trzech ekosystemow (cargo, github-actions, npm) z grupowaniem minor/patch i swiadomym wykluczeniem ciezkich crate'ow z grupy (fastembed, usearch, tokenizers, candle*, git2, rusqlite) w .github/dependabot.yml.",
+    "Komentarze w workflow dokumentuja realne incydenty (cichy no-op filtra pnpm w test.yml:149-153, brak archiwum ARM Linux powodujacy 404 w npm w release.yml:30-38), co pokazuje, ze zespol zna te klasy bledow."
+  ],
+  "inconsistencies": [
+    "README.md:38, ARCHITECTURE.md:122, AGENTS.md:381, CONTRIBUTING.md:213 oraz crates/vestige-mcp/src/dashboard/wire/mod.rs:35-41 opisuja scripts/check-generated-types.sh jako bramke CI, ktora 'fails any PR' - zaden workflow jej nie wywoluje.",
+    "test.yml:149-153 deklaruje guard 'Belt and braces: ... verify the filter found a workspace member by failing the step if pnpm reports zero matches', ale test.yml:154-156 nie zawiera zadnego takiego kroku.",
+    "CONTRIBUTING.md:156 wymaga, by kazda zmiana w apps/dashboard/src byla poprzedzona recznym 'pnpm build' (bundle jest wbudowywany przez include_dir!), ale CI przebudowuje bundle i nigdy nie sprawdza git diff.",
+    "main.rs:187 loguje 'telemetry exporter initialized', podczas gdy telemetry.rs:88-91 przyznaje, ze 'OTLP exporter wiring is a follow-up', a docs/CONFIGURATION.md:206 opisuje feature telemetry jako 'no-op until exporter is wired'.",
+    "packages/vestige-mcp-npm/package.json:3 (2.0.3), packages/vestige-mcpb/manifest.json:5 (1.5.0) i packages/vestige-init/package.json:3 (2.0.1) rozjezdzaja sie z Cargo.toml:15 (3.4.0), a scripts/check-version-and-tools.sh:150-159 sprawdza w tych plikach tylko pole license - gate przechodzi zielono.",
+    "postinstall.js:10 hardkoduje BINARY_VERSION = '2.0.3' niezaleznie od wersji pakietu (postinstall.js:9), wiec URL pobierania (postinstall.js:38) wskazuje tag sprzed 5 miesiecy.",
+    "release.yml:57 uzywa dtolnay/rust-toolchain@stable, a rust-toolchain.toml:2-5 deklaruje, ze pinowanie 'ensures every contributor and CI uses the same compiler' - release omija ten pin.",
+    "README.md:130 podaje URL archiwum x86_64-apple-darwin jako instalacje dla macOS Intel, ale to archiwum jest budowane z --no-default-features (release.yml:43-46), co docs/CONFIGURATION.md:208 opisuje jako 'Skips embeddings + vector search. Smallest binary, keyword-only search'."
+  ],
+  "findings": [
+    {
+      "title": "Bramka ts-rs (check-generated-types.sh) nie jest podlaczona do zadnego workflow",
+      "severity": "high",
+      "category": "inconsistency",
+      "evidence": "git grep -n 'check-generated-types' .github/ -> brak trafien; jedyne wywolanie skryptu to jego naglowek (scripts/check-generated-types.sh:15-16 'Run locally before pushing or rely on the CI check that calls this script'). Skrypt jest natomiast oglaszany jako dzialajaca bramka CI w README.md:38, ARCHITECTURE.md:122, AGENTS.md:381, CONTRIBUTING.md:213 i crates/vestige-mcp/src/dashboard/wire/mod.rs:35-41 ('git diff --exit-code apps/dashboard/src/types/generated/ in CI fails the PR'). test.yml (215 linii) nie zawiera ani wywolania skryptu, ani zadnego git diff po typach.",
+      "impact": "PR zmieniajacy DTO w crates/vestige-mcp/src/dashboard/wire/*.rs przechodzi CI bez regeneracji apps/dashboard/src/types/generated/*.ts; TypeScript kompiluje sie na nieaktualnych typach, a runtime.ts (Zod) zaczyna odrzucac odpowiedzi - deklarowany 'end-to-end contract' nie jest egzekwowany, drift wychodzi dopiero recznie.",
+      "proposal": "Dodac do joba 'dashboard' w test.yml krok z toolchainem (actions-rust-lang/setup-rust-toolchain@v1) i uruchomieniem ./scripts/check-generated-types.sh (albo osobny job 'wire-contract' z needs: [metadata], korzystajacy z cache Rust); skrypt juz robi cargo test -p vestige-mcp --lib dashboard + git diff --exit-code.",
+      "effort": "S",
+      "skill_basis": "reuse-patterns-security.md (Monorepo patterns): bramka opisana jako CI gate musi byc realnym krokiem workflow; github-actions SKILL: per-job gating i path filters."
+    },
+    {
+      "title": "Wersje publikowanych pakietow (npm 2.0.3, MCPB 1.5.0, init 2.0.1) rozjechane z workspace 3.4.0, a gate wersji ich nie obejmuje",
+      "severity": "high",
+      "category": "inconsistency",
+      "evidence": "packages/vestige-mcp-npm/package.json:3 'version': '2.0.3' (ostatni commit pliku: e5bea34, 2026-04-08, gdy repo bylo na 3.1.0), packages/vestige-mcpb/manifest.json:5 'version': '1.5.0', packages/vestige-mcpb/build.sh:4 VERSION=\"${1:-1.1.0}\", packages/vestige-init/package.json:3 'version': '2.0.1' vs Cargo.toml:15 version = 3.4.0. scripts/check-version-and-tools.sh:150-159 sprawdza dla tych trzech plikow wylacznie pole license; uruchomienie ./scripts/check-version-and-tools.sh konczy sie 'All metadata checks passed' (exit=0) mimo rozjazdu wersji.",
+      "impact": "Instalacja npm ('vestige-mcp-server', wskazywana w README.md:140) pobiera binarki z tagu v2.0.3 (postinstall.js:38), czyli serwer MCP sprzed trzech wersji minor, a manifest MCPB deklaruje 1.5.0 - uzytkownik nie ma szans zauwazyc, ze dostal stary build; bramka metadata daje falszywe poczucie spojnosci wersji.",
+      "proposal": "Rozszerzyc sekcje 1 skryptu check-version-and-tools.sh o petle po packages/*/package.json oraz packages/vestige-mcpb/manifest.json porownujaca wersje z WS_VERSION (analogicznie do license_files), a w postinstall.js:10 zastapic hardkod odczytem wersji pakietu/manifestu.",
+      "effort": "S",
+      "skill_basis": "github-actions anti-patterns: 'Hard-coded versions in multiple workflows -> version drift -> centralize'; workspace-monorepo.md: publikacja pakietow workspace wymaga spojnych wersji."
+    },
+    {
+      "title": "postinstall.js pobiera i uruchamia binarki z GitHuba bez weryfikacji integralnosci",
+      "severity": "high",
+      "category": "security",
+      "evidence": "packages/vestige-mcp-npm/scripts/postinstall.js:38 buduje URL releases/download/v${BINARY_VERSION}/..., :125 pobiera przez https.get, :130 rozpakowuje przez execSync tar -xzf / Expand-Archive, :116 ustawia chmodSync 0o755 - brak jakiegokolwiek sprawdzenia sha256/sygnatury. release.yml:82-86 publikuje wylacznie plik archiwum (files: vestige-mcp-${{ matrix.target }}.${{ matrix.archive }}); git grep -in 'sha256' -- .github packages -> brak trafien.",
+      "impact": "Kazde 'npm install vestige-mcp-server' wykonuje kod z archiwum, ktorego nikt nie weryfikuje; podmiana assetu w release lub przejecie repo/konta daje RCE u instalujacego. Brak sum uniemozliwia tez wykrycie okaleczonego pobrania - postinstall sprawdza jedynie istnienie pliku (postinstall.js:132-136).",
+      "proposal": "W release.yml generowac sha256sum dla kazdego archiwum i dolaczac plik .sha256 do assetow, a w postinstall.js pobierac sume i porownywac (crypto.createHash) przed extract(), przerywajac instalacje przy niezgodnosci; docelowo podpisywac artefakty (cosign/Sigstore) i publikowac npm z --provenance.",
+      "effort": "M",
+      "skill_basis": "reuse-patterns-security.md: 'npm publish --provenance', security checklist (supply chain); docker-images-builds.md: tagowanie/digest pinning artefaktow."
+    },
+    {
+      "title": "Brak jawnego bloku permissions w test.yml i brak pinowania akcji do SHA (w tym dtolnay/rust-toolchain@stable w release.yml)",
+      "severity": "high",
+      "category": "security",
+      "evidence": "grep -rn 'permissions' .github/workflows/ -> tylko release.yml:12 (contents: write); test.yml nie ma bloku permissions w ogole. Wszystkie 'uses:' to tagi/gałęzie, zero pinow SHA: actions/checkout@v4, Swatinem/rust-cache@v2, pnpm/action-setup@v4, actions/setup-node@v4, actions-rust-lang/setup-rust-toolchain@v1, taiki-e/install-action@cargo-llvm-cov, codecov/codecov-action@v5, rustsec/audit-check@v2, EmbarkStudios/cargo-deny-action@v2, softprops/action-gh-release@v2 oraz release.yml:57 dtolnay/rust-toolchain@stable (odniesienie do ruchomej gałęzi).",
+      "impact": "Ruchomy tag/galeza akcji moze zostac przesunieta przez wydawce lub atakujacego; w release.yml, ktory ma contents: write i publikuje binarki dla wszystkich uzytkownikow, daje to mozliwosc podmiany wydania. Brak permissions w test.yml oznacza poleganie na domyslnych uprawnieniach repozytorium, a rustsec/audit-check potrzebuje issues/checks write do zglaszania advisory.",
+      "proposal": "Dodac 'permissions: { contents: read }' na poziomie test.yml (i waskie rozszerzenie tylko w jobie audit, jesli ma zakladac issue) oraz przypiac kazde 'uses:' do pelnego SHA - Dependabot dla github-actions jest juz skonfigurowany i bedzie podbijal piny.",
+      "effort": "M",
+      "skill_basis": "reuse-patterns-security.md -> Security: 'Pin actions to full SHA', 'Minimal permissions', anty-wzorce 'Unpinned third-party actions' i 'No permissions block'."
+    },
+    {
+      "title": "Wydanie budowane toolchainem stable, a nie pinowanym 1.91.0",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "release.yml:57 'uses: dtolnay/rust-toolchain@stable' z targets: ${{ matrix.target }}; rust-toolchain.toml:2-5 channel = '1.91.0' z komentarzem 'Pinning here ensures every contributor and CI uses the same compiler'; test.yml:40 uzywa actions-rust-lang/setup-rust-toolchain@v1, ktory auto-wykrywa rust-toolchain.toml (komentarz test.yml:38-39); Cargo.toml:17 rust-version = '1.91'.",
+      "impact": "Binarki release'owe kompiluje kompilator, ktorego CI nigdy nie walidowalo (i inny niz zadeklarowany pin/MSRV), wiec artefakt nie odpowiada przetestowanej konfiguracji; przy nowym stable zmiany w codegenie/LTO wchodza do wydania bez przejscia przez bramki.",
+      "proposal": "W release.yml zamienic na actions-rust-lang/setup-rust-toolchain@v1 (czyta rust-toolchain.toml) lub przypiac dtolnay/rust-toolchain do tagu 1.91.0, i dodac krok 'rustc --version' do logu release'u dla audytu.",
+      "effort": "S",
+      "skill_basis": "github-actions SKILL (runners/toolchain pinning) + anti-patterns: 'Pin to SHA not tag', 'Hard-coded versions in multiple workflows -> version drift'."
+    },
+    {
+      "title": "Macierz CI nie pokrywa Windows ani buildow --no-default-features, mimo ze release je wysyla",
+      "severity": "medium",
+      "category": "test-gap",
+      "evidence": "test.yml:50-53 matrix os: [macos-latest, ubuntu-latest] dla 'cargo check --workspace --all-targets --all-features' i clippy - brak windows-latest; git grep -n 'no-default-features' .github/workflows/ -> brak trafien, podczas gdy release.yml:43-46 buduje x86_64-apple-darwin z cargo_flags: '--no-default-features'. AGENTS.md:338 i README.md:379 reklamuja build --no-default-features jako wspierana konfiguracje.",
+      "impact": "Blad kompilacji specyficzny dla Windows (cfg(windows), sciezki, zaleznosci) albo dla feature-setu bez embeddings/vector-search/preprocessing wychodzi dopiero przy tagowaniu release'u i blokuje wydanie dla calej macierzy, bo build jest w jednym workflow.",
+      "proposal": "Dodac 'windows-latest' do macierzy joba check oraz osobny tani job 'check-minimal' z 'cargo check -p vestige-mcp --no-default-features --all-targets' (bez testow), zeby pokryc oba wydawane warianty.",
+      "effort": "S",
+      "skill_basis": "github-actions SKILL: matrix builds (OS x features), 'Cache aggressively / parallelize jobs'; docker-images-builds.md: multi-platform build verification."
+    },
+    {
+      "title": "Dzienny cron odpala caly pipeline (z 3 buildami release), a release.yml nie ma cache, timeoutow ani retry na uploadzie assetow",
+      "severity": "medium",
+      "category": "performance",
+      "evidence": "test.yml:8-10 schedule cron '0 5 * * *' bez warunkow na jobach, wiec leca wszystkie joby; job release-build (test.yml:175-215) ma 'if: github.ref == refs/heads/main', a dla zdarzenia schedule GitHub ustawia github.ref na galaz domyslna, czyli refs/heads/main - 3 buildy 'cargo build --release' (timeout 45 min kazdy) wykonuja sie co noc. release.yml nie zawiera Swatinem/rust-cache ani timeout-minutes na jobie build, a softprops/action-gh-release@v2 (release.yml:83) nie ma retry (przy fail-fast: false, release.yml:23, pojedynczy blad sieci = brak assetu dla danego targetu).",
+      "impact": "Koszt: codziennie pelny suite + coverage + 5 targetow x 2 crate'y bez cache; brak timeout-minutes pozwala zawieszonemu buildowi palic domyslne 6h. Brak retry przy uploadzie daje release z brakujacym assetem, a postinstall.js:38 mapuje ten target wprost -> 404 przy npm install.",
+      "proposal": "Rozdzielic cron: dodac 'if: github.event_name != schedule' na jobach testowych albo przeniesc audit/deny do osobnego workflow 'security-audit.yml' z samym cronem; w release.yml dodac Swatinem/rust-cache@v2 z kluczem per target, timeout-minutes: 45 na jobie i ponawianie uploadu (np. krok 'gh release upload --clobber' w petli 3 prob).",
+      "effort": "M",
+      "skill_basis": "reuse-patterns-security.md: 'Cache aggressively', timeout strategy table, 'Set timeout-minutes on every job'; anti-pattern 'No timeout-minutes'."
+    },
+    {
+      "title": "Artefakt x86_64-apple-darwin jest wydawany bez embeddings/vector-search/preprocessing, a README kieruje po niego uzytkownikow",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "release.yml:43-46 (target x86_64-apple-darwin, cargo_flags: '--no-default-features') vs crates/vestige-mcp/Cargo.toml:14 default = ['embeddings','vector-search','preprocessing']; README.md:130 podaje dokladnie URL vestige-mcp-x86_64-apple-darwin.tar.gz jako instalacje dla macOS; docs/CONFIGURATION.md:208 opisuje --no-default-features jako 'Skips embeddings + vector search. Smallest binary, keyword-only search'; postinstall.js:20-31 mapuje darwin+x64 wlasnie na ten target. Weryfikacja statyczna (read-only) - nie budowalem binarki, wiec nie potwierdzam runtime'owo, co dokladnie traci ten build.",
+      "impact": "Uzytkownik macOS Intel - zarowno z README, jak i przez npm - dostaje serwer bez wyszukiwania semantycznego i bez content-intelligence pipeline, bez zadnego ostrzezenia w logach startowych ani w dokumentacji instalacyjnej; roznica wzgledem aarch64-apple-darwin jest niewidoczna.",
+      "proposal": "Budowac x86_64-apple-darwin na runnerze Intel (macos-13) z domyslnymi features; jesli cross-compile jest niemozliwy, dodac w main.rs ostrzezenie startowe pod #[cfg(not(feature = \"embeddings\"))] oraz adnotacje przy README.md:130 i w CONTRIBUTING.md.",
+      "effort": "M",
+      "skill_basis": "github-actions SKILL: matrix builds i spojnosc artefaktow per target; anti-pattern 'Hard-coded versions/feature drift'."
+    },
+    {
+      "title": "MCPB: binarka linux-arm64 jest pobierana, ale manifest nigdy jej nie wskazuje",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "packages/vestige-mcpb/build.sh:27-29 pobiera vestige-mcp-aarch64-unknown-linux-gnu.tar.gz i tworzy server/vestige-linux-arm64; packages/vestige-mcpb/manifest.json:23-29 ma platform_overrides tylko dla 'win32' i 'linux' (linux -> server/vestige-mcp-linux-x64), a entry_point (manifest.json:18) to server/vestige-mcp-darwin-arm64; brak jakiegokolwiek joba MCPB w CI (grep -rn 'mcpb' .github/workflows/ -> brak trafien).",
+      "impact": "Na Linux ARM64 bundle uruchomi binarke x86_64 (exec format error), choc ARM64 lezy w paczce; uzytkownik MCPB dostaje niedzialajaca instalacje, a ze bundlowanie jest reczne, zaden gate tego nie wykryje.",
+      "proposal": "Dodac w manifest.json wpis dla Linux ARM64 zgodny ze schematem MCPB (platform_overrides/arch) albo usunac pobieranie ARM64 z build.sh; w build.sh dodac walidacje, ze kazda binarka wskazywana przez manifest istnieje w server/.",
+      "effort": "S",
+      "skill_basis": "github-actions SKILL: matrix/artifact consistency; brak - regula wlasna z pakowania artefaktow per platforma."
+    },
+    {
+      "title": "Job dashboard pomija biome check, a komentarz obiecuje guard filtra, ktorego nie ma",
+      "severity": "medium",
+      "category": "test-gap",
+      "evidence": "test.yml:148-156 wykonuje 'pnpm --filter vestige-dashboard check' (tsc --noEmit), 'test' (vitest) i 'build'; apps/dashboard/package.json:12 definiuje 'ci': 'tsc --noEmit && biome check . && vitest run', a AGENTS.md:435 każe weryfikowac zmiany przez 'cd apps/dashboard && pnpm ci' - Biome 2.4.10 nie jest uruchamiany w CI. Komentarz test.yml:149-153 deklaruje 'Belt and braces: ... verify the filter found a workspace member by failing the step if pnpm reports zero matches', ale test.yml:154-156 nie zawiera takiego kroku.",
+      "impact": "Regresje lint/format (Biome) wchodza na main; jesli nazwa pakietu lub filtr kiedys znow sie rozjedzie, job ponownie stanie sie cichym no-opem z exit 0 - dokladnie incydent opisany w komentarzu.",
+      "proposal": "Zastapic trzy kroki jednym 'pnpm --filter vestige-dashboard ci' (lub dodac 'pnpm --filter vestige-dashboard lint') i dodac realny guard, np. 'pnpm --filter vestige-dashboard exec pwd' z testem niepustego wyniku, tak jak opisuje komentarz.",
+      "effort": "S",
+      "skill_basis": "workspace-monorepo.md (Monorepo CI Patterns / Pitfalls): weryfikacja filtra pnpm; reuse-patterns-security.md: quick-check gate."
+    },
+    {
+      "title": "Brak bramki dryfu dla commitowanego apps/dashboard/build wbudowywanego w binarke",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "crates/vestige-mcp/src/dashboard/static_files.rs:14 include_dir!(\"$CARGO_MANIFEST_DIR/../../apps/dashboard/build\"); apps/dashboard/vite.config.ts:18 outDir: 'build'; git ls-files apps/dashboard/build | wc -l = 51 (bundle jest w repo); CONTRIBUTING.md:156 wymaga recznego 'pnpm build' przed commitem; test.yml:156 uruchamia 'pnpm ... build', ale nie ma po nim git diff --exit-code na apps/dashboard/build/; git grep -n 'git diff' -- .github scripts -> tylko check-generated-types.sh, ktory nie jest wywolywany.",
+      "impact": "PR zmieniajacy apps/dashboard/src bez przebudowania bundle'a przechodzi CI, a kolejny release wbudowuje stary UI - uzytkownik na /dashboard widzi nieaktualna wersje interfejsu, mimo ze kod zrodlowy jest nowszy.",
+      "proposal": "Dodac w jobie dashboard po 'pnpm build' krok 'git diff --exit-code --stat -- apps/dashboard/build/' z komunikatem nakazujacym commit przebudowanego bundle'a (analogicznie do check-generated-types.sh:29).",
+      "effort": "S",
+      "skill_basis": "reuse-patterns-security.md: bramki generowanych artefaktow; anti-pattern 'Storing builds as cache (not artifact)' - tu: commitowany build bez weryfikacji."
+    },
+    {
+      "title": "Telemetria OTLP to atrapa, ktora loguje sukces eksportu; brak jakichkolwiek spanow i logow requestow",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "telemetry.rs:88-91 (feature 'telemetry') loguje 'OTLP exporter wiring is a follow-up' i zwraca TelemetryStatus::Initialized { endpoint }; main.rs:186-188 loguje info!(otlp_endpoint = %endpoint, \"telemetry exporter initialized\"); docs/CONFIGURATION.md:206 opisuje feature jako 'no-op until exporter is wired'. Dodatkowo git grep -n '#\\[instrument' crates/ -> brak trafien, tower-http ma features ['cors','set-header','limit'] (crates/vestige-mcp/Cargo.toml:88) bez 'trace', wiec router dashboardu nie ma TraceLayer/access logow; tracing-subscriber z feature 'json' (Cargo.toml:27) nie jest wykorzystany w main.rs (main.rs:169-174 uzywa fmt()).",
+      "impact": "Operator, ktory ustawi VESTIGE_OTLP_ENDPOINT i zbuduje z --features telemetry, dostaje w logach potwierdzenie eksportu, ktorego nie ma; brak spanow per narzedzie MCP i brak logow dostepu HTTP uniemozliwia diagnoze latency/error rate na produkcji bez zewnetrznych narzedzi.",
+      "proposal": "Zmienic log w main.rs:187 na ostrzezenie ('OTLP endpoint configured but exporter not wired - telemetry is a stub') i zwracac odrebny status TelemetryStatus::NotWired; dodac #[instrument(skip(...))] w dispatchu narzedzi MCP oraz TraceLayer (feature 'trace' w tower-http) na routerze dashboardu.",
+      "effort": "M",
+      "skill_basis": "monitoring-instrumentation.md: trzy filary (traces/logs/metrics), OTel context propagation, structured logging; 'What to log' (request method/path/status/duration)."
+    },
+    {
+      "title": "/api/health zwraca HTTP 200 takze dla statusu critical, a metryki nie sa scrape'owalne",
+      "severity": "medium",
+      "category": "missing-feature",
+      "evidence": "crates/vestige-mcp/src/dashboard/handlers/observability.rs:49-74 zwraca Ok(Json(HealthCheckDto{status,...})) dla kazdego statusu, w tym HealthStatus::Critical (average_retention < 0.3, linie 58-66); route w crates/vestige-mcp/src/dashboard/mod.rs:168. Brak endpointu /metrics: git grep -in 'prometheus' -> brak trafien, git grep -n '\"/metrics\"' -> brak trafien; licznik try_lock_metrics (crates/vestige-mcp/src/cognitive.rs:327) jest wystawiany wylacznie przez narzedzie MCP system_status (crates/vestige-mcp/src/tools/maintenance/system_status.rs:205).",
+      "impact": "Probe kontenera/load-balancera uznaje krytyczny stan pamieci za zdrowy (HTTP 200), wiec restart i alert nie zadzialaja; brak /metrics uniemozliwia monitorowanie i alertowanie po latencji/blędach, mimo ze dane (try_lock_skips, liczba memorii, embedding coverage) sa w procesie.",
+      "proposal": "Zwracac 503 dla HealthStatus::Critical (200 dla healthy/degraded/empty) i rozdzielic /api/health/live od /api/health/ready; dodac '/metrics' (np. crate metrics + metrics-exporter-prometheus) eksponujacy try_lock_skips, total_nodes, embedding_coverage i histogram latencji wyszukiwania.",
+      "effort": "M",
+      "skill_basis": "monitoring-instrumentation.md: Prometheus metric types, /metrics endpoint, alerting rules 'ServiceDown: up == 0'; docker-runtime-operations.md: health check parameters."
+    },
+    {
+      "title": "CI ustawia VESTIGE_TEST_MOCK_EMBEDDINGS=1, ale zaden kod jej nie czyta",
+      "severity": "low",
+      "category": "docs",
+      "evidence": "test.yml:15 'VESTIGE_TEST_MOCK_EMBEDDINGS: \"1\"' w env workflow; git grep -n 'TEST_MOCK' zwraca wylacznie .env.example:70, .github/workflows/test.yml:15, CONTRIBUTING.md:50/57/73/76/79/211 i docs/CONFIGURATION.md:50/224 - zero wystapien w plikach *.rs (tests/e2e/src/mocks/mock_embedding.rs to inny symbol, MOCK_EMBEDDING_DIM).",
+      "impact": "Zmienna jest martwa: testy nie przelaczaja sie na mocki, wiec unit-tests/mcp-tests/journey-tests/coverage zachowuja sie tak, jakby jej nie bylo - jesli ktorakolwiek sciezka testowa dotyka embeddings, kazde uruchomienie CI pobiera model ONNX, a CONTRIBUTING.md:57 obiecuje, ze tego nie robi.",
+      "proposal": "Albo zaimplementowac odczyt zmiennej w sciezce inicjalizacji embeddings/testow (Storage::init_embeddings pod cfg(test) lub jawny mock provider), albo usunac ja z test.yml:15, CONTRIBUTING.md, docs/CONFIGURATION.md i .env.example, zeby dokumentacja nie opisywala nieistniejacej funkcji.",
+      "effort": "S",
+      "skill_basis": "monitoring-instrumentation.md / docs-consistency: deklaracja w dokumentacji musi odpowiadac zachowaniu kodu; brak - regula wlasna."
+    }
+  ]
+}

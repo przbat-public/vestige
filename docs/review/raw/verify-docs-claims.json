@@ -1,0 +1,105 @@
+{
+  "id": "docs-claims",
+  "dimension": "Dokumentacja, spójność twierdzeń, jakość języka",
+  "notes": "Zakres: w pliku audytowym NIE ma znalezisk o severity critical; wszystkie 2 znaleziska 'high' oraz 12 'medium'/'low' zweryfikowałem w kodzie na HEAD=811f40c (working tree czyste dla sprawdzanych plików). Czego nie miałem jak sprawdzić: (a) zewnętrznej prawdziwości twierdzeń marketingowych, których nie da się wyprowadzić z repo (np. 'competitive with text-embedding-3-small on MTEB'); (b) tego, czy autor dokumentacji miał na myśli przyszłe API - weryfikowałem wyłącznie stan kodu na HEAD; (c) realnego FPS wykresu 3D (nie uruchamiałem dashboardu ani przeglądarki - opieram się na komentarzu w limits.rs i na braku benchmarku w repo); (d) pełnego przebiegu CI (nie uruchamiałem scripts/check-version-and-tools.sh ani cargo test - analizowałem sam skrypt i kod, który gate czyta). Metody: czytanie wskazanych linii (nie streszczeń), git show/log -S, oraz pomiary na dysku (rozmiary cache modeli ONNX) i lokalnym sqlite3. Bilans: 13 confirmed, 1 partially-confirmed, 0 refuted, 0 uncertain - żadne znalezisko high nie okazało się nieprawdziwe. Jedyne częściowo obalone to znalezisko o limicie SQLite w README npm: jego teza (zawyżony limit) jest prawdziwa, ale uzasadnienie zawiera nieprawdę o braku PRAGMA page_size, więc skorygowałem przyczynę i wartość docelową. Przy znalezisku o liczbie tras REST doprecyzowałem rozbicie (35 rejestracji /api/*, 33 ścieżki, 5 tras nie-API), nie zmieniając werdyktu.",
+  "verdicts": [
+    {
+      "title": "README nadal reklamuje auto-GC pamięci, którego kod już nie wykonuje",
+      "severity": "high",
+      "verdict": "confirmed",
+      "evidence": "README.md:256 (dokładny tekst: 'Auto-promotes frequently accessed memories. Auto-GCs low-retention memories.'). Kod na HEAD: crates/vestige-core/src/storage/sqlite/consolidation.rs:302-333 - 'let gc_triggered = false;' plus tylko tracing::warn! z 'candidates = below_target' i komentarz 'Automatic deletion is gone'. Jedyne wystąpienie gc_below_retention w całym crates/ poza definicją to komentarz: `grep -rn 'gc_below_retention' --include=*.rs crates/` -> consolidation.rs:304 (komentarz opisujący usunięty call site). Definicja: maintenance.rs:65-75 ('Destructive and irreversible ... It must never be called from an automatic path'). Kontrprzykłady wykluczone: brak feature gate'a, brak zmiennej środowiskowej włączającej auto-GC (`grep -rn 'VESTIGE_RETENTION_TARGET'` -> consolidation.rs:313 i health.rs:68, żaden nie woła GC), brak schedulera GC w main.rs (auto-odpala się tylko run_consolidation, main.rs:225-310). Sprzeczność wewnątrzdokumentacyjna potwierdzona: docs/SCIENCE.md:82 i docs/FAQ.md:161 mówią 'Memories are never deleted automatically', a `grep -rn 'auto-GC|Auto-GC'` po README/ARCHITECTURE/AGENTS/docs trafia wyłącznie README.md:256. Weryfikacja historii: 608d866 ('fix(core): consolidation no longer deletes memories', 2026-09-19) usunął wywołanie gc_below_retention(0.3, 30) i NIE poprawił README - plik README.md nie występuje w `git show --stat 608d866`.",
+      "correction": ""
+    },
+    {
+      "title": "SCIENCE.md i FAQ.md dokumentują narzędzia `importance` i `context`, których nie ma w API",
+      "severity": "high",
+      "verdict": "confirmed",
+      "evidence": "Katalog narzędzi: crates/vestige-mcp/src/server/catalog.rs ma 28 wpisów `tool(` (grep -c -> 28) i nie zawiera 'importance' ani 'context'; grep po całym crates/vestige-mcp/src/server/ dla '\"importance\"' i '\"context\"' nie zwraca ANI JEDNEGO trafienia (sprawdziłem also aliasy w server/deprecated.rs:27-90 - są tam m.in. 'promote_memory', 'recall', 'stats', ale nie 'importance'/'context'). Parametry z dokumentacji nie istnieją nigdzie w kodzie: `grep -rn 'hours_back|hours_forward' --include=*.rs` -> ZERO trafień w Rust, jedyne trafienia w repo to docs/SCIENCE.md:132-133 i docs/FAQ.md:215-216. Dokumentacja: docs/SCIENCE.md:127-137 (importance(memory_id, event_type, hours_back, hours_forward)) i :145-154 (context(query, project, topics, time_weight, topic_weight)); docs/FAQ.md:212-216, :299-305 oraz dodatkowo :331 ('importance(memory_id=\"xxx\", event_type=\"user_flag\")') i :744-750 (sekcja 'Multi-Channel Importance' opisująca 5 typów eventów). Realny odpowiednik: tools/importance.rs:11-35 - schema importance_score wymaga WYŁĄCZNIE 'content' (opcjonalnie context_topics, project), nie ma memory_id ani event_type. Silnik synaptic tagging istnieje w rdzeniu (crates/vestige-core/src/neuroscience/synaptic_tagging/*), ale nie ma go w tools/list, więc przykład z dokumentacji nie wykona się. Jedyna nieścisłość w uzasadnieniu audytu: 'event_type' nie jest parametrem żadnego NARZĘDZIA (poprawnie), ale istnieje jako pole ImportanceEventType w rdzeniu (events.rs:96) - co nie zmienia faktu, że wywołanie z dokumentacji zwróci 'Unknown tool' (dispatch.rs:169).",
+      "correction": ""
+    },
+    {
+      "title": "Rozmiary modeli zaniżone o ~1 GB; trzy sprzeczne liczby w trzech dokumentach",
+      "severity": "medium",
+      "verdict": "confirmed",
+      "evidence": "Pomiar na tej maszynie (cache należy do projektu, katalog vestige.vestige): `ls -la ~/Library/Caches/vestige.vestige/fastembed/models--nomic-ai--nomic-embed-text-v1.5/blobs/` -> plik 547310275 B (547 MB), pozostałe blob-y to 711 KB i mniej (config/tokenizer); `.../models--jinaai--jina-reranker-v2-base-multilingual/blobs/` -> 1114040223 B (1.114 GB) + 17082734 B (17 MB). Razem ~1.68 GB, co zgadza się z liczbą audytu. Dokumentacja podaje sprzeczne wartości: docs/CONFIGURATION.md:11-12 ('~130 MB' + '~600 MB'), docs/SCIENCE.md:206 ('~130 MB') i :212 ('278 M params, ~600 MB'), docs/FAQ.md:612 ('~130MB') i :856 ('~130MB'), docs/integrations/xcode.md:166 i :231 ('~130MB'), packages/vestige-mcp-npm/README.md:82 ('~130MB'), README.md:429 ('~130MB') - a README.md:369 mówi '~1.3GB' (najbliżej prawdy, ale wciąż zaniżone o ~0,4 GB). Wewnętrzna sprzeczność w kodzie potwierdzona dokładnie: crates/vestige-core/src/search/reranker.rs:135-136 ('reads ~150 MB from disk on every later start') vs reranker.rs:177 ('Jina Reranker v2 Base Multilingual, ~1.1GB') - ten sam model, dwa różne komentarze. Wariant modelu: embeddings/local.rs:173 używa EmbeddingModel::NomicEmbedTextV15 (nie-kwantyzowany), co odpowiada 547 MB; gdyby celem było 130 MB, potrzebny byłby wariant Q (137 MB wg embedding-onnx-size-speed-report.md).",
+      "correction": ""
+    },
+    {
+      "title": "AGENTS.md pomija wymagany `confirmed: true` dla `restore` i `gc`",
+      "severity": "medium",
+      "verdict": "confirmed",
+      "evidence": "AGENTS.md:280-281 dokumentuje `gc: { \"min_retention\": 0.1, \"dry_run\": true }` i `restore: { \"path\": \"/path/to/backup.json\" }` - bez `confirmed`. Kod: crates/vestige-mcp/src/tools/restore.rs:14-30 - schema ma \"required\": [\"path\", \"confirmed\"], a restore.rs:62-70 ('Destructive-op gate. Restore has no dry-run...') odrzuca KAŻDE wywołanie bez confirmed przez common::is_confirmed. GC: tools/maintenance/gc.rs:31-36 dodaje parametr `confirmed` ('Required to be `true` when `dry_run` is `false`'), a gc.rs:78-83 zwraca missing_confirmation_error, gdy dry_run=false bez potwierdzenia. Potwierdzona też druga część znaleziska: SECURITY.md:86 twierdzi 'The `restore` and `gc` tools default to `dry_run=true`', choć restore nie ma parametru dry_run w ogóle (restore.rs:16-28 - tylko path i confirmed). Nie jest to problem 'już naprawiony': AGENTS.md ani SECURITY.md nie były ruszane przez commity wprowadzające gate (git log na tych plikach nie zawiera zmian po 1397e23/6c7cca3 dotyczących confirmed).",
+      "correction": ""
+    },
+    {
+      "title": "„40 REST routes” to 35 rejestracji /api/* i 33 ścieżki, a bramka CI utrwala zawyżoną liczbę",
+      "severity": "medium",
+      "verdict": "confirmed",
+      "evidence": "Policzone na HEAD: crates/vestige-mcp/src/dashboard/mod.rs ma 305 linii i DOKŁADNIE 40 wywołań `.route(` w liniach 126-211 (numery: 126 127 132 133 135 137 138 139 140 141 142 143 144 148 149 151 155 159 160 165 167 168 170 172 174 175 176 177 178 179 186 188 196 201 202 203 205 207 209 211) - więc liczba '40' w dokumentach nie jest zmyślona, ale jest myląca. Rozbicie: 35 rejestracji pod /api/*, 33 unikalne ścieżki /api/* (bo mod.rs:138-140 rejestruje `/api/memories/{id}` trzy razy: GET, DELETE, PATCH), 4 trasy nie-API: `/dashboard` (mod.rs:126), `/dashboard/{*path}` (mod.rs:127-130), `/` (132), `/graph` (133) oraz WebSocket `/ws` (135) - czyli 5 nie-API. Dokumenty: README.md:190 ('40 REST routes'), ARCHITECTURE.md:223 ('40 routes total'), AGENTS.md:350 ('40 REST routes'). Gate: scripts/check-version-and-tools.sh:120-140 liczy `grep -cE '^[[:space:]]*\\.route\\(' ` na mod.rs i wymaga, by README/ARCHITECTURE/AGENTS reklamowały tę samą liczbę - więc poprawienie dokumentacji bez zmiany skryptu wywali CI (dokładnie tak, jak twierdzi audyt).",
+      "correction": "Uszczegółowienie: audyt mówi '5 nie-API' i wymienia '/dashboard/{*path}' - zgadza się (5 tras: dashboard, dashboard SPA wildcard, /, /graph, /ws). Reszta liczb (40 call sites, 35 rejestracji /api/*, 33 unikalne ścieżki) potwierdzona."
+    },
+    {
+      "title": "README obiecuje „1000+ nodes at 60fps”, a limit dashboardu opisuje zapaść przy ~600 węzłach",
+      "severity": "medium",
+      "verdict": "confirmed",
+      "evidence": "README.md:166 ('Force-directed 3D graph with 1000+ nodes at 60fps'). Kod: crates/vestige-mcp/src/dashboard/wire/limits.rs:34-40 - komentarz przy graph_max_nodes_max: 'Above this the rendering pipeline stalls on the main thread and FPS collapses; verified empirically at ~600 nodes on M1 Air... Going much further than 1000 is irresponsible until that lands'. Wartości: limits.rs:62-63 -> graph_max_nodes_default: 50, graph_max_nodes_max: 1000. Kontrprzykład sprawdzony: nie znalazłem w repo żadnego benchmarku FPS ani testu wydajności grafu 3D (grep po 'fps' w crates/ i benchmarks/ nie zwraca pomiaru) - twierdzenie README nie ma więc pokrycia, a komentarz w kodzie mówi wprost o ~600 węzłach. Uwaga: 60fps przy 1000 węzłach nie jest sprzeczne z twardym capem 1000 (cap to nie gwarancja 60fps), ale dokumentacja obiecuje płynność, której kod nie potwierdza.",
+      "correction": ""
+    },
+    {
+      "title": "Próg stanu Dormant: dokumentacja 0.4, kod 0.3 w scoringu i konsolidacji",
+      "severity": "medium",
+      "verdict": "confirmed",
+      "evidence": "Dokumentacja: ARCHITECTURE.md:136 ('Active >=0.7, Dormant >=0.4, Silent >=0.1'), ARCHITECTURE.md:177-180 (sekcja Memory States: Dormant >= 0.4), docs/SCIENCE.md:70-76 (tabela: Dormant 40-70%, Silent 10-40%). Kod rozjeżdża się dokładnie tak, jak opisano: crates/vestige-mcp/src/tools/search_unified/pipeline/scoring.rs:146-153 klasyfikuje po `result.node.retention_strength > 0.7 / > 0.3 / > 0.1`; crates/vestige-core/src/storage/sqlite/consolidation.rs:239-245 robi to samo (`n.retention_strength > 0.3` -> Dormant). Wzorzec zgodny z dokumentacją: crates/vestige-mcp/src/tools/memory_unified/helpers.rs:5-21 (ACCESSIBILITY_DORMANT = 0.4, ACCESSIBILITY_SILENT = 0.1 + próg na KOMPOZYCIE accessibility, nie na samym retention). Czyli dwa różne progi (0.3 vs 0.4) i dwie różne wielkości wejściowe (retention_strength vs accessibility 0.5*ret+0.3*retr+0.2*stor) - spójne z impactem z audytu (ta sama pamięć w innym kubełku w zależności od ścieżki). To nie jest 'już naprawione': helpers.rs to osobny klasyfikator, a dwa pozostałe miejsca nadal mają 0.3.",
+      "correction": ""
+    },
+    {
+      "title": "Protokół startu sesji w AGENTS.md czyta pola, których `session_context` nie zwraca",
+      "severity": "medium",
+      "verdict": "confirmed",
+      "evidence": "AGENTS.md:43-44 dosłownie: '- `totalMemories` > 700 → call `find_duplicates`' i '- `savesSinceLastDream` > 100 → call `reflect` (metacognitive check)', w bloku 'Then check `automationTriggers` from response' (AGENTS.md:39-45). Kod: crates/vestige-mcp/src/tools/session_context/execute.rs:352-362 zwraca dokładnie: context, tokensUsed, tokenBudget, expandable oraz automationTriggers{needsDream, needsBackup, needsGc} - brak totalMemories i brak savesSinceLastDream. Sprawdzone, że dane są liczone, ale nieeksportowane: execute.rs:163-171 liczy `stats` i `saves_since_last_dream` (użyte do needs_dream w linii 189-190) - czyli naprawa jest trywialna (dopisanie dwóch pól), co potwierdza ocenę 'S' z audytu. Pola istnieją w innym narzędziu: tools/maintenance/system_status.rs:232-266 -> 'totalMemories': stats.total_nodes oraz automationTriggers.savesSinceLastDream. Czyli dwie z pięciu reguł automatyzacji z kanonicznych instrukcji są nieegzekwowalne z dokumentowanego wywołania - dokładnie jak twierdzi audyt.",
+      "correction": ""
+    },
+    {
+      "title": "SECURITY.md opisuje limit długości zapytania jako `VESTIGE_MAX_TOKEN_BUDGET`",
+      "severity": "medium",
+      "verdict": "confirmed",
+      "evidence": "SECURITY.md:83: 'Query length limit: configurable via `VESTIGE_MAX_TOKEN_BUDGET`; tools default to safe ceilings.' Kod używa tej zmiennej WYŁĄCZNIE do klampowania budżetu odpowiedzi: `grep -rn 'VESTIGE_MAX_TOKEN_BUDGET' --include=*.rs crates/` -> dokładnie 2 trafienia: tools/search_unified/pipeline/finalize.rs:266-270 ('let max_budget: i32 = std::env::var(\"VESTIGE_MAX_TOKEN_BUDGET\")...unwrap_or(100_000); let budget = budget.clamp(100, max_budget)') oraz tools/session_context/execute.rs:27. Po stronie zapytania jedyne ograniczenie to liczba termów FTS5: crates/vestige-core/src/fts.rs:12 ('const MAX_TERMS: usize = 32;', komentarz mówi o 1000-znakowym query budującym wielusettermową ekspresję OR). Czyli zdanie w SECURITY.md jest nieprawdziwe co do kierunku ograniczenia (odpowiedź vs zapytanie). Kontekst łagodzący: SECURITY.md:84-85 (FTS5 przez vestige_core::fts) jest poprawne i to ono realnie ogranicza wektor - ale to nie unieważnia błędu w linii 83, bo audytor czytający linię 83 dostaje nieprawdziwą informację o konfigurowalnym limicie długości zapytania.",
+      "correction": ""
+    },
+    {
+      "title": "packages/vestige-mcp-npm/README.md: błędny limit SQLite i sprzeczna arytmetyka pojemności",
+      "severity": "low",
+      "verdict": "partially-confirmed",
+      "evidence": "Część potwierdzona: packages/vestige-mcp-npm/README.md:74 ('Database limit: 216TB (SQLite theoretical max)'). Oficjalna dokumentacja SQLite (sekcja 25 'Maximum Database Size' na https://sqlite.org/limits.html, stan na 2026-07-10) podaje maksymalny rozmiar pliku bazy jako 4294967294 stron, co przy maksymalnej stronie 65536 B daje ~281 TB, a przy domyślnej 4096 B ~17,5 TB. Liczby 216 TB nie ma w dokumentacji SQLite w żadnym wariancie - jest błędna. Potwierdzona też wewnętrzna sprzeczność w tym samym akapicie: wiersz 76 ('1 million memories ≈ 1-2GB') vs wiersz 78 ('100 memories/day would use ~1.5GB after 10 years' = 365 tys. pamięci, czyli 0,4-0,7 GB wg skali z wiersza 76). Część OBALONA: audyt twierdzi, że 'Vestige nie ustawia PRAGMA page_size (storage/sqlite/init.rs:101-109 ustawia tylko WAL, synchronous, cache_size...)' i na tej podstawie rekomenduje '~17,5 TB przy domyślnym page_size 4 KiB'. To nieprawda: page_size jest ustawiany na 8192 przez migrację V7 - crates/vestige-core/src/storage/migrations/runner.rs:38-46 ('conn.pragma_update(None, \"page_size\", 8192)?; ... VACUUM; ... Database page_size upgraded to 8192 via VACUUM', z komentarzem o porzuceniu transakcji) oraz registry.rs:38-41 (opis migracji v7: 'Performance: page_size 8192, FTS5 porter tokenizer') i sql.rs:437-443. Pomiar lokalny potwierdza mechanikę: `sqlite3 'PRAGMA page_size=8192; VACUUM; SELECT max_page_count*page_size/1024^4'` -> 32.0 TB (przy 4096 -> 16.0 TB), bo biblioteka anaconda ma jeszcze stary limit 2^32-2 stron; przy dzisiejszym defaultcie 4294967294 stron realny sufit dla Vestige to ~35,2 TB (8192 B x 4294967294), a nie 17,5 TB.",
+      "correction": "Prawda: (1) README npm zawyża limit - realny sufit dla bazy Vestige to ~35 TB (page_size=8192 ustawiany w migracji V7 x maks. 4294967294 stron), a '216 TB' nie odpowiada żadnej liczbie z dokumentacji SQLite (tam ~281 TB przy stronie 65536 B i ~17,5 TB przy domyślnej 4096 B); (2) sprzeczność 1-2GB/mln vs 1,5GB/365 tys. w wierszach 76 i 78 jest realna. Błędna jest natomiast diagnoza przyczyny i rekomendowana wartość w audycie: Vestige NIE działa na domyślnym page_size 4 KiB, więc '~17,5 TB przy domyślnym page_size 4 KiB' należy zastąpić '~35 TB przy page_size 8192 B (Vestige) / ~281 TB to maksimum teoretyczne SQLite przy stronie 64 KiB'."
+    },
+    {
+      "title": "AGENTS.md - kanoniczna lista narzędzi pomija `precompute_for_context`",
+      "severity": "low",
+      "verdict": "confirmed",
+      "evidence": "`grep -c precompute_for_context AGENTS.md` -> 0, mimo że AGENTS.md:335 deklaruje '28 MCP tools' i wskazuje catalog.rs jako kanon. Narzędzie realnie istnieje: crates/vestige-mcp/src/server/catalog.rs:31-33 (komentarz kategorii: '4 cog: dream, explore_connections, predict, precompute_for_context (sleep-time compute)') i catalog.rs:286-288 (wpis w build_tools_list z opisem TTL 1-168h i tagów precomputed/topic:<slug>); implementacja tools/precompute.rs. Jest też udokumentowane w README.md:286 i crates/vestige-mcp/README.md:62 (z adnotacją 'mutating, additive'). W AGENTS.md sekcje narzędzi wymieniają predict (AGENTS.md:236) i deep_reference (:242), ale precompute brak - lista 28 narzędzi w pliku ogłaszającym się źródłem prawdy (AGENTS.md:3-6, CLAUDE.md/GEMINI.md jako symlinki) jest niekompletna o 1 pozycję.",
+      "correction": ""
+    },
+    {
+      "title": "Zakres w20 w SCIENCE.md (0.1-0.8) nie zgadza się z clampem w kodzie [0.01, 1.0]",
+      "severity": "low",
+      "verdict": "confirmed",
+      "evidence": "docs/SCIENCE.md:50 ('w₂₀ = personalized decay parameter (0.1-0.8)') vs crates/vestige-core/src/storage/sqlite/fsrs_personalization.rs:68-74 - komentarz 'The value is clamped to FSRS-6's valid decay range `[0.01, 1.0]`' i kod 'let clamped = w20.clamp(0.01, 1.0);'. Zgodność reszty opisu potwierdzona: nazwa i wzór się zgadzają (fsrs/algorithm.rs:84-85 wzór z w20, algorithm.rs:38 wartość domyślna w20=0.1542), rozjeżdża się wyłącznie zakres. Sprawdziłem też, czy gdzieś indziej w kodzie nie ma clampu do 0.1-0.8, który czyniłby dokumentację prawdziwą - jedyne miejsce zapisu to fsrs_personalization.rs:74. Znalezisko drobne, ale prawdziwe.",
+      "correction": ""
+    },
+    {
+      "title": "docs/blog/xcode-memory.md podaje „23 cognitive tools”",
+      "severity": "low",
+      "verdict": "confirmed",
+      "evidence": "docs/blog/xcode-memory.md:86 ('**23 cognitive tools** — search, ingest, dream, predict, explore connections, garbage collect, and more') vs katalog 28 narzędzi (catalog.rs, grep -c 'tool(' -> 28; AGENTS.md:335 '28 MCP tools'; README.md:271 '28 MCP Tools'). Klauzula zamrożenia z docs/launch/README.md:3-11 dotyczy WYŁĄCZNIE blog-post.md, show-hn.md i demo-script.md - docs/blog/xcode-memory.md nie jest na tej liście, więc liczba nie ma dyspensy. Gate scripts/check-version-and-tools.sh sprawdza tylko README.md, ARCHITECTURE.md i AGENTS.md (tablica route_doc_files oraz grep na README dla liczby narzędzi), więc bloga nikt nie pilnuje - dokładnie jak twierdzi audyt.",
+      "correction": ""
+    },
+    {
+      "title": "„130 years of memory research” nie ma pokrycia w cytowanych źródłach (Ebbinghaus 1885 -> 141 lat)",
+      "severity": "low",
+      "verdict": "confirmed",
+      "evidence": "Trzy wystąpienia potwierdzone co do pliku i treści: README.md:13 ('Built on 130 years of memory research'), packages/vestige-mcp-npm/README.md:5 ('Built on 130 years of cognitive science research'), docs/blog/xcode-memory.md:17 ('built on 130 years of memory research'). Najstarsze cytowane źródło w repo to Ebbinghaus 1885: docs/launch/blog-post.md:7 (lista 'Ebbinghaus (1885), Collins & Loftus (1975), ...'), docs/launch/blog-post.md:386 (pozycja bibliografii 'Ebbinghaus, H. (1885). Uber das Gedachtnis') oraz crates/vestige-core/tests/scientific_validation.rs:20-35 (replikacja Murre & Dros 2015 testów Ebbinghausa 1885). Od 1885 do 2026 jest 141 lat, nie 130 - więc liczba nie ma pokrycia w źródłach; nie znalazłem w repo żadnego źródła z ~1896 (grep po '18[0-9][0-9]' w docs/ i crates/ nie zwraca nic starszego niż 1885). Nie jest to twierdzenie krytyczne, ale jest to liczba-marketing bez podstawy.",
+      "correction": ""
+    }
+  ]
+}

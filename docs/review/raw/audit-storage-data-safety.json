@@ -1,0 +1,164 @@
+{
+  "id": "storage-data-safety",
+  "dimension": "Storage: schemat, migracje, transakcje, bezpieczenstwo danych",
+  "summary": "Przeaudytowalem warstwe storage (migracje V1-V15, transakcje, FTS5, cykl zycia embeddingow i sidecara HNSW, sciezki GDPR oraz backup/restore, narzedzia maintenance MCP) w trybie read-only, traktujac 6 dzisiejszych commitow jako punkt odniesienia. Najpowazniejsze ustalenie: artefakt narzedzia `backup` (plik .db z VACUUM INTO) nie ma zadnego konsumenta - `restore` przyjmuje wylacznie JSON, wiec udokumentowana petla backup->restore nie istnieje. Trzy sciezki zapisu (review.rs x2, init.rs) otwieraja `BEGIN IMMEDIATE` bez rollbacku na sciezce bledu, co przy jednym wspoldzielonym polaczeniu writera trwale blokuje zapisy do restartu; nowy helper `begin_write_transaction` z commitu 167b800 jest uzyty tylko w 2 z 5 miejsc. Erasure z RODO art. 17 nie jest osiagalne z zadnego binarium ani trasy REST, a `erase_by_tag` nadmiernie usuwa dane (wzorzec LIKE bez cudzyslowu zamykajacego). Trigger FTS5 `knowledge_au` bez `UPDATE OF content, tags` przepisuje indeks pelnotekstowy przy kazdym UPDATE retention, czyli przy kazdym trafieniu wyszukiwania i przy calym `apply_decay`, a runner migracji czyta wersje schematu raz, bez walidacji gornej granicy i polykajac bledy odczytu.",
+  "strengths": [
+    "Migracje V7 i V14 obsluguja operandy, ktore nie dzialaja w transakcji (`VACUUM`, `PRAGMA auto_vacuum`), poza transakcja i podnosza `schema_version` dopiero po sukcesie, wiec nieudany VACUUM zostawia baze na v6/v13 i migracja powtarza sie przy nastepnym starcie (crates/vestige-core/src/storage/migrations/runner.rs:32-61).",
+    "`begin_write_transaction` (crates/vestige-core/src/storage/sqlite/helpers.rs:301-326) realizuje `BEGIN IMMEDIATE` + 3 logowane ponowienia 100/200/400 ms i jest wpiety w dwa najbardziej narazone na SQLITE_BUSY_SNAPSHOT miejsca: consolidation.rs:536 oraz temporal.rs:196.",
+    "Backup MCP uzywa `VACUUM INTO` z escapowaniem apostrofow i odrzucaniem znakow kontrolnych (crates/vestige-core/src/storage/sqlite/maintenance.rs:46-63) - zgodnie z dokumentacja SQLite, w przeciwienstwie do CLI `vestige backup`, ktore robi `std::fs::copy` (crates/vestige-mcp/src/bin/cli/backup.rs:41-47).",
+    "Sidecar HNSW jest traktowany jako cache odtwarzalny ze SQLite: walidacja `schema`/`row_count`, porownanie `loaded.len()` i przebudowa przy kazdym bledzie (crates/vestige-core/src/storage/sqlite/init.rs:406-480), z testami roundtrip i stale-sidecar (crates/vestige-core/src/storage/sqlite/tests.rs:402-476).",
+    "Naprawiona nazwa tabeli w sciezce GDPR (`memory_access_log`) ma test regresyjny pilnujacy, ze erasure nie konczy sie bledem `no such table` i faktycznie usuwa wiersz (crates/vestige-core/src/storage/sqlite/gdpr.rs:39-49, tests.rs:522-553).",
+    "Bramka potwierdzenia dla operacji destrukcyjnych jest zaimplementowana i przetestowana dla `gc` oraz `restore`, w tym przypadek `confirmed: \"true\"` jako string (crates/vestige-mcp/src/tools/maintenance/tests.rs:257-332, crates/vestige-mcp/src/tools/restore.rs:188-261).",
+    "V14 (`auto_vacuum=INCREMENTAL`) nie jest martwa migracja: consolidation.rs:280 wykonuje `PRAGMA incremental_vacuum(1024)` w kazdym cyklu, a runner loguje przelaczenie trybu (runner.rs:59-61)."
+  ],
+  "inconsistencies": [
+    "ARCHITECTURE.md:196 opisuje 'Versions 1-14' i twierdzi, ze V12 to tabele `decisions`/`hubs`/`insights` z indeksami FK, a V13 to kolumny tier/confidence; faktycznie V12 dodaje kolumne `extra_json` (migrations/sql.rs:634), V13 dwa czesciowe indeksy hubow (sql.rs:665-673), a V15 w ogole nie istnieje w tym opisie (registry.rs:78-82).",
+    "ARCHITECTURE.md:196 deklaruje 'All forward-only and idempotent', ale V2/V4/V5/V8/V9/V10/V11/V12 uzywaja golego `ALTER TABLE ... ADD COLUMN` (np. sql.rs:98), wiec powtorne wykonanie konczy sie bledem `duplicate column name` - idempotentne sa tylko kroki z `IF NOT EXISTS`.",
+    "`test_partial_migration_rolls_back` (migrations/tests.rs:24-47) nie wywoluje `apply_migrations` - testuje semantyke `execute_batch` samego SQLite, wiec regresja rollbacku w runnerze nie zostanie wykryta; `test_gc_destructive_call_with_confirmation_proceeds` (maintenance/tests.rs:335-356) nie zapisuje zadnej pamieci, a przy `min_retention: 1.0` swiezy wezel (retention 1.0, nodes.rs:153) i tak nie jest kandydatem, wiec test nie dowodzi usuniecia czegokolwiek.",
+    "`gc_below_retention` (sqlite/maintenance.rs:75) ma zero wywolan w repo po usunieciu auto-GC, a jego doc (maintenance.rs:69-74) wskazuje jako konsumenta 'the `gc` MCP tool', ktory w rzeczywistosci usuwa przez `delete_node` (tools/maintenance/gc.rs:176).",
+    "AGENTS.md:278 i AGENTS.md:281 paruja `backup: {}` z `restore: { path: backup.json }`, a `backup` tworzy plik `.db` (tools/maintenance/backup.rs:31) - opis nie odpowiada zachowaniu narzedzi.",
+    "search.rs:5 reklamuje 'Keyword - FTS5 BM25 over knowledge_fts', ale `keyword_search` sortuje po `retention_strength`, a nie po `rank` (search.rs:131), podczas gdy druga sciezka keyword robi to poprawnie (search.rs:372)."
+  ],
+  "findings": [
+    {
+      "title": "Backup tworzy plik .db, a restore przyjmuje wylacznie JSON - odtworzenie backupu jest niemozliwe",
+      "severity": "critical",
+      "category": "bug",
+      "evidence": "tools/maintenance/backup.rs:31 zapisuje `vestige-{timestamp}.db`, a `catalog.rs:204-207` opisuje narzedzie jako 'Create a SQLite database backup. Returns the backup file path.'. Z drugiej strony `catalog.rs:297-300` + `tools/restore.rs:87-105` przyjmuja tylko MCP wrapper / `RecallResult` / tablice JSON i dla pliku .db zwracaja 'Unrecognized backup format'; binarka `crates/vestige-restore/src/main.rs:48-49` wymaga formatu `[{type,text}]`, a CLI (`bin/cli/restore.rs:29-33`) identycznie. Grep po `crates/` i `apps/` nie znajduje zadnej sciezki, ktora otwieralaby snapshot .db (brak restore przez `ATTACH`/`sqlite3_backup`), a trasa REST restore nie istnieje (`dashboard/mod.rs` - brak).",
+      "impact": "Agent wywolujacy `backup` dostaje sciezke pliku i raport sukcesu, ale pozniejsze `restore` (MCP, CLI, binarka) nie potrafi z niego odtworzyc danych - jedyna dzialajaca metoda to reczne podmienienie pliku bazy, co nie jest nigdzie udokumentowane. W razie awarii uzytkownik zostaje z nieuzywalnym artefaktem, a trigger `needsBackup` raportuje stan jako zabezpieczony, co jest luka compliance (RODO art. 32(1)(c)).",
+      "proposal": "Dodac `Storage::restore_from_snapshot(&Path)` (ATTACH + `sqlite3_backup`/kopiowanie tabel do docelowej bazy) i rozpoznawanie formatu po naglowku SQLite w `tools::restore::execute` (obok JSON), albo zmienic `execute_backup` tak, by pisal JSON w formacie konsumowanym przez `restore`. W obu przypadkach dodac test petli backup->restore na wspolnym `TempDir` (`tools/maintenance/tests.rs`).",
+      "effort": "M",
+      "skill_basis": "brak - skill jest PostgreSQL-owy; dotyczy kontraktu backup/restore w SQLite"
+    },
+    {
+      "title": "`split_memories` z `dry_run: false` usuwa pamieci bez bramki `confirmed` - wbrew wlasnej regule projektu",
+      "severity": "high",
+      "category": "security",
+      "evidence": "crates/vestige-mcp/src/tools/common.rs:34-38: 'Every destructive tool MUST default to a safe path (`dry_run = true`, `confirmed = false`) so misuse by an over-eager agent cannot delete data on the first call. The gate fires only when both: 1. the caller asks for the destructive variant, AND 2. they pass `confirmed: true`.'. `split_memories_schema()` (tools/maintenance/split_memories.rs:27-33) nie deklaruje pola `confirmed`, a `split_memories.rs:94-111` przy `dry_run=false` wola `storage.delete_node(id)` w petli. Dla kontrastu `gc.rs:78-83` wymusza `common::is_confirmed(&raw)`, a `maintenance/tests.rs:257-274` pilnuje obecnosci flagi w schemacie gc.",
+      "impact": "Jedno wywolanie `split_memories { dry_run: false }` trwale usuwa do 100 pamieci (limit <= 100, min_length >= 100) bez potwierdzenia i bez kopii; instrukcja narzedzia kaze dopiero PO usunieciu zrobic re-ingest, a przy awarii agenta dane przepadaja bezpowrotnie (brak tombstone'a i audytu).",
+      "proposal": "Dodac `confirmed` (boolean, default false) do `split_memories_schema()`, sprawdzac `common::is_confirmed(&raw)` przed petla usuwajaca w `execute_split_memories` i dodac test 'blocked split must not delete' analogiczny do `test_gc_destructive_call_without_confirmation_is_blocked`.",
+      "effort": "S",
+      "skill_basis": "brak - regula pochodzi z `tools/common.rs:34-38`"
+    },
+    {
+      "title": "Sciezki erasure (RODO art. 17) nie sa osiagalne z zadnego interfejsu produktu",
+      "severity": "high",
+      "category": "missing-feature",
+      "evidence": "`grep -rn 'right_to_erasure|erase_by_tag' crates/ apps/` zwraca wylacznie definicje w `storage/sqlite/gdpr.rs:22` i `gdpr.rs:72`, wzmianke w `storage/sqlite/mod.rs:32` oraz testy `sqlite/tests.rs:522-553` - brak w `server/catalog.rs` (28 narzedzi), `server/dispatch.rs`, `bin/cli/*` i `dashboard/mod.rs`. Jednoczesnie README.md:79 reklamuje 'Privacy governance - `right_to_erasure()` for GDPR-style complete removal', a CHANGELOG.md:371 'a function for GDPR-style complete removal of a memory and all its connections, embeddings, and state transitions'.",
+      "impact": "Zadanie usuniecia danych (art. 17) nie da sie zrealizowac przez MCP, CLI ani REST - jedyne dostepne usuniecie to `memory(action=\"delete\")`/`gc`, ktore nie czysci insightow ani fizycznie nie usuwa danych z pliku. Deklaracja compliance w README nie ma pokrycia w funkcji produktu, wiec audyt RODO konczy sie na poziomie biblioteki, do ktorej uzytkownik nie ma dostepu.",
+      "proposal": "Dodac narzedzie MCP `erase` (schema z `confirmed`, parametry `id` albo `tag`) dispatchowane w `server/dispatch.rs` do `Storage::right_to_erasure`/`erase_by_tag`, trase `POST /api/maintenance/erase` w `dashboard/mod.rs` oraz wpis do `catalog.rs` z `destructive(...)`; pokryc testem E2E, ze po wywolaniu `get_node` zwraca `None`.",
+      "effort": "M",
+      "skill_basis": "brak"
+    },
+    {
+      "title": "`erase_by_tag` dopasowuje prefiksy tagow (LIKE bez cudzyslowu zamykajacego) - usuwa wiecej danych niz zadano",
+      "severity": "high",
+      "category": "security",
+      "evidence": "gdpr.rs:78 buduje wzorzec LIKE jako `%\"<tag>%` (cudzyslow otwierajacy, brak zamykajacego), a gdpr.rs:80 wykonuje `SELECT id FROM knowledge_nodes WHERE LOWER(tags) LIKE ?1`. Wzorzec `%\"code%` pasuje do tagu `codebase`, `%\"work%` do `workshop`, a `%`/`_` pochodzace z tagu nie sa escapowane (tag `100%` daje wzorzec `%\"100%%`). Ten sam plik stosuje poprawny wzorzec dokladnego dopasowania w nodes.rs:408: `EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?)`, uzyty takze w `count_nodes_filtered` (nodes.rs:462).",
+      "impact": "Bulk erasure po tagu usuwa pamieci o innych tagach, ktorych prefiks sie zgadza (pary code/codebase, test/testing, work/workshop), bez ostrzezenia i bez mozliwosci cofniecia; funkcja zwraca wylacznie liczniki, wiec nadmiarowe usuniecia sa niewidoczne dla wywolujacego.",
+      "proposal": "Zastapic LIKE dokladnym dopasowaniem: `SELECT id FROM knowledge_nodes WHERE EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?1)` (bez `LOWER`, bo `normalize_tags` w tags.rs:10 juz lowercasuje) i dodac test regresyjny: `erase_by_tag(\"code\")` nie moze usunac wezla z tagiem `codebase`.",
+      "effort": "S",
+      "skill_basis": "Anti-patterns: 'LIKE with leading wildcard - LIKE %search% always seq scans' - tu dodatkowo blad dopasowania (nadzbior)"
+    },
+    {
+      "title": "Trigger `knowledge_au` bez `UPDATE OF content, tags` przepisuje caly dokument FTS5 przy kazdym UPDATE pola FSRS",
+      "severity": "medium",
+      "category": "performance",
+      "evidence": "Migracje V1/V7/V15 tworza `CREATE TRIGGER knowledge_au AFTER UPDATE ON knowledge_nodes` bez zawezenia kolumn (sql.rs:730-735; wczesniej sql.rs:80-85 i 472-477), a cialo triggera wykonuje pare `'delete'` + `INSERT` do `knowledge_fts`. UPDATE-y, ktore nie dotykaja tresci ani tagow: review.rs:243-253 (retrieval/retention/times_retrieved przy KAZDYM trafieniu wyszukiwania, wolane z search.rs:104), temporal.rs:217-220 (cala tabela w partiach), consolidation.rs:82-85, maintenance.rs:150-156, 172, 184-187.",
+      "impact": "Kazde trafienie wyszukiwania i kazdy cykl konsolidacji re-tokenizuje dokumenty FTS5 dla zmienionych wierszy (przy `apply_decay` - dla calej tabeli), co mnozy koszt zapisu, rozdyma indeks FTS (wymaga okresowego `'optimize'`, consolidation.rs:275) i zwieksza WAL. Na store ze 100k pamieci oznacza to pelne przepisanie korpusu w kazdym cyklu, mimo ze tresc sie nie zmienila.",
+      "proposal": "Nowa migracja V16: `DROP TRIGGER knowledge_au; CREATE TRIGGER knowledge_au AFTER UPDATE OF content, tags ON knowledge_nodes BEGIN ... END;` (opcjonalnie z `WHEN NEW.content IS NOT OLD.content OR NEW.tags IS NOT OLD.tags`). Test: UPDATE `retrieval_strength` nie zmienia stanu `knowledge_fts` (porownanie liczby wierszy/`SELECT count(*)` przed i po).",
+      "effort": "S",
+      "skill_basis": "Indexes -> 'When to Index: Don't index when Write-heavy with infrequent reads' oraz Index Maintenance (koszt utrzymania indeksu przy zapisach)"
+    },
+    {
+      "title": "`BEGIN IMMEDIATE` bez rollbacku na sciezce bledu zostawia otwarta transakcje na wspoldzielonym polaczeniu writera",
+      "severity": "high",
+      "category": "bug",
+      "evidence": "Trzy miejsca uzywaja golego `writer.execute_batch(\"BEGIN IMMEDIATE\")` i moga wyjsc z funkcji przez `?` przed `COMMIT`: review.rs:208-221 (`prepare_cached` w 209-214), review.rs:241-259 (`prepare_cached` w 242-254) oraz init.rs:513-535 (`prepare_cached` w 515-516, `vector_index.lock()` w 518-521). Przy wczesnym wyjsciu `MutexGuard<Connection>` jest zwalniany bez `ROLLBACK`/`COMMIT`, a polaczenie wraca do puli z otwarta transakcja (rusqlite nie zamyka polaczenia przy dropie guarda, wiec jego rollback-on-close nie zachodzi). Dodatkowo te trzy miejsca omijaja nowy helper: `grep -n begin_write_transaction` znajduje uzycia tylko w consolidation.rs:536 i temporal.rs:196 (commit 167b800), choc doc helpera mowi 'the way every writer in this crate must' (helpers.rs:289).",
+      "impact": "Pierwszy blad `prepare`/`lock` w tych sciezkach zostawia otwarty write-lock: kolejne `BEGIN IMMEDIATE` na tym samym polaczeniu koncza sie 'cannot start a transaction within a transaction', wiec wszystkie zapisy procesu (ingest, review, gc, erasure, migracja wymiarow) przestaja dzialac do restartu, a inne procesy (CLI) blokuja sie na `busy_timeout`. W `migrate_embeddings` blad w polowie dodatkowo zostawia czesc wektorow zaktualizowanych bez commita.",
+      "proposal": "Zamienic wszystkie trzy miejsca na `super::helpers::begin_write_transaction(&writer)?` (zwraca `rusqlite::Transaction` z rollbackiem na dropie) i dodac test regresyjny: wymusic blad w `downscale_retention_batch` (np. przez usuniecie kolumny w kopii schematu) i sprawdzic, ze kolejny `ingest` zakonczy sie sukcesem.",
+      "effort": "S",
+      "skill_basis": "Transactions -> Basic Transaction: 'Or roll back on error: BEGIN; ... ROLLBACK;' oraz Deadlocks -> Prevention (spojny zakres i czas trzymania blokady)"
+    },
+    {
+      "title": "`update_node_content` usuwa wektor z indeksu przed re-embedem - przy niedostepnym embedderze pamiec wypada z wyszukiwania semantycznego na stale",
+      "severity": "high",
+      "category": "bug",
+      "evidence": "nodes.rs:269-280 wykonuje bezwarunkowe `index.remove(id)`, a nastepnie `generate_embedding_for_node(id, new_content)`; helpers.rs:57-69 przy `!self.embedding_service.is_ready()` loguje wylacznie warning i zwraca `Ok(())` bez zapisania wektora. `has_embedding` pozostaje 1, a wiersz w `node_embeddings` nadal trzyma wektor starej tresci (aktualizowany tylko przez `store_embedding_for_node`, helpers.rs:89-131), wiec `generate_embeddings(force=false)` pominie ten wezel (embeddings.rs:156-172).",
+      "impact": "Po edycji tresci przy niezainicjalizowanym modelu (albo bledzie ONNX) pamiec znika z HNSW do konca zycia procesu, choc dalej jest widoczna w `keyword_search`; po restarcie wroci do indeksu z wektorem STAREJ tresci, wiec wyszukiwanie semantyczne zwroci ja dla nieaktualnej semantyki, a `has_embedding=1` zablokuje backfill przez `regenerate_embeddings`.",
+      "proposal": "W `update_node_content` (nodes.rs:255) liczyc nowy embedding PRZED usunieciem starego z indeksu i usuwac dopiero po sukcesie; przy `Err` lub braku gotowosci modelu ustawiac `has_embedding = 0` (plus `embedding_model = NULL`), aby `generate_missing_embeddings`/`regenerate_embeddings` mogly naprawic stan. Test: edit bez gotowego embeddera -> `has_embedding == 0` i wezel nadal w indeksie.",
+      "effort": "M",
+      "skill_basis": "brak - spojnosc cache/indeksu z tabela zrodlowa (SQLite/FTS5/HNSW)"
+    },
+    {
+      "title": "CLI `vestige backup` i docs/STORAGE.md kopiuja plik zywej bazy WAL (`fs::copy`/`cp`) zamiast `VACUUM INTO`",
+      "severity": "high",
+      "category": "outdated-practice",
+      "evidence": "crates/vestige-mcp/src/bin/cli/backup.rs:41-47 wykonuje `std::fs::copy(&db_path, &output)` po jednorazowym `PRAGMA wal_checkpoint(TRUNCATE)` z INNEGO polaczenia (backup.rs:28-34), bez blokady pisarzy na czas kopiowania. docs/STORAGE.md:137-154 rekomenduje `cp ~/Library/Application\\ Support/com.vestige.core/vestige.db ~/vestige-backup.db`, wariant cronowy oraz 'Just use Time Machine ... they'll catch the file automatically'. MCP `backup` robi to poprawnie (`VACUUM INTO`, maintenance.rs:46-63), a repo ma wlasny raport (docs/research/mcp-production-best-practices-2026-09-19.md:1446 i 1464) cytujacy sqlite.org/howtocorrupt.html par. 1.2: kopia 'might contain some old and some new content, and thus be corrupt', i wskazujacy `VACUUM INTO` jako metode zalecana.",
+      "impact": "Najbardziej widoczna sciezka (CLI + dokumentacja) potrafi wyprodukowac niespojna kopie: checkpoint i kopiowanie nie sa atomowe wzgledem pisarzy, wiec przy dzialajacym serwerze MCP backup moze zawierac stan mieszany lub nie zawierac `-wal`. Uzytkownik dowiaduje sie o tym dopiero przy odtwarzaniu. Dodatkowo `run_backup` otwiera `Storage::new(None)` (backup.rs:26-30, przez `get_default_db_path`), co uruchamia migracje na zywej bazie w ramach operacji 'backup'.",
+      "proposal": "Zamienic `std::fs::copy` w `run_backup` na `Storage::backup_to(&output)` (`VACUUM INTO`) i zaktualizowac docs/STORAGE.md:133-156 (usunac `cp`/cron/Time Machine na zywym pliku, wskazac `vestige backup` oraz ostrzezenie o WAL). Dodac test, ktory po backupie otwiera plik snapshotu i sprawdza `PRAGMA integrity_check` oraz obecnosc wierszy.",
+      "effort": "S",
+      "skill_basis": "brak - skill jest PostgreSQL-owy; podstawa: SQLite docs (howtocorrupt.html par. 1.2, backup.html)"
+    },
+    {
+      "title": "Runner migracji czyta `schema_version` raz, nie waliduje wersji i polyka bledy odczytu",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "runner.rs:21 pobiera `current_version` przed petla i nigdy nie odczytuje jej ponownie po zajęciu write-locka; runner.rs:6-13 (`get_current_version`) konczy sie `.or(Ok(0))`, wiec kazdy blad - brak tabeli, `database is locked`, uszkodzony wpis - daje 0 i uruchamia V1..V15 na istniejacej bazie, gdzie V2 `ALTER TABLE knowledge_nodes ADD COLUMN valid_from` (sql.rs:98) konczy sie bledem `duplicate column name` i `apply_migrations` zwraca Err. Brak takze kontroli gornej granicy: baza z przyszlej wersji (np. 16) jest otwierana bez ostrzezenia, bo warunek `migration.version > current_version` (runner.rs:25) nie ma odpowiednika w druga strone.",
+      "impact": "Dwa procesy startujace rownoczesnie na swiezej bazie (CLI + serwer MCP) - przegrany odczytuje 0, po commicie zwyciezcy probuje V1..V15 i konczy start bledem `duplicate column name`, mimo ze baza jest poprawna. Analogicznie kazda baza, w ktorej `schema_version` jest chwilowo nieczytelna (np. zablokowana), staje sie nieotwieralna, a uruchomienie na bazie z nowszego schematu nie jest sygnalizowane.",
+      "proposal": "W `apply_migrations` (runner.rs:20) odczytywac wersje PONOWNIE wewnatrz kazdej transakcji po `BEGIN IMMEDIATE` i pomijac migracje juz zastosowane; w `get_current_version` rozroznic brak tabeli (`rusqlite::Error::SqliteFailure` z komunikatem `no such table: schema_version`) od pozostalych bledow i propagowac te drugie; dodac `if current_version > MIGRATIONS.last().unwrap().version { return Err(...) }`.",
+      "effort": "M",
+      "skill_basis": "Isolation -> 'The application must handle retry'; brak reguly o wersjonowaniu schematu w skillu"
+    },
+    {
+      "title": "Sidecar HNSW walidowany tylko po liczbie wierszy - stare wektory przezywaja restart",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "`persist_vector_index` zapisuje do meta wylacznie `schema`, `row_count` i `dimensions` (init.rs:248-252), a `try_load_vector_index_from_sidecar` porownuje jedynie `meta_rows != expected_rows` oraz `loaded.len() != expected_rows` (init.rs:439-465). Tymczasem `update_node_content` podmienia wektor tylko w pamieci (nodes.rs:273-279) i nie zapisuje sidecara, a `persist_vector_index` jest wolany wylacznie z consolidation.rs:287 oraz z przebudowy przy starcie (init.rs:384) - nie ma go ani w `ingest_inner` (nodes.rs:114-195), ani w `delete_node` (nodes.rs:319-335), ani w sciezce GDPR.",
+      "impact": "Sekwencja: konsolidacja zapisuje sidecar (N wierszy) -> edycja tresci zmienia wektor w indeksie i w `node_embeddings`, ale nie w pliku -> proces konczy sie bez kolejnej konsolidacji. Przy nastepnym starcie liczba wierszy sie zgadza, wiec walidacja przechodzi i sidecar jest ladowany z wektorem STAREJ tresci; wyszukiwanie semantyczne zwraca te pamiec dla nieaktualnej semantyki, cicho, bez zadnego logu ostrzegawczego.",
+      "proposal": "Rozszerzyc meta o odcisk stanu embeddingow (np. `SELECT COUNT(*), COALESCE(MAX(created_at),'') FROM node_embeddings` - `created_at` odswieza `store_embedding_for_node`) i odrzucac sidecar przy niezgodnosci, albo wolac `persist_vector_index()` po kazdej zmianie embeddingu (edit/regenerate/gc). Test: persist -> edit tresci -> restart musi dac `VectorIndexSource::Rebuilt`.",
+      "effort": "S",
+      "skill_basis": "brak - walidacja cache'u indeksu wektorowego"
+    },
+    {
+      "title": "Erasure nie jest atomowe, nie czysci `insights.source_memories` i nie usuwa danych fizycznie, wbrew wlasnemu docowi",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "gdpr.rs:22-68 wykonuje 5 niezaleznych `DELETE` bez `BEGIN`/`COMMIT` - to jedyne miejsce w warstwie storage bez transakcji, wiec blad w polowie zostawia wezel bez embeddingow, logow i stanu. gdpr.rs:19-21 deklaruje usuniecie 'connections, embeddings, access logs, insights that reference it', ale zadnego `DELETE FROM insights` nie ma, a `insights.source_memories` to tablica JSON z ID wezlow (insights.rs:14-27, kolumna z sql.rs:142). `right_to_erasure` nie wykonuje tez `VACUUM`/`incremental_vacuum` ani nie przepisuje sidecara HNSW, wiec usuniety wektor pozostaje w ostatnio zapisanym `vestige.hnsw`.",
+      "impact": "Po erasure ID i powiazania ofiary pozostaja w `insights.source_memories` (odwracalna referencja do danych osobowych), usuniety wektor lezy w pliku sidecara, a usuniete wiersze pozostaja w wolnych stronach bazy do czasu pelnego VACUUM. Przy bledzie w polowie sekwencji erasure jest czesciowa, nie jest wycofywana i raportuje niepelny licznik jako sukces.",
+      "proposal": "Owinac cale `right_to_erasure` w `helpers::begin_write_transaction`, dodac czyszczenie `insights` (np. `DELETE FROM insights WHERE source_memories LIKE '%\"<id>\"%'` wzglednie normalizacja do tabeli laczacej), po erasure wywolywac `PRAGMA incremental_vacuum` i `persist_vector_index()`, oraz poprawic docstring na faktyczne zachowanie.",
+      "effort": "M",
+      "skill_basis": "Transactions -> Basic Transaction (BEGIN/COMMIT/ROLLBACK, savepoint dla operacji wieloetapowych)"
+    },
+    {
+      "title": "`keyword_search` sortuje po `retention_strength`, ignorujac ranking BM25 - po przejsciu na term-query gubi najlepsze trafienia",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "search.rs:126-133: `... WHERE knowledge_fts MATCH ?1 AND n.retention_strength >= ?2 ORDER BY n.retention_strength DESC LIMIT ?3` - brak `rank`; druga sciezka keyword uzywa `ORDER BY rank` (search.rs:368-374), a doc modulu mowi 'Keyword - FTS5 BM25 over knowledge_fts' (search.rs:5). Uzasadnienie tegorocznej zmiany wprost zaklada ranking BM25 (fts.rs:16-22: 'FTS5's own bm25 ranking already scores documents matching more terms higher'), a sanitizer zwraca teraz `\"a\" OR \"b\" OR ...` dla do 32 termow (fts.rs:31-52), czyli zbior trafien jest szeroki.",
+      "impact": "`SearchMode::Keyword` (resources/codebase.rs:57, 115, 164), `tools/precompute.rs:220` i budowanie krawedzi relacji (`smart_ingest/post_ingest.rs:135`) dostaja liste posortowana po retention: dokument pasujacy do 1 z 32 termow, ale z retention 1.0, wyprzedza dokument pasujacy do wszystkich termow z retention 0.9 i wypycha go poza LIMIT. Trafnosc keyword search oraz jakosc krawedzi grafu zbudowanych na tych wynikach spadaja.",
+      "proposal": "W `keyword_search` (search.rs:114) sortowac po `rank` (`ORDER BY rank LIMIT ?3`), zostawiajac filtr `min_retention` w WHERE, albo uzyc `ORDER BY rank` jako klucza glownego z retention jako wtornym; dodac test porownujacy kolejnosc dla zapytania wielotermowego z dwoma dokumentami.",
+      "effort": "S",
+      "skill_basis": "brak - dotyczy rankingu FTS5, nie SQL"
+    },
+    {
+      "title": "`get_nodes_by_type_and_tag` uzywa prefiksowego LIKE z nieescapowanymi wildcardami zamiast `json_each`",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "nodes.rs:523-531: `let tag_pattern = format!(\"%\\\"{}%\", tag);` + `tags LIKE ?2` - brak cudzyslowu zamykajacego i brak escapowania `%`/`_`. Ten sam plik ma poprawny wzorzec dokladnego dopasowania: nodes.rs:408 `EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?)`, uzyty rowniez w `count_nodes_filtered` (nodes.rs:462).",
+      "impact": "Filtr codebase zwraca pamieci z innych codebase'ow o prefiksowym tagu (tag `codebase:vestige` pasuje do wzorca `%\"codebase%`, tag `code` do `%\"code%`), a tag zawierajacy `%` lub `_` dziala jak wildcard; przy `ORDER BY retention_strength DESC` (nodes.rs:528) nadmiarowe trafienia wypychaja wlasciwe, wiec kontekst codebase jest zasmiecony.",
+      "proposal": "Przepisac oba warianty `get_nodes_by_type_and_tag` (nodes.rs:509-556) na `EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?1)` spójnie z `get_all_nodes_filtered` i dodac test z dwoma podobnymi tagami (`code` vs `codebase`).",
+      "effort": "S",
+      "skill_basis": "Anti-patterns: 'LIKE with leading wildcard - LIKE %search% always seq scans'; tu dodatkowo blad dopasowania (nadzbior) i brak escapowania wildcardow"
+    },
+    {
+      "title": "Brak indeksu na `waking_tag`/`waking_tag_at` - kazdy `dream` skanuje cala tabele i parsuje JSON tagow wszystkich wierszy",
+      "severity": "medium",
+      "category": "performance",
+      "evidence": "V8 dodaje kolumny bez indeksu (sql.rs:486-487; kontrast: V9 dodaje `idx_nodes_flashbulb`, sql.rs:528), a `get_waking_tagged_memories` wykonuje `SELECT * FROM knowledge_nodes WHERE waking_tag = TRUE ORDER BY waking_tag_at DESC LIMIT ?1` (maintenance.rs:197-199). Sciezka dream wola to dwa razy na cykl (tools/dream.rs:52 i 79), a `row_to_node` (helpers.rs:153-267) deserializuje `tags`, `provenance` i `extra_json` dla kazdego wiersza przed zastosowaniem LIMIT.",
+      "impact": "Na store z dziesiatkami tysiecy pamieci kazde `dream` wykonuje pelny skan tabeli plus parsowanie JSON per wiersz, mimo ze liczba otagowanych wierszy jest typowo zerowa lub kilkuelementowa; dodatkowo `clear_waking_tags` (maintenance.rs:184-187) przepisuje FTS dla wszystkich otagowanych wierszy, co laczy sie z findingiem o triggerze `knowledge_au`.",
+      "proposal": "Migracja V16: `CREATE INDEX idx_nodes_waking_tag ON knowledge_nodes(waking_tag_at) WHERE waking_tag = TRUE;` (wzorzec czesciowych indeksow z V11/V13) i test planu przez `EXPLAIN QUERY PLAN` potwierdzajacy uzycie indeksu zamiast `SCAN knowledge_nodes`.",
+      "effort": "S",
+      "skill_basis": "Indexes -> 'Index when: Column in WHERE/JOIN/ORDER BY' oraz Partial Indexes (indeks tylko dla wierszy spelniajacych warunek)"
+    }
+  ]
+}

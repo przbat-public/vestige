@@ -1,0 +1,149 @@
+{
+  "id": "retrieval-stack-2026",
+  "topic": "Retrieval 2026: embeddingi, rerankery, dywersyfikacja, indeksy",
+  "summary": "Stan na 2026-09-19: stos retrievalu Vestige jest o jedną do dwóch generacji za stanem rynku: biblioteka wejściowa fastembed stoi na 5.13.4 (2026-04-27), gdy najnowsza to 7.0.1 (2026-09-16) - a to ona decyduje, które modele (EmbeddingGemma, Qwen3-Embedding, BGE-M3 joint, SPLADE) są w ogóle dostępne lokalnie i bez własnej plumbing ONNX. Embeddingi nomic-embed-text-v1.5 są używane niezgodnie z kartą modelu: prefixy zadaniowe są domyślnie wyłączone (VESTIGE_NOMIC_PREFIXES), a truncacja Matryoshka nie wykonuje wymaganego layer_norm przed obcięciem do 384D. Reranker to Jina Reranker v2 Base (BEIR 57.06), podczas gdy na rynku są już listwise jina-reranker-v3/v3.5 (BEIR 62.10/63.20, licencja CC-BY-NC, czyli nie do binarki AGPL) oraz licencyjnie bezpieczny bge-reranker-v2-m3 (Apache-2.0), wspierany przez fastembed od ręki. Dywersyfikacja jest w praktyce martwa: stage MMR w pipeline dziala po truncacji i nic nie odrzuca, co wlasny A/B w benchmarks/memconflict/RESULTS.md pokazal jako identyczne wyniki ramion A i B. Fuzja hybrydowa to RRF na dokladnie dwóch listach bez wag, mimo ze standardem jest wazony RRF nad N listami, a dochodzi trzecia lista sparse-neural. Indeksy (FTS5 + USearch 2.25.2 z kwantyzacja i8) pozostaja wlasciwym wyborem: Tantivy nie ma modulu ANN, sqlite-vec jest pre-v1 i brute-force, a oficjalny SQLite vec1 nie ma jeszcze wydania.",
+  "sources": [
+    "https://docs.rs/crate/fastembed/latest",
+    "https://github.com/anush008/fastembed-rs/releases.atom",
+    "https://github.com/Anush008/fastembed-rs",
+    "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5",
+    "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B",
+    "https://arxiv.org/abs/2605.13521",
+    "https://huggingface.co/blog/embeddinggemma",
+    "https://developers.googleblog.com/en/introducing-embeddinggemma/",
+    "https://jina.ai/news/jina-reranker-v3-0-6b-listwise-reranker-for-sota-multilingual-retrieval/",
+    "https://arxiv.org/abs/2509.25085",
+    "https://jina.ai/news/jina-reranker-v3-5-faster-listwise-reranking-hybrid-attention-self-distillation/",
+    "https://arxiv.org/abs/2607.18152",
+    "https://huggingface.co/api/models/BAAI/bge-reranker-v2-m3",
+    "https://arxiv.org/abs/2602.16299",
+    "https://huggingface.co/papers/2602.16299",
+    "https://github.com/Pringled/pyversity",
+    "https://docs-v3-preview.elastic.dev/elastic/elasticsearch/tree/main/reference/elasticsearch/rest-apis/retrievers/rrf-retriever",
+    "https://github.com/unum-cloud/USearch/releases.atom",
+    "https://github.com/quickwit-oss/tantivy/releases.atom",
+    "https://github.com/asg017/sqlite-vec",
+    "https://www.sqlite.org/forum/forumpost/c9d69d74c6644dd1",
+    "https://sqlite.org/vec1",
+    "https://arxiv.org/abs/2605.20926"
+  ],
+  "items": [
+    {
+      "title": "fastembed 5.13.4 -> 7.0.1 (2026-09-16): skok o dwie wersje major, sprzezony z ort 2.0.0-rc.13 i tokenizers 0.23",
+      "what_it_is": "fastembed-rs ma dzis 7.0.1 (2026-09-16), po 7.0.0 (2026-09-16), 6.1.0 (2026-09-12), 6.0.3 (2026-09-07) i 6.0.0 (2026-08-16); projekt pinuje 5.13.4 (2026-04-27). Zlamania: 6.0.0 zamienilo fastembed::Error z aliasu anyhow::Error na enum; 7.0.0 zmienilo sygnature UserDefinedSparseModel::new, przenioslo cache modeli candle do FASTEMBED_CACHE_DIR, oznacza InitOptions jako deprecated alias TextInitOptions i podnosi zaleznosci do ort =2.0.0-rc.13, tokenizers ^0.23.2, ndarray ^0.17.2, MSRV 1.88. Nowe mozliwosci w 6.x/7.x: EmbeddingGemma-300M (plus build Q4 jako EmbeddingGemma300MQ4), Qwen3-Embedding 0.6B/4B/8B i Qwen3-VL-Embedding-2B przez backend candle, nomic-embed-text-v2-moe w F16/BF16, BGE-M3 joint (dense + sparse + ColBERT w jednym forward passie), SparseTextEmbedding (SPLADE++), inference-free sparse (opensearch-neural-sparse-encoding-doc-v3-gte, 6.1.0) oraz modul similarity (cosine_similarity, top_k).",
+      "why_for_vestige": "To pozycja-odblokowanie dla pozostalych: crates/vestige-core/Cargo.toml pinuje fastembed = 5.13 z default-features = false (hf-hub-rustls-tls + ort-download-binaries-rustls-tls), a feature late-interaction dodatkowo pinuje ort = =2.0.0-rc.12 i tokenizers 0.22 wlasnie po to, by zunifikowac sie z ort z fastembed 5.13. Kazda proba uzycia EmbeddingGemma/Qwen3/BGE-M3 dzisiaj oznacza wlasne ONNX-y przez ort, czyli dokladnie to, co juz raz zrobiono dla ColBERT-a (crates/vestige-core/src/search/late_interaction/colbert.rs) i co wiaze projekt z konkretna wersja rc. Bump fastembed >= 5.17.4 podnosi ort do rc.13, wiec pin late-interaction trzeba ruszyc w tym samym commicie - inaczej cargo unifikacja sie rozjedzie i mamy dwa buildy ort.",
+      "adoption": "Osobny PR: podniesc fastembed do 7.x, przejsc z anyhow-owego Error na match po warianatch fastembed::Error (miejsca: crates/vestige-core/src/embeddings/local.rs, embeddings/mod.rs, search/reranker.rs), podniesc pin ort do 2.0.0-rc.13 i tokenizers do 0.23, sprawdzic ze feature late-interaction nadal sie kompiluje i ze FASTEMBED_CACHE_PATH (get_cache_dir) nie koliduje z nowym cache candle. Nie zmieniac modelu w tym samym PR - to ma byc bump bez zmiany jakosci, potwierdzony testami i brakiem regresji w benchmarks/memconflict.",
+      "effort": "M",
+      "sources": [
+        "https://docs.rs/crate/fastembed/latest",
+        "https://github.com/anush008/fastembed-rs/releases.atom",
+        "https://github.com/Anush008/fastembed-rs"
+      ]
+    },
+    {
+      "title": "nomic-embed-text-v1.5: wlaczyc prefixy zadaniowe i dodac layer_norm przed truncacja Matryoshka",
+      "what_it_is": "Karta modelu nomic-ai/nomic-embed-text-v1.5 (repo utworzone 2024-02-10, licencja Apache-2.0) mowi wprost: tekst promptu MUSI zawierac task instruction prefix - dokumenty jako search_document: <text>, zapytania jako search_query: <text>. Dla Matryoshki karta podaje trzy kroki: F.layer_norm(embeddings) -> obciecie do wymiaru -> F.normalize. Opublikowana tabela MRL: 768D = 62.28 MTEB, 512D = 61.96, 256D = 61.04, 128D = 59.34, 64D = 56.10; wymiar 384D nie jest publikowany (projektu wybor lezy miedzy 512 a 256).",
+      "why_for_vestige": "Dwie niezgodnosci z karta modelu w jednym miejscu. (1) Prefixy: crates/vestige-core/src/embeddings/local.rs (nomic_prefixes_enabled, EmbedTask::prefix) domyslnie zwraca pusty string, a .env.example:52 ma VESTIGE_NOMIC_PREFIXES=0 - czyli wektory sa liczone w trybie, ktorego model nie byl trenowany, i tylko tag embedding_model_tag() (nomic-embed-text-v1.5 vs ...+prefix) pozwala wykryc te dwa rezimy. (2) Layer norm: matryoshka_truncate (crates/vestige-core/src/embeddings/local.rs:506) tylko obcina wektor i L2-normalizuje; nie ma kroku layer_norm, ktory karta modelu podaje jako czesc przepisu MRL - a caly projekt pracuje na 384D, czyli na wymiarze wymagajacym tego przepisu najbardziej. grep po embeddings/ nie znajduje zadnego layer_norm.",
+      "adoption": "Krok 1: dodac layer_norm(768) przed obcieciem w matryoshka_truncate i pokryc testem jednostkowym (norma i ksztalt). Krok 2: wlaczyc VESTIGE_NOMIC_PREFIXES=1 jako nowa domyslna wartosc, uruchomic regenerate_embeddings (istniejacy MCP tool) i sprawdzic, ze stary store jest wykrywany przez tag modelu, a nie mieszany. Krok 3: A/B na benchmarks/memconflict (arm baseline vs nowy) i zapisac wynik w RESULTS.md - bez tego nie wiadomo, czy zysk z prefixow nie jest mniejszy niz koszt przepisania wszystkich wektorow.",
+      "effort": "M",
+      "sources": [
+        "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5"
+      ]
+    },
+    {
+      "title": "Wybor modelu embeddingow 2026: Qwen3-Embedding-0.6B, granite-embedding-r2, EmbeddingGemma-300M wobec obecnego nomic v1.5",
+      "what_it_is": "Trzy realne kandydatury na 2026-09-19. (1) Qwen3-Embedding-0.6B (arXiv:2506.05176, karta modelu z czerwca 2025, licencja Apache-2.0): 28 warstw, 32k kontekstu, 1024 wymiary z MRL od 32 do 1024, instruction-aware (instrukcja po stronie zapytania daje 1-5% zysku), MTEB Multilingual 64.33 i MTEB Eng v2 70.70; seria ma takze 4B (69.45) i 8B (70.58 - numer 1 na liscie MTEB multilingual na 2025-06-05). (2) Granite Embedding Multilingual R2 (arXiv:2605.13521, v1 2026-05-13, v2 2026-05-14, Apache-2.0): dwa bi-encodery na ModernBERT - 311M pelny i 97M kompaktowy (najlepszy wynik sposrod otwartych modeli multilingual ponizej 100M), okno 32 768 tokenow (64x wieksze niz R1), 200+ jezykow, MRL w wariancie pelnym. (3) EmbeddingGemma-300M (Google, blog 2025-09-04): 308M parametrow, tylko 2048 tokenow kontekstu, MRL 768 -> 512/256/128, 100+ jezykow, deklarowane poniżej 200 MB RAM po kwantyzacji i poniżej 15 ms na EdgeTPU; wymaga promptow task: search result | query: dla zapytan oraz title: none | text: dla dokumentow.",
+      "why_for_vestige": "Bazowy model to nomic-embed-text-v1.5: 62.28 MTEB (angielski), 8192 kontekstu, Apache-2.0, 384D po MRL. Nowe opcje roznia sie na trzech osiach istotnych dla Vestige: jakosc wielojezyczna (Qwen3-0.6B 64.33 MTEB multilingual, granite R2 200+ jezykow), dlugosc kontekstu (granite 32k vs nomic 8k vs EmbeddingGemma 2k, podczas gdy MAX_TEXT_LENGTH w crates/vestige-core/src/embeddings/local.rs wynosi 8192, a pamieci bywaja dluzsze) oraz koszt lokalny - rozmiary ONNX zebrane w raporcie w repo (embedding-onnx-size-speed-report.md): nomic int8 137 MB, EmbeddingGemma int8 309 MB lub Q4 197 MB, Qwen3-0.6B int8 613 MB. fastembed 7 obsluguje EmbeddingGemma (takze build Q4) i Qwen3 przez candle; granite R2 nie ma oficjalnego kwantyzowanego ONNX-a, wiec wymagalby wlasnego eksportu.",
+      "adoption": "Nie zmieniac modelu przed naprawa prefixow i layer_norm (poprzednia pozycja), bo inaczej porownuje sie dwie niesprawnosci. Potem A/B offline na zamrozonym fixtures i na benchmarks/locomo: (a) nomic-384 z prefixami i layer_norm jako baseline, (b) EmbeddingGemma-300M Q4 przez fastembed 7 (uwaga na 2048 tokenow - krotszy kontekst wymusi chunking pamieci), (c) granite-embedding-r2 311M (wlasny ONNX, brak oficjalnej kwantyzacji), (d) Qwen3-Embedding-0.6B przez candle (613 MB int8, 32k kontekstu). Kryterium decyzji: nDCG@10 i recall na wlasnych danych, nie pozycja w MTEB, plus p95 latencji i RSS po starcie. Utrzymac kontrakt 384D, chyba ze zwyciezca ma wyraznie lepszy punkt MRL w innym wymiarze.",
+      "effort": "L",
+      "sources": [
+        "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B",
+        "https://arxiv.org/abs/2605.13521",
+        "https://huggingface.co/blog/embeddinggemma",
+        "https://developers.googleblog.com/en/introducing-embeddinggemma/"
+      ]
+    },
+    {
+      "title": "Reranker: bge-reranker-v2-m3 (Apache-2.0) dostepny dzis, jina-reranker-v3/v3.5 (listwise) tylko jako opt-in",
+      "what_it_is": "jina-reranker-v3 (2025-10-03, arXiv:2509.25085) to 0.6B listwise z interaction typu last but not late: BEIR 62.10 nDCG@10 przy 0.6B, przy 57.06 dla jina-reranker-v2 (0.3B) i 56.51 dla bge-reranker-v2-m3. jina-reranker-v3.5 (2026-08-03, arXiv:2607.18152) podnosi to do BEIR 63.20, MIRACL 74.11, RTEB 70.95 i +9.6 nDCG@10 na Struct-IR, przy 1.56x mniejszej latencji niz v3 (3L2G hybrid attention + self-distillation), ale wagi sa na licencji non-commercial (CC-BY-NC-4.0). bge-reranker-v2-m3 (BAAI, utworzony 2024-03-15, ostatnia modyfikacja 2024-06-24, licencja apache-2.0, 567.8M parametrow) ma w tych samych pomiarach BEIR 56.51 i najlepszy MIRACL 69.32 sposrod modeli do 0.6B i jest juz wystawiony w fastembed jako RerankerModel::BGERerankerV2M3.",
+      "why_for_vestige": "crates/vestige-core/src/search/reranker.rs uzywa Jina Reranker v2 Base Multilingual (komentarz w pliku sam planuje migracje do v3 z celem +5% nDCG@10). Problem: fastembed - nawet w 7.0.1 - nadal wystawia tylko bge-reranker-base, bge-reranker-v2-m3, jina-reranker-v1-turbo-en i jina-reranker-v2-base-multilingual, wiec v3 nie jest zamiana jednego enuma. Do tego projekt jest AGPL-3.0-only, a wagi v3/v3.5 sa non-commercial: nie moga wejsc do domyslnej sciezki ani do binarki, co najwyzej jako model pobierany przez uzytkownika za istniejaca bramka w stylu VESTIGE_LATE_INTERACTION.",
+      "adoption": "Krok tani (S): przelaczyc domyslny cross-encoder na RerankerModel::BGERerankerV2M3 i zrobic A/B na zbiorze z polskimi/angielskimi zapytaniami - sam ten swap jest darmowy, a w pomiarach producenta bije obecny model na MIRACL. Krok drozszy (L): prototyp jina-reranker-v3 przez istniejaca sciezke ort + tokenizers (feature late-interaction), z lista ograniczen licencyjnych w docs i bez wlaczania domyslnego. W obu przypadkach zmierzyc czulosc na candidate_count/result_count (dzis 50 -> 10 w RerankerConfig::default) i na dlugosc listy, bo wersje listwise maja twarde limity liczby dokumentow w kontekscie.",
+      "effort": "M",
+      "sources": [
+        "https://jina.ai/news/jina-reranker-v3-0-6b-listwise-reranker-for-sota-multilingual-retrieval/",
+        "https://arxiv.org/abs/2509.25085",
+        "https://jina.ai/news/jina-reranker-v3-5-faster-listwise-reranking-hybrid-attention-self-distillation/",
+        "https://arxiv.org/abs/2607.18152",
+        "https://huggingface.co/api/models/BAAI/bge-reranker-v2-m3",
+        "https://github.com/Anush008/fastembed-rs"
+      ]
+    },
+    {
+      "title": "Late interaction: MICE (minimal interaction cross-encoders) i last but not late zamiast klasycznego ColBERT-a",
+      "what_it_is": "MICE (arXiv:2602.16299, 2026) wychodzi od cross-encoderow i usuwa zbedne interakcje, otrzymujac architekture typu late-interaction: 4x nizsza latencja niz standardowy cross-encoder, koszt dorownujacy ColBERT-owi, przy zachowaniu wiekszosci skutecznosci in-domain i lepszej generalizacji out-of-domain (kod: github.com/xpmir/mice). Rownolegle jina-reranker-v3 (arXiv:2509.25085) pokazuje ten sam kierunek od strony generatywnej: dokumenty i zapytanie w jednym oknie kontekstu (do 64 dokumentow w 131k tokenow), z embeddingiem wyciaganym z ostatniego tokenu kazdego dokumentu.",
+      "why_for_vestige": "Projekt ma kompletna sciezke late-interaction - crates/vestige-core/src/search/late_interaction/colbert.rs + maxsim.rs, feature late-interaction, zmienne VESTIGE_LATE_INTERACTION i VESTIGE_COLBERT_MODEL_DIR - ale jest ona bezuzyteczna w praktyce: benchmarks/memconflict/RESULTS.md (2026-09-19) odnotowuje, ze ColBERT byl inertny w kazdym przebiegu, bo wymaga lokalnego ONNX-a w cache, ktorego maszyna nie ma; w cache sa tylko nomic-embed-text-v1.5 i Jina cross-encoder. Innymi slowy: zlozonosc (drugi runtime ort, wlasny tokenizer, pin wersji) jest zaplacona, a zysk nie jest zmierzony ani razu.",
+      "adoption": "Zdecydowac wprost: albo (a) dowiezc pomiar - wystawic fixtures w benchmarks/, policzyc nDCG@10 i p95 przed/po wlaczeniu late interaction na tych samych kandydatach, i dopiero wtedy trzymac feature; albo (b) jesli pomiar nie jest mozliwy w tym kwartale, wycofac feature z domyslnej dokumentacji jako eksperyment i zostawic tylko kod za flaga. MICE traktowac jako kandydata do podmiany samego rerankera tokenowego, gdy pojawi sie checkpoint ONNX - architektura jest zgodna z tym, co juz mamy w maxsim.rs.",
+      "effort": "M",
+      "sources": [
+        "https://arxiv.org/abs/2602.16299",
+        "https://huggingface.co/papers/2602.16299",
+        "https://arxiv.org/abs/2509.25085"
+      ]
+    },
+    {
+      "title": "Dywersyfikacja: DPP obok MMR i przeniesienie stage'u przed truncacje kandydatow",
+      "what_it_is": "pyversity (MIT, 2025) zestawia piec strategii dywersyfikacji z ich zlozonoscia i rekomendowanym zakresem parametru diversity: MMR O(k*n*d), diversity 0.4-0.7 (prosty baseline); MSD O(k*n*d), 0.3-0.5 (maksymalna roznorodnosc); DPP O(k*n*d + n*k^2), 0.5-0.8, rekomendowany domyslnie - w ich benchmarkach na czterech zbiorach DPP daje +26-44% ILAD i +54-86% ILMD przy jednoczesnej poprawie trafnosci o 1.8-3.1%; COVER O(k*n^2) do pokrycia tematow; SSD dla feedow sekwencyjnych. DPP w wersji greedy-MAP (Chen, Zhang, Zhou 2018) jest tani obliczeniowo przy malym k.",
+      "why_for_vestige": "Dywersyfikacja jest w repo zaimplementowana, ale nie dziala. crates/vestige-core/src/search/mmr.rs implementuje mmr_select, a crates/vestige-mcp/src/tools/search_unified/pipeline/retrieval.rs:180 uruchamia stage MMR po tym, jak lista kandydatow zostala juz przycieta do config.limit (linie ~125/130), i wola mmr_select z keep = scored.len() - czyli permutuje ocalalych i nie odrzuca nikogo. Wlasny A/B z 2026-09-19 (benchmarks/memconflict/RESULTS.md, ramiona A i B) pokazuje identyczne wyniki na kazdej metryce wlasnie z tego powodu, a nie z powodu danych. Dodatkowo MMR jest domyslnie wylaczony (VESTIGE_MMR), a jego lambda 0.7 jest blisko gornej granicy zalecen dla MMR z przegladu pyversity.",
+      "adoption": "Przeniesc stage dywersyfikacji przed ciecie do config.limit: pobrac N = 3-5x wiecej kandydatow (pipeline juz ma overfetch_limit i mnozniki 1/3/5 dla trybow precise/balanced/exhaustive) i wybrac K z N. W mmr.rs (albo nowym diversity.rs) obok MMR dodac greedy DPP z jednym wspolnym pokretlem diversity i wyborem przez env (np. VESTIGE_DIVERSIFY=mmr|dpp|off). Domyslnie zostawic off do momentu, gdy naprawiony A/B na pytaniach konfliktowych/wielo-hopowych pokaze wzrost - inaczej powtarzamy blad polegajacy na wlaczaniu niezmierzonej dzwigni.",
+      "effort": "M",
+      "sources": [
+        "https://github.com/Pringled/pyversity"
+      ]
+    },
+    {
+      "title": "Fuzja hybrydowa: wazony RRF nad N listami i trzecia lista sparse-neural",
+      "what_it_is": "Elasticsearch w swoim RRF retrieverze dokumentuje dwa parametry, ktorych brakuje w naszej implementacji: rank_constant (domyslnie 60) oraz wage per retriever, gdzie rrf_score = suma(w_i * rrf_score_i) - i pokazuje przyklad hybrydy trzech list (lexical + sparse vector + kNN). Po stronie modeli fastembed 7 daje SparseTextEmbedding (SPLADE++ i bge-m3), BGE-M3 joint (dense + sparse + ColBERT w jednym forward passie) oraz - od 6.1.0 (2026-09-12) - model sparse typu inference-free (opensearch-neural-sparse-encoding-doc-v3-gte), w ktorym zapytania licza sie wylacznie z tokenizera i precomputed tabeli IDF, bez inference.",
+      "why_for_vestige": "crates/vestige-core/src/search/hybrid.rs::reciprocal_rank_fusion przyjmuje dokladnie dwie listy, ignoruje przekazane wyniki (liczy tylko rangi) i ma k = 60 zaszyte w sygnaturze wywolania; crates/vestige-core/src/storage/sqlite/search.rs:257 uzywa go do wyboru kandydatow, a dopiero potem wazy 0.3/0.7 keyword/semantic w combined_score. Pipeline MCP przekazuje te same 0.3/0.7 (pipeline/retrieval.rs:51). Konsekwencja: nie da sie dodac trzeciej listy bez zmiany API, a deklaracja w AGENTS.md o triple hybrid scoring (BM25 + semantic + RRF) nie ma pokrycia w kodzie - RRF widzi dwie listy i jest bezwagowy. Model inference-free sparse jest szczegolnie atrakcyjny dla lokalnego serwera: dokumenty embeduje sie raz przy zapisie (koszt jak przy embeddingach), a zapytanie nie wymaga zadnego forward passu, wiec trzecia lista nie podnosi kosztu na sciezce odczytu.",
+      "adoption": "Krok 1 (S): uogolnic sygnature do rrf(&[(results, weight)], k) z zachowaniem obecnych wywolan jako wagi 1.0 i wystawic rank_constant oraz wagi przez env (spojnie z istniejacymi VESTIGE_*). Krok 2 (L): ocenic liste sparse-neural - zaczac od inference-free SPLADE, bo nie wymaga inferencji na zapytaniu, i zbudowac dla niej osobny indeks w SQLite (odwrocony), a nastepnie zmierzyc na benchmarks/memconflict i LoCoMo, czy trzecia lista daje cokolwiek ponad FTS5 + wektory.",
+      "effort": "L",
+      "sources": [
+        "https://docs-v3-preview.elastic.dev/elastic/elasticsearch/tree/main/reference/elasticsearch/rest-apis/retrievers/rrf-retriever",
+        "https://github.com/anush008/fastembed-rs/releases.atom",
+        "https://github.com/Anush008/fastembed-rs"
+      ]
+    },
+    {
+      "title": "usearch 2.25.2 -> 2.26.2: hartowanie load/save, stats() i wybor kwantyzacji i8 vs f16",
+      "what_it_is": "USearch ma dzis 2.26.2 (2026-08-31). 2.26.1 (2026-08-22) zawiera poprawke bezpieczenstwa: bound file-controlled sizes in view() (OOB read przy czytaniu spreparowanego indeksu - region levels i span dense vectors) oraz reserve requested member capacity. 2.26.0 (2026-07-10) dodaje stats() w Rust SDK i compact binding, miesza hashe kluczy calkowitych SplitMix64 i odzyskuje tombstone'y slot_lookup_ przy churnie. 2.25.3 (2026-05-24) dodaje straznika przy rzutowaniu skwantyzowanych wartosci (zero-magnitude) i checked arithmetic dla alokacji; 2.25.2 wystawilo Float8 w bindingu Rust i przelaczylo SimSIMD v6 na NumKong v7.",
+      "why_for_vestige": "crates/vestige-core/src/search/vector.rs buduje indeksy USearch z kwantyzacja ScalarKind::I8 (linie 146 i 334) przy 384D, a Cargo.lock ma usearch 2.25.2 - czyli wersje sprzed poprawek na sciezce ladowania indeksu. To wazne, bo sidecar vestige.hnsw jest wczytywany z dysku na starcie (fast path walidowany liczba wierszy w storage/sqlite/init.rs), wiec OOB-read z 2.26.1 dotyczy realnej sciezki, a nie hipotetycznej. Mieszanie hashy kluczy (SplitMix64) dotyczy wprost projektu, ktory mapuje UUID-y na u64 klucze. i8 jest poprawny dla metryki cosine (L2-normalizowane wektory), wiec obecny wybor jest zgodny z dokumentacja, ale nigdy nie zostal zmierzony pod katem recall.",
+      "adoption": "Bump do 2.26.2 (S) i w tym samym PR dodac logowanie stats() przy starcie, zeby stan indeksu byl widoczny w observability. Nastepnie (M) offline A/B recall@10 i rozmiaru sidecara dla I8 vs F16 vs F32 przy 384D na zamrozonym fixtures - dopiero ten pomiar rozstrzyga, czy 4x oszczednosci I8 sa warte jakiejkolwiek straty recall, czy lepiej wrocic do F16 jak sugeruje dokumentacja USearch. Nie zmieniac domyslnej kwantyzacji bez tego pomiaru.",
+      "effort": "S",
+      "sources": [
+        "https://github.com/unum-cloud/USearch/releases.atom"
+      ]
+    },
+    {
+      "title": "Warstwa leksykalna i indeksy: FTS5 zostaje, Tantivy i sqlite-vec odpadaja, oficjalny SQLite vec1 na watchliscie",
+      "what_it_is": "Tantivy ma 0.26.2 (2026-09-08) po 0.26.0 (2026-03-31) i jest dojrzalym silnikiem BM25 w Rust, ale nie ma modulu ANN. sqlite-vec jest nadal pre-v1 (README: pre-v1, so expect breaking changes), dziala brute-force, a ostatnie stabilne wydanie to 0.1.9 (2026-03-31) z prerelease 0.1.10-alpha.4 (2026-05-18). Oficjalny SQLite vec1 (sqlite.org/vec1) nie ma jeszcze wydania - Dan Kennedy, 2026-03-30: there is still no vec1 release, braki SIMD na ARM/WASM i testing is woefully inadequate; dostepne sa docs API i manual, indeks jest kwantyzowany, a kolumna distance zwraca statystyki coarse_error i reconstruction_error, co ma sluzyc do decyzji o retreningu.",
+      "why_for_vestige": "Dzisiejszy uklad - FTS5 w tym samym pliku SQLite (crates/vestige-core/src/fts.rs, storage/sqlite/search.rs) plus USearch w sidecarze - jest spojny i nie ma oczywistego nastepcy. Przejscie na Tantivy doklada drugi indeks i drugi stos tokenizacji/analizatorow bez zysku ANN. sqlite-vec zastapilby dzialajacy HNSW skanem brute-force, a przy 1M x 512D pomiary zewnetrzne pokazuja ok. 2.5 QPS. vec1 jest jedynym kierunkiem, ktory realnie usunalby sidecar i dal ANN natywnie w SQLite, ale do wydania nie mozna na nim budowac roadmapy.",
+      "adoption": "Zapisac decyzje jako ADR: zostajemy na FTS5 + USearch, bez Tantivy i bez sqlite-vec; uzasadnienie ma zawierac liczby z tego researchu. Dodac vec1 do watchlisty z jednodniowym spike'iem po wydaniu (zakres: czy da sie zastapic sidecar, jak wyglada kwantyzacja i reranking, jak wyglada migracja z istniejacego schema). Zero zmian w kodzie teraz.",
+      "effort": "S",
+      "sources": [
+        "https://github.com/quickwit-oss/tantivy/releases.atom",
+        "https://github.com/asg017/sqlite-vec",
+        "https://www.sqlite.org/forum/forumpost/c9d69d74c6644dd1",
+        "https://sqlite.org/vec1"
+      ]
+    },
+    {
+      "title": "Bramka pomiarowa dla kazdej zmiany w retrievalu (nDCG@10 / recall@k na zamrozonym fixtures)",
+      "what_it_is": "W repo istnieje juz kontrolowany harness: benchmarks/memconflict to port MemConflict (arXiv:2605.20926) z obowiazkowymi ramionami kontrolnymi (no-memory, random, BM25) i importem LongMemEval, benchmarks/locomo ma zapisane wyniki i ewaluator, a crates/vestige-core/tests/benchmark_eval.rs oraz benches/search_bench.rs domykaja strone Rust. MemConflict liczy macro/micro AA, UOCS i CRS-lex; jego RESULTS.md dokumentuje tez ograniczenia (brak powtarzalnosci bitowej, macro vs micro rozjezdzaja sie, jeden przebieg bez testow istotnosci).",
+      "why_for_vestige": "Kazda z dziewieciu powyzszych pozycji to twierdzenie o jakosci rankingu (prefixy nomic, bge vs jina, DPP vs MMR, wazony RRF, kwantyzacja i8 vs f16), a dzisiejszy stan pomiaru tego nie obroni. Dowod z 2026-09-19: A/B MMR wyszedl identyczny w obu ramionach nie z powodu danych, tylko okablowania, a ColBERT okazal sie niemierzalny w tym drzewie, bo brakuje lokalnego modelu. Bez zamrozonego zestawu zapytan i metryk kazda z tych zmian bedzie wymiana opinii, a nie decyzja inzynierska.",
+      "adoption": "Dodac male offline eval: zamrozony plik fixtures (zapytanie -> zestaw oczekiwanych id) plus liczenie nDCG@10, recall@50 i p95 latencji, uruchamiane jako test/benchmark przed kazda zmiana w retrieverze; wyniki dopisywac do RESULTS.md w formacie jak istniejacy (z jawnym podzialem macro/micro i liczba przebiegow). Kolejne PR-y z tego researchu powinny miec w opisie przed/po z tej bramki.",
+      "effort": "S",
+      "sources": [
+        "https://arxiv.org/abs/2605.20926"
+      ]
+    }
+  ]
+}

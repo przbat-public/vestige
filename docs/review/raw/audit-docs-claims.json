@@ -1,0 +1,168 @@
+{
+  "id": "docs-claims",
+  "dimension": "Dokumentacja, spójność twierdzeń, jakość języka",
+  "summary": "Przeczytałem wszystkie pliki w zakresie (README, ARCHITECTURE, AGENTS/CLAUDE, CONTRIBUTING, SECURITY, docs/**, README kraterów i pakietów) i skonfrontowałem każdą twierdzoną liczbę z kodem: katalogiem narzędzi, routerem Axuma, rejestrem migracji, schematami narzędzi, stałymi FSRS-6, limitami dashboardu, Cargo.toml/package.json/pnpm-lock oraz cache modeli ONNX na dysku. Liczby, które da się sprawdzić maszynowo, w większości się zgadzają (28 narzędzi, 11 zasobów, migracje v1-v15, 16 tras SPA, 21 parametrów FSRS-6, 18 testów journey), a linki względne i anchory są czyste w 85 plikach .md. Rozjazdy siedzą gdzie indziej: README nadal reklamuje auto-GC usunięty dzisiejszym commitem 608d866, SCIENCE.md i FAQ.md dokumentują dwa narzędzia, których nie ma w API ani w mapie aliasów, a rozmiary modeli (130 MB / 600 MB) są zaniżone o ~1 GB względem tego, co realnie pobiera przypięty fastembed 5.13.4. Gate CI na liczbę tras REST utrwala zawyżone „40”, bo zlicza też SPA, WebSocket i trzykrotną rejestrację tej samej ścieżki.",
+  "strengths": [
+    "Liczby weryfikowalne maszynowo się zgadzają: 28 narzędzi (catalog.rs, `tool(` x28), 11 zasobów (11x `uri:`), migracje v1-v15 (registry.rs, 15 wpisów, max version: 15), 16 tras dashboardu (apps/dashboard/src/App.tsx:42-57), 21 parametrów FSRS-6 (fsrs/algorithm.rs:17 `[f64; 21]`, test algorithm.rs:365), 278M parametrów Jina zgodne z .mcp-research/sources/jina-reranker-v2-card.md:280.",
+    "Matematyka FSRS-6 w dokumentacji jest wierna kodowi: docs/SCIENCE.md:42-50 (`factor = 0.9^(-1/w20) - 1`, `R = (1 + factor*t/S)^(-w20)`) odpowiada fsrs/algorithm.rs:84-125, a crates/vestige-core/src/memory/strength.rs:16-30 sam ostrzega, że jego stałe 9.0/0.5 to przybliżenie historyczne, a nie krzywa FSRS-6 używana przez silnik - to rzadka uczciwość.",
+    "Progi bramy prediction-error z docs/SCIENCE.md:29-31 (0.92 / 0.75) zgadzają się z advanced/prediction_error/constants.rs:5,9 (NEAR_IDENTICAL_THRESHOLD = 0.92, DEFAULT_SIMILARITY_THRESHOLD = 0.75).",
+    "Ścieżki bazy danych są spójne w trzech dokumentach i w kodzie: docs/STORAGE.md:13-15, SECURITY.md:50-52, crates/vestige-mcp/README.md:125-127 vs storage/sqlite/init.rs:120-133 (ProjectDirs::from(\"com\", \"vestige\", \"core\") -> data_dir()/vestige.db); `--data-dir` zgodnie opisany jako jedyny override.",
+    "Komendy w CONTRIBUTING.md:100-112 istnieją co do nazw: [profile.release] (lto/codegen-units/panic/strip/opt-level=3) i [profile.dist] w Cargo.toml:65-80, targety `nlp_baseline` (crates/vestige-core/tests/nlp_baseline.rs) i `mcp_protocol` (tests/e2e/Cargo.toml, [[test]] mcp_protocol -> tests/mcp/protocol_tests.rs).",
+    "Liczby LoCoMo w README.md:45 uzgadniają się z benchmarks/locomo/README.md:11-30: 66.17% vs 41.00% = +25.17 pp, Mem0 66.88% - 66.17% = 0.71 pp, LangMem 58.10%.",
+    "Zero martwych linków względnych i zerwanych anchorów w 85 plikach .md (własny skrypt sprawdzający ścieżki i slugi nagłówków); jedyne trafienia to vendorowane .mcp-research/sources/* oraz skrócone linki w mcp-sdk-2026-07-28-support-report.md.",
+    "Uczciwość metodologiczna: docs/launch/README.md:1-11 jawnie zamraża liczby marketingowe, docs/SCIENCE.md:52 odmawia cytowania własnego benchmarku („quote the upstream measurement, not ours”), a benchmarks/locomo/README.md:17 ostrzega przed niereprodukowalnością sędziego gpt-4o-mini."
+  ],
+  "inconsistencies": [
+    "README.md:256 („Auto-GCs low-retention memories”) vs kod po commicie 608d866 (consolidation.rs:302-333 tylko loguje kandydatów, `gc_below_retention` ma zakaz wywołań automatycznych) oraz vs docs/SCIENCE.md:82 i docs/FAQ.md:161 („Memories are never deleted automatically”).",
+    "README.md:369 („~1.3GB”) vs README.md:429 („~130MB”) vs docs/CONFIGURATION.md:11-12 („~130 MB” + „~600 MB”) - trzy różne liczby w trzech miejscach, a realny pobór to ~1.68 GB (547 MB + 1.11 GB + tokenizer).",
+    "crates/vestige-core/src/search/reranker.rs:135-136 („reads ~150 MB from disk on every later start”) vs ten sam plik, reranker.rs:177 („~1.1GB”).",
+    "AGENTS.md:43-44 (pola `totalMemories` i `savesSinceLastDream` w odpowiedzi) vs session_context/execute.rs:352-362 (zwraca wyłącznie needsDream/needsBackup/needsGc); te pola istnieją tylko w system_status.rs:232-266.",
+    "README.md:190, ARCHITECTURE.md:223, AGENTS.md:350 („40 REST routes”) vs dashboard/mod.rs:126-211: 40 wywołań `.route(`, w tym 5 nie-API i 3x ta sama ścieżka `/api/memories/{id}` (35 rejestracji /api/*, 33 unikalne ścieżki).",
+    "ARCHITECTURE.md:136 i :178 oraz docs/SCIENCE.md:73 (Dormant >= 0.4) vs tools/search_unified/pipeline/scoring.rs:146-153 i storage/sqlite/consolidation.rs:239-245 (klasyfikacja po `> 0.3`), przy wzorcowym helpers.rs:5-21 z ACCESSIBILITY_DORMANT = 0.4.",
+    "benchmarks/locomo/README.md:171 („Session-level chunking... Evaluating turn-level chunking is on the roadmap”) vs tabela w tym samym pliku (wiersze 11-13: turn-level i turn+facts) oraz benchmarks/locomo/src/main.rs:89 (ChunkLevel::TurnExtracted) i README.md:45.",
+    "README.md:166 („1000+ nodes at 60fps”) vs crates/vestige-mcp/src/dashboard/wire/limits.rs:34-40 („stalls on the main thread and FPS collapses; verified empirically at ~600 nodes on M1 Air”).",
+    "SECURITY.md:86 („The `restore` and `gc` tools default to `dry_run=true`”) vs tools/restore.rs:14-30 (brak parametru dry_run, `required: [\"path\", \"confirmed\"]`) i tools/maintenance/gc.rs:78-83 (`confirmed` wymagane dopiero przy `dry_run=false`)."
+  ],
+  "findings": [
+    {
+      "title": "README nadal reklamuje auto-GC pamięci, którego kod już nie wykonuje",
+      "severity": "high",
+      "category": "docs",
+      "evidence": "README.md:256: „Autonomic Regulation ... Auto-GCs low-retention memories”. Kod po 608d866: crates/vestige-core/src/storage/sqlite/consolidation.rs:302-333 ustawia `let gc_triggered = false;` i tylko loguje `candidates = below_target`; maintenance.rs:65-75 opisuje `gc_below_retention` jako „Destructive and irreversible ... must never be called from an automatic path again”. Grep „auto-GC|Auto-GC|automatically deletes” po README/ARCHITECTURE/AGENTS/docs zwraca wyłącznie README.md:256, a docs/SCIENCE.md:82 i docs/FAQ.md:161 mówią wprost „Memories are never deleted automatically”.",
+      "impact": "Użytkownik czyta w README, że serwer sam sprząta słabe wspomnienia, podczas gdy serwer nie usuwa już nic - i odwrotnie: dokumentacja obiecuje zachowanie, które zostało właśnie usunięte jako niebezpieczne (twardy DELETE bez pin-checku i tombstone'a). To najgorszy rodzaj stale docs: dotyczy trwałości danych.",
+      "proposal": "Zamienić zdanie w README.md:256 na: „promuje często używane pamięci i raportuje zaległości; nic nie usuwa automatycznie - GC wyłącznie przez `gc` z `dry_run` (i `confirmed: true` dla wersji niszczącej)”, spójnie z SCIENCE.md:82. Ten sam akapit dopisać do AGENTS.md w sekcji „Automatic (server handles it)”.",
+      "effort": "S",
+      "skill_basis": "writing-english/technical-writing-and-tone.md:50 - „Update the README when the code changes (stale docs are worse than no docs)”"
+    },
+    {
+      "title": "SCIENCE.md i FAQ.md dokumentują narzędzia `importance` i `context`, których nie ma w API",
+      "severity": "high",
+      "category": "docs",
+      "evidence": "catalog.rs::build_tools_list ma 28 narzędzi (`grep -c '^\\s*tool(' = 28`) i nie zawiera `context` ani `importance`; server/deprecated.rs:27-90 (mapa aliasów) też ich nie ma; dispatch.rs:169 zwraca „Unknown tool: {}”. Tymczasem docs/SCIENCE.md:127-137 i docs/FAQ.md:212-224 opisują `importance(memory_id=..., event_type=\"user_flag\", hours_back=9, hours_forward=2)`, a docs/SCIENCE.md:145-154 i docs/FAQ.md:299-305 `context(query=\"error handling patterns\", project=..., topics=[...], time_weight=0.3, topic_weight=0.4)`. Realny odpowiednik to `importance_score` z schema tools/importance.rs:17-36 (content/context_topics/project).",
+      "impact": "Agent lub człowiek kopiuje przykład z głównego dokumentu naukowego i dostaje błąd wykonania; ponadto FAQ obiecuje „multi-channel importance” z typami eventów, których żadne narzędzie nie przyjmuje.",
+      "proposal": "Przepisać przykłady na istniejące API: `importance_score` (content/context_topics/project) oraz `search` z `context_topics`/`token_budget` zamiast `context(...)`; retroaktywne wzmocnienie pokazać przez `memory(action=\"promote\")`. Pliki: docs/SCIENCE.md:127-154, docs/FAQ.md:210-224, 331, 744.",
+      "effort": "M",
+      "skill_basis": "writing-english/technical-writing-and-tone.md:23 - „Working code: Every example should run as-is”; ai-dev/checklists.md:31 (brak halucynowanych zależności/API)"
+    },
+    {
+      "title": "Rozmiary modeli zaniżone o ~1 GB; trzy sprzeczne liczby w trzech dokumentach",
+      "severity": "medium",
+      "category": "docs",
+      "evidence": "Pomiar na tej maszynie (cache utworzony przez projekt): `ls -la ~/Library/Caches/vestige.vestige/fastembed/models--nomic-ai--nomic-embed-text-v1.5/blobs/*` -> 547 310 275 B; `.../models--jinaai--jina-reranker-v2-base-multilingual/blobs/*` -> 1 114 040 223 B + 17 082 734 B (tokenizer). Źródło: fastembed 5.13.4 (Cargo.lock:1124-1126) mapuje `NomicEmbedTextV15` na `onnx/model.onnx` (registry: fastembed-5.13.4/src/models/text_embedding.rs:218-220), a `JINARerankerV2BaseMultiligual` na `onnx/model.onnx` (src/models/reranking.rs:42-47); kod używa wariantu nie-kwantyzowanego (embeddings/local.rs:173 `EmbeddingModel::NomicEmbedTextV15`). Dokumentacja mówi inaczej: docs/CONFIGURATION.md:11-12 („~130 MB” + „~600 MB”), docs/SCIENCE.md:206 i :212, docs/FAQ.md:612 i :856, docs/integrations/xcode.md:166 i :231, packages/vestige-mcp-npm/README.md:82, README.md:429, a jednocześnie README.md:369 podaje „~1.3GB”. Dodatkowo crates/vestige-core/src/search/reranker.rs:135-136 twierdzi „~150 MB from disk”, gdy reranker.rs:177 mówi „~1.1GB”.",
+      "impact": "Realny pierwszy start pobiera ~1.68 GB, a dokumenty obiecują 130 MB lub 600 MB - użytkownik na metered łączu, w CI albo w sandboxie Xcode planuje zupełnie inny budżet czasu i dysku. Rozbieżność komentarzy w reranker.rs trafia też do logów i code review.",
+      "proposal": "Ujednolicić we wszystkich miejscach na: „nomic-embed-text-v1.5 fp32 onnx ~547 MB + Jina Reranker v2 onnx ~1.11 GB (~1.68 GB łącznie)”, poprawić reranker.rs:135-136, a jeśli 137 MB jest celem - przełączyć embeddings/local.rs:173 na `EmbeddingModel::NomicEmbedTextV15Q` (fastembed: `onnx/model_quantized.onnx`, 137.3 MB wg embedding-onnx-size-speed-report.md) i zmierzyć regresję na LoCoMo.",
+      "effort": "S",
+      "skill_basis": "writing-polish/tone-technical-ai-detection-cliches.md:10.6 - zamiast przymiotników podaj liczby, ale liczby muszą być sprawdzone; technical-writing-and-tone.md:50 (stale docs)"
+    },
+    {
+      "title": "AGENTS.md pomija wymagany `confirmed: true` dla `restore` i `gc`",
+      "severity": "medium",
+      "category": "docs",
+      "evidence": "AGENTS.md:280-281 dokumentuje `gc: { \"min_retention\": 0.1, \"dry_run\": true }` i `restore: { \"path\": \"/path/to/backup.json\" }`. Kod: tools/restore.rs:62-70 odrzuca KAŻDE wywołanie bez `confirmed`, a schema restore.rs:14-30 ma `\"required\": [\"path\", \"confirmed\"]`; tools/maintenance/gc.rs:78-83 wymaga `confirmed` przy `dry_run=false` (schema gc.rs:31-36). SECURITY.md:86 dokłada błędne twierdzenie, że `restore` „default[s] to dry_run=true”, choć restore nie ma parametru dry_run.",
+      "impact": "Agent wykonujący kanoniczne instrukcje nie przywróci backupu (błąd RequestDenied -32002) i nie dokończy GC po review; nazwa flagi nie występuje w dokumentacji, więc kolejna próba też jest zgadywaniem.",
+      "proposal": "Dopisać `confirmed` do AGENTS.md:280-281 oraz do tabel README.md:321-322 i crates/vestige-mcp/README.md:87-88, a SECURITY.md:86 przepisać na: „`gc` domyślnie `dry_run=true`, a `dry_run=false` wymaga `confirmed: true`; `restore` nie ma dry-runu i wymaga `confirmed: true`”.",
+      "effort": "S",
+      "skill_basis": "writing-english/technical-writing-and-tone.md:7,23 - dokumentacja API musi podawać wymagane parametry i ścieżkę błędu; przykłady muszą działać"
+    },
+    {
+      "title": "„40 REST routes” to 35 rejestracji /api/* i 33 ścieżki, a bramka CI utrwala zawyżoną liczbę",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "dashboard/mod.rs:126-211 zawiera 40 wywołań `.route(`, z czego 5 nie jest API (`/dashboard`, `/dashboard/{*path}`, `/`, `/graph`, `/ws`), a `/api/memories/{id}` jest rejestrowane 3x (GET/DELETE/PATCH) - skrypt zliczający: „total .route( call sites: 40, api registrations: 35, distinct api paths: 33”. Dokumenty mówią „40 REST routes” (README.md:190, ARCHITECTURE.md:223, AGENTS.md:350), a scripts/check-version-and-tools.sh:131-140 wymusza liczbę równą liczbie wywołań `.route(` w README/ARCHITECTURE/AGENTS.",
+      "impact": "Opisany kontrakt REST jest zawyżony o 7 pozycji (SPA, legacy HTML, WebSocket i duplikaty metod), a gate CI uniemożliwia poprawienie dokumentacji bez zmiany skryptu - liczby nie da się naprawić „lokalnie”.",
+      "proposal": "Zmienić metrykę w scripts/check-version-and-tools.sh na liczbę unikalnych ścieżek `/api/*` (33) i zaktualizować trzy dokumenty; w ARCHITECTURE.md:223 rozbić ją jawnie na „33 REST API + 4 trasy stron/SPA + 1 WebSocket”.",
+      "effort": "M",
+      "skill_basis": "ai-dev/checklists.md:57 (dokumentacja adekwatna i zweryfikowana) + technical-writing-and-tone.md:21 (Specific)"
+    },
+    {
+      "title": "README obiecuje „1000+ nodes at 60fps”, a limit dashboardu opisuje zapaść przy ~600 węzłach",
+      "severity": "medium",
+      "category": "docs",
+      "evidence": "README.md:166: „Force-directed 3D graph with 1000+ nodes at 60fps” vs crates/vestige-mcp/src/dashboard/wire/limits.rs:34-40: „Above this the rendering pipeline stalls on the main thread and FPS collapses; verified empirically at ~600 nodes on M1 Air ... Going much further than 1000 is irresponsible until that lands”, przy `graph_max_nodes_max: 1000` i domyślnym capie 50 (limits.rs:62-63).",
+      "impact": "Twierdzenie wydajnościowe bez benchmarku w repo, sprzeczne z pomiarem zapisanym w kodzie; użytkownik planuje grafy tysiąca węzłów i dostaje urywane 60fps.",
+      "proposal": "Zastąpić zdanie w README.md:166 formułą zgodną z kodem: „domyślnie 50 węzłów, twardy limit 1000; ~600 węzłów to granica płynności na M1 Air do czasu LOD/clusteringu w Graph3D” albo dołączyć pomiar FPS.",
+      "effort": "S",
+      "skill_basis": "writing-english/technical-writing-and-tone.md:300 - „Persuasion with evidence is rhetoric. Persuasion without evidence is manipulation”"
+    },
+    {
+      "title": "Próg stanu Dormant: dokumentacja 0.4, kod 0.3 w scoringu i konsolidacji",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "ARCHITECTURE.md:136 („Dormant >=0.4”) i :178 („Dormant (>= 0.4)”), docs/SCIENCE.md:73 („Dormant 40-70%”) vs tools/search_unified/pipeline/scoring.rs:146-153 i crates/vestige-core/src/storage/sqlite/consolidation.rs:239-245, które klasyfikują po `retention_strength > 0.3`. Wzorcowa implementacja zgodna z dokumentacją to tools/memory_unified/helpers.rs:5-21 (ACCESSIBILITY_DORMANT = 0.4 + kompozyt 0.5*retention + 0.3*retrieval + 0.2*storage).",
+      "impact": "Ta sama pamięć o retention 0.35 jest „Dormant” w `memory(action=\"state\")` i w dashboardzie, ale w scoringu wyszukiwania oraz w snapshotach konsolidacji wpada do innego kubełka - raporty stanów i statystyki nie zgadzają się ze sobą.",
+      "proposal": "Wynieść progi do jednego źródła (np. `vestige_core::neuroscience::memory_states` stałe publiczne) i użyć ich w scoring.rs:146-153 oraz consolidation.rs:239-245; jeśli 0.3 jest celowe, zmienić ARCHITECTURE.md:136,178 i docs/SCIENCE.md:73 na 0.3 z uzasadnieniem.",
+      "effort": "M",
+      "skill_basis": "brak reguły wprost - spójność twierdzeń dokumentacji z implementacją"
+    },
+    {
+      "title": "Protokół startu sesji w AGENTS.md czyta pola, których `session_context` nie zwraca",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "AGENTS.md:43-44: „`totalMemories` > 700 -> call `find_duplicates`”, „`savesSinceLastDream` > 100 -> call `reflect`”, w kontekście „check `automationTriggers` from response” z kroku session_context. session_context/execute.rs:352-362 zwraca tylko `context`, `tokensUsed`, `tokenBudget`, `expandable` i `automationTriggers{needsDream, needsBackup, needsGc}`. Pola `totalMemories` i `automationTriggers.savesSinceLastDream` istnieją wyłącznie w tools/maintenance/system_status.rs:232-266.",
+      "impact": "Dwie z pięciu reguł automatyzacji z kanonicznych instrukcji są nieegzekwowalne z dokumentowanego wywołania - `find_duplicates` i `reflect` nie odpalą się, dopóki agent nie zgadnie, że potrzebny jest `system_status`.",
+      "proposal": "Albo dodać `totalMemories` i `savesSinceLastDream` do obiektu `automationTriggers` w session_context/execute.rs:357 (dane są już policzone dla needs_dream), albo przepisać AGENTS.md:43-44 na jawny krok „`system_status` -> `automationTriggers.savesSinceLastDream` / `totalMemories`”.",
+      "effort": "S",
+      "skill_basis": "writing-english/technical-writing-and-tone.md:23 (przykłady muszą działać) + :21 (Specific)"
+    },
+    {
+      "title": "SECURITY.md opisuje limit długości zapytania jako `VESTIGE_MAX_TOKEN_BUDGET`",
+      "severity": "medium",
+      "category": "security",
+      "evidence": "SECURITY.md:83: „Query length limit: configurable via `VESTIGE_MAX_TOKEN_BUDGET`; tools default to safe ceilings”. W kodzie `VESTIGE_MAX_TOKEN_BUDGET` klampuje budżet ODPOWIEDZI: tools/search_unified/pipeline/finalize.rs:266-270 (`max_budget` default 100_000, potem `budget.clamp(100, max_budget)`) i session_context/execute.rs:27. Po stronie zapytania jedynym ograniczeniem jest liczba terminów FTS5: crates/vestige-core/src/fts.rs:12 (`MAX_TERMS = 32`); walidacji długości `query` brak (grep `query.len()` w walidacji nie zwraca trafień).",
+      "impact": "Audytor bezpieczeństwa czyta, że istnieje konfigurowalny limit długości zapytania, i uznaje wektor za zamknięty; realnie nie ma takiej kontroli, więc opis zestawu zabezpieczeń jest nieprawdziwy w jedynym miejscu, które ma być źródłem prawdy o bezpieczeństwie.",
+      "proposal": "Poprawić SECURITY.md:83 na fakty: „zapytania FTS5 przechodzą przez `vestige_core::fts` i są ograniczone do 32 terminów; budżet odpowiedzi ogranicza `VESTIGE_MAX_TOKEN_BUDGET` (default 100 000)”, a jeśli limit długości faktycznie ma istnieć - dodać walidację w tools/search_unified/schema.rs i odnotować ją tutaj.",
+      "effort": "S",
+      "skill_basis": "writing-english/technical-writing-and-tone.md:21 (Specific zamiast ogólników) - dokument kontroli bezpieczeństwa musi opisywać realne zachowanie"
+    },
+    {
+      "title": "packages/vestige-mcp-npm/README.md: błędny limit SQLite i sprzeczna arytmetyka pojemności",
+      "severity": "low",
+      "category": "docs",
+      "evidence": "packages/vestige-mcp-npm/README.md:74: „Database limit: 216TB (SQLite theoretical max)”. Dokumentacja SQLite (sqlite.org/limits.html, sekcja 25) podaje maksimum ~281 TB i ~17,5 TB przy domyślnym page_size 4096; Vestige nie ustawia `PRAGMA page_size` (storage/sqlite/init.rs:101-109 ustawia tylko WAL, synchronous, cache_size=-64000, temp_store, foreign_keys, busy_timeout, mmap_size, journal_size_limit). Dodatkowo ten sam plik jest wewnętrznie sprzeczny: wiersz 76 „1 million memories ~ 1-2GB”, a wiersz 78 „100 memories/day would use ~1.5GB after 10 years” (=365 tys. pamięci, czyli 0,4-0,7 GB wg skali z wiersza 76).",
+      "impact": "Zawyżona o rząd wielkości obietnica pojemności i dwa wykluczające się szacunki w jednym akapicie; realny sufit przy domyślnym page_size jest ~12x niższy niż podany, a liczba 1,5 GB nie wynika z niczego.",
+      "proposal": "Poprawić wiersz 74 na „~17,5 TB przy domyślnym page_size 4 KiB (teoretyczne maksimum 281 TB)” i ujednolicić wiersz 78: „365 tys. pamięci ~ 0,4-0,7 GB przy 1-2 KB na pamięć”.",
+      "effort": "S",
+      "skill_basis": "writing-polish/tone-technical-ai-detection-cliches.md:10.6 - liczby zamiast przymiotników, ale liczby muszą być sprawdzone"
+    },
+    {
+      "title": "AGENTS.md - kanoniczna lista narzędzi pomija `precompute_for_context`",
+      "severity": "low",
+      "category": "missing-feature",
+      "evidence": "catalog.rs:22-33 i build_tools_list zawierają `precompute_for_context` (sleep-time compute); README.md:286 i crates/vestige-mcp/README.md:62 je dokumentują; `grep -c precompute_for_context AGENTS.md` = 0, mimo że AGENTS.md:335 deklaruje „28 MCP tools” i plik ogłasza się źródłem prawdy dla agentów (AGENTS.md:3-6, a CLAUDE.md/GEMINI.md to symlinki).",
+      "impact": "Agent nie wie o pre-fetchu kontekstu przed sesją i nie użyje narzędzia; lista narzędzi w pliku, który ma być kanonem, jest niekompletna o 1 z 28 pozycji.",
+      "proposal": "Dodać sekcję `### precompute_for_context` w AGENTS.md obok `predict` (AGENTS.md:236) z parametrami z tools/precompute/schema (topic, ttl_hours 1-168) i adnotacją mutating/additive.",
+      "effort": "S",
+      "skill_basis": "writing-english/technical-writing-and-tone.md:7 - dokumentacja API odpowiada na komplet pytań dla każdego narzędzia/endpointu"
+    },
+    {
+      "title": "Zakres w20 w SCIENCE.md (0.1-0.8) nie zgadza się z clampem w kodzie [0.01, 1.0]",
+      "severity": "low",
+      "category": "science",
+      "evidence": "docs/SCIENCE.md:50: „w20 = personalized decay parameter (0.1-0.8)” vs crates/vestige-core/src/storage/sqlite/fsrs_personalization.rs:68-74: „The value is clamped to FSRS-6's valid decay range `[0.01, 1.0]` ... `let clamped = w20.clamp(0.01, 1.0);`”. Nazwa parametru i wzór są zgodne (fsrs/algorithm.rs:38 w20=0.1542, algorithm.rs:84-85), rozjeżdża się wyłącznie zakres.",
+      "impact": "Osoba dostrajająca model nie wie, jaki zakres jest realnie przyjmowany i jaki był zakres treningowy FSRS-6; dokument naukowy przestaje być wiarygodnym źródłem parametrów.",
+      "proposal": "Ujednolicić jedno z dwóch: albo zawęzić clamp w fsrs_personalization.rs:74 do [0.1, 0.8] i uzasadnić to zakresem treningowym FSRS-6, albo poprawić docs/SCIENCE.md:50 na [0.01, 1.0] i dopisać, skąd szerokość.",
+      "effort": "S",
+      "skill_basis": "brak reguły wprost - wierność opisu naukowego względem implementacji"
+    },
+    {
+      "title": "docs/blog/xcode-memory.md podaje „23 cognitive tools”",
+      "severity": "low",
+      "category": "docs",
+      "evidence": "docs/blog/xcode-memory.md:86: „**23 cognitive tools** - search, ingest, dream, predict, explore connections, garbage collect, and more”; katalog ma 28 narzędzi (catalog.rs, README.md:367, AGENTS.md:335). Blog nie jest objęty klauzulą zamrożenia z docs/launch/README.md:3-11 (ta dotyczy tylko blog-post.md, show-hn.md, demo-script.md), więc liczba nie ma dyspensy.",
+      "impact": "Publikowany tekst wprowadza czytelnika w błąd co do rozmiaru API, a liczba nie jest pilnowana przez żadną bramkę (gate sprawdza tylko README/ARCHITECTURE/AGENTS/crates README).",
+      "proposal": "Zamienić na „28 MCP tools” albo usunąć liczbę i linkować do sekcji „28 MCP Tools” w README.md; rozważyć dopisanie docs/blog/ do listy plików sprawdzanych przez scripts/check-version-and-tools.sh.",
+      "effort": "S",
+      "skill_basis": "writing-english/technical-writing-and-tone.md:50 - stale docs"
+    },
+    {
+      "title": "„130 years of memory research” nie ma pokrycia w cytowanych źródłach (Ebbinghaus 1885 -> 141 lat)",
+      "severity": "low",
+      "category": "docs",
+      "evidence": "README.md:13, packages/vestige-mcp-npm/README.md:5 („130 years of cognitive science research”) i docs/blog/xcode-memory.md:17. Najstarsze źródło cytowane w repo to Ebbinghaus (1885): docs/launch/blog-post.md:386 oraz crates/vestige-core/tests/scientific_validation.rs:28-35 (replikacja Murre & Dros 2015 testów Ebbinghausa 1885), co daje 141 lat w 2026. Żadne źródło z ~1896 nie występuje w dokumentacji ani w kodzie.",
+      "impact": "Liczba-marketing bez źródła; przy pierwszej weryfikacji podważa zaufanie do pozostałych liczb w README (a te - jak 28 narzędzi czy 66.17% - są poprawne).",
+      "proposal": "Zamienić na konkret: „od Ebbinghausa (1885) po FSRS-6” albo podać jawnie „141 lat” z przypisem; ujednolicić we wszystkich trzech plikach.",
+      "effort": "S",
+      "skill_basis": "writing-english/technical-writing-and-tone.md:300 - persuasion with evidence is rhetoric; tone-technical-ai-detection-cliches.md:10.6 (puste wzmacniacze)"
+    }
+  ]
+}

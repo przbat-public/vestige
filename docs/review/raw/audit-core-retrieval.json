@@ -1,0 +1,163 @@
+{
+  "id": "core-retrieval",
+  "dimension": "Rdzen: wyszukiwanie, ranking, silnik kognitywny",
+  "summary": "Przeszedlem caly lancuch retrieval -> scoring -> finalize (crates/vestige-mcp/src/tools/search_unified/pipeline/*), warstwe fuzji (search/hybrid.rs + storage/sqlite/search.rs::hybrid_search), reranker/ColBERT/MMR, FSRS-6 (algorithm.rs, scheduler.rs, optimizer.rs + konsumenci w storage/sqlite), ACT-R/spreading activation oraz detektory NLP (negation.rs, contradiction.rs) i bramke kalibracji (tests/nlp_baseline.rs). Najwazniejszy wniosek: kolejne etapy rankingu nie sa spojne - wynik rerankera (Jina/ColBERT) jest wyrzucany, a jedyny re-sort w fazie scoring przywraca kolejnosc hybrydowa, wiec praktycznie caly koszt cross-encodera nie przeklada sie na kolejnosc wynikow; dodatkowo etap 6 (spreading activation) zmienia combined_score po ostatnim sortowaniu, wiec tablica results w odpowiedzi nie jest monotoniczna wzgledem raportowanych ocen. Znalazlem tez potwierdzony empirycznie panic na zapytaniu uzytkownika (offsety bajtowe z to_lowercase w decompose_query) oraz systematyczne przesuniecie offsetow w detektorze negacji (te same offsety z obnizonego tekstu trafiaja do oryginalu). FSRS-6 jest matematycznie zgodny z referencja (retrievability, SInc, same-day stability, forget stability), ale personalizacja w20 jest fitowana na blednych parach (stala stability per node, elapsed od created_at), a retention_strength - na ktorym opiera sie filtr min_retention i klasyfikacja stanu - ma trzech konkurencyjnych pisarzy. Ponizej 14 znalezisk z twardymi dowodami; sprawdzenie krzywej FSRS-6 i kalibracji ECE nie zostalo uruchomione (brak buildu w trybie read-only), co zaznaczam w evidence.",
+  "strengths": [
+    "Rekrutacja kandydatow jest rozdzielona od oceny: hybrid_search uzywa RRF (k=60) tylko do wyboru zbioru kandydatow, a combined_score powstaje z wazonej mieszanki surowych ocen (storage/sqlite/search.rs:214-311) - separacja jest udokumentowana i spojna z kodem.",
+    "Filtry tanie (valid_until, min_retention, min_similarity) uruchamiaja sie przed rerankerem (retrieval.rs:69-89), wiec cross-encoder nie przetwarza kandydatow odrzuconych przez progi.",
+    "FSRS-6 algorithm.rs jest zgodny z referencja w kluczowych formulach: R=(1+factor*t/S)^(-w20) z factor=0.9^(-1/w20)-1 (algorithm.rs:84-127), S'=S*(e^w8*(11-D)*S^-w9*(e^(w10*(1-R))-1)*HP*EB+1) (199-233), S'f=w11*D^-w12*((S+1)^w13-1)*e^(w14*(1-R)) z ograniczeniem S'f<=S (238-261), same-day S'=S*e^(w17*(G-3+w18))*S^-w19 (266-279), mean reversion do D0(4) (173-190).",
+    "Spreading activation uzywa BFS z kolejka zamiast stosu LIFO i dokumentuje te zmiane (spreading_activation.rs:290-374), a boost w finalize jest ograniczony do +20% z uzasadnieniem dlaczego nie wiecej (finalize.rs:147-165).",
+    "MMR i dedup dzialaja na wspoldzielonym, przetestowanym prymitywie: mmr_select jest generyczny, z normalizacja min-max i testami na lambda=1, top_k oraz pusty input (mmr.rs:32-151).",
+    "Memoizacja/ochrona query: sanitize_fts5_query jest allow-listowa (alphanumeryki + cudzyslowy, limit 1000 znakow i liczby termow) i pokryta testami na operatory oraz content:secret (fts.rs:31-88)."
+  ],
+  "inconsistencies": [
+    "Opis etapow mowi 'retrieval -> scoring -> finalize' z rankingiem rerankera jako etapem 2, ale kod wyrzuca score rerankera i przywraca kolejnosc po combined_score w etapie 5 - deklarowany dwustopniowy ranking (reranker jako stage 2) nie istnieje w wyniku.",
+    "AGENTS.md/README opisuja '8-stage pipeline' z rerankingiem i spreading activation, a modul pipeline wymienia ponad 20 podetapow (0,1,2,2B,2C,3,3B,4,5,5B,5C,5D,5E-pre,5E,5F,5G,6,7) - liczba '8' nie odpowiada kodowi.",
+    "Komentarz w retrieval.rs o etapie 2C (MMR) twierdzi, ze reordering 'balances relevance against novelty, so the downstream context budget keeps a diverse set', ale reordering jest kasowany re-sortem w scoring.rs, a zbior jest juz przyciety do limit - czyli deklarowany efekt nie moze wystapic (co potwierdza dzisiejszy A/B w benchmarks/memconflict/RESULTS.md dla czesci 'zbior').",
+    "finalize.rs:157-160 deklaruje, ze 'activation is normalised to [0, 1.0] by the network', podczas gdy ActivatedMemory.activation to propagated = activation*edge.strength*decay (bez normalizacji), a przy zbieznych krawedziach ta sama pamiec pojawia sie wielokrotnie w wyniku.",
+    "Dokumentacja memory/strength.rs (naglowek, linie 16-29) przyznaje, ze FSRS_FACTOR/FSRS_DECAY to 'coarser approximation' nieuzywane w crate::fsrs, ale retention_strength (jedyny sygnal widziany przez search) jest liczone dokladnie ta przyblizona formula w dwoch miejscach: review.rs:74-75 i consolidation/sleep.rs:114-116.",
+    "Schema narzedzia opisuje min_similarity jako ogolny 'Minimum similarity threshold' (schema.rs:28-34), a kod porownuje je wylacznie z surowym cosine z HNSW i przepuszcza wyniki bez semantycznego dopasowania (semantic_score = None) bez sprawdzenia progu (retrieval.rs:82-86)."
+  ],
+  "findings": [
+    {
+      "title": "Panic na zapytaniu uzytkownika: offsety z to_lowercase() w decompose_query",
+      "severity": "high",
+      "category": "bug",
+      "evidence": "crates/vestige-core/src/search/decompose.rs:165-167: `if let Some(pos) = query.to_lowercase().find(\" and \")` -> `query[..pos]` / `query[pos + 5..]`. Dowod wykonawczy (rustc 1.91.0, program w /tmp/vprobe/probe.rs): dla query = \"\\u{212A} and something substantial here\" (KELVIN SIGN) lower_len=32 vs orig_len=34, pos=1, `q.is_char_boundary(1) == false`, `catch_unwind` -> panic 'byte index 1 is not a char boundary; it is inside K (bytes 0..3)'. Sciezka jest osiagalna w produkcyjnym buildzie: retrieval.rs:245 wola decompose_query bezposrednio w async fn (feature vector-search jest domyslny wg AGENTS.md), a bajt 0x212A/0x212B zmniejszaja dlugosc przy lowercasingu.",
+      "impact": "Kazde zapytanie zawierajace znak, ktory przy lowercasingu zmienia dlugosc bajtowa (K U+212A, ANGSTROM U+212B, TURKISH I U+0130 w druga strone), wywala panic w handlerze search zamiast zwrocic wyniki - twarda awaria narzedzia MCP (DoS) na tresci kontrolowanej przez uzytkownika.",
+      "proposal": "Nie porownuj offsetow miedzy `query` i `query.to_lowercase()`. W decompose.rs:164-169 uzyj dopasowania ASCII-case-insensitive zachowujacego dlugosc, np. `fn find_ci(hay: &str, needle: &str) -> Option<usize>` z `hay.as_bytes().windows(n).position(|w| w.eq_ignore_ascii_case(needle.as_bytes()))`, albo `match_indices` na `query` z porownaniem `to_ascii_lowercase()`. Ten sam wzorzec zastosuj w split_by_question_chains (decompose.rs:127-133), gdzie `stripped[4..]`/`[5..]`/`[11..]` zaleza od `stripped.to_lowercase()`.",
+      "effort": "S",
+      "skill_basis": "brak wprost; sorting-searching.md (Binary Search Pitfalls: 'Wrong branch/off-by-one' - indeks z jednej reprezentacji danych uzyty do drugiej)"
+    },
+    {
+      "title": "Score rerankera jest wyrzucany, a etap 5 przywraca kolejnosc hybrydowa - cross-encoder nie wplywa na ranking",
+      "severity": "high",
+      "category": "bug",
+      "evidence": "retrieval.rs:119-126: `cog.reranker.rerank(...)` -> `filtered_results = reranked.into_iter().map(|rr| rr.item).collect();` (pole `RerankedResult::score` z reranker.rs:66-73 nie jest nigdzie czytane - `grep -rn \"rr.score|RerankedResult\" crates/` poza reranker.rs daje tylko re-exporty i late_interaction). Nastepnie scoring.rs:51-55 sortuje `filtered_results` po `combined_score`, ktorego reranker nie dotyka (hybrid_search zwraca juz posortowane po combined_score - storage/sqlite/search.rs:353-357). Jedyne produkcyjne wywolanie reranker.rerank to retrieval.rs:121.",
+      "impact": "Zaladowany na starcie model Jina Reranker v2 Base (278M, ~150MB) i sciezka ColBERT zmieniaja wylacznie to, ktore elementy przetrwaja obciecie do `limit`; ich ocena i kolejnosc sa kasowane, a agent widzi kolejnosc hybrydowa + heurystyczne boosty. Koszt (setki ms na zapytanie) nie daje deklarowanej precyzji top-K, a kazda kalibracja wag rerankera jest niemierzalna.",
+      "proposal": "W etapie 2 przenies ocene rerankera do wyniku, np. `filtered_results = reranked.into_iter().map(|rr| { let mut it = rr.item; it.combined_score = rr.score; it }).collect();` (analogicznie dla sciezki ColBERT w retrieval.rs:104-113) i przelicz boosty etapu 5 jako mnozniki na tym wyniku, albo dodaj osobne pole `rerank_score` i sortuj po nim w scoring.rs:51.",
+      "effort": "M",
+      "skill_basis": "sorting-searching.md (Sorting Decision Tree / pitfalls: sortowanie po kluczu, ktory nie zostal zaktualizowany przez etap rankingowy)"
+    },
+    {
+      "title": "retention_strength ma trzech pisarzy o sprzecznej semantyce - filtr min_retention i klasyfikacja stanu sa zalezne od czasu konsolidacji",
+      "severity": "high",
+      "category": "inconsistency",
+      "evidence": "Pisarze: (1) search-hit: review.rs:135-136 i 245-246 `retention_strength = MIN(1.0, retention_strength + 0.02)`, `retrieval_strength = MIN(1.0, ... + 0.05)`, wolane dla kazdego trafienia przez finalize.rs:188-196; (2) review: review.rs:73-75 `new_retrieval_strength = 1.0; new_retention = 0.7*1.0 + min(storage/10,1)*0.3` (czyli >= 0.7 po kazdym review); (3) apply_decay: temporal.rs:207-219 `new_retrieval = retrievability_with_decay(...); new_retention = sleep.calculate_retention(storage, new_retrieval)` -> UPDATE. Konsumenci: retrieval.rs:79 filtr `r.node.retention_strength < config.min_retention` i scoring.rs:147-155 progi 0.7/0.3/0.1 -> Active/Dormant/Silent/Unavailable.",
+      "impact": "(a) Ta sama baza daje rozny zestaw wynikow zaleznnie od tego, czy po ostatnim wyszukiwaniu przeszedl apply_decay (co 6h wg AGENTS.md) - wartosc fluktuuje miedzy ~1.0 (po search-hitach) a wartoscia z krzywej FSRS; (b) po ~50 trafieniach retention nasyca sie na 1.0 i taka pamiec nigdy nie spadnie do Dormant/Silent (mnoznik 0.7/0.3), wiec progi stanu przestaja cokolwiek znaczyc dla gorących wpisow; (c) min_retention > 0 dziala inaczej dla pamieci dotknietych i nie dotknietych od ostatniej konsolidacji.",
+      "proposal": "Wprowadz jednego pisarza: wyliczaj retention przy odczycie (np. `Storage::effective_retention(node, now, w20)` uzywajace fsrs::retrievability_with_decay + SleepConsolidation::calculate_retention) i usun zapisy z review.rs:135-136/245-246 oraz podwojny zapis w temporal.rs:218; albo oznacz search-hit jako aktualizacje tylko `last_accessed`/`times_retrieved`, a retention zostaw wylacznie apply_decay. Zaktualizuj wtedy retrieval.rs:79 i scoring.rs:147-155, by czytaly jedna, zdefiniowana wartosc.",
+      "effort": "M",
+      "skill_basis": "brak wprost (single-writer / idempotentnosc stanu); data-structures.md (Hash Map - jedna reprezentacja klucza zamiast kilku zrodel prawdy)"
+    },
+    {
+      "title": "Offsety bajtowe z obnizonego tekstu trafiaja do oryginalu w detektorze negacji (NegEx)",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "negation.rs:85 `let lowered = text.to_lowercase();`, tokenizacja po `lowered` (negation.rs:92, 284-301), a nastepnie `text.get(scope_start..scope_end)` (negation.rs:143-147) i zwrot `trigger_start/scope_end` jako offsets do oryginalu. Dowod wykonawczy (rustc 1.91.0, /tmp/vprobe/probe.rs): dla \"\\u{0130} do not deploy on Friday.\" orig_len=27, lower_len=28, pozycja 'not' w lowered=7 vs w oryginale=6 (przesuniecie +1). Konsument: contradiction.rs:171-188 uzywa `scope.trigger_start`/`scope.scope_end` jako `Evidence.span_*`, a kontrakt w contradiction.rs:92 mowi, ze offsety sa 'into new'.",
+      "impact": "Dla tekstu z znakiem rozszerzajacym sie przy lowercasingu (İ U+0130) `scope_text` jest obciete o bajt (lub puste, gdy `get` trafia w granice znaku), a `Evidence.span_*` wskazuje na zly fragment - detektor sprzecznosci gubi sygnal NEGATION_SCOPE (0.85) albo raportuje dowod wskazujacy na inne slowa, co psuje audytowalnosc bramki.",
+      "proposal": "W find_negation_scopes buduj mape offsetow: iteruj `text.char_indices()`, skladaj `lowered` z `c.to_lowercase()` i zapisuj `Vec<(usize /*orig*/, usize /*lowered*/)>`, a offsety wynikowe przeliczaj przez te mape (albo po prostu obnizaj tylko ASCII: `c.to_ascii_lowercase()`, co zachowuje dlugosc bajtowa i wystarcza dla leksykonow EN/PL). Dodaj test z \"\\u{0130}\" i \"\\u{212A}\" sprawdzajacy, ze `&text[s.scope_start..s.scope_end]` daje ten sam fragment co dla wersji bez tych znakow.",
+      "effort": "M",
+      "skill_basis": "brak wprost (UTF-8/byte-vs-char boundary)"
+    },
+    {
+      "title": "Kolejnosc wynikow w odpowiedzi nie jest monotoniczna wzgledem raportowanego combinedScore (etap 6 po ostatnim sortowaniu)",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "scoring.rs:50-55 wykonuje jedyny re-sort po boostach; finalize.rs:166-170 zwieksza `combined_score` dla `scoring.results.iter_mut().skip(1)` (do +20%), a `grep -n sort crates/vestige-mcp/src/tools/search_unified/pipeline/finalize.rs` nie zwraca nic - po boostach nie ma ponownego sortowania. Format odpowiedzi emituje te ocene: format.rs:13 (brief) i format.rs:48 (summary/full) `\"combinedScore\": r.combined_score`. W testach (search_unified/tests.rs) sa tylko asercje `assert!(first[\"combinedScore\"].is_number())` (linie 278, 403), brak sprawdzenia monotonicznosci.",
+      "impact": "Klient (agent, dashboard, deep_reference) dostaje tablice, w ktorej results[0] moze miec nizszy combinedScore niz results[1]; kazdy konsument sortujacy po ocenie albo prezentujacy 'top score' dostanie inny ranking niz kolejnosc tablicy, a progi typu 'wez wyniki z combinedScore > X' staja sie niespojne z kolejnoscia.",
+      "proposal": "Po apply_spreading_activation w finalize.rs:37 (przed formatowaniem) wykonaj stabilne `scoring.results.sort_by(|a,b| b.combined_score.partial_cmp(&a.combined_score).unwrap_or(Ordering::Equal))`, albo trzymaj boost aktywacyjny w osobnym polu (np. `activationScore`) i nie mieszaj go z emitowanym combinedScore. Dodaj test w search_unified/tests.rs: `windows(2).all(|w| w[0][\"combinedScore\"] >= w[1][\"combinedScore\"])`.",
+      "effort": "S",
+      "skill_basis": "sorting-searching.md (Sorting Decision Tree - kolejnosc wyjscia musi wynikac z klucza, ktory jest raportowany; stabilnosc sortowania jako tie-breaker)"
+    },
+    {
+      "title": "Niedeterminizm rankingu: cale etapy scoringu sa pomijane przy kontencji locka (try_lock)",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "scoring.rs:77-80 (temporal), 139-142 (state accessibility), 258-261 (retrieval competition), 307-310 (emotional) oraz finalize.rs:125-128, 135-141, 218-221, 314-317 - kazde `let Ok(cog) = cognitive.try_lock() else { record_miss(...); return; }`. Funkcje sa wolane z `async fn run` (scoring.rs:31-48, finalize.rs:29-39), ktore i tak `await`-uja (spawn_blocking), ale same etapy nie moga `.await`, wiec lock jest tylko probowany.",
+      "impact": "Identyczne zapytanie na identycznej bazie zwraca rozny ranking w zaleznosci od tego, czy rownolegle dziala dream/consolidate/session_context: raz stosuje sie boost temporalny/stanu/emocjonalny/kompetycje, raz nie. To lamie determinizm deklarowany w komentarzach etapow i uniemożliwia reprodukcje A/B (dzisiejszy harness sam zreszta notuje, ze 'vestige is not bit-reproducible').",
+      "proposal": "Pozyskaj lock raz na poczatku `scoring::run` przez `let mut cog = cognitive.lock().await;` i przekaz `&mut CognitiveEngine` (lub guard) do apply_temporal_boost/apply_state_accessibility/apply_emotional_boost/apply_retrieval_competition; SQL do embeddings juz jest wynoszony poza lock (scoring.rs:240-251), wiec zwiekszenie zakresu locka nie obejmie IO. Jesli blokada ma byc miekka, to przy niepowodzeniu zwroc blad zamiast po cichu zmieniac ranking.",
+      "effort": "M",
+      "skill_basis": "brak wprost (determinizm); data-structures.md (LRU/Hash Map - spojnosc stanu przy wspoldzielonym dostepie)"
+    },
+    {
+      "title": "Personalizowany w20 jest fitowany na blednych parach (stala stability per node, elapsed od created_at, rating zawsze 'Good')",
+      "severity": "medium",
+      "category": "science",
+      "evidence": "consolidation.rs:628 dla kazdego wpisu z memory_access_log pobiera BIEZACE `stability, difficulty, created_at` node'a (jedna wartosc na wszystkie historyczne zdarzenia), consolidation.rs:650 `let elapsed = (ts - created).num_seconds()/86400.0` (czas od utworzenia, nie od poprzedniego review), consolidation.rs:644-648 mapuje `\"search_hit\" => 3` i `_ => 3`, wiec praktycznie wszystkie zdarzenia to rating 3; wynik `optimizer.optimize_decay()` (668) jest zapisywany i stosowany przy starcie przez apply_personalized_weights (fsrs_personalization.rs:94-104, wolane z init.rs:197 i consolidation.rs:691).",
+      "impact": "Funkcja straty FSRSOptimizer::calculate_loss (optimizer.rs:88-108) jest liczona na parach (stala S, zawyzony t), wiec zoptymalizowany w20 odzwierciedla glownie rozklad wieku wpisow, nie tempo zapominania; zapisany w20_personalized przesuwa nastepnie cala krzywa R oraz wartosci retention_strength w apply_decay - czyli blednie skalibrowany decay propaguje sie do rankingu i do interwalow powtorek.",
+      "proposal": "Zapisz w memory_access_log (lub korzystaj z historii review) pare (stability_przed_zdarzeniem, elapsed_od_poprzedniego_zdarzenia, rating) w momencie zdarzenia i podawaj ja do ReviewLog; w optimize_w20_if_ready usun zapytanie o biezace stability (consolidation.rs:626-637) i policz elapsed jako roznice kolejnych timestampow per node. Rozważ tez log-loss zamiast RMSE (optimizer.rs:107), zgodnie z referencja FSRS.",
+      "effort": "M",
+      "skill_basis": "brak wprost (metodologia optymalizacji); techniques-patterns.md (binary search on answer - poprawne dane wejsciowe funkcji celu)"
+    },
+    {
+      "title": "MMR: reordering jest kasowany re-sortem, wiec zapowiedziana poprawka (przed obcieciem) sama nie wystarczy",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "Dzisiejszy commit 811f40c i benchmarks/memconflict/RESULTS.md dokumentuja, ze MMR nie zmienia zbioru (keep = scored.len(), retrieval.rs:189-195, po truncate do limit w 121-130). Uzupelnienie: nawet kolejnosc jest kasowana, bo scoring.rs:51-55 sortuje po `combined_score`, ktorego mmr_select nie modyfikuje (mmr.rs:71-80 zwraca te same wartosci w innej kolejnosci), a format odpowiedzi dziedziczy te kolejnosc.",
+      "impact": "Zapowiedziany w RESULTS.md krok 'MMR-select K from top-N before truncation' nadal nie da mierzalnego efektu na ranking: wybrany podzbior zostanie ponownie posortowany po combined_score, wiec zroznicowanie MMR zniknie przed formatowaniem; A/B mierzony harnessem (ktory ocenia zbior) nadal nie odrozni MMR od baseline.",
+      "proposal": "Przenies etap MMR przed truncate i przypisz wynik MMR do sortowanego klucza (np. ustaw `combined_score` proporcjonalnie do MMR-score albo dodaj `mmr_rank` i zrob finalny sort po (mmr_selected, combined_score)) w scoring.rs:51, a nie tylko permutuj wektor w retrieval.rs:180-196; nastepnie powtorz A/B.",
+      "effort": "M",
+      "skill_basis": "techniques-patterns.md (Greedy - kolejnosc wyboru musi byc utrzymana do konca; ekspansja/obciecie przed greedy selection)"
+    },
+    {
+      "title": "Spreading activation: duplikaty w associations i boost liczony z najnizszej (nie najwyzszej) aktywacji",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "spreading_activation.rs:333-361: dla kazdej krawedzi `results.push(ActivatedMemory{...})` bez deduplikacji po `memory_id` (guard `visited` chroni tylko przetwarzanie kolejki, nie push), wiec zbiezne krawedzie daja wiele wpisow dla tej samej pamieci; wyniki sa sortowane malejaco (368-372). finalize.rs:142-145 buduje `HashMap<&str, f64>` przez `collect()`, gdzie przy duplikacie wygrywa OSTATNI wpis, czyli najmniejsza aktywacja; finalize.rs:172-182 bierze `activated.iter().take(3)` bez dedup, wiec `associations` moze zawierac ten sam memoryId dwa razy.",
+      "impact": "Agent dostaje zduplikowane wpisy w bloku associations (marnuje budzet tokenow i sugeruje dwa niezalezne skojarzenia), a boost wyniku dla sasiada z wieloma krawedziami jest systematycznie zanizony - czyli silentnie inny niz opisany w komentarzu finalize.rs:147-165 mechanizm 'strong, fresh edges get a bump'.",
+      "proposal": "W ActivationNetwork::activate agreguj po target_id (np. `HashMap<String, ActivatedMemory>` z `max` po activation i min po distance, plus suma sciezek), a w finalize.rs:142-145 uzyj `fold` z `f64::max` zamiast `collect()`; dodatkowo dedup listy associations po memory_id przed `take(activation_take)`.",
+      "effort": "S",
+      "skill_basis": "data-structures.md (Hash Map - agregacja po kluczu, max/reduce zamiast 'last write wins')"
+    },
+    {
+      "title": "compress_content gubi krotkie segmenty - wersje, sciezki i fragmenty kodu znikaja z czytanej pamieci",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "helpers.rs:57-66: `content.split(['.', '\\n'])` + `.filter(|s| s.len() > 5)` usuwa wszystkie segmenty <=5 znakow, po czym finalize.rs:278-286 podmienia `result[\"content\"]` na wynik kompresji (ratio = budget/total_size). To dotyczy kazdego wyniku, gdy ustawiono token_budget (session_context domyslnie 2000).",
+      "impact": "Segmenty takie jak 'v3.4.0' (po splicie: [\"v3\",\"4\",\"0\"] - wszystkie <=5 znakow), sufiksy sciezek ('rs', 'toml'), numery linii i krotkie linie kodu sa bezpowrotnie usuwane z tresci zwracanej agentowi; wynik nadal wyglada jak zwykly tekst z markerem '[N of M segments]', wiec model nie wie, ktore konkrety zostaly wyrzucone, a pelny tekst nie jest podany w zadnym polu odpowiedzi.",
+      "proposal": "Nie tnij po znaku '.': uzyj podzialu na granice zdan z zachowaniem separatora (np. split_inclusive(['.', '\\n']) i rekonstrukcja oryginalnych separatorow) oraz usun prog `len() > 5` na rzecz wazenia dlugoscia; dodatkowo dla wynikow, ktore zostaly skompresowane, dopisz id do listy `expandable`/oznacz pole `contentCompressed: true`, aby konsument wiedzial, ze ma pobrac pelna tresc przez memory(action='get').",
+      "effort": "S",
+      "skill_basis": "brak wprost (lossy compression w read path)"
+    },
+    {
+      "title": "Etap 5F robi N+1 zapytan SQL i O(n^2) porownan na kazdym wyszukiwaniu",
+      "severity": "low",
+      "category": "performance",
+      "evidence": "scoring.rs:368-410: `ids_for_task.into_iter().map(|id| storage_pi.get_connections_for_memory(&id))` to jedno zapytanie na kazdy wynik (brak batcha), a w podwojnej petli `result_ids.contains(other)` (liniowy skan) oraz dwa `filtered_results.iter().find(...)` dla kazdej pary sprzecznosci; etap nie ma zadnego guardu na `retrieval_mode`, wiec dziala takze w trybie precise (w przeciwienstwie do competition, scoring.rs:234).",
+      "impact": "Dla limit=100 to 100 zapytan SQL + do ~10^4 porownan String na kazde zapytanie, na sciezce odczytu, ktora ma byc sub-50ms; w trybie precise (reklamowanym jako 'fast, token-efficient') wykonywana jest ta sama praca mimo braku potrzeby.",
+      "proposal": "Zbuduj raz `HashMap<&str, DateTime<Utc>>` i `HashSet<&str>` z `filtered_results` (zamiast `contains`/`find`), pobierz polaczenia jednym zapytaniem z `WHERE source_id IN (...)` (lub dodaj `Storage::get_connections_bulk`), i pomin etap gdy `config.retrieval_mode == \"precise\"`.",
+      "effort": "S",
+      "skill_basis": "data-structures.md (Hash Map - O(1) lookup zamiast liniowego skanu; unikanie N+1)"
+    },
+    {
+      "title": "Dedup 2B i MMR przebudowuja HashSety dla kazdej pary - O(n^2) alokacji w hot path",
+      "severity": "low",
+      "category": "performance",
+      "evidence": "retrieval.rs:140-158 (dedup) i 180-196 (MMR) wolaja `content_overlap`, ktore za kazdym wywolaniem buduje DWA nowe `HashSet<&str>` z pelnej tresci (helpers.rs:125-143). Przy limit=100 dedup to 4950 par -> ~9900 zbiorow; mmr_select (mmr.rs:65-77) wola te sama domkniecie O(n^2 * |S|) razy, czyli rzedu 10^5-10^6 budow zbiorow na jedno zapytanie z VESTIGE_MMR=on.",
+      "impact": "Skok opoznienia i alokacji przy limit=100 oraz przy wlaczonym MMR; dodatkowo `content_overlap` odrzuca slowa <=2 znakow (helpers.rs:129,134), wiec podobienstwo ignoruje terminy typu AI/DB/PL - to samo uposledzenie trafia do progu dedup 0.85 i do MMR.",
+      "proposal": "Policz raz `Vec<HashSet<&str>>` (lub mape slowo->bit) przed petlami i przekaz domkniecie operujace na indeksach do mmr_select/dedup; rozwaz tez odrzucanie kandydatow po taniej metryce (dlugosc/tagi) przed pelnym Jaccardem.",
+      "effort": "S",
+      "skill_basis": "data-structures.md (Hash Map/Set - prekomputacja zbioru raz, zamiast przebudowy per para)"
+    },
+    {
+      "title": "Podzapytania dekompozycji sa wykonywane sekwencyjnie",
+      "severity": "low",
+      "category": "performance",
+      "evidence": "retrieval.rs:248-264: `for sub_query in &decomposition.sub_queries { let sub_results = tokio::task::spawn_blocking(move || storage_clone.hybrid_search(...)).await?; all_results.push(sub_results); }` - kazde podzapytanie jest await-owane po kolei, mimo ze `Storage::hybrid_search` bierze `&self` i korzysta z wlasnych lockow per-call, a kazde podzapytanie overfetchuje `overfetch_limit` (= limit*3).",
+      "impact": "Opóznienie rosnie liniowo z liczba czesci zapytania: dla zapytania z 4 czesci (np. session_context z listy tematow) wykonujemy 4 pelne wyszukiwania hybrydowe + 4x embedding query zamiast jednego zrownoleglonego cyklu, co przy krotkim budzecie czasowym MCP jest odczuwalne i niepotrzebne.",
+      "proposal": "Zbierz handle z `spawn_blocking` w wektor i uzyj `futures::future::join_all` (albo `tokio::task::JoinSet`), a nastepnie scal wyniki istniejacym `vestige_core::search::decompose::merge_results` (ktory ma juz implementacje i testy, ale w pipeline jest zduplikowany inline w retrieval.rs:266-287).",
+      "effort": "S",
+      "skill_basis": "brak wprost (rownoleglosc I/O-bound)"
+    },
+    {
+      "title": "Bramka kalibracji NLP jest praktycznie pusta (MAX_ECE = 0.35 na 64 przykladach)",
+      "severity": "low",
+      "category": "test-gap",
+      "evidence": "crates/vestige-core/tests/nlp_baseline.rs:71 `const MAX_ECE: f32 = 0.35;` (asercja w 132-143), a dataset sprzecznosci ma 64 przyklady (nlp/eval/data/contradiction.rs:1-3: '64 examples: 32 positive, 32 negative'). Detektor emituje tylko kilka dyskretnych poziomow pewnosci (contradiction.rs:72 CORRECTION_PHRASE_CONFIDENCE=0.6, 78 NEGATION_SCOPE_CONFIDENCE=0.85, 84 ASYMMETRIC_NEGATION_CONFIDENCE=0.45 + fuzje), wiec ECE liczone w 10 koszykach (metrics.rs:167-180) opiera sie na ~4 unikalnych wartosciach confidence.",
+      "impact": "Deklaracja z nlp/mod.rs:17-21 ('Measurability ... calibration (Expected Calibration Error) ... No detector upgrade ships without an eval delta') nie jest realnie egzekwowana: detektor moze byc overconfident o 30 p.p. i nadal przejsc CI, a przy 64 przykladach pojedynczy blad zmienia ECE o ~1.5 p.p. - bramka nie chroni przed regresja kalibracji w bramce sprzecznosci (ktora decyduje o supersesji pamieci).",
+      "proposal": "Obniz MAX_ECE do <=0.15 po rozszerzeniu datasetu (docelowo >=200 par, po >=50 na podzbior jezykowy), dodaj asercje per-sygnal (np. przypadki z EvidenceKind::NegationScope musza miec accuracy >= 0.80, co uzasadnia NEGATION_SCOPE_CONFIDENCE=0.85) oraz test na rozdzielczosc confidence (liczba unikalnych wartosci > 5), aby ECE nie bylo liczone na 4 punktach.",
+      "effort": "M",
+      "skill_basis": "brak wprost (walidacja metryki/eval gate)"
+    }
+  ]
+}

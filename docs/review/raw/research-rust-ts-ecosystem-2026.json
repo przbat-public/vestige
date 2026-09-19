@@ -1,0 +1,203 @@
+{
+  "id": "rust-ts-ecosystem-2026",
+  "topic": "Ekosystem Rust i TypeScript 2026: aktualizacje i narzedzia",
+  "summary": "Stan na 2026-09-19: najwazniejszym ustaleniem jest aktywna podatnosc High w SQLite FTS5 (CVE-2026-11822 / CVE-2026-11824, naprawiona w SQLite 3.53.2) - projekt buduje bundled SQLite 3.51.3 przez libsqlite3-sys 0.37.0, a Vestige uzywa FTS5 jako kanalu keyword (BM25) w kazdym wyszukiwaniu, wiec wystarczy podniesc rusqlite do 0.40.1+, gdzie bundled SQLite to 3.53.2. Drugie ustalenie to React Router: zablokowane 7.14.0 jest podatne na GHSA-2j2x-hqr9-3h42 (open redirect, fix 7.14.1), a cala linia 7.x zebrala w 2026 kilka advisory HIGH - bezpiecznym celem jest 7.18.4 lub 8.4.0. Frontend dryfowal o kilka majorow (Vite 6.4.1 vs 8.3.0 z Rolldown/Oxc, TypeScript 5.9.3 vs 7.0.2 native Go, Vitest 4.0.18 vs 5.0.1, Biome 2.4.10 vs 2.5.14, Playwright 1.59.1 vs 1.63.0, jsdom 29 vs 30), a React Router 8 wymaga Node 22.22+, React 19.2.7+ i Vite 7+ - projekt spelnia te warunki po podniesieniu wersji, a importy juz uzywaja 'react-router' (bez react-router-dom), co czyni migracje tania. Po stronie Rust poza SQLite: fastembed 7.0.1 wymusza jednoczesne przejscie na ort 2.0.0-rc.13 i tokenizers 0.23.2, Rust 1.98.1 naprawia miscompilation vtable z 1.98.0 (projekt pinuje 1.91.0), a git2 0.20, criterion 0.5 i lru 0.16 sa po kilka majorow za najnowszymi. Narzedziowo projekt nie ma dzis cargo-nextest, cargo-mutants, miri ani sccache - mimo ze E2E uruchamia testy z --test-threads=1 (naturalny zysk z nextest) i nie ma zadnego cache kompilacji poza Swatinem/rust-cache. Nie znaleziono zadnych advisory dla usearch, fastembed, ort, axum, clap ani ts-rs; ignorowany RUSTSEC-2024-0436 (paste) jest nadal aktualny, bo tokenizers 0.23.2 wciaz ciagnie paste 1.0.14.",
+  "sources": [
+    "https://crates.io/api/v1/crates/rusqlite",
+    "https://github.com/rusqlite/rusqlite/releases/tag/v0.40.1",
+    "https://docs.rs/crate/libsqlite3-sys/0.38.2",
+    "https://www.sqlite.org/cves.html",
+    "https://www.sqlite.org/changes.html",
+    "https://www.sqlite.org/releaselog/3_53_2.html",
+    "https://nvd.nist.gov/vuln/detail/CVE-2026-11824",
+    "https://sqlite.org/src/info/061febcf41ca",
+    "https://api.osv.dev/v1/query",
+    "https://github.com/advisories/GHSA-2j2x-hqr9-3h42",
+    "https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+    "https://github.com/advisories/GHSA-84g9-w2xq-vcv6",
+    "https://github.com/advisories/GHSA-2w69-qvjg-hvjx",
+    "https://raw.githubusercontent.com/remix-run/react-router/main/CHANGELOG.md",
+    "https://reactrouter.com/changelog",
+    "https://reactrouter.com/upgrading/v7",
+    "https://registry.npmjs.org/react-router",
+    "https://registry.npmjs.org/vite",
+    "https://registry.npmjs.org/vitest",
+    "https://registry.npmjs.org/typescript",
+    "https://registry.npmjs.org/@biomejs/biome",
+    "https://registry.npmjs.org/@playwright/test",
+    "https://registry.npmjs.org/jsdom",
+    "https://registry.npmjs.org/react",
+    "https://vite.dev/guide/migration",
+    "https://docs.rs/crate/fastembed/7.0.1/source/Cargo.toml.orig",
+    "https://docs.rs/crate/fastembed/5.13.4/source/Cargo.toml.orig",
+    "https://crates.io/api/v1/crates/fastembed",
+    "https://github.com/pykeio/ort/releases/tag/v2.0.0-rc.13",
+    "https://docs.rs/fastembed/7.0.1/fastembed/enum.EmbeddingModel.html",
+    "https://raw.githubusercontent.com/nodejs/Release/main/schedule.json",
+    "https://blog.rust-lang.org/releases/",
+    "https://blog.rust-lang.org/2026/09/03/Rust-1.98.1/",
+    "https://github.com/nextest-rs/nextest/releases",
+    "https://nexte.st/docs/features/record-replay-rerun/",
+    "https://github.com/sourcefrog/cargo-mutants/releases/tag/v27.1.0",
+    "https://github.com/mozilla/sccache/releases/tag/v0.18.0",
+    "https://github.com/EmbarkStudios/cargo-deny/releases/tag/0.20.2",
+    "https://rustsec.org/advisories/RUSTSEC-2024-0436.html",
+    "https://crates.io/api/v1/crates/git2",
+    "https://crates.io/api/v1/crates/criterion",
+    "https://crates.io/api/v1/crates/lru",
+    "https://crates.io/api/v1/crates/tokenizers"
+  ],
+  "items": [
+    {
+      "title": "SQLite FTS5 heap buffer overflow (CVE-2026-11822 / CVE-2026-11824) - bundled SQLite 3.51.3 wymaga podniesienia do 3.53.2+",
+      "what_it_is": "CVE-2026-11824 (opublikowana 2026-06-09, CVSS v3.1 7.8 / CVSS v4.0 8.5 High, CWE-122) to heap-based buffer overflow w rozszerzeniu FTS5 SQLite. Zlosliwa baza z metadanymi continuation page (szLeaf < 4) wywoluje integer underflow w fts5ChunkIterate() i przeplenienie bufora podczas zapytania FTS5 MATCH - skutek: crash lub arbitrary code execution w aplikacjach kompilowanych z SQLITE_ENABLE_FTS5. Dotyczy SQLite < 3.53.2; naprawione w 3.53.2 z 2026-06-03. CVE-2026-11822 to ta sama usterka, raportowana osobnym CVE.",
+      "why_for_vestige": "To nie jest teoretyczne ryzyko dla tego repo. Cargo.toml:34 deklaruje rusqlite = \"0.39\", Cargo.lock pinuje rusqlite 0.39.0 + libsqlite3-sys 0.37.0, a jego bundled amalgamation to SQLite 3.51.3 (zweryfikowane lokalnie w ~/.cargo/registry/src/.../libsqlite3-sys-0.37.0/sqlite3/sqlite3.h: SQLITE_VERSION \"3.51.3\") - czyli wersja ponizej 3.53.2, wiec podatna. FTS5 nie jest opcjonalnym dodatkiem: crates/vestige-core/src/storage/sqlite/search.rs:5 dokumentuje 'Keyword - FTS5 BM25 over knowledge_fts', nodes.rs:339 i search.rs:120/365 wolaja sanitize_fts5_query, a consolidation.rs:264 robi FTS5 index optimize. Poniewaz pamiec Vestige jest lokalna i dlugotrwala, a tresci pochodza z niezaufanych zrodel (ingest z rozmow, dokumentow, kodu), wektor 'crafted database' jest realny. Ciezar naprawy jest niski: nie trzeba zmieniac kodu, wystarczy podniesienie wersji, bo bundled SQLite wedruje razem z libsqlite3-sys.",
+      "adoption": "Podniesc w Cargo.toml (workspace.dependencies, linia 34) rusqlite z \"0.39\" na \"0.40\" i odswiezyc lock (cargo update -p rusqlite). Cel: rusqlite 0.40.2 (2026-08-08) + libsqlite3-sys 0.38.2, ktory bundluje SQLite 3.53.2 - wersja z poprawka obu CVE. Release 0.40.1 (2026-06-06) explicite zawiera 'Bump bundled SQLite version to 3.53.2'. Sprawdzic, czy projekt dotyka VTab API: 0.40.0 (2026-05-26) ma breaking changes 'Replace VTab macros by constructors' i 'Fix VTab::best_index' - Vestige nie definiuje wlasnych virtual tables (brak create_module/VTab w crates/), wiec te zmiany powinny byc nieaktywne. Uwaga na feature 'encryption' (vestige-core/Cargo.toml:26 -> rusqlite/bundled-sqlcipher) - trzeba zweryfikowac, ze bundled-sqlcipher w 0.40.x tez niesie SQLite >= 3.53.2; dla sciezki SQLCipher libsqlite3-sys 0.37.0 mial SQLite 3.50.4, wiec ta sciezka jest podatna tym bardziej. Po podniesieniu uruchomic cargo test --workspace oraz test odtworzenia istniejacej bazy (migracje v1-v15) i przeliczenie indeksu FTS5. Dodatkowo warto podniesc prog w deny.toml/CI nie zmieniajac samej konfiguracji. Weryfikacja: cargo tree -p libsqlite3-sys oraz test, ktory loguje SELECT sqlite_version().",
+      "effort": "S",
+      "sources": [
+        "https://nvd.nist.gov/vuln/detail/CVE-2026-11824",
+        "https://www.sqlite.org/cves.html",
+        "https://www.sqlite.org/releaselog/3_53_2.html",
+        "https://github.com/rusqlite/rusqlite/releases/tag/v0.40.1",
+        "https://crates.io/api/v1/crates/rusqlite",
+        "https://docs.rs/crate/libsqlite3-sys/0.38.2"
+      ]
+    },
+    {
+      "title": "React Router 7.14.0 - podatne na GHSA-2j2x-hqr9-3h42; docelowo 7.18.4 lub 8.4.0",
+      "what_it_is": "Zablokowana w pnpm-lock.yaml wersja react-router 7.14.0 (mimo deklaracji ^7.5.0 w apps/dashboard/package.json:32) jest podatna na GHSA-2j2x-hqr9-3h42 (opublikowana 2026-06-03, MODERATE): same-origin redirect ze sciezka zaczynajaca sie od '//' powoduje open redirect; naprawione w 7.14.1. Rownolegle, w samym 2026 roku linia 7.x zebrala kilka advisory HIGH: GHSA-3cgp-3xvw-98x8 (XSS, fix 7.9.0), GHSA-2w69-qvjg-hvjx i GHSA-8v8x-cx79-35w7 (XSS / SSR XSS w ScrollRestoration, fix 7.12.0), GHSA-8646-j5j9-6r62 (XSS w RSC redirect, fix 7.13.2), GHSA-49rj-9fvp-4h2h (vendored turbo-stream v2, arbitrary constructor invocation, fix 7.14.2), GHSA-84g9-w2xq-vcv6 (CSRF przez PUT/PATCH/DELETE, fix 7.15.1) oraz GHSA-337j-9hxr-rhxg (arbitrary constructor injection w deserializeErrors(), fix 7.18.0).",
+      "why_for_vestige": "Dashboard to nie statyczna strona - to SPA serwowany z tego samego procesu co MCP server (axum, crates/vestige-mcp/src/dashboard/mod.rs) pod /dashboard, wiec open redirect i XSS maja kontekst lokalnego serwera z dostepem do 40 tras REST (m.in. /api/reflect, /api/temporal, /api/decisions). Projekt uzywa trybu deklaratywnego (BrowserRouter, Routes, Route, NavLink, Outlet, useNavigate, useLocation, MemoryRouter, Link, Navigate) w 244 plikach .ts/.tsx - to zestaw dotkniety advisory od redirectow i CSRF. Kluczowe dla kosztu: grep po apps/dashboard/src pokazuje, ze wszystkie importy to 'react-router', zero wystapien 'react-router-dom' i zero 'react-router/dom' - a usuniecie react-router-dom jest jedna z glownych breaking changes v8, wiec ta czesc migracji jest juz zrobiona.",
+      "adoption": "Krok minimalny (S): podniesc react-router do 7.18.4 (opublikowany 2026-09-15, ostatni 7.x) - zamyka wszystkie wymienione 7.x advisory lacznie z GHSA-337j-9hxr-rhxg (fix 7.18.0), minimalna zmiana ryzyka. Krok docelowy: 8.4.0 (2026-09-15). React Router 8.0.0 (2026-06-17) podnosi minima do Node 22.22.0+, React 19.2.7+ i Vite 7+, jest ESM-only i usuwa react-router-dom oraz deprecated pola 'data' w meta (zamiast tego loaderData). Warunki dla tego repo: Node w CI to 22 (trzeba podniesc do >= 22.22), React jest zablokowany na 19.2.5 - ponizej wymaganego 19.2.7, wiec React musi isc razem (najlepiej od razu 19.3.0), a Vite 6.4.1 nie spelna 'Vite 7+' - czyli RR8 jest sprzezone z migracja Vite. Rekomendacja: najpierw 7.18.4 jako natychmiastowy fix bezpieczenstwa, potem 8.4.0 w jednym PR z React 19.3 i Vite 8. Weryfikacja: pnpm --filter vestige-dashboard test (MemoryRouter w testach), tsc --noEmit, playwright test.",
+      "effort": "S",
+      "sources": [
+        "https://github.com/advisories/GHSA-2j2x-hqr9-3h42",
+        "https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+        "https://github.com/advisories/GHSA-49rj-9fvp-4h2h",
+        "https://github.com/advisories/GHSA-84g9-w2xq-vcv6",
+        "https://raw.githubusercontent.com/remix-run/react-router/main/CHANGELOG.md",
+        "https://reactrouter.com/changelog",
+        "https://reactrouter.com/upgrading/v7",
+        "https://registry.npmjs.org/react-router"
+      ]
+    },
+    {
+      "title": "Dryf frontendu o kilka majorow: Vite 6.4.1 -> 8.3.0 (Rolldown/Oxc), TypeScript 5.9.3 -> 7.0.2, Vitest 4.0.18 -> 5.0.1, Biome 2.4.10 -> 2.5.14, Playwright 1.59.1 -> 1.63.0, jsdom 29 -> 30",
+      "what_it_is": "Lockfile pokazuje realne wersje: vite 6.4.1, typescript 5.9.3, vitest 4.0.18, @biomejs/biome 2.4.10, @playwright/test 1.59.1, jsdom 29.0.2, react 19.2.5, tailwindcss 4.2.0, zod 4.3.6, three 0.172.0, @vitejs/plugin-react 4.7.0. Najnowsze stabilne na 2026-09-19: Vite 8.3.0 (2026-09-10), TypeScript 7.0.2 (2026-07-08), Vitest 5.0.1 (2026-09-15), Biome 2.5.14 (2026-09-16), Playwright 1.63.0 (2026-09-04), jsdom 30.1.0 (2026-09-17), React 19.3.0 (2026-09-09), Tailwind 4.3.3 (2026-07-16), zod 4.6.5, three 0.186.0. Vite 8 to zmiana fundamentu: Rolldown i Oxc zamiast Rollup i esbuild, przy czym obiektowa forma build.rollupOptions.output.manualChunks zostala usunieta, a forma funkcyjna jest deprecated na rzecz build.rolldownOptions.output.codeSplitting; minifikacja JS idzie przez Oxc, CSS przez Lightning CSS, a esbuild staje sie zaleznoscia opcjonalna.",
+      "why_for_vestige": "Plik apps/dashboard/vite.config.ts uzywa dokladnie tego, co Vite 8 zmienia najbardziej: manualChunks jest funkcja (z rozbudowanym komentarzem o krytycznym grupowaniu react/react-dom/scheduler/use-sync-external-store w jednym chunku, bo inaczej pojawia sie runtime crash 'Cannot set properties of undefined (setting Activity)'). To wlasnie ten mechanizm zmienia sie na codeSplitting, wiec migracja Vite 8 wymaga swiadomego przepisania podzialu chunka i ponownej weryfikacji, ze regresja nie wrocila. Dodatkowo chunkSizeWarningLimit: 1024 i @vitejs/plugin-react 4.7.0 (dla Vite 8 potrzebny plugin-react 6.x, ktory wymaga Node ^20.19 || >=22.12). tsconfig/dashboard korzysta z tsc -b (build mode z project references) - przy TypeScript 7 (natywny port Go) trzeba potwierdzic wsparcie trybu build. jsdom 30 wymaga Node ^22.22.2 || ^24.15.0 || >=26.0.0, wiec jest sprzezony z podniesieniem Node. Vitest 5 jest sprzezony z wersja Vite. Biome ma dodatkowo wersjonowany $schema (biome.json wskazuje schemas/2.4.10/schema.json), ktory trzeba podniesc razem z pakietem.",
+      "adoption": "Nie robic tego jednym krokiem. Kolejnosc o najnizszym ryzyku: (1) Biome 2.5.14 + schema URL (S, tylko lint, biome check .), (2) Playwright 1.63.0 + jsdom 30 + React 19.3.0 (S), (3) Vitest 5.0.1 razem z Vite 8.3.0 i @vitejs/plugin-react 6.x (M), bo Vitest 5 zalezy od linii Vite, (4) Tailwind 4.3.3 + zod 4.6.5 + three 0.186.0 (S), (5) TypeScript 7.0.2 na koncu (M) - sciezka migracji przez 5.9 -> 6.0 -> 7.0, z przegladem usunietych flag i weryfikacja tsc -b. Przy Vite 8 trzeba przepisac manualChunks na build.rolldownOptions.output.codeSplitting i utrzymac React + react-dom + scheduler + use-sync-external-store w jednym chunku; zaktualizowac tez skrypt scripts/check-generated-types.sh i job 'dashboard' w .github/workflows/test.yml (pnpm install --frozen-lockfile). Weryfikacja po kazdym kroku: pnpm --filter vestige-dashboard run ci (tsc --noEmit && biome check . && vitest run), potem build i playwright test.",
+      "effort": "L",
+      "sources": [
+        "https://vite.dev/guide/migration",
+        "https://registry.npmjs.org/vite",
+        "https://registry.npmjs.org/vitest",
+        "https://registry.npmjs.org/typescript",
+        "https://registry.npmjs.org/@biomejs/biome",
+        "https://registry.npmjs.org/@playwright/test",
+        "https://registry.npmjs.org/jsdom",
+        "https://registry.npmjs.org/react",
+        "https://registry.npmjs.org/@vitejs/plugin-react",
+        "https://playwright.dev/docs/release-notes"
+      ]
+    },
+    {
+      "title": "fastembed 5.13.4 -> 7.0.1 wymusza jednoczesne przejscie na ort 2.0.0-rc.13 i tokenizers 0.23.2",
+      "what_it_is": "fastembed 6.0.0 (2026-08-23) i 7.0.0/7.0.1 (2026-09-16) to dwa kolejne majory ponad uzywane 5.13.x. Z Cargo.toml.orig obu wersji wynika, ze fastembed 5.13.4 pinuje ort = \"=2.0.0-rc.12\", a fastembed 7.0.1 pinuje ort = \"=2.0.0-rc.13\" i podnosi tokenizers z 0.22.2 do 0.23.2 (candle 0.10 -> 0.11). Nazwy feature'ow zostaly stabilne: hf-hub-rustls-tls, ort-download-binaries-rustls-tls, ort-load-dynamic, nomic-v2-moe, qwen3 wystepuja identycznie w 6.0.0, 6.1.0 i 7.0.1, wiec konfiguracja feature'ow w Cargo.toml nie wymaga zmian. Enum EmbeddingModel nadal zawiera NomicEmbedTextV1, NomicEmbedTextV15 i NomicEmbedTextV15Q w 7.0.1.",
+      "why_for_vestige": "crates/vestige-core/Cargo.toml:85-88 uzywa fastembed 5.13 z default-features = false i para feature'ow rustls; w komentarzu (linie 80-84) jest wprost zapisane, ze defaults sa wylaczone, by zamienic native-tls na rustls i wykluczyc crate 'image', bo cargo-deny banuje bare openssl. To znaczy, ze feature names sa czescia kontraktu bezpieczenstwa i dobrze, ze pozostaja stabilne. Dalej: linie 95-102 pokazuja, ze ort jest przypiety do DOKLADNIE \"=2.0.0-rc.12\" wlasnie po to, by cargo zunifikowalo jeden build ONNX Runtime z fastembed; tokenizers jest na 0.22. Podniesienie fastembed bez jednoczesnego podniesienia ort zlamie te unifikacje - pojawia sie dwa buildy ort (podwojony rozmiar binarium i ryzyko konfliktu backendu TLS, dokladnie to, przed czym ostrzega komentarz w liniach 42-44). Feature late-interaction jest tez zrodlem Cargo.lock: tokenizers 0.22.2. Model nomic-embed-text-v1.5 (768D -> 384D Matryoshka) pozostaje dostepny, wiec nie ma migracji embeddingow ani koniecznosci przeliczania wektorow.",
+      "adoption": "Traktowac fastembed + ort + tokenizers jako jedna zmiane w jednym commicie. Podniesc w crates/vestige-core/Cargo.toml: fastembed z \"5.13\" na \"7.0\", ort z \"=2.0.0-rc.12\" na \"=2.0.0-rc.13\" (linia 101), tokenizers z \"0.22\" na \"0.23\" (linia 102). Zachowac bez zmian pary feature'ow hf-hub-rustls-tls i ort-download-binaries-rustls-tls oraz default-features = false. Po zmianie obowiazkowo: cargo tree -i ort (musi byc dokladnie jedna wersja ort w grafie) oraz cargo deny check bans licenses sources, bo ort rc.13 moze ciagnac nowe tranzytywne zaleznosci, a deny.toml ma biala liste licencji. Sprawdzic tez, czy nomic-v2 i qwen3-reranker nadal buduja sie z nowym ort. Test funkcjonalny: cargo test -p vestige-core oraz porownanie embeddingu referencyjnego zdania przed i po (wartosci powinny byc identyczne lub w granicach tolerancji numerycznej), a nastepnie uruchomienie z VESTIGE_TEST_MOCK_EMBEDDINGS=0 na jednej bazie testowej. Jesli ort rc.13 zmieni wyniki numeryczne, trzeba podjac decyzje o regeneracji embeddingow (env regenerate_embeddings).",
+      "effort": "M",
+      "sources": [
+        "https://docs.rs/crate/fastembed/7.0.1/source/Cargo.toml.orig",
+        "https://docs.rs/crate/fastembed/5.13.4/source/Cargo.toml.orig",
+        "https://crates.io/api/v1/crates/fastembed",
+        "https://github.com/pykeio/ort/releases/tag/v2.0.0-rc.13",
+        "https://docs.rs/fastembed/7.0.1/fastembed/enum.EmbeddingModel.html",
+        "https://crates.io/api/v1/crates/tokenizers"
+      ]
+    },
+    {
+      "title": "Rust 1.98.1 naprawia miscompilation vtable z 1.98.0 - projekt pinuje 1.91.0",
+      "what_it_is": "Najnowszy stable to Rust 1.98.1 (2026-09-03), a linia 2026 to 1.93.0 (2026-01-22), 1.94.0 (2026-03-05), 1.95.0 (2026-04-16), 1.96.0 (2026-05-28), 1.97.0 (2026-07-09) i 1.98.0 (2026-08-20). Rust 1.98.1 jest wydaniem poprawkowym do konkretnego bledu: w 1.98.0 rustc w niektorych przypadkach generowal vtable trait object z null pointerem w miejscu function pointera, co jest undefined behavior - w czesci przypadkow segfault, ale mozliwe tez dowolne skutki typowe dla UB. To nie jest zwykly bump; wersja 1.98.0 jest w praktyce wersja do unikniecia.",
+      "why_for_vestige": "rust-toolchain.toml pinuje channel = \"1.91.0\", a Cargo.toml:17 deklaruje rust-version = \"1.91\" (edition 2024). Pin jest celowy ('Pinning here ensures every contributor and CI uses the same compiler'), wiec sam nie powoduje problemu - projekt jest na wersji, ktora tego bledu nie ma. Ryzyko jest w scenariuszu aktualizacji: jesli ktokolwiek podniesie toolchain na 1.98.0 (a to naturalny odruch przy odswiezaniu zaleznosci, bo rusqlite 0.40.2 ma MSRV 1.88, a tokenizers/criterion chca nowszych kompilatorow), trafi na wersje z miscompilation. Jest to istotne wlasnie tutaj, bo architektura MCP opiera sie na trait objectach i dynamic dispatch (McpServer -> Arc<Storage>, tools/* jako trait objects), czyli dokladnie na vtable. Dodatkowo cargo-mutants 27.1.0 wymaga wsparcia TOML 1.1 z Rust 1.94 wzwyz, a wiekszosc nowych crate'ow zaklada MSRV > 1.91 - utrzymywanie 1.91 bedzie wymuszac coraz wiecej wyjatkow.",
+      "adoption": "Podniesc rust-toolchain.toml (channel) oraz Cargo.toml [workspace.package].rust-version razem, w jednym commicie, docelowo na 1.98.1 (nie 1.98.0). Komentarz w rust-toolchain.toml juz wymaga aktualizacji 'in tandem', wiec to jest zgodne z zamyslem repo. Sprawdzic, czy nowsze wydania nie zmieniaja niczego w edition 2024 i czy clippy nie wprowadza nowych lintow (CI ma cargo clippy -- -D warnings, wiec nowe ostrzezenia zatrzymaja build - zaplanowac czas na ich naprawe). Uwaga: workspace.lints.clippy zawiera field_scoped_visibility_modifiers, dbg_macro, todo, unimplemented - przy nowym kompilatorze warto przejrzec, czy nie doszly nowe restriction lints. Kolejnosc: najpierw podniesc rusqlite (item 1), potem toolchain, potem fastembed, zeby odseparowac przyczyny bledow. CI: actions-rust-lang/setup-rust-toolchain@v1 czyta rust-toolchain.toml, wiec wystarczy zmiana w repo; rozwazyc tez dodanie beta/nightly do macierzy jako wczesne ostrzeganie.",
+      "effort": "S",
+      "sources": [
+        "https://blog.rust-lang.org/2026/09/03/Rust-1.98.1/",
+        "https://blog.rust-lang.org/releases/",
+        "https://github.com/rust-lang/rust/issues/161441"
+      ]
+    },
+    {
+      "title": "Brak cargo-nextest, cargo-mutants i miri - najwiekszy nieuzywany lewar w jakosci testow",
+      "what_it_is": "cargo-nextest 0.9.145 (2026-09-16) to runner testow z procesowa izolacja przypadkow, retry, test groups i runnerami per-test; nowsze wydania dodaly run recording oraz record-replay-rerun (katalog stanu, ktory pozwala odtworzyc i powtorzyc dokladnie te same przebiegi). cargo-mutants 27.1.0 (2026-06-02) mierzy jakosc testow przez mutacje; 27.0.0 (2026-03-07) zmienil semantyke laczenia wartosci --file/--exclude/--examine-re z pliku konfiguracyjnego (teraz sumuja sie z CLI), a 27.1.0 dodal mutacje NonZero<T> i wsparcie TOML 1.1 z Rust 1.94. Miri (komponent rustup, obecny lokalnie jako ~/.cargo/bin/cargo-miri) wykrywa UB - data races, uzycie po free, nieprawidlowe aliasowanie.",
+      "why_for_vestige": "Projekt ma bardzo duza suita (workspace cargo test obejmuje unit + E2E + cognitive + journey + extreme + MCP protocol + scientific-validation), ale uruchamia ja bez runnera: .github/workflows/test.yml:99 i :110 wolaja cargo test -- --test-threads=1. Wymuszenie jednego watku to klasyczny objaw testow, ktore nie sa odizolowane (wspoldzielony plik bazy, stan globalny, port) - cargo-nextest z izolacja procesowa czesto pozwala zdjac to ograniczenie i rownoleglosc wraca bez przepisywania testow. To jest realny zysk czasu CI dla repo z 30-minutowym jobem journey-tests i 20-minutowym mcp-tests. cargo-mutants jest szczegolnie trafiony w tym projekcie, bo kluczowa logika to geste warunki liczbowe i progi (FSRS-6, wagi confidence jak NEGATION_SCOPE_CONFIDENCE = 0.85, wagi BM25/semantic, progi retention, RRF) - mutacje stalych i operatorow relacyjnych pokaza, ktore testy nie odrozniaja poprawnej wartosci od zmutowanej. Miri ma sens dla kodu FFI-owego i unsafe: rusqlite (C SQLite), usearch (C++ HNSW) i ort (C ONNX Runtime) - trzeba jednak pamietac, ze Miri nie wykona kodu C/C++, wiec zakres trzeba ograniczyc do czysto-rustowych modulow (fsrs, search scoring, preprocessing).",
+      "adoption": "Dodac runner bez zmiany kodu testow: zainstalowac cargo-nextest i zamienic w test.yml kroki cargo test na cargo nextest run - zachowujac istniejace filtry pakietow/testow. Zaczac od jobu unit-tests (cargo nextest run --workspace --lib), a nastepnie sprobowac zdjac --test-threads=1 z jobow mcp-tests i journey-tests i zmierzyc, czy izolacja procesowa wystarcza; jesli testy nadal wymagaja serializacji, wyrazic to przez nextest-version i test groups zamiast globalnego --test-threads=1. Dodac cargo-mutants jako job nocny (schedule), nie blokujacy PR - mutanty na calym workspace beda trwac godziny; zaczac od waskich filtrow -f na modulach fsrs i search z --in-place=false i wynikiem JSON. Miri uruchamiac jako osobny, nieblokujacy job tylko na wybranych pakietach czysto-rustowych, z MIRIFLAGS ograniczajacym czas. Zaktualizowac scripts/check-version-and-tools.sh, ktory juz sprawdza spojnosc narzedzi, o nowe wpisy. Wszystkie trzy narzedzia wersjonowac w CI przez taiki-e/install-action, zeby wersje byly powtarzalne.",
+      "effort": "M",
+      "sources": [
+        "https://github.com/nextest-rs/nextest/releases",
+        "https://nexte.st/docs/features/record-replay-rerun/",
+        "https://github.com/sourcefrog/cargo-mutants/releases/tag/v27.1.0",
+        "https://github.com/sourcefrog/cargo-mutants/releases/tag/v27.0.0",
+        "https://crates.io/api/v1/crates/cargo-nextest",
+        "https://crates.io/api/v1/crates/cargo-mutants"
+      ]
+    },
+    {
+      "title": "Zalegle zaleznosci Rust poza SQLite: git2 0.20 -> 0.21, criterion 0.5 -> 0.8, lru 0.16 -> 0.18, notify 8 -> 8.2",
+      "what_it_is": "Sprawdzone najnowsze stabilne: git2 0.21.0 (2026-05-18, projekt ma 0.20), criterion 0.8.2 (2026-02-04, projekt 0.5; 0.6.0 wydany 2025-05-17, 0.7.0 2025-07-25), lru 0.18.4 (2026-09-03, projekt 0.16), notify 8.2.0 (2026-08-30, projekt deklaruje \"8\", wiec w zakresie), tokenizers 0.23.2, usearch 2.26.2 (2026-08-31, projekt \"2\" -> w zakresie), clap 4.6.7 (2026-09-14, projekt \"4\" -> w zakresie), axum nadal 0.8.9 (2026-04-14), hyper 1.11.1 (2026-08-28, tranzytywnie), tower-http 0.7.1 (2026-08-31, projekt 0.6.10), tokio 1.53.1 (2026-07-20, projekt 1.52.3). Zrodla advisory: OSV nie zwraca zadnych podatnosci dla usearch, fastembed, ort, axum, clap, ts-rs ani @biomejs/biome, a wszystkie trafienia dla tokio, hyper i rusqlite dotycza wersji dawno naprawionych (np. tokio < 1.44.2, hyper < 0.14.12), wiec obecne wersje sa czyste.",
+      "why_for_vestige": "crates/vestige-core/Cargo.toml:69 trzyma git2 0.20 z feature'em vendored-openssl - to najciezsza zaleznosc budujaca sie ze zrodel (kompilacja OpenSSL), wiec kazde jej podniesienie wplywa na czas CI i na cargo-deny (komentarz w deny.toml wyjasnia, ze vendored-openssl jest dozwolonym wyjatkiem od zakazu bare openssl). criterion 0.5 -> 0.8 to zmiana z MSRV 1.70 na nowsze i wymaga poprawki w crates/vestige-core/benches/search_bench.rs:6, gdzie black_box jest importowany z criterion - w nowszych wersjach nalezy uzywac std::hint::black_box, a makra criterion_group!/criterion_main! pozostaja. lru 0.16 -> 0.18 dotyczy cache embeddingow zapytan (Cargo.toml:105), czyli sciezki gorącej. tower-http 0.6 -> 0.7 ma breaking changes i jest uzywany w dashboardzie (features cors, set-header, limit), a hyper 1.9 -> 1.11 to tranzytywny upgrade axum.",
+      "adoption": "Podzielic na partie o roznym ryzyku. Bezpieczne teraz (S): cargo update dla zaleznosci juz objetych zakresami semver (notify 8.2.0, usearch 2.26.2, clap 4.6.7, tokio 1.53.1, axum 0.8.9) - bez zmian w Cargo.toml, tylko odswiezenie locka plus pelne testy. Wymaga edycji manifestu: lru na \"0.18\" (S) i git2 na \"0.21\" (M - zweryfikowac, ze vendored-openssl i API codebase/ nadal dzialaja, bo git2 0.21 to zmiana API w czesci sygnatur). criterion na \"0.8\" razem z poprawka black_box w search_bench.rs (S). tower-http na \"0.7\" osobno (M), bo to web warstwa dashboardu - po zmianie uruchomic testy 40 tras REST. Uwaga: usearch 2.25.2 -> 2.26.2 przechodzi przez zmiany HNSW, wiec po aktualizacji trzeba zweryfikowac, czy zapisany sidecar vestige.hnsw nadal sie laduje, czy zadziala sciezka przebudowy z SQLite (row-count-validated fast path z rebuildem jako fallback). Po kazdej partii: cargo test --workspace, cargo deny check, cargo clippy -- -D warnings.",
+      "effort": "M",
+      "sources": [
+        "https://crates.io/api/v1/crates/git2",
+        "https://crates.io/api/v1/crates/criterion",
+        "https://crates.io/api/v1/crates/lru",
+        "https://crates.io/api/v1/crates/notify",
+        "https://crates.io/api/v1/crates/usearch",
+        "https://crates.io/api/v1/crates/tower-http",
+        "https://crates.io/api/v1/crates/tokio",
+        "https://crates.io/api/v1/crates/hyper",
+        "https://api.osv.dev/v1/query"
+      ]
+    },
+    {
+      "title": "sccache 0.18.0 - brak lokalnego cache kompilacji Rust poza CI",
+      "what_it_is": "sccache 0.18.0 (2026-09-14) to wydanie skupione na poprawnosci cache key i wielopoziomowym storage. Kluczowa dla bezpieczenstwa cache'u zmiana: asembler, ktory faktycznie wywola gcc/clang, jest teraz czescia cache key, wiec dwa toolchainy z roznymi binutils nie moga sobie przekazac zlego pliku obiektowego. Wydanie 0.17.0 (2026-07-29) wprowadzilo nowa architekture client-side (SCCACHE_CLIENT_SIDE), w ktorej klient sam robi lookup i uruchamia kompilator, a serwer tylko trzyma shared state - to usuwa round-trip i waskie gardlo serwera. 0.16.0 (2026-06-19) dodalo read-only backends i zdalna egzekucje na aarch64.",
+      "why_for_vestige": "Repo ma dokladnie ten profil, na ktorym sccache zarabia najwiecej: duzy graf zaleznosci z ciezkimi crate'ami budowanymi ze zrodel (git2 z vendored-openssl, bundled SQLite przez libsqlite3-sys, ONNX Runtime przez ort/fastembed, HNSW przez usearch), profil release z lto = true i codegen-units = 1, oraz macierz CI na trzech targetach (aarch64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu). CI uzywa dzis Swatinem/rust-cache@v2, ktory cache'uje target/ i registry, ale nie jest kompilacyjnym cache'em content-addressed - przy zmianie jednego pliku w vestige-core przebudowa zaleznosci moze sie powtarzac. sccache uzupelnia rust-cache, a nie zastepuje go. Dodatkowo .github/workflows/test.yml ma job release-build z timeout-minutes: 45 na kazdy target, wiec redukcja czasu kompilacji jest mierzalna.",
+      "adoption": "Wdrozyc w dwoch krokach. Lokalnie i w CI: ustawic RUSTC_WRAPPER=sccache przy zachowaniu Swatinem/rust-cache@v2; w CI uzyc actions/cache@v5 dla katalogu sccache (klucz z hashFiles Cargo.lock i wersji toolchaina) oraz SCCACHE_GHA_ENABLED lub backendu w chmurze, jesli chce sie dzielic cache miedzy runnerami. Warto rozwazyc SCCACHE_CLIENT_SIDE dla lokalnego DX, ale w CI zostawic tryb serwerowy do czasu potwierdzenia stabilnosci. Trzeba pamietac o znanym ograniczeniu: sccache nie cache'uje skutecznie przy zmianach profilu/incremental, a profil release z lto dziala najlepiej. Przy okazji podniesc akcje w workflows (patrz item nizej), bo actions/cache@v4 jest przestarzale. Weryfikacja: sccache --show-stats przed i po dwoch kolejnych buildach release; oczekiwany wysoki cache hit rate dla crate'ow zewnetrznych.",
+      "effort": "S",
+      "sources": [
+        "https://github.com/mozilla/sccache/releases/tag/v0.18.0",
+        "https://github.com/mozilla/sccache/releases/tag/v0.17.0",
+        "https://crates.io/api/v1/crates/sccache"
+      ]
+    },
+    {
+      "title": "Node.js: deklaracja engines >=18 jest nieaktualna; Node 20 EOL, a React Router 8 wymaga >=22.22",
+      "what_it_is": "Wg oficjalnego schedule Node.js: v20 (Iron) osiagnelo end-of-life 2026-04-30, v22 (Jod) jest w maintenance od 2025-10-21 z EOL 2027-04-30, v24 (Krypton) jest LTS z maintenance od 2026-10-20 i EOL 2028-04-30, v25 osiagnelo EOL 2026-06-01, a v26 wchodzi w LTS 2026-10-28. Czyli na 2026-09-19 realne opcje to Node 22 (maintenance LTS) albo Node 24 (LTS). React Router 8.0.0 (2026-06-17) podniosl minimum do Node 22.22.0 i zapowiedzial, ze v9 wyjdzie w okolicy EOL Node 22 (maj 2027). jsdom 30.1.0 wymaga Node ^22.22.2 || ^24.15.0 || >=26.0.0. @vitejs/plugin-react 6.1.1 wymaga Node ^20.19.0 || >=22.12.0.",
+      "why_for_vestige": "package.json:21-23 deklaruje engines.node >= 18, co jest dzis nieprawda w obie strony: Node 18 i 20 sa po EOL, a najnowsze narzedzia i tak wymagaja 22+. CI ustawia node-version: 22 (.github/workflows/test.yml:147), czyli jest blizej poprawnej wersji, ale bez konkretnej wersji minor - a React Router 8 i jsdom 30 wymagaja >= 22.22, wiec 'node 22' moze byc niewystarczajace, jesli runner da starszy minor. To jest ciche ryzyko: deklaracja engines jest niespojna z CI i z ekosystemem, a przy podnoszeniu React Router/Vite/jsdom moze wyjsc jako blad instalacji albo runtime. Warto tez zauwazyc, ze wiele starszych wersji GitHub Actions (checkout@v4, setup-node@v4, actions/cache@v4, upload-artifact@v4) dziala na Node 20, ktory jest po EOL - najnowsze majory (checkout@v7, setup-node@v7, cache@v5, upload-artifact@v7) sa aktualizowane wlasnie pod katem nowego runtime'u.",
+      "adoption": "Podniesc package.json engines.node na \">=22.22.0\" (lub \"^22.22.0 || >=24.0.0\") i dodac pole packageManager (pnpm jest juz w wersji 12.4.2 lokalnie, a CI uzywa pnpm/action-setup@v4 z version: 10 - warto uspoic). W CI ustawic konkretny minor: node-version: 22.22 (albo 24.x) zamiast 22. Zaktualizowac akcje do aktualnych majorow: actions/checkout@v4 -> v7, actions/setup-node@v4 -> v7, actions/cache@v4 -> v5, actions/upload-artifact@v4 -> v7, pnpm/action-setup@v4 -> v6, actions-rust-lang/setup-rust-toolchain@v1 -> v2, codecov/codecov-action@v5 -> v7, EmbarkStudios/cargo-deny-action@v2 -> v2.1.1. Przy okazji rozważyć przypinanie akcji po SHA (deny.toml i SECURITY.md juz traktuja supply chain powaznie, a .github/dependabot.yml ma package-ecosystem github-actions, wiec aktualizacje beda przychodzic automatycznie). Nie zmieniac wszystkich akcji w jednym PR - rozdzielic bumpy na dwie partie (Rust i Node) i obserwowac CI.",
+      "effort": "S",
+      "sources": [
+        "https://raw.githubusercontent.com/nodejs/Release/main/schedule.json",
+        "https://reactrouter.com/upgrading/v7",
+        "https://registry.npmjs.org/jsdom",
+        "https://registry.npmjs.org/@vitejs/plugin-react",
+        "https://github.com/actions/checkout/releases",
+        "https://github.com/actions/setup-node/releases"
+      ]
+    },
+    {
+      "title": "cargo-deny 0.20.2 - czyszczenie przestarzalych flag CLI i przeglad listy ignorowanych advisory",
+      "what_it_is": "cargo-deny 0.20.2 (2026-07-09) to najnowsze wydanie; 0.20.0/0.20.1 wyszly tego samego dnia. 0.20.2 zawiera refaktor CLI (PR #881), ktory przeniosl zduplikowane opcje do poziomu root i USUNAL kilka przestarzalych opcji/flag/wartosci, oraz dodal lint bans.std-replacements wykrywajacy crate'y z crates.io, ktore zostaly czesciowo lub calkowicie zastapione w std/core. Cargo-deny pozostaje narzedziem uzywanym w CI tego repo przez EmbarkStudios/cargo-deny-action (obecnie @v2, dostepne 2.1.1 z cargo-deny 0.20.2).",
+      "why_for_vestige": "deny.toml jest dobrze utrzymany i kluczowy dla tego projektu: komentarz w naglowku wyjasnia, ze CI uruchamia cztery checki, ale blokuje tylko advisories i bans, a licenses i sources ostrzegaja; dalej jest lista dozwolonych licencji (projekt jest AGPL-3.0-only) oraz lista dozwolonych zrodel, ktora wymusza rustls albo vendored-openssl zamiast bare openssl. To jest realna bariera bezpieczenstwa, ktora tlumaczy m.in. wybor feature'ow fastembed. W sekcji [advisories] jest jedno ignorowane advisory: RUSTSEC-2024-0436 dla crate 'paste' z uzasadnieniem 'Transitive via tokenizers -> paste' i data ponownego sprawdzenia 2026-12-31. Zweryfikowalem, ze to ignorowanie jest nadal konieczne: tokenizers 0.23.2 (najnowsze) wciaz deklaruje paste = \"1.0.14\" i macro_rules_attribute = \"0.2.0\", wiec migracja na 'pastey' (huggingface/tokenizers#1707) nie zostala wydana. Ponadto Cargo.lock nadal zawiera paste 1.0.15 i macro_rules_attribute 0.2.2. Bez zmian w tej sekcji podniesienie cargo-deny nie jest wymagane, ale warto uspoic wersje narzedzia z akcja i sprawdzic, czy refaktor CLI z 0.20.2 nie usunal flag, ktorych uzywa pipeline.",
+      "adoption": "Sprawdzic, czy komendy uzywane w CI (cargo deny check bans licenses sources w test.yml:130-134) i lokalne instrukcje w deny.toml (cargo deny check) dzialaja bez zmian na 0.20.2 - usuniete zostaly przestarzale flagi CLI, a nie sama skladnia 'check <check>', wiec ryzyko jest niskie. Podniesc EmbarkStudios/cargo-deny-action z @v2 na 2.1.1, zeby wersja binarki byla spojna z lokalna dokumentacja. Rozwazyc wlaczenie nowego lintu bans.std-replacements - przy tak duzym grafie zaleznosci (m.in. lru, chrono, regex) moze wskazac crate'y, ktore mozna usunac. Zachowac wpis RUSTSEC-2024-0436 bez zmian, ale zaktualizowac uzasadnienie: potwierdzone 2026-09-19, ze tokenizers 0.23.2 nadal ciagnie paste 1.0.14, wiec termin 2026-12-31 wymaga ponownej weryfikacji lub przesuniecia. Warto tez dopisac do deny.toml krotka notke o CVE-2026-11824 i wymogu bundled SQLite >= 3.53.2 (patrz item 1), zeby przyszla osoba podnoszaca rusqlite wiedziala, gdzie jest prog bezpieczenstwa. Weryfikacja: cargo deny check oraz uruchomienie jobu 'deny' w CI.",
+      "effort": "S",
+      "sources": [
+        "https://github.com/EmbarkStudios/cargo-deny/releases/tag/0.20.2",
+        "https://crates.io/api/v1/crates/cargo-deny",
+        "https://rustsec.org/advisories/RUSTSEC-2024-0436.html",
+        "https://docs.rs/crate/tokenizers/0.23.2/source/Cargo.toml.orig"
+      ]
+    }
+  ]
+}

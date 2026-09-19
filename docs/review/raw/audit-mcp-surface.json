@@ -1,0 +1,162 @@
+{
+  "id": "mcp-surface",
+  "dimension": "Powierzchnia MCP i zgodnosc z protokolem",
+  "summary": "Przejrzalem warstwe protokolu (crates/vestige-mcp/src/protocol/*, server.rs, server/{catalog,dispatch,deprecated}.rs), katalog 28 narzedzi z ich schematami i adnotacjami, oraz sciezke tools/call od JSON-RPC do odpowiedzi. Protokol jest napisany recznie (brak zaleznosci rmcp w Cargo.toml), deklaruje MCP_VERSION 2025-11-25 i negocjuje wersje z klientem. Najpowazniejsze problemy sa w warstwie JSON-RPC: serwer odpowiada na notyfikacje ramka bez pola id (naruszenie JSON-RPC 2.0 sec.5), a stdio uzywa tokio::select! z read_line, ktore nie jest cancellation-safe, wiec heartbeat moze trwale zgubic czesciowo odebrane zadanie. Nieznane narzedzie zwraca -32601, choc spec (tools.md, Error Handling) podaje przyklad -32602 dla Unknown tool; resources/read zwraca -32603 zamiast -32002. Kilka adnotacji klamie o rzeczywistym zachowaniu (readOnlyHint=true dla search/session_context/export, ktore zapisuja do bazy i na dysk), a narzedzie mark_reviewed jest dispatchowane, ale nie wystawione w tools/list, mimo ze resource memory://due kaze modelowi go wywolac. Warstwa HTTP nie waliduje MCP-Protocol-Version i nie eksponuje Mcp-Session-Id w CORS, a implementacja nie ma nic z rewizji 2026-07-28 (server/discover, resultType, ttlMs/cacheScope, Tasks/MRTR). Pozytywy: wszystkie 28 narzedzi ma jawne adnotacje i title, katalog jest pilnowany testami (unikalnosc nazw, skladnosc required/properties, tytuly), a budzety tokenow search/session_context sa realnie egzekwowane i raportowane w odpowiedzi.",
+  "strengths": [
+    "Kazde z 28 narzedzi ma jawny, kompletny zestaw adnotacji (readOnlyHint/destructiveHint/idempotentHint/openWorldHint) + title na poziomie tool i annotations, wymuszony testem every_tool_has_explicit_annotations (crates/vestige-mcp/src/server/catalog.rs:489-518) oraz every_tool_has_display_title (catalog.rs:525-542).",
+    "Katalog jest twardo pilnowany testami: dokladnie 28 narzedzi (catalog.rs:453-461), unikalnosc nazw (599-611), snake_case (616-630), a takze najwazniejszy niezmiennik schematu - kazdy wpis w required musi istniec w properties (552-595).",
+    "Warstwa bledow narzedzi jest zgodna z SEP-1303/spec: bledy wykonania wracaja jako CallToolResult z isError=true i tekstem dla modelu, a nie jako bledy protokolu (crates/vestige-mcp/src/server/dispatch.rs:196-206); autoryzacja HTTP uzywa stale-time porownania tokenu (protocol/http.rs:197-221) z walidacja formatu UUID dla Mcp-Session-Id (http.rs:227-233).",
+    "Budzet tokenow jest realnie egzekwowany, nie tylko deklarowany: search robi fit -> kompresje -> przeniesienie do expandable i raportuje tokensUsed (tools/search_unified/pipeline/finalize.rs:93, 256-303), session_context clampuje token_budget do VESTIGE_MAX_TOKEN_BUDGET (tools/session_context/execute.rs:31-32, 355).",
+    "Warstwa aliasow jest skupiona w jednym module z testami per alias (server/deprecated.rs:28-127 + 13 testow), a nazwy deprecated nie wyciekaja do tools/list."
+  ],
+  "inconsistencies": [
+    "Komentarz w catalog.rs i messages.rs twierdzi, ze brak outputSchema jest celowy, bo 'kazde narzedzie zwraca plain text' (catalog.rs:17-23, protocol/messages.rs:94-99) - ale narzedzia zwracaja JSON spretty-printowany i dodatkowo zakodowany jako string w polu text (dispatch.rs:185-193), czyli dokladnie ten format, dla ktorego spec 2025-06-18/2025-11-25 przewiduje structuredContent.",
+    "tools/common.rs:20 okresla -32002 jako 'MCP RequestDenied', a protocol/types.rs:77 ten sam kod nazywa ResourceNotFound; spec (server/resources.md, Error Handling) definiuje -32002 wylacznie jako Resource not found, a wlasny dokument repo (docs/research/mcp-production-best-practices-2026-09-19.md:291) zapowiada migracje -32002 -> -32602.",
+    "catalog.rs:126-128 jawnie przyznaje w komentarzu, ze search zapisuje stan (FSRS strengthening), po czym nadaje mu readOnlyHint=true; to samo dotyczy session_context (catalog.rs:311 vs tools/session_context/execute.rs:95) i export (catalog.rs:216 vs tools/maintenance/export.rs:137,159, ktore tworzy pliki na dysku).",
+    "resources/memory.rs:215 kaze modelowi wykonac 'Use mark_reviewed with rating 1-4 to complete review', ale mark_reviewed nie wystepuje w build_tools_list (28 wpisow) ani w tablicy aliasow deprecated.rs - jest dispatchowane w server/dispatch.rs:86, czyli istnieje jako niewidoczne narzedzie.",
+    "tools/common.rs:20-30 opisuje kontrakt błędu potwierdzenia (kod -32002 + blok data.requestedSchema), a faktycznie zwracany jest isError=true z tekstem, w ktorym schema jest wklejona jako escapowany JSON, a stala REQUEST_DENIED_CODE nie jest uzyta w zadnym miejscu repo (grep -rn REQUEST_DENIED_CODE: tylko definicja).",
+    "Dokumentacja repo (docs/research/mcp-production-best-practices-2026-09-19.md:14-17, 291) wymienia jako MUST biezacej rewizji 2026-07-28: server/discover, resultType oraz ttlMs/cacheScope; w kodzie nie ma zadnego z nich (grep zwraca 0 trafien), a MCP_VERSION = 2025-11-25 (protocol/types.rs:9)."
+  ],
+  "findings": [
+    {
+      "title": "Serwer odpowiada na notyfikacje ramka bez pola id (naruszenie JSON-RPC 2.0 i MCP)",
+      "severity": "high",
+      "category": "bug",
+      "evidence": "protocol/types.rs:32-33 - pole id ma #[serde(skip_serializing_if = \"Option::is_none\")], wiec Some(JsonRpcResponse::error(None, ...)) serializuje sie bez id. server.rs:88-104 - kazde zadanie inne niz initialize/notifications/initialized, takze notyfikacja (id=None), konczy sie return Some(JsonRpcResponse::error(request.id, ...)); server.rs:117-126 - nieznana metoda -> Err -> Some(error) bez sprawdzenia request.id. stdio.rs:83-98 zapisuje kazda taka ramke na stdout; stdio.rs:64 dla bledow parsowania tworzy error(None, parse_error) => ramka bez id. Dowod posredni: awaryjny literat w stdio.rs:73 zawiera \"id\":null, czyli intencja autora byla inna niz zachowanie sciezki normalnej.",
+      "impact": "Klient wysylajacy np. notifications/cancelled, notifications/roots/list_changed albo jakakolwiek nieznana notyfikacje dostaje odpowiedz, ktorej nie wolno mu dostac, i to bez id - nie da sie jej skorelowac, a klienty walidujace ramki schematem JSON-RPC (np. zod JSONRPCErrorSchema w TS SDK wymaga id) odrzuca ja lub przerwa polaczenie. Blad parsowania rowniez lamie JSON-RPC 2.0 sec.5, ktory wymaga id=null.",
+      "proposal": "W McpServer::handle_request (server.rs:88) rozroznic zadanie od notyfikacji: przy request.id.is_none() obsluzyc notyfikacje bez generowania odpowiedzi (return None), a nieznane metody notyfikacji tylko zalogowac. W protocol/types.rs usunac skip_serializing_if z id (pole zawsze serializowane, Value::Null gdy brak) albo dodac dedykowany konstruktor response_error_null_id. Dodac test jednostkowy: serde_json::to_value(JsonRpcResponse::error(None, JsonRpcError::parse_error()))[\"id\"] == Value::Null oraz test, ze handle_request na notyfikacji zwraca None.",
+      "effort": "S",
+      "skill_basis": "JSON-RPC 2.0 / MCP: odbiorca notyfikacji MUST NOT wysylac odpowiedzi; spec tools.md Error Handling wymaga id w bledzie protokolu; skill ai-mcp advanced-patterns.md - three-tier error model"
+    },
+    {
+      "title": "stdio: tokio::select! z read_line moze trwale zgubic czesciowo odebrane zadanie",
+      "severity": "high",
+      "category": "bug",
+      "evidence": "protocol/stdio.rs:41-42 - pętla uzywa tokio::select! { result = reader.read_line(&mut line_buf) => ..., _ = tokio::time::sleep(HEARTBEAT_INTERVAL) => ... }, a HEARTBEAT_INTERVAL = 30 s (stdio.rs:18). Tokio 1.52.3 (Cargo.lock: tokio 1.52.3; Cargo.toml:24 - version 1) w src/io/util/read_line.rs konstruuje ReadLine z buf: mem::take(string).into_bytes() i nie ma implementacji Drop - po anulowaniu future (wygrany branch sleep) bufor z czesciowo odczytanymi bajtami jest porzucany, a String uzytkownika pozostaje oprozniony.",
+      "impact": "Jesli w chwili wybudzenia heartbeat klient zdazyl wyslac tylko czesc linii (bez \\n), te bajty przepadaja bezpowrotnie - zadanie nie zostanie nigdy wykonane, a klient czeka na odpowiedz do timeoutu. Objaw: sporadyczne 'zawieszenia' MCP przy dlugich sesjach, niemozliwe do reprodukcji bez wywolania wyscigu.",
+      "proposal": "Nie anulowac odczytu: albo (a) wyniesc future read_line poza pętle i trzymac je w zmiennej miedzy iteracjami, albo (b) calkowicie usunac heartbeat z pętli odczytu i wysylac keepalive z osobnego zadania tylko miedzy ramkami, albo (c) zastapic select! konstrukcja z read_until na Vec<u8> i wlasnym buforowaniem poza przyszloscia. Dodac test regresyjny w stylu: podac polowę linii, odczekac > heartbeat, dokonczyc linie i sprawdzic, ze zadanie zostalo wykonane.",
+      "effort": "M",
+      "skill_basis": "brak w skillu (dokumentacja cancellation safety tokio dla AsyncBufReadExt::read_line)"
+    },
+    {
+      "title": "Nieznane narzedzie zwraca -32601 Method not found zamiast -32602 Unknown tool",
+      "severity": "high",
+      "category": "inconsistency",
+      "evidence": "server/dispatch.rs:167-172 - unknown => return Err(JsonRpcError::method_not_found_with_message(&format!(\"Unknown tool: {}\", unknown))), czyli kod -32601. Zachowanie jest zamrozone testem server/tests.rs:352-370 (assert_eq!(error.code, -32601)). Spec MCP (server/tools.md, Error Handling, rewizja 2025-11-25) podaje wprost przyklad bledu protokolu dla nieznanego narzedzia z kodem -32602 i message 'Unknown tool: invalid_tool_name'; wlasny dokument repo (docs/research/mcp-production-best-practices-2026-09-19.md:1257) notuje, ze -32602 rozroznia 'Unknown Tool' od 'Invalid Parameters'.",
+      "impact": "Klient/agent interpretuje odpowiedz jako 'serwer nie obsluguje metody tools/call', a nie 'zla nazwa narzedzia', co utrudnia automatyczne samonaprawienie (model nie wie, ze ma poprawic nazwe) i lamie konwencje, na ktorych opieraja sie testy zgodnosci.",
+      "proposal": "W server/dispatch.rs:167 uzyc JsonRpcError::invalid_params(&format!(\"Unknown tool: {}\", unknown)) (kod -32602) i zaktualizowac server/tests.rs:369; rozwazyc dodanie do tresci listy najblizszych nazw z katalogu, aby model mogl sie samo-poprawic.",
+      "effort": "S",
+      "skill_basis": "MCP spec tools.md Error Handling (przyklad -32602 Unknown tool); repo docs/research/mcp-production-best-practices-2026-09-19.md:1257"
+    },
+    {
+      "title": "Adnotacje readOnlyHint=true dla narzedzi, ktore zapisuja do bazy lub na dysk",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "catalog.rs:126-128 - search dostaje read_only_safe mimo komentarza 'Search performs FSRS strengthening on hits'; faktyczny zapis: tools/search_unified/pipeline/finalize.rs:38 strengthen_on_access(...), finalize.rs:188-215 (strengthen_batch_on_access + record_memory_access). catalog.rs:311 - session_context tez read_only_safe, a tools/session_context/execute.rs:95 wywoluje strengthen_batch_on_access. catalog.rs:216 - export read_only_safe, a tools/maintenance/export.rs:137 std::fs::create_dir_all oraz :159 std::fs::File::create tworza pliki w ~/.vestige/exports/.",
+      "impact": "Klienty ufajace adnotacjom (ChatGPT, VS Code Copilot wg skilla) pomijaja potwierdzenie dla readOnlyHint=true - w praktyce kazde wyszukiwanie zmienia stan FSRS, a export trwale zmienia system plikow, bez wiedzy uzytkownika. Zaufanie do adnotacji tego serwera spada, co moze sklonic hosty do wymuszania potwierdzen na wszystkich narzedziach.",
+      "proposal": "W catalog.rs zmienic klasyfikacje: search i session_context na mutating(..., false) (albo dodac pomocnika read_only_with_side_effects z readOnlyHint=false, destructiveHint=false, idempotentHint=false), export na mutating(..., false). Jesli intencja jest utrzymanie auto-zatwierdzania, przeniesc strengthening za flage argumentu (np. strengthen: true/false) i wtedy warunkowo raportowac read-write w opisie.",
+      "effort": "S",
+      "skill_basis": "skill ai-mcp advanced-patterns.md - tabela Tool Annotations: readOnlyHint = 'Doesn't modify state'"
+    },
+    {
+      "title": "HTTP: brak walidacji MCP-Protocol-Version i brak Mcp-Session-Id w CORS (klienty przegladarkowe nie dzialaja)",
+      "severity": "medium",
+      "category": "missing-feature",
+      "evidence": "grep -rn \"MCP-Protocol-Version\" crates/ apps/ zwraca 0 trafien - naglowek wymagany od rewizji 2025-06-18 nie jest nigdzie czytany ani walidowany. protocol/http.rs:157-167 - CorsLayer ustawia tylko allow_origin, allow_methods (POST/DELETE/OPTIONS) i allow_headers([CONTENT_TYPE, AUTHORIZATION]); brak expose_headers, a lista dozwolonych naglowkow nie zawiera Mcp-Session-Id. Jednoczesnie http.rs:333-341 wymaga naglowka Mcp-Session-Id przy kazdym zadaniu innym niz initialize.",
+      "impact": "Klient przegladarkowy (MCP Inspector w trybie web, SDK w przegladarce) nie przejdzie preflightu dla Mcp-Session-Id (naglowek spoza listy safelisted -> Access-Control-Request-Headers), a nawet gdyby przeszedl, nie odczyta wartosci sesji z odpowiedzi bez Access-Control-Expose-Headers. Dodatkowo serwer nie odrzuca zadan z nieobslugiwana wersja protokolu kodem 400, przez co negocjacja wersji jest tylko iluzja po stronie klienta.",
+      "proposal": "W protocol/http.rs:157-167 dodac .allow_headers([..., \"mcp-session-id\", \"mcp-protocol-version\"]) oraz .expose_headers([\"mcp-session-id\"]); dodac middleware walidujacy MCP-Protocol-Version (brak/zla wartosc -> 400 z JSON-RPC error -32020 HeaderMismatch wg rewizji 2026-07-28, a dla 2025-11-25 -> 400 z kodem -32600).",
+      "effort": "S",
+      "skill_basis": "MCP spec: Streamable HTTP + Versioning (naglowek MCP-Protocol-Version); repo docs/research/mcp-production-best-practices-2026-09-19.md:113-114"
+    },
+    {
+      "title": "resources/read zwraca -32603 Internal error zamiast -32002 Resource not found",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "server.rs:236-250 - kazdy blad z resources::memory::read / resources::codebase::read, w tym 'Unknown resource scheme' i 'Unknown memory resource' (resources/memory.rs:30), jest mapowany na JsonRpcError::internal_error(&e) => -32603. Jednoczesnie protocol/types.rs:129-135 funkcja resource_not_found (kod -32002) istnieje, ale ma #[allow(dead_code)] // Reserved for future resource handling i nie jest nigdzie wywolywana. Spec (server/resources.md, Error Handling) podaje: 'Resource not found: -32002', 'Internal errors: -32603'.",
+      "impact": "Klient nie odroznia 'nie ma takiego zasobu' od awarii serwera - nie moze np. pokazac sensownego komunikatu ani ponowic z innym URI, a monitoring zlicza normalne przypadki braku zasobu jako bledy wewnetrzne.",
+      "proposal": "Rozdzielic bledy w resources/*::read na wariant NotFound i Internal (np. enum ResourceError), a w server.rs:236-250 mapowac NotFound na JsonRpcError::resource_not_found(uri) (-32002) i usunac #[allow(dead_code)]. Dodac test jednostkowy na resources/read z nieznanym URI asertujacy -32002.",
+      "effort": "M",
+      "skill_basis": "MCP spec server/resources.md Error Handling (Resource not found: -32002)"
+    },
+    {
+      "title": "mark_reviewed: narzedzie mutujace istniejace w dispatchu, ale nieobecne w tools/list, i rekomendowane przez resource",
+      "severity": "medium",
+      "category": "inconsistency",
+      "evidence": "server/dispatch.rs:86 - \"mark_reviewed\" => tools::review::execute(...). Katalog build_tools_list ma dokladnie 28 wpisow (catalog.rs:453-461) i mark_reviewed w nim nie ma; aliasy w server/deprecated.rs:28-127 tez go nie obejmuja (diff nazw dispatch vs katalog: dispatch-only = cross_reference, mark_reviewed). Jednoczesnie resources/memory.rs:212-216 zwraca modelowi instrukcje: 'Use mark_reviewed with rating 1-4 to complete review'. Narzedzie wykonuje UPDATE FSRS (tools/review.rs:68 storage.mark_reviewed(...)), a jego plik naglowkowy mowi 'Review Tool (Deprecated)' (tools/review.rs:1-3).",
+      "proposal": "Zdecydowac jedna sciezke: albo dodac mark_reviewed do katalogu z adnotacja mutating(idempotent=false) i opisem, albo usunac dispatch i zmienic instrukcje w resources/memory.rs:215 na memory(action='promote')/istniejacy odpowiednik. Jesli narzedzie ma pozostac ukryte, przeniesc je do deprecated.rs jako alias, aby zniklo z dispatchu jako samodzielny byt.",
+      "impact": "Model jest instruowany przez resource, zeby wywolac narzedzie, ktorego nie widzi w tools/list - hosty walidujace nazwy narzedzi odrzuca takie wywolanie, a pozostale dzialaja na niewidocznym, nieudokumentowanym API mutujacym stan FSRS bez adnotacji.",
+      "effort": "S",
+      "skill_basis": "MCP spec tools.md - Tool Names SHOULD be unique within a server; narzedzia sa discoverable przez tools/list"
+    },
+    {
+      "title": "Schematy narzedzi: brak wymagan warunkowych per action i brak ograniczen deklarowanych w opisach",
+      "severity": "medium",
+      "category": "dx",
+      "evidence": "tools/memory_unified/schema.rs:11-32 - required = ['action'] tylko; 'id' (wymagane dla get/delete/state/promote/demote/edit) i 'content' (wymagane dla edit) sa opisane wylacznie proza, a ich brak wywala sie dopiero w runtime (tools/memory_unified/execute.rs:43-52). tools/smart_ingest/schema.rs:11-80 - brak jakiegokolwiek required na najwyzszym poziomie (jedyny 'required' jest w itemie tablicy items, linia 76), brak enum dla node_type, a limit 20 dla items istnieje tylko jako opis. tools/intention_unified/schema.rs:117-121 - 'limit' bez minimum/maximum; tools/explore.rs:23-25 - 'to' wymagane dla chain/bridges opisane tylko proza (schema required = [action, from] w linii 38). Test katalogu (catalog.rs:552-595) sprawdza jedynie, ze each required istnieje w properties - brak required nie jest bledem, wiec luka przechodzi CI.",
+      "impact": "Model nie wie z JSON Schema, ktore pola sa obowiazkowe dla danego action, wiec generuje niepoprawne wywolania (np. memory(action='delete') bez id), co kosztuje dodatkowa runde i zasmieca kontekst bledami; brak enum dla node_type pozwala zapisac smieciowy typ; brak maxItems nie chroni przed 21+ elementami w get_batch (runtime odrzuca, ale dopiero po deserializacji).",
+      "proposal": "Dodac warunki per action w JSON Schema 2020-12 (domyslny draft w MCP od 2025-11-25): allOf/if-then albo oneOf z const dla action, enum dla node_type, maxItems: 20 na ids/items, minimum/maximum dla limit; rozszerzyc test w catalog.rs o asercje 'kazde dzialanie ma zadeklarowane wymagane pola' (tabela action -> required per narzedzie).",
+      "effort": "M",
+      "skill_basis": "MCP spec tools.md + JSON Schema usage (draft 2020-12 domyslnie); skill ai-mcp advanced-patterns.md (schema = kontrakt dla modelu)"
+    },
+    {
+      "title": "Brak czegokolwiek z rewizji 2026-07-28: server/discover, resultType, ttlMs/cacheScope, Tasks, MRTR",
+      "severity": "medium",
+      "category": "missing-feature",
+      "evidence": "protocol/types.rs:9 - MCP_VERSION = \"2025-11-25\"; grep -rn 'server/discover|resultType|ttlMs|cacheScope|input_required|io.modelcontextprotocol/tasks' w crates/ zwraca 0 trafien (poza zerem wystapien w kodzie produkcyjnym). ListToolsResult (protocol/messages.rs:157-161) i ListResourcesResult (:206-210) nie maja nextCursor ani pol cache. Transport HTTP jest sesyjny (protocol/http.rs:34-37, 254-305), podczas gdy 2026-07-28 usuwa Mcp-Session-Id i initialize. Wlasny dokument repo (docs/research/mcp-production-best-practices-2026-09-19.md:14-17) wymienia server/discover jako MUST, a resultType oraz ttlMs/cacheScope jako wymagane dla wynikow i list. SDK rmcp 3.x obsluguje 2026-07-28, ale projekt nie korzysta z zadnego SDK MCP (brak rmcp w crates/vestige-mcp/Cargo.toml).",
+      "impact": "Vestige jest serwerem legacy: nowoczesne klienty (ktore najpierw wolaja server/discover) nie moga odkryc serwera poza fallbackiem do initialize, traci sie cache'owanie katalogu narzedzi (ttlMs/cacheScope) i mozliwosc oznaczania dlugich operacji (dream/consolidate/backup do 5 min) jako Tasks, a planowane sesyjnie API HTTP bedzie musialo zostac przepisane.",
+      "proposal": "Stopniowa, addytywna migracja bez lamania 2025-11-25: (1) obsluzyc server/discover zwracajace te same dane co initialize + supportedVersions, (2) dodac resultType do wynikow i ttlMs/cacheScope do tools/list oraz resources/list (katalog jest statyczny, wiec ttlMs np. 300000, cacheScope 'public'), (3) dopisac execution.taskSupport='optional' dla dream/consolidate/regenerate_embeddings, (4) dodac uruchomienie oficjalnego conformance suite do CI (docs/mcp-observability-conformance-research-2026-09-19.md:438-470).",
+      "effort": "L",
+      "skill_basis": "skill ai-mcp servers-reference.md tabela Spec Evolution (2026-07-28: sessionless, server/discover, resultType, CacheableResult) oraz advanced-patterns.md (Tasks)"
+    },
+    {
+      "title": "Testy oznaczone jako 'MCP E2E' nie uruchamiaja serwera - nie sprawdzaja ani jednej ramki protokolu",
+      "severity": "medium",
+      "category": "test-gap",
+      "evidence": "Grep w tests/e2e/tests/mcp/protocol_tests.rs po 'McpServer|Command::new|vestige-mcp' zwraca 0 trafien; plik sklada sie z asercji na rekocznie napisanych literalach json!, np. test_jsonrpc_error_response_format (protocol_tests.rs:99-126) i test_tools_call_response_format (:390-410) sprawdzaja wlasne literaly, nie odpowiedzi serwera. CI uruchamia to jako job 'MCP E2E Tests' po zbudowaniu binarki (.github/workflows/test.yml:90-99: cargo test --package vestige-e2e-tests --test mcp_protocol), co sugeruje test end-to-end, ktorym nie jest.",
+      "impact": "Niezmienniki warstwy drutu (obecnosc id w odpowiedzi, brak odpowiedzi na notyfikacje, kod bledu dla nieznanego narzedzia, naglowki sesji HTTP) nie sa pokryte zadnym testem - dokladnie dlatego defekt z brakiem id (znalezisko nr 1) przezyl do tej pory. Zielony CI daje falszywe poczucie zgodnosci z protokolem.",
+      "proposal": "Przepisac tests/e2e/tests/mcp/protocol_tests.rs tak, aby budowal McpServer i przechodzil pelna petle JSON-RPC (serializacja -> handle_request -> serde_json::to_value) oraz dodac test podprocesowy na zbudowanej binarce (spawn, initialize, notifications/initialized, tools/call, zamkniecie stdin) z asercjami na id, isError i kodach bledow. Rozwazyc wlaczenie oficjalnego conformance suite (npx @modelcontextprotocol/conformance) dla rewizji 2025-11-25.",
+      "effort": "M",
+      "skill_basis": "skill ai-mcp advanced-patterns.md - Testing: in-memory transport / handler extraction; repo docs/mcp-observability-conformance-research-2026-09-19.md (B1 conformance suite)"
+    },
+    {
+      "title": "Sesyjny HTTP: kazdy initialize tworzy nowa sesje, stare nie sa usuwane, a limit jest globalny (503 dla wszystkich)",
+      "severity": "medium",
+      "category": "bug",
+      "evidence": "protocol/http.rs:34 MAX_SESSIONS = 100; http.rs:254-260 - kazde zadanie initialize sprawdza tylko sessions.len() >= MAX_SESSIONS i zwraca 503 SERVICE_UNAVAILABLE; http.rs:268-305 - zawsze generuje nowy UUID i wstawia nowa sesje (brak ponownego uzycia istniejacej); http.rs:36-40 - reaper usuwa dopiero sesje bezczynne > 30 min i uruchamia sie co 5 min; http.rs:406-431 - DELETE /mcp usuwa wylacznie sesje wskazana w naglowku, wiec klient, ktory zgubil identyfikator, nie moze jej posprzatac.",
+      "impact": "Klient, ktory wykonuje initialize czesciej niz raz na 30 minut (restart IDE, reconnect, petla testowa, wiele kart przegladarki), wyczerpuje limit 100 sesji i od tego momentu kazdy kolejny initialize - takze od innych klientow - dostaje 503 przez nawet pol godziny. Jest to globalna awaria dostepnosci wywolywana normalnym, nie wrogim ruchem.",
+      "proposal": "W post_mcp przy is_initialize najpierw sprobowac zwrocic istniejaca sesje dla tego samego klienta (klucz: naglowek Mcp-Session-Id jesli przeslany i znany), a przy braku - przed zwrotem 503 usunac najstarsze bezczynne sesje (per-client cap + LRU eviction) oraz skrocic SESSION_TIMEOUT. Alternatywnie udokumentowac limit w /api/_meta/limits i zwracac 429 z Retry-After zamiast 503.",
+      "effort": "M",
+      "skill_basis": "MCP spec Streamable HTTP - sesja MUST be terminated explicitly or by timeout; skill ai-mcp servers-reference.md (Sessionless 2026-07-28 jako docelowy model)"
+    },
+    {
+      "title": "REQUEST_DENIED_CODE = -32002 jest martwa stala, a nazwa i dokumentacja przecza specyfikacji",
+      "severity": "low",
+      "category": "inconsistency",
+      "evidence": "tools/common.rs:46 definiuje pub const REQUEST_DENIED_CODE: i64 = -32002, ale grep -rn REQUEST_DENIED_CODE w calym repo zwraca tylko te jedna linie (zadnego uzycia). Komentarz common.rs:20 twierdzi, ze klienty renderuja -32002 jako 'permission failure', tymczasem spec (server/resources.md) definiuje -32002 jako Resource not found, a repo docs/research/mcp-production-best-practices-2026-09-19.md:291 zapowiada migracje tego kodu na -32602. Rzeczywisty gate (common.rs:67-81) zwraca isError=true z tekstem zawierajacym escapowany JSON 'requestedSchema: {...}' zamiast struktury data.requestedSchema.",
+      "impact": "Dokumentacja w kodzie obiecuje kontrakt (kod bledu + ustrukturyzowane data), ktorego serwer nigdy nie emituje; kazdy, kto napisze klienta pod te obietnice, dostanie tylko string. Martwa stala sugeruje niedokonczona migracje i myli przy przyszlych zmianach kodow.",
+      "proposal": "Usunac REQUEST_DENIED_CODE albo przeniesc informacje o potwierdzeniu do prawdziwego pola strukturalnego w wyniku (dodac opcjonalne data/structuredContent z requestedSchema jako obiektem), zaktualizowac komentarz w tools/common.rs:6-38 do faktycznego zachowania i poprawic nazwe kodu na ResourceNotFound, jesli kiedykolwiek zostanie uzyty.",
+      "effort": "S",
+      "skill_basis": "MCP spec server/resources.md (-32002 = Resource not found); skill ai-mcp servers-reference.md (elicitation/MRTR jako sciezka docelowa)"
+    },
+    {
+      "title": "Podwojne kodowanie JSON w wynikach narzedzi i brak structuredContent/outputSchema",
+      "severity": "low",
+      "category": "performance",
+      "evidence": "server/dispatch.rs:185-193 - wynik kazdego narzedzia jest serializowany przez serde_json::to_string_pretty(&content), a nastepnie wstawiany jako string do ToolResultContent { content_type: \"text\" }, czyli caly JSON jest dodatkowo escapowany (kazdy cudzyslow i newline jako \\\" / \\n) i sformatowany z wcieciami. ToolDescription (protocol/messages.rs:100-111) nie ma pola output_schema, a CallToolResult (protocol/messages.rs:175-179) nie ma structured_content; catalog.rs:17-23 uzasadnia ten brak tym, ze narzedzia zwracaja 'plain text', co nie jest prawda.",
+      "impact": "Kazda odpowiedz jest o ok. 10-20% wieksza w tokenach niz payload binarnie rownowazny (escaping + pretty-print), co przy token_budget liczonym w znakach (finalize.rs:271 budget * 4) zaniza realnie dostarczana tresc; klienty nie moga walidowac odpowiedzi schematem, a modele musza parsowac JSON ukryty w stringu.",
+      "proposal": "W dispatch.rs wysylac zarowno structuredContent (obiekt content) jak i content[0].text z kompaktowym serde_json::to_string (bez pretty), a dla najczestszych narzedzi (search, memory, session_context, system_status) opublikowac outputSchema wyprowadzony z istniejacych DTO wire/* (ts-rs juz generuje te struktury).",
+      "effort": "L",
+      "skill_basis": "skill ai-mcp advanced-patterns.md - Structured Tool Output (outputSchema + structuredContent, kompatybilnosc przez text block)"
+    },
+    {
+      "title": "Heartbeat stdio wysyla nieistniejaca metode notifications/ping, takze przed initialize",
+      "severity": "low",
+      "category": "bug",
+      "evidence": "protocol/stdio.rs:118-132 - co HEARTBEAT_INTERVAL (30 s, stdio.rs:18) serwer zapisuje na stdout literal {\"jsonrpc\":\"2.0\",\"method\":\"notifications/ping\"}; w specyfikacji MCP nie ma metody notifications/ping (ping jest zadaniem, na ktore odpowiada serwer - server.rs:116), a ramka leci bezwarunkowo, rowniez zanim klient wysle initialize.",
+      "impact": "Klienty loguja ostrzezenia o nieznanej notyfikacji albo traktuja strumien jako zanieczyszczony; niektore hosty walidujace metody w notyfikacjach moga przerwac sesje. Wartosc dodana heartbeat jest watpliwa - stdio nie wymaga keepalive, a kazdy zapis zwieksza ryzyko wyscigu z odczytem (patrz znalezisko nr 2).",
+      "proposal": "Usunac heartbeat z protocol/stdio.rs (albo ograniczyc go do odpowiedzi ping, ktore i tak obsluguje handle_request) i polegac na tym, ze klient wykrywa martwy proces przez brak odpowiedzi na ping. Jesli keepalive jest potrzebny, uzyc standardowego ping jako zadania z id i oczekiwac odpowiedzi klienta.",
+      "effort": "S",
+      "skill_basis": "skill ai-mcp servers-reference.md - Notifications (zamkniety zbior metod MCP); JSON-RPC 2.0"
+    }
+  ]
+}
