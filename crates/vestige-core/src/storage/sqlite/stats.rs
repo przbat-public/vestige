@@ -67,8 +67,25 @@ impl Storage {
             |row| row.get(0),
         )?;
 
+        // Report the tag the *current* embedding function writes — model id plus
+        // space version and prefix regime, e.g. `nomic-embed-text-v1.5+v2+prefix`
+        // — instead of a hard-coded model id. The old literal named the v1-style
+        // tag no matter which space the stored vectors came from, so
+        // `system_status.embeddingModel` (and `/api/system-stats`, and the CLI's
+        // `Embedding Model` line) could not reveal that a store still holds
+        // pre-v2 vectors; the version/regime is exactly what an operator needs
+        // to decide whether `regenerate_embeddings` is still owed.
+        #[cfg(feature = "embeddings")]
         let embedding_model: Option<String> = if nodes_with_embeddings > 0 {
-            Some("nomic-embed-text-v1.5".to_string())
+            Some(crate::embeddings::embedding_model_tag().to_string())
+        } else {
+            None
+        };
+        // Without the embedding function there is no current tag to report, and
+        // naming a model this build cannot compute a vector for would be a lie.
+        #[cfg(not(feature = "embeddings"))]
+        let embedding_model: Option<String> = if nodes_with_embeddings > 0 {
+            Some("unavailable (built without the `embeddings` feature)".to_string())
         } else {
             None
         };
