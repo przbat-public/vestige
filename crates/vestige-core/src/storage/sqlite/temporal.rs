@@ -186,11 +186,14 @@ impl Storage {
 
             // Write batch using writer transaction
             {
-                let mut writer = self
+                let writer = self
                     .writer
                     .lock()
                     .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-                let tx = writer.transaction()?;
+                // BEGIN IMMEDIATE + retry: this pass writes rows it just read, which is
+                // exactly the shape that loses writes to SQLITE_BUSY_SNAPSHOT when the
+                // CLI commits beside the server (busy_timeout does not cover the upgrade).
+                let tx = super::helpers::begin_write_transaction(&writer)?;
 
                 for (id, last_accessed, storage_strength, _, sentiment_mag, stability) in &batch {
                     let last = DateTime::parse_from_rfc3339(last_accessed)

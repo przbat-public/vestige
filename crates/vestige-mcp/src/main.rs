@@ -412,8 +412,23 @@ async fn main() {
         tokio::spawn(async move {
             // Small delay so we don't block the stdio handshake
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let mut cog = cog_clone.lock().await;
-            cog.reranker.init_cross_encoder();
+            // Load on the blocking pool with NO lock held: the load reads ~150 MB from
+            // disk (or downloads it), and holding the shared CognitiveEngine mutex for
+            // that long stalls every other tool — explore, predict, session_context and
+            // friends all queue behind it. The lock is taken only to install the result.
+            let loaded =
+                tokio::task::spawn_blocking(vestige_core::search::Reranker::load_cross_encoder)
+                    .await
+                    .ok()
+                    .flatten();
+
+            match loaded {
+                Some(model) => cog_clone.lock().await.reranker.install_cross_encoder(model),
+                None => tracing::warn!(
+                    "cross-encoder unavailable at startup — search keeps the BM25 \
+                     term-overlap fallback"
+                ),
+            }
         });
     }
 

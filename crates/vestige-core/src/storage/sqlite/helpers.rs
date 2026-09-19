@@ -285,3 +285,55 @@ impl Storage {
         Ok(())
     }
 }
+
+/// Begin a write transaction the way every writer in this crate must: `BEGIN IMMEDIATE`,
+/// with a short logged retry when the write lock is busy.
+///
+/// A `DEFERRED` transaction that reads before it writes can fail with
+/// `SQLITE_BUSY_SNAPSHOT` when another process commits in between — the CLI running
+/// beside the MCP server is the normal case — and SQLite does **not** consult
+/// `busy_timeout` for that upgrade, so the write is simply lost. Taking the write lock
+/// up front puts the wait under the 5 s busy timeout instead, and once
+/// `BEGIN IMMEDIATE` succeeds SQLite guarantees no `SQLITE_BUSY` until `COMMIT`.
+///
+/// The retries cover the case where the timeout itself expires: three attempts at
+/// 100/200/400 ms, each logged, then the error propagates.
+pub(crate) fn begin_write_transaction(conn: &Connection) -> Result<rusqlite::Transaction<'_>> {
+    const RETRY_DELAYS_MS: [u64; 3] = [100, 200, 400];
+
+    let mut attempt = 0usize;
+    loop {
+        match conn.execute_batch("BEGIN IMMEDIATE") {
+            Ok(()) => break,
+            Err(e) if is_busy(&e) && attempt < RETRY_DELAYS_MS.len() => {
+                let delay_ms = RETRY_DELAYS_MS[attempt];
+                attempt += 1;
+                tracing::warn!(
+                    attempt,
+                    delay_ms,
+                    "write transaction could not take the lock; retrying"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    // The `BEGIN IMMEDIATE` above already owns the write lock; wrapping it in an
+    // unchecked transaction gives the usual commit / rollback-on-drop semantics
+    // without issuing a second BEGIN.
+    Ok(conn.unchecked_transaction()?)
+}
+
+/// Whether a `rusqlite` error is the "another writer holds the lock" family, i.e. the
+/// only kind that is worth retrying.
+pub(crate) fn is_busy(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(e, _)
+            if matches!(
+                e.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+    )
+}

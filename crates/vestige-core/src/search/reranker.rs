@@ -127,16 +127,19 @@ impl Reranker {
         }
     }
 
-    /// Initialize the cross-encoder model (Jina Reranker v2 Base Multilingual, ~1.1GB)
+    /// Load the cross-encoder model (Jina Reranker v2 Base Multilingual, 278M params)
+    /// **without holding any lock**.
     ///
-    /// Downloads the model on first call. Call this during server startup,
-    /// NOT in tests or hot paths.
+    /// Downloads the model on first call and reads ~150 MB from disk on every later
+    /// start, so callers must run this on a blocking thread — see the startup path in
+    /// `main.rs`. Loading it while holding the shared `CognitiveEngine` mutex used to
+    /// stall every other tool (`explore`, `predict`, `session_context`, …) for the
+    /// duration of the load.
+    ///
+    /// Returns `None` when the model is unavailable; the caller keeps the BM25
+    /// term-overlap fallback in that case.
     #[cfg(feature = "embeddings")]
-    pub fn init_cross_encoder(&mut self) {
-        if self.cross_encoder.is_some() {
-            return; // Already initialized
-        }
-
+    pub fn load_cross_encoder() -> Option<TextRerank> {
         let options = RerankInitOptions::new(RerankerModel::JINARerankerV2BaseMultiligual)
             .with_cache_dir(get_cache_dir())
             .with_show_download_progress(true);
@@ -148,14 +151,42 @@ impl Reranker {
                     params = "278M",
                     "cross-encoder reranker loaded"
                 );
-                self.cross_encoder = Some(model);
+                Some(model)
             }
             Err(e) => {
                 tracing::warn!(
                     error = %e,
                     "cross-encoder unavailable, falling back to BM25 term-overlap scoring"
                 );
+                None
             }
+        }
+    }
+
+    /// Install a model produced by [`Self::load_cross_encoder`].
+    ///
+    /// Cheap by construction: it only moves an already-loaded model into place, so a
+    /// caller can hold the engine lock for the handful of nanoseconds this takes.
+    #[cfg(feature = "embeddings")]
+    pub fn install_cross_encoder(&mut self, model: TextRerank) {
+        if self.cross_encoder.is_none() {
+            self.cross_encoder = Some(model);
+        }
+    }
+
+    /// Initialize the cross-encoder model (Jina Reranker v2 Base Multilingual, ~1.1GB)
+    ///
+    /// Convenience wrapper that loads and installs in one call. Async startup paths
+    /// should prefer [`Self::load_cross_encoder`] + [`Self::install_cross_encoder`] so
+    /// the load never happens under a lock.
+    #[cfg(feature = "embeddings")]
+    pub fn init_cross_encoder(&mut self) {
+        if self.cross_encoder.is_some() {
+            return; // Already initialized
+        }
+
+        if let Some(model) = Self::load_cross_encoder() {
+            self.install_cross_encoder(model);
         }
     }
 
