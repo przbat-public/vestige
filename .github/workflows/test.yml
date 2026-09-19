@@ -22,10 +22,20 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # NOTE: VESTIGE_TEST_MOCK_EMBEDDINGS used to be set here. No code path ever
-  # read it (0 hits outside docs), so it only advertised a mock-embedding mode
-  # that does not exist. Re-add it only together with the code that reads it
-  # (embedding init under cfg(test), or an explicit mock provider).
+  # Offline, deterministic embeddings for every job. The switch is read by
+  # `vestige_core::embeddings::mock_embeddings_enabled`
+  # (crates/vestige-core/src/embeddings/local.rs): while it is on, the ONNX
+  # forward pass is replaced by a hash of the text — same 384 dimensions,
+  # L2-normalised, lexically meaningful — so the semantic path
+  # (embeddings → HNSW → RRF) is exercised without downloading the ~547 MB
+  # model on a cold cache. It is a *runtime* switch: it cannot change the
+  # artifacts release.yml compiles.
+  # No test asserts real-model behaviour (nothing pins `model_name()`,
+  # `is_ready()` or a similarity value, and every decision assertion expects
+  # "create", which the mock reproduces), and tests/e2e forces the same value
+  # onto the server processes it spawns (tests/e2e/src/harness/mcp_process.rs).
+  # Set it to "0" for a run that must load the real model.
+  VESTIGE_TEST_MOCK_EMBEDDINGS: "1"
 
 # Cancel previous runs on the same ref to save CI minutes.
 concurrency:
@@ -43,6 +53,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: ./scripts/check-version-and-tools.sh
+      # The MCPB bundle is assembled by hand (`packages/vestige-mcpb/build.sh`
+      # then `mcpb pack`), and nothing checked that manifest.json, launch.sh and
+      # build.sh agree — which is how the ARM64 Linux binary shipped without any
+      # host being able to select it. Static check: no network, no binaries, no
+      # Rust toolchain.
+      - run: ./packages/vestige-mcpb/check-manifest.sh
+      # `npm install vestige-mcp-server` downloads a release archive and then
+      # executes what is inside it, so the wrapper verifies the published
+      # `<archive>.sha256` before extracting anything (fail-closed on a
+      # mismatch, explicit warning when a release predates the checksums). The
+      # test is hermetic — node:test plus builtins, local tarballs, no network —
+      # and needs no dependency install.
+      - run: node --test packages/vestige-mcp-npm/scripts/binary-install.test.js
 
   fmt:
     name: Rustfmt
@@ -99,6 +122,34 @@ jobs:
       # configuration without paying for a full release build; tests and benches
       # are deliberately excluded because they are not what ships.
       - run: cargo check -p vestige-mcp -p vestige-restore --no-default-features
+
+  check-windows:
+    name: Check (windows-latest)
+    runs-on: windows-latest
+    needs: [metadata]
+    if: github.event_name != 'schedule'
+    # Cold Windows cache: the workspace builds fastembed / ort / tokenizers /
+    # rusqlite / usearch from scratch, which is slower than the POSIX runners.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: windows
+      # release.yml ships x86_64-pc-windows-msvc (and the npm wrapper maps
+      # win32+x64 onto that archive), but nothing in CI ever compiled the
+      # workspace for Windows: a cfg- or dependency-level break could only
+      # surface while tagging a release. release.yml runs with fail-fast: false,
+      # so the other targets would still publish and Windows users would get a
+      # 404 from postinstall.
+      #
+      # Compile-only, and deliberately NOT part of the `check` matrix that
+      # unit-tests / mcp-tests / journey-tests depend on: this job adds platform
+      # coverage without gating the rest of the pipeline. Clippy stays on the two
+      # POSIX runners — turning on `-D warnings` for a platform that has never
+      # been linted is a separate change.
+      - run: cargo check --workspace --all-targets --all-features
 
   doc:
     name: Rustdoc
