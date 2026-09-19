@@ -42,6 +42,7 @@ see [`PORTING-NOTES.md`](PORTING-NOTES.md) for measured runtimes.
 | `LONGMEMEVAL.lock.json` | Pinned LongMemEval_S (cleaned) revision + hash. |
 | `longmemeval.py` | LongMemEval_S **sanity check only** — see below. **Ported**. |
 | `results/` | Timestamped run outputs. |
+| `RESULTS.md` | Numbers measured in this tree. Its tables are **generated** by `run.py --render-table` (see the `wygenerowane przez` comment above each table), never transcribed by hand. |
 
 ## The four arms
 
@@ -75,17 +76,63 @@ changes: retrieval.
 --data-dir D         base dir for per-user stores (default results/datadir-<stamp>/)
 --keep-databases     keep the per-user stores instead of deleting them
 --out PATH           results JSON path
+--mcnemar A:B[,A:B]  paired exact McNemar test over questions both arms answered
+                     (default vestige:bm25; 'none' disables). p-values land in the
+                     results JSON under `significance`
+--min-reportable-n N  flag every column computed on fewer than N questions (default 10);
+                     warnings go to the console, to `power_analysis` in the JSON and
+                     to a trailing '*' in the markdown table
+--markdown-table P   write the results table as markdown to P, generated from
+                     TABLE_COLUMNS (never transcribe a table by hand)
+--render-table J     do not run anything: re-render the table (and any requested
+                     McNemar tests) from one or more stored results JSON files
 ```
 
 Static-conflict questions (the ones that exercise CRS) first appear around
 session 16-24 depending on the instance. `--sessions 25` is the practical
 floor for covering all three conflict types.
 
-Fast offline iteration, no server needed (sub-second):
+Fast offline iteration, no server needed:
 
 ```sh
 python3 benchmarks/memconflict/run.py --arms nomem,random,bm25 --instances 1 --sessions 25
 ```
+
+Regenerating a published table from the committed artifacts (this is exactly how
+the Run 1 table in [`RESULTS.md`](RESULTS.md) is produced — the output is pasted
+verbatim, comment included):
+
+```sh
+python3 benchmarks/memconflict/run.py --render-table \
+  benchmarks/memconflict/results/ab-mmr-off-20260919.json,benchmarks/memconflict/results/ab-mmr-on-20260919.json \
+  --markdown-table /tmp/results-run1.md
+```
+
+## Statistics: what is and is not tested
+
+Delta sentences in this directory are cheap to write and easy to over-claim, so
+the harness now reports three things next to every table:
+
+- **A paired test, on request.** `--mcnemar A:B` (default `vestige:bm25`)
+  runs an exact two-sided McNemar test over the questions both arms answered,
+  on binarised `answer_accuracy` (≥ 0.5), and writes the p-value, the
+  discordant counts, a per-conflict-type and a per-instance breakdown into the
+  results JSON under `significance`. Stdlib only (`math.comb`), no SciPy.
+- **Cluster honesty.** Questions are nested inside simulated users, so the
+  effective sample is the number of users, not the number of questions.
+  McNemar assumes independent pairs, which makes every p *optimistic*; the
+  `per_instance` block is what exposes the clustering and must be read with
+  the p-value.
+- **Small-n flags.** `--min-reportable-n` (default 10) marks any column whose
+  stratum has fewer questions — console, JSON (`power_analysis`) and markdown
+  (`*`). Nothing is suppressed; a flagged number is still visible so a reader
+  can see it is noise.
+
+Not tested, and not to be implied by any number here: confidence intervals,
+cluster bootstrap, multiple-comparison correction, and any metric that is not
+defined per question (e.g. `crs_struct`, a vestige-only capability report with
+no control arm). Absolute values are not comparable to the paper's table — see
+[`PORTING-NOTES.md`](PORTING-NOTES.md).
 
 ## Gotchas
 

@@ -61,6 +61,16 @@ CONTEXT_MAX_CHARS = int(os.environ.get("LOCOMO_CONTEXT_MAX_CHARS", "0")) or None
 # rate limit allows.
 THROTTLE_SECS = float(os.environ.get("LOCOMO_THROTTLE_SECS", "1.0"))
 
+# Conversation-level filter (sample_id values such as "conv-26"). Applied
+# BEFORE sampling, so a tune/hold-out split is possible: run the tune
+# conversations, choose the prompt/knobs, then re-run with the held-out ones.
+# The list actually used is recorded in the output JSON as "conversations".
+CONVERSATIONS = [
+    c.strip()
+    for c in os.environ.get("LOCOMO_CONVERSATIONS", "").split(",")
+    if c.strip()
+]
+
 # Per-rank weights for score-adaptive truncation. Top-1 gets the largest
 # slice; the long tail still gets enough to hold a useful sentence or two.
 # These sum to ~1.0 and follow a ZIPF-like decay tuned on LoCoMo dev set.
@@ -651,12 +661,38 @@ def main():
 
     results = data["results"]
 
+    if CONVERSATIONS:
+        before = len(results)
+        allowed = set(CONVERSATIONS)
+        results = [r for r in results if r.get("sample_id") in allowed]
+        present = sorted({r.get("sample_id") for r in results if r.get("sample_id")})
+        missing = sorted(allowed - set(present))
+        print(
+            f"Conversation filter LOCOMO_CONVERSATIONS={','.join(CONVERSATIONS)}: "
+            f"{before} -> {len(results)} questions; conversations present: "
+            f"{', '.join(present) if present else '(none)'}",
+            flush=True,
+        )
+        if missing:
+            print(
+                f"WARNING: requested conversation(s) with no questions in the "
+                f"retrieval results: {', '.join(missing)}",
+                flush=True,
+            )
+        if not results:
+            print("Nothing left to evaluate after the conversation filter.", flush=True)
+            sys.exit(1)
+
     sample_size = int(os.environ.get("LOCOMO_SAMPLE", "0"))
     seed = int(os.environ.get("LOCOMO_SEED", "42"))
     if sample_size > 0 and sample_size < len(results):
         random.seed(seed)
         results = random.sample(results, sample_size)
         print(f"Sampled {sample_size} questions (seed={seed})", flush=True)
+
+    conversations_evaluated = sorted(
+        {r.get("sample_id") for r in results if r.get("sample_id")}
+    )
 
     print(
         f"Evaluating {len(results)} questions with answer={ANSWER_MODEL} judge={JUDGE_MODEL}",
@@ -795,6 +831,8 @@ def main():
         "pipeline": data.get("pipeline"),
         "sample_size": sample_size if sample_size > 0 else None,
         "sample_seed": seed if sample_size > 0 else None,
+        "conversations_filter": CONVERSATIONS or None,
+        "conversations": conversations_evaluated,
         "overall_llm_score": overall_score,
         "per_category": per_cat,
         "retrieval_metrics": data.get("retrieval_metrics", {}),

@@ -184,6 +184,20 @@ python3 benchmarks/memconflict/fetch_dataset.py
    the whole file regardless of `--questions`. It was ported the same way as
    `run.py` (per-question fresh store, `search` instead of `recall`) but has not
    been smoke-tested.
+8. **Significance is optional and optimistic.** `--mcnemar` (default
+   `vestige:bm25`) is the only statistical test in the harness: an exact
+   two-sided McNemar test on binarised per-question correctness. It treats
+   questions as independent, but they are nested inside simulated users, so the
+   p-value is optimistic; the `per_instance` breakdown in the results JSON is
+   the honest part. There are no confidence intervals, no cluster bootstrap and
+   no multiple-comparison correction. See the "Statistics" section of
+   [`README.md`](README.md).
+9. **Small strata are flagged, not hidden.** The reference run has 7
+   static-conflict and 3 conditional-conflict questions; `--min-reportable-n`
+   (default 10) marks them in the console, in `power_analysis` and with a `*`
+   in the markdown table. Macro AA still averages them with the 88-question
+   dynamic type, which is why the macro/micro split must always be reported
+   together.
 
 ## 8. Smoke command and expected runtime
 
@@ -234,7 +248,9 @@ Verified in this tree:
 | --- | --- |
 | `ast.parse` on `run.py`, `mcp_client.py`, `bm25.py`, `judge.py`, `fetch_dataset.py`, `longmemeval.py` | all OK |
 | `run.py --help`, `longmemeval.py --help` | both render, all flags documented |
-| `nomem` / `random` / `bm25` arms, 1 instance × 25 sessions | 0.4 s, 52 questions, no server needed |
+| `nomem` / `random` / `bm25` arms, 1 instance × 25 sessions | ~1.2 s, 52 questions (dynamic 46 / static 4 / conditional 2), no server needed |
+| `run.py --render-table results/ab-mmr-off-20260919.json,results/ab-mmr-on-20260919.json --markdown-table <tmp>` | re-renders the committed artifacts without running anything; the markdown output is the block published in `RESULTS.md`; `--mcnemar vestige:bm25` reports n=98, 19 vs 7 discordant, p=0.0290 |
+| column-contract gates | a swapped `statAA`/`CRSlex` label in `TABLE_COLUMNS`, a re-labelled column, and a results file whose `static_conflict` block lacks `crs_lex` all raise `SystemExit` instead of printing a table |
 | Full 4-arm run, 1 instance × 7 sessions, `--warmup 10` | 40 s, 9 questions, 0 errors |
 | Full 4-arm run, 1 instance × 17 sessions, `--warmup 10` | 67 s, 29 questions incl. 1 static, `deep_reference` probe executed, 0 errors |
 | Per-user store cleanup | base dir removed after the run; `results/` left with only the upstream artifacts |
