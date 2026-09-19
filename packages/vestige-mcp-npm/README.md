@@ -87,6 +87,26 @@ The model is cached in a platform-specific directory (macOS `~/Library/Caches/ve
 export FASTEMBED_CACHE_PATH="$HOME/.fastembed_cache"
 ```
 
+## Integrity of the downloaded binaries
+
+GitHub release archives are published together with a `<archive>.sha256` sibling
+(`sha256sum` format), and the installer verifies the download against it before
+anything is unpacked or executed:
+
+- **checksum matches** → the archive is extracted;
+- **checksum differs** → the installation is aborted, nothing is extracted, the
+  downloaded archive is deleted and the command exits non-zero;
+- **release has no `.sha256`** (anything published before the checksums were
+  added) → the install proceeds, but prints an explicit
+  `integrity … was NOT verified` warning.
+
+To check an archive by hand:
+
+```bash
+curl -LO https://github.com/samvallad33/vestige/releases/latest/download/vestige-mcp-aarch64-apple-darwin.tar.gz{,.sha256}
+shasum -a 256 -c vestige-mcp-aarch64-apple-darwin.tar.gz.sha256   # or sha256sum -c
+```
+
 ## Environment Variables
 
 | Variable | Description | Default |
@@ -94,6 +114,7 @@ export FASTEMBED_CACHE_PATH="$HOME/.fastembed_cache"
 | `RUST_LOG` | Log verbosity / tracing filter | `info` |
 | `FASTEMBED_CACHE_PATH` | Embeddings model cache location | platform cache dir |
 | `VESTIGE_DASHBOARD_PORT` | Dashboard HTTP + WebSocket port | `3927` |
+| `VESTIGE_SKIP_BINARY_DOWNLOAD` | Skip the postinstall download entirely (offline/vendored installs); no checksum is verified either | unset |
 
 Custom storage location is set with the `--data-dir <PATH>` flag, not an environment variable. See [docs/CONFIGURATION.md](https://github.com/samvallad33/vestige/blob/main/docs/CONFIGURATION.md) for the full list.
 
@@ -123,7 +144,7 @@ Fix the MCP connection first, then the model will download automatically.
 | Platform | Architecture |
 |----------|--------------|
 | macOS | ARM64 (Apple Silicon), x86_64 (Intel) |
-| Linux | x86_64 |
+| Linux | x86_64, ARM64 (aarch64) |
 | Windows | x86_64 |
 
 ## License

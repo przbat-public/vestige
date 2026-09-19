@@ -3,5 +3,8 @@ bin/vestige
 bin/vestige.exe
 bin/vestige-mcp
 bin/vestige-mcp.exe
+bin/vestige-restore
+bin/vestige-restore.exe
 bin/*.tar.gz
 bin/*.zip
+bin/*.sha256
