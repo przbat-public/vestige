@@ -2,7 +2,7 @@
 
 Vestige MCP Server - A synthetic hippocampus for AI assistants.
 
-Built on 130 years of cognitive science research, Vestige provides biologically-inspired memory that decays, strengthens, and consolidates like the human mind.
+Built on memory research from Ebbinghaus (1885) to FSRS-6, Vestige provides biologically-inspired memory that decays, strengthens, and consolidates like the human mind.
 
 ## Installation
 
@@ -71,15 +71,15 @@ vestige consolidate    # Run memory maintenance cycle
 
 Vestige uses SQLite for storage. Your memories are stored on **disk**, not in RAM.
 
-- **Database limit**: 216TB (SQLite theoretical max)
+- **Database limit**: ~17.5 TB — SQLite caps a database at 4,294,967,294 pages and a Vestige database runs at a 4 KiB page size (measured on a live database: `PRAGMA page_size` → 4096, `PRAGMA max_page_count` → 4294967294; migration V7 requests `page_size = 8192`, which does not take effect once the connection is in WAL mode). SQLite's theoretical maximum is ~281 TB at 64 KiB pages.
 - **RAM usage**: ~64MB cache (configurable)
-- **Typical usage**: 1 million memories ≈ 1-2GB on disk
+- **Typical usage**: 1 million memories ≈ 1-2GB on disk (rough estimate — there is no in-repo storage benchmark behind it)
 
-You'll never run out of space. A heavy user creating 100 memories/day would use ~1.5GB after 10 years.
+A heavy user creating 100 memories/day would reach ~365k memories after 10 years, i.e. ~0.4-0.7 GB at that same per-memory estimate.
 
 ## Embeddings
 
-On first use, Vestige downloads the nomic-embed-text-v1.5 model (~130MB). This is a one-time download and all subsequent operations are fully offline.
+On first use, Vestige downloads two ONNX models: nomic-embed-text-v1.5 (~547 MB, unquantized) and the Jina Reranker v2 base multilingual cross-encoder (~1.11 GB) — ~1.68 GB in total. This is a one-time download and all subsequent operations are fully offline.
 
 The model is cached in a platform-specific directory (macOS `~/Library/Caches/vestige.vestige/fastembed`, Linux `~/.cache/vestige/fastembed`). Override it with:
 

@@ -10,7 +10,7 @@
 
 **Your AI forgets everything between sessions. Vestige fixes that.**
 
-Built on 130 years of memory research — FSRS-6 spaced repetition, prediction error gating, synaptic tagging, spreading activation, memory dreaming — all running in a single Rust binary with a 3D neural visualization dashboard. 100% local. Zero cloud.
+Built on memory research from Ebbinghaus (1885) to FSRS-6 — spaced repetition, prediction error gating, synaptic tagging, spreading activation, memory dreaming — all running in a single Rust binary with a 3D neural visualization dashboard. 100% local. Zero cloud.
 
 [Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-28-mcp-tools) | [Docs](docs/)
 
@@ -163,7 +163,7 @@ Vestige speaks MCP — the universal protocol for AI tools. One brain, every IDE
 Vestige v2.0 ships with a real-time 3D visualization of your AI's memory. Every memory is a glowing node in 3D space. Watch connections form, memories pulse when accessed, and the entire graph come alive during dream consolidation.
 
 **Features:**
-- Force-directed 3D graph with 1000+ nodes at 60fps
+- Force-directed 3D graph — 50 nodes by default, hard cap 1000 (`/api/_meta/limits`); ~600 nodes is the highest count verified smooth so far (measured on an M1 Air), and LOD/clustering for larger graphs is still on the roadmap
 - Bloom post-processing for cinematic neural network aesthetic
 - Real-time WebSocket events: memories pulse on access, burst on creation, fade on decay
 - Dream visualization: graph enters purple dream mode, replayed memories light up sequentially
@@ -187,7 +187,7 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 │  Light/Dark Mode · a11y · 16 pages                  │
 ├─────────────────────────────────────────────────────┤
 │  Axum HTTP + WebSocket Server (port 3927)           │
-│  40 REST routes · ts-rs/Zod wire contract · WS bus  │
+│  40 routes (33 REST API paths) · ts-rs/Zod · WS     │
 ├─────────────────────────────────────────────────────┤
 │  MCP Server (stdio JSON-RPC + HTTP on :3928)        │
 │  28 tools · 11 resources · per-session instances    │
@@ -318,8 +318,8 @@ The canonical catalog lives in [`crates/vestige-mcp/src/server/catalog.rs`](crat
 | `memory_changelog` | Audit trail of state transitions |
 | `split_memories` | Find compound/multi-topic memories that should be split into atomic pieces |
 | `regenerate_embeddings` | Backfill or rebuild embeddings (e.g. after a model upgrade or a long offline stretch) |
-| `backup` / `export` / `gc` | Database backup, JSON export, garbage collection |
-| `restore` | Restore from JSON backup |
+| `backup` / `export` / `gc` | Database backup, JSON export, garbage collection (`gc` is dry-run by default; the destructive pass needs `confirmed: true`) |
+| `restore` | Restore from JSON backup — no dry-run mode; every call must pass `confirmed: true` |
 
 ---
 
@@ -355,9 +355,9 @@ At the start of every session:
 | **Language** | Rust 2024 edition (MSRV 1.91) |
 | **Codebase** | 1,080+ tests + 10 scientific validation + 18 cognitive journey tests |
 | **Binary size** | ~20MB |
-| **Embeddings** | Nomic Embed Text v1.5 (768D → 384D Matryoshka, 8192 context) |
+| **Embeddings** | Nomic Embed Text v1.5 (768D → 384D Matryoshka, 8192 context; ~547 MB ONNX) |
 | **Vector search** | USearch HNSW (in-memory ANN, single-thread reads via mutex) |
-| **Reranker** | Jina Reranker v2 Base Multilingual (278M params) |
+| **Reranker** | Jina Reranker v2 Base Multilingual (278M params, ~1.11 GB ONNX) |
 | **Search** | Triple hybrid scoring (BM25 + semantic + RRF) + metacognition + interference resolution |
 | **Storage** | SQLite + FTS5 (optional SQLCipher encryption) |
 | **Dashboard** | React 19 + Vite 6 + React Router 7 + Three.js + Tailwind CSS 4 + i18next |
@@ -366,7 +366,7 @@ At the start of every session:
 | **Transport** | MCP stdio (JSON-RPC 2.0) + optional HTTP MCP (port 3928) + WebSocket |
 | **MCP tools** | 28 (4 unified + smart_ingest + 2 temporal + 7 maintenance + 2 dedup + 4 cognitive + restore + session_context + 2 autonomic + 3 metacognitive + deep_reference) |
 | **Cognitive modules** | Stateful neuroscience + advanced + search families. Canonical list in `cognitive.rs::CognitiveEngine` |
-| **First run** | Downloads embedding + reranker models (~1.3GB), then fully offline |
+| **First run** | Downloads embedding + reranker models (~1.68 GB: ~547 MB nomic-embed-text-v1.5 ONNX + ~1.11 GB Jina Reranker v2 ONNX), then fully offline |
 | **Platforms** | macOS (ARM/Intel), Linux (x86_64), Windows |
 
 ### Optional Features
@@ -426,7 +426,7 @@ claude mcp add vestige /usr/local/bin/vestige-mcp -s user
 <details>
 <summary>Embedding model download fails</summary>
 
-First run downloads ~130MB from Hugging Face. If behind a proxy:
+First run downloads ~547 MB (embedding model) plus ~1.11 GB (reranker) from Hugging Face. If behind a proxy:
 ```bash
 export HTTPS_PROXY=your-proxy:port
 ```

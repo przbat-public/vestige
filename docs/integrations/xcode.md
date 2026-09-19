@@ -163,7 +163,7 @@ See [CLAUDE.md templates](../CLAUDE-SETUP.md) for a full setup.
 
 ### Embedding model cache
 
-The first time Vestige runs, it downloads the embedding model (~130MB). In Xcode's sandboxed environment, the cache location is:
+The first time Vestige runs, it downloads the embedding model (~547 MB) and the reranker (~1.11 GB). In Xcode's sandboxed environment, the cache location is:
 
 ```
 ~/Library/Caches/vestige.vestige/fastembed
@@ -228,7 +228,7 @@ Xcode 26.3 has a feature gate (`claudeai-mcp`) that may block custom MCP servers
 <details>
 <summary>Embedding model fails to download</summary>
 
-The first run downloads ~130MB. If Xcode's sandbox blocks the download:
+The first run downloads ~1.68 GB (~547 MB embedding model + ~1.11 GB reranker). If Xcode's sandbox blocks the download:
 
 1. Run `vestige-mcp` once from your terminal to cache the model
 2. The cache at `~/Library/Caches/vestige.vestige/fastembed` will be available to the sandboxed instance

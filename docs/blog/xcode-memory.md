@@ -14,7 +14,7 @@ I fixed this with one file and 30 seconds.
 
 ## The Setup
 
-[Vestige](https://github.com/samvallad33/vestige) is a cognitive memory system built on 130 years of memory research. It uses FSRS-6 spaced repetition (the algorithm behind modern Anki), prediction error gating, synaptic tagging, and spreading activation — all running in a single Rust binary, 100% local.
+[Vestige](https://github.com/samvallad33/vestige) is a cognitive memory system built on memory research from Ebbinghaus (1885) to FSRS-6. It uses FSRS-6 spaced repetition (the algorithm behind modern Anki), prediction error gating, synaptic tagging, and spreading activation — all running in a single Rust binary, 100% local.
 
 It speaks MCP (Model Context Protocol), the same protocol Xcode 26.3 uses for tool integration. So connecting them was trivial.
 
@@ -83,7 +83,7 @@ Vestige remembers the way a brain does:
 - **Prediction error gating** — automatically deduplicates and decides whether to create, update, or supersede memories
 - **Spreading activation** — searching for one memory strengthens related memories
 - **Synaptic tagging** — important memories get tagged for long-term consolidation
-- **23 cognitive tools** — search, ingest, dream, predict, explore connections, garbage collect, and more
+- **28 MCP tools** — search, ingest, dream, predict, explore connections, garbage collect, and more
 
 All running locally in a single Rust binary. No cloud. No API keys. No data leaves your machine.
 

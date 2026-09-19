@@ -47,7 +47,7 @@ where factor = 0.9^(-1/w₂₀) - 1
 - `R` = retrievability (probability of recall)
 - `t` = time since last review
 - `S` = stability (time for R to drop to 90%)
-- `w₂₀` = personalized decay parameter (0.1-0.8)
+- `w₂₀` = personalized decay parameter, clamped to FSRS-6's valid decay range **[0.01, 1.0]** (`storage/sqlite/fsrs_personalization.rs::save_personalized_w20`). Upstream default: 0.1542.
 
 FSRS-6 uses 21 parameters optimized on 700M+ Anki reviews. The FSRS team's open [SRS benchmark](https://github.com/open-spaced-repetition/srs-benchmark) compares it against SM-2 and other schedulers; their published number is roughly a 30% reduction in review burden at the same target retention. Vestige uses the upstream default weights as-is and does **not** rerun that benchmark on its own corpus — quote the upstream measurement, not ours.
 
@@ -78,6 +78,8 @@ Accessibility is calculated as:
 ```
 accessibility = 0.5 × retention + 0.3 × retrieval_strength + 0.2 × storage_strength
 ```
+
+**Two classifiers, one caveat.** The table above is the accessibility classifier used by `memory(action="state")` and the dashboard (`tools/memory_unified/helpers.rs`, thresholds `0.7 / 0.4 / 0.1`). The search pipeline and consolidation snapshots bucket on raw `retention_strength` instead, with a **0.3** Dormant cut-off (`tools/search_unified/pipeline/scoring.rs`, `storage/sqlite/consolidation.rs`). A memory at `retention_strength = 0.35` is therefore Dormant in `memory(action="state")` but Silent in search scoring and consolidation stats; the thresholds are not yet unified. See [ARCHITECTURE.md → Memory States](../ARCHITECTURE.md#memory-states).
 
 Memories are never deleted automatically. They fade from relevance but can be revived if accessed again.
 
@@ -124,17 +126,13 @@ In Vestige's implementation:
 
 **Synaptic Tagging & Capture** (Frey & Morris, 1997) discovered that important events retroactively strengthen recent memories.
 
-In Vestige:
-```
-importance(
-  memory_id="the-important-one",
-  event_type="user_flag",
-  hours_back=9,
-  hours_forward=2
-)
-```
+In Vestige the mechanism lives in `vestige_core::neuroscience::synaptic_tagging` and runs *inside* the ingest and consolidation paths — there is no `importance` tool to call:
 
-When you flag something important, it strengthens ALL memories from the surrounding time window (default: 9 hours back, 2 hours forward). This models biological memory consolidation.
+- `smart_ingest` tags a new memory once its importance composite exceeds 0.3, and fires a PRP (plasticity-related protein) event above 0.7 (`tools/smart_ingest/post_ingest.rs`).
+- `dream` replays the accumulated tags during consolidation (`tools/dream.rs`).
+- The capture window defaults to **9 hours back / 2 hours forward** (`DEFAULT_BACKWARD_HOURS = 9.0`, `DEFAULT_FORWARD_HOURS = 2.0`) and tag lifetime to 12 hours. These are compile-time constants in the core engine, not per-call parameters.
+
+The event taxonomy (`ImportanceEventType`: `UserFlag`, `EmotionalContent`, `NoveltySpike`, `RepeatedAccess`, `CrossReference`, `TemporalProximity`) exists in the core enum, but the MCP layer only ever emits `NoveltySpike` — so the "retroactively flag this as important" flow is not reachable through `tools/list` today. To strengthen a specific memory on demand, call `memory(action="promote")`; to score content before saving it, call `importance_score(content, context_topics, project)`.
 
 ---
 
@@ -142,18 +140,19 @@ When you flag something important, it strengthens ALL memories from the surround
 
 Based on **Tulving's Encoding Specificity (1973)**: we remember better when retrieval context matches encoding context.
 
-The `context` tool exploits this:
+In Vestige this is stage 5 of the unified `search` pipeline, driven by the `context_topics` parameter:
+
 ```
-context(
+search(
   query="error handling patterns",
-  project="my-api",
-  topics=["authentication"],
-  time_weight=0.3,
-  topic_weight=0.4
+  context_topics=["authentication"],
+  token_budget=3000
 )
 ```
 
-If you learned something while working on auth, you'll recall it better when working on auth again.
+Topic overlap between the retrieval topics and a memory's tags scales that memory's score by up to +30% (`tools/search_unified/pipeline/scoring.rs::apply_context_matching`). Only `search` exposes this knob — `session_context(context.topics=[...])` and `predict(context.current_topics=[...])` feed the predictive-retrieval `SessionContext` instead (the first topic becomes `current_focus`), not the search-time boost.
+
+There is no separate `context` tool, and no `mood` / `time_weight` / `topic_weight` knobs — those parameters were never implemented. `context_topics` is the only context channel the search schema accepts.
 
 ---
 
@@ -203,13 +202,15 @@ Beyond search, `deep_reference` runs a full reasoning pipeline across memories: 
 **Nomic Embed Text v1.5** (via fastembed):
 - 768-dimensional vectors, truncated to 384D via Matryoshka representation learning (~1% MTEB loss vs full 768, ~2× smaller vectors → lower HNSW memory footprint), then L2-renormalized.
 - 8,192-token context window.
-- ~130 MB model size.
+- ~547 MB ONNX model (`onnx/model.onnx` of `nomic-ai/nomic-embed-text-v1.5`, unquantized — measured in the fastembed cache).
 - Runs 100% local (after first download).
 - Competitive with OpenAI's `text-embedding-3-small` on MTEB.
 
 ## Reranker
 
-**Jina Reranker v2 Base Multilingual** (278 M params, ~600 MB) cross-encodes the top-K candidates after hybrid retrieval. Multilingual coverage (100+ languages) and longer effective context than older bge-reranker variants.
+**Jina Reranker v2 Base Multilingual** (278 M params, ~1.11 GB ONNX) cross-encodes the top-K candidates after hybrid retrieval. Multilingual coverage (100+ languages) and longer effective context than older bge-reranker variants.
+
+Together the two downloads are **~1.68 GB** on first run. (Some code comments still quote older figures — `search/reranker.rs` says "~150 MB" in one place and "~1.1GB" in another; the measured cache sizes above are authoritative.)
 
 ## Cache Location
 

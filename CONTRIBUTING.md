@@ -59,8 +59,8 @@ VESTIGE_TEST_MOCK_EMBEDDINGS=1 cargo test --workspace
 | `VESTIGE_HTTP_BIND` / `VESTIGE_HTTP_PORT` | HTTP transport bind (default `127.0.0.1:3928`) |
 | `VESTIGE_DASHBOARD_PORT` | Dashboard port (default `3927`) |
 | `VESTIGE_AUTH_TOKEN` | Override the bearer token for the HTTP transport (auto-generated otherwise) |
-| `VESTIGE_MAX_TOKEN_BUDGET` | Cap for `search` / `session_context` token budget |
-| `VESTIGE_RETENTION_TARGET` | FSRS-6 retention target override (default `0.85`) |
+| `VESTIGE_MAX_TOKEN_BUDGET` | Upper clamp for the `search` / `session_context` response token budget (default `100000`) |
+| `VESTIGE_RETENTION_TARGET` | FSRS-6 retention target override (default `0.8`) |
 | `VESTIGE_CONSOLIDATION_INTERVAL_HOURS` | Background consolidation cadence (default `6`) |
 | `RUST_LOG` | Tracing filter (e.g. `vestige_mcp=debug,vestige_core=info`) |
 

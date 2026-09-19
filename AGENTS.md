@@ -40,8 +40,11 @@ Then check `automationTriggers` from response:
 - `needsDream` → call `dream`
 - `needsBackup` → call `backup`
 - `needsGc` → call `gc` with `dry_run: true`, then review
+
+`session_context` returns exactly those three triggers in `automationTriggers`. The memory-count and saves-based rules need one extra call — `system_status` reports both fields:
+
 - `totalMemories` > 700 → call `find_duplicates`
-- `savesSinceLastDream` > 100 → call `reflect` (metacognitive check)
+- `automationTriggers.savesSinceLastDream` > 100 → call `reflect` (metacognitive check)
 
 > **Fallback:** If `session_context` unavailable: `search` × 2 → `intention` check → `system_status` → `predict`.
 
@@ -53,6 +56,7 @@ Then check `automationTriggers` from response:
 - **FSRS-6 consolidation** — background loop every 6h (configurable via `VESTIGE_CONSOLIDATION_INTERVAL_HOURS`)
 - **Inline consolidation** — after tool calls, `ConsolidationScheduler` decides when to run mini-consolidation
 - **Reconsolidation window expiry** — 5-minute labile windows auto-expire
+- **Nothing is ever deleted automatically.** Consolidation only *reports* low-retention candidates; `gc_below_retention` is never called from an automatic path. GC happens only when you call `gc` (dry-run first, `confirmed: true` for the destructive pass).
 
 ### You must trigger (via automationTriggers)
 | Trigger | Condition | Tool to call |
@@ -239,6 +243,12 @@ Returns multi-dimensional scores: encoding, retrieval, temporal, evidence.
   "current_topics": ["error handling", "rust"] } }
 ```
 
+### precompute_for_context — Sleep-Time Compute
+```json
+{ "topic": "OAuth2 token refresh", "top_k": 5, "ttl_hours": 24 }
+```
+Pre-fetches and summarizes the top-K memories for an upcoming topic **before** you ask, storing the digest as a `precomputed_summary` memory tagged `precomputed` + `topic:<slug>` with `valid_until = now + ttl_hours`. `topic` is required; `top_k` is clamped to 1–20 (default 5) and `ttl_hours` to 1–168 (default 24). Call it at session start ("I expect to work on X today") or session end; the next `search` / `session_context` / `deep_reference` call hits the warm cache. Mutating but additive — each call mints a fresh memory and older summaries expire through `temporal`.
+
 ### deep_reference — Cognitive Reasoning Engine
 ```json
 { "query": "Why did we choose PostgreSQL over MySQL?", "depth": 20 }
@@ -250,7 +260,7 @@ Full reasoning across memories: FSRS-6 trust scoring, intent classification (Fac
 ```json
 { "content": "Content to evaluate", "context_topics": ["debugging"], "project": "vestige" }
 ```
-Composite > 0.6 = save it.
+Composite > 0.6 = save it (documentation heuristic — the tool returns the score and enforces no threshold).
 
 ### find_duplicates, memory_timeline, memory_changelog, memory_health, memory_graph
 ```json
@@ -277,8 +287,8 @@ system_status: {}
 consolidate: {}
 backup: {}
 export: { "format": "json", "tags": ["bug-fix"], "since": "2026-01-01" }
-gc: { "min_retention": 0.1, "dry_run": true }
-restore: { "path": "/path/to/backup.json" }
+gc: { "min_retention": 0.1, "dry_run": true }                      // dry_run:false additionally requires "confirmed": true
+restore: { "path": "/path/to/backup.json", "confirmed": true }     // no dry-run mode — confirmed is mandatory on every call
 ```
 
 ---
@@ -341,13 +351,13 @@ restore: { "path": "/path/to/backup.json" }
 - **Bench:** `cargo bench -p vestige-core`
 - **Architecture:** `McpServer` → `Arc<Storage>` + `Arc<Mutex<CognitiveEngine>>`
 - **Storage:** SQLite WAL mode, `Mutex<Connection>` reader/writer split, FTS5 full-text search. Implementation split across `storage/sqlite/` per concern (nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats). Migrations v1–v15.
-- **Embeddings:** nomic-embed-text-v1.5 (768D → 384D Matryoshka truncation, 8K context) via fastembed (local ONNX, no API)
-- **Reranker:** Jina Reranker v2 Base Multilingual (278M params) cross-encoder
+- **Embeddings:** nomic-embed-text-v1.5 (768D → 384D Matryoshka truncation, 8K context) via fastembed (local ONNX, no API; ~547 MB download)
+- **Reranker:** Jina Reranker v2 Base Multilingual (278M params, ~1.11 GB ONNX download) cross-encoder
 - **Search:** Compound query decomposition + Triple hybrid scoring (BM25 + semantic + RRF), active forgetting, prospective indexing
 - **Vector index:** USearch HNSW (in-memory ANN; persisted to a `vestige.hnsw` sidecar + meta JSON and loaded on startup via a row-count-validated fast path, with rebuild-from-SQLite fallback when the sidecar is missing or stale)
 - **Binaries:** `vestige-mcp` (MCP server), `vestige` (CLI), `vestige-restore`
 - **Dashboard:** React 19 + Vite 6 + React Router 7 + Three.js + Tailwind 4 + i18next (EN/PL), embedded at `/dashboard`
-- **Dashboard API:** 40 REST routes (including `/api/reflect`, `/api/temporal`, `/api/confidence`, `/api/decisions`, `/api/hubs`, `/api/insights`, `/api/_meta/limits`). Handlers split per domain under `dashboard/handlers/` (memory, search, graph, history, intentions, maintenance, review, cognitive, metacognitive, observability, decisions, hubs, insights, pages).
+- **Dashboard API:** 40 route registrations — 33 distinct REST API paths plus 4 page/SPA routes (`/dashboard`, `/dashboard/{*path}`, `/`, `/graph`) and 1 WebSocket (`/ws`); `/api/memories/{id}` counts three times because GET, DELETE and PATCH each register it. Includes `/api/reflect`, `/api/temporal`, `/api/confidence`, `/api/decisions`, `/api/hubs`, `/api/insights`, `/api/_meta/limits`. Handlers split per domain under `dashboard/handlers/` (memory, search, graph, history, intentions, maintenance, review, cognitive, metacognitive, observability, decisions, hubs, insights, pages).
 - **Env vars:** `VESTIGE_DASHBOARD_PORT` (default 3927), `VESTIGE_CONSOLIDATION_INTERVAL_HOURS` (default 6), `RUST_LOG`, `VESTIGE_NOMIC_PREFIXES` (default off — apply Nomic `search_query:`/`search_document:` task prefixes; coupled with `regenerate_embeddings`, see `.env.example`)
 
 For cognitive architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).

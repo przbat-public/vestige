@@ -6,12 +6,12 @@
 
 ## First-Run Network Requirement
 
-Vestige downloads two models on first use:
+Vestige downloads two models on first use (~1.68 GB in total):
 
-- **Nomic Embed Text v1.5** (~130 MB) — embedding model
-- **Jina Reranker v2 Base Multilingual** (~278 M params, ~600 MB) — cross-encoder reranker
+- **Nomic Embed Text v1.5** (~547 MB ONNX, unquantized) — embedding model
+- **Jina Reranker v2 Base Multilingual** (~278 M params, ~1.11 GB ONNX) — cross-encoder reranker
 
-**All subsequent runs are fully offline.**
+Sizes are the measured `onnx/model.onnx` blobs in the fastembed cache. **All subsequent runs are fully offline.**
 
 ### Model Cache Location
 
@@ -42,8 +42,8 @@ Custom database location is set with the `--data-dir` flag (see [Command-Line Op
 | `VESTIGE_HTTP_BIND` | `127.0.0.1` | HTTP MCP transport bind address |
 | `VESTIGE_HTTP_PORT` | `3928` | HTTP MCP transport port (overridden by `--http-port`) |
 | `VESTIGE_AUTH_TOKEN` | auto-generated | Bearer token for the HTTP MCP transport (constant-time compared) |
-| `VESTIGE_MAX_TOKEN_BUDGET` | tool default | Cap for `search` / `session_context` token budget |
-| `VESTIGE_RETENTION_TARGET` | `0.85` | FSRS-6 retention target |
+| `VESTIGE_MAX_TOKEN_BUDGET` | `100000` | Upper clamp for the `search` / `session_context` **response** token budget (requests are capped separately: `vestige_core::fts` truncates queries to 1,000 chars / 32 terms) |
+| `VESTIGE_RETENTION_TARGET` | `0.8` | FSRS-6 retention target (read by consolidation reporting and `health`) |
 | `VESTIGE_CONSOLIDATION_INTERVAL_HOURS` | `6` | Background consolidation cadence |
 | `VESTIGE_NOMIC_PREFIXES` | off | Apply Nomic `search_query:`/`search_document:` task prefixes. Coupled with `regenerate_embeddings` — see [`.env.example`](../.env.example) |
 | `VESTIGE_ENCRYPTION_KEY` | — | Required when built with the `encryption` feature (SQLCipher) |

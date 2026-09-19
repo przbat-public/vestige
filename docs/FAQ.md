@@ -207,19 +207,15 @@ In Vestige's current implementation:
 
 **Synaptic Tagging & Capture** (Frey & Morris, 1997) discovered that important events retroactively strengthen recent memories.
 
-In Vestige's implementation:
-```
-importance(
-  memory_id="the-important-one",
-  event_type="user_flag",  # or "emotional", "novelty", "repeated_access", "cross_reference"
-  hours_back=9,   # Look back 9 hours (configurable)
-  hours_forward=2  # Capture next 2 hours too
-)
-```
+In Vestige's implementation the engine (`vestige_core::neuroscience::synaptic_tagging`) runs *inside* the ingest and consolidation paths — there is no `importance` tool:
 
-**Use case**: You realize mid-conversation that the architecture decision from 2 hours ago was pivotal. Call `importance` to retroactively strengthen it AND all related memories from that time window.
+- `smart_ingest` tags a memory once its importance composite exceeds 0.3, and fires a PRP event above 0.7 (`tools/smart_ingest/post_ingest.rs`).
+- `dream` replays those tags during consolidation (`tools/dream.rs`).
+- The capture window defaults to **9 hours back / 2 hours forward**, tag lifetime to 12 hours. These are compile-time constants in the core engine (`DEFAULT_BACKWARD_HOURS = 9.0`, `DEFAULT_FORWARD_HOURS = 2.0`), **not** per-call parameters.
 
-*Based on neuroscience research showing synaptic consolidation windows of several hours. Vestige uses 9 hours backward and 2 hours forward by default, which can be configured per call.*
+**Use case**: a memory that looked trivial this morning turns out to matter. The supported move today is `memory(action="promote", id="...")`, which raises its retrieval strength directly; retroactive tagging of a whole time window is wired to the automatic ingest path only. The event types (`user_flag`, `emotional`, `novelty`, `repeated_access`, `cross_reference`, `temporal_proximity`) exist in the core enum, but no MCP tool emits a `user_flag` event yet.
+
+*Based on neuroscience research showing synaptic consolidation windows of several hours; Vestige's 9h/2h defaults follow that literature.*
 </details>
 
 <details>
@@ -294,19 +290,18 @@ This is how Claude can remember to follow up on things across sessions.
 
 Based on **Tulving's Encoding Specificity (1973)**: we remember better when retrieval context matches encoding context.
 
-The `context` tool exploits this:
+In Vestige this is stage 5 of the unified `search` pipeline, driven by `context_topics`:
 ```
-context(
+search(
   query="error handling patterns",
-  project="my-api",           # Project context
-  topics=["authentication"],  # Topic context
-  mood="neutral",             # Emotional context
-  time_weight=0.3,           # Weight for temporal matching
-  topic_weight=0.4           # Weight for topic matching
+  context_topics=["authentication"],  # Topic context
+  token_budget=3000
 )
 ```
 
-**Why it matters**: If you learned something while working on auth, you'll recall it better when working on auth again. Vestige scores memories higher when contexts match.
+**Why it matters**: If you learned something while working on auth, you'll recall it better when working on auth again. Topic overlap between `context_topics` and a memory's tags scales its score by up to +30% (`tools/search_unified/pipeline/scoring.rs::apply_context_matching`).
+
+There is no separate `context` tool, and `project` / `mood` / `time_weight` / `topic_weight` were never implemented — `context_topics` is the only context channel the search schema accepts. (`session_context(context.topics=[...])` and `predict(context.current_topics=[...])` take a similar field but route it to predictive retrieval, where the first topic becomes the session focus — they do not apply the search-time boost.)
 </details>
 
 <details>
@@ -328,9 +323,9 @@ The unified `search` always uses hybrid, which gives you the best of both worlds
 
 Three approaches:
 
-1. **Mark as important**: `importance(memory_id="xxx", event_type="user_flag")`
+1. **Mark as important**: `memory(action="promote", id="xxx")` (legacy alias: `promote_memory`) — raises retrieval strength so it outranks competing memories
 2. **Access regularly**: The Testing Effect strengthens memories each time you retrieve them
-3. **Promote explicitly**: `promote_memory(id="xxx")` after it proves valuable
+3. **Score before saving**: `importance_score(content="...", context_topics=[...])` returns a composite score; > 0.6 is worth saving
 
 For truly critical information, consider also:
 - Using specific tags like `["critical", "never-forget"]`
@@ -435,9 +430,9 @@ SELECT COUNT(*) FROM knowledge_nodes WHERE retention_strength < 0.1;
 | `min_retention` in search | 0.0 | Filter out weak memories |
 | `min_similarity` in search | 0.5 | Minimum semantic match |
 | Prediction Error thresholds | 0.75, 0.92 | CREATE/UPDATE/REINFORCE boundaries |
-| Synaptic capture window | 9h back, 2h forward | Retroactive importance range |
-| Memory state thresholds | 0.1, 0.4, 0.7 | Silent/Dormant/Active accessibility boundaries |
-| Context weights | temporal: 0.3, topical: 0.4 | Context-dependent retrieval weights |
+| Synaptic capture window | 9h back, 2h forward | Retroactive importance range (constants in `vestige_core::neuroscience::synaptic_tagging` — not a tool parameter) |
+| Memory state thresholds | 0.1, 0.4, 0.7 | Accessibility boundaries for `memory(action="state")`; search scoring and consolidation bucket on raw retention with a 0.3 Dormant cut-off |
+| Confidence boost from `context_topics` | up to +30% | Context-dependent retrieval boost |
 
 Most of these are hardcoded but based on cognitive science research. Future versions may expose them.
 </details>
@@ -609,7 +604,7 @@ This matches empirical data better than the exponential model most apps use.
 
 **Nomic Embed Text v1.5** (via fastembed):
 - 768-dimensional vectors
-- ~130MB model size
+- ~547 MB ONNX model (`onnx/model.onnx`, unquantized)
 - Runs 100% local (after first download)
 - Good balance of quality vs speed
 
@@ -619,7 +614,7 @@ Why Nomic:
 - No API costs or rate limits
 - Fast enough for real-time search
 
-The model is cached at `~/.cache/huggingface/` after first run.
+The model is cached in the fastembed cache directory derived from `ProjectDirs::from("", "vestige", "vestige")` — macOS `~/Library/Caches/vestige.vestige/fastembed`, Linux `~/.cache/vestige/fastembed`, Windows `%LOCALAPPDATA%\vestige\vestige\cache\fastembed` — overridable with `FASTEMBED_CACHE_PATH`. The Jina reranker (~1.11 GB) is downloaded into the same cache on first start, so budget **~1.68 GB** in total.
 </details>
 
 <details>
@@ -741,23 +736,17 @@ Vestige uses SQLite + HNSW (via fastembed) for vectors, but wraps them in cognit
 
 **1. Multi-Channel Importance**
 
-The `importance` tool supports different importance types that affect strengthening differently:
-- `user_flag`: Explicit "this is important" (strongest)
-- `emotional`: Emotionally significant memories
-- `novelty`: Surprising/unexpected information
-- `repeated_access`: Auto-triggered by frequent retrieval
-- `cross_reference`: When multiple memories link together
+`importance_score(content="...", context_topics=[...], project="...")` scores content through the 4-channel neuroscience model (novelty / arousal / reward / attention) and returns the per-channel breakdown plus an encoding boost. Rule of thumb used in these docs: composite > 0.6 means it is worth saving (this is a documentation heuristic — the tool returns the score and does not enforce a threshold).
+
+Behind it sits the synaptic-tagging event taxonomy in the core engine — `user_flag`, `emotional`, `novelty`, `repeated_access`, `cross_reference`, `temporal_proximity`, each with a different base strength (`ImportanceEventType::base_strength`). The MCP layer currently emits only `novelty_spike` (from `smart_ingest`, when the importance composite exceeds 0.7), so the other channels are reachable from Rust code but not from a tool call.
 
 **2. Temporal Capture Window**
 
-When you flag something important, it doesn't just strengthen that memory—it strengthens ALL memories from the surrounding time window (default: 9 hours back, 2 hours forward). This models how biological memory consolidation works.
+When the ingest path fires a PRP event it strengthens not just that memory but everything inside the capture window (default: 9 hours back, 2 hours forward, tag lifetime 12 hours) — `DEFAULT_BACKWARD_HOURS` / `DEFAULT_FORWARD_HOURS` / `DEFAULT_TAG_LIFETIME_HOURS` in `vestige_core::neuroscience::synaptic_tagging`. These are compile-time constants, not per-call parameters.
 
 **3. Memory Dreams (Experimental)**
 
-The codebase contains a `ConsolidationScheduler` for automated memory processing. While not fully wired up, it's designed for:
-- Offline consolidation cycles
-- Automatic importance re-evaluation
-- Pattern detection across memories
+The `ConsolidationScheduler` drives inline consolidation between tool calls (`server/dispatch.rs` records activity and checks `should_consolidate()`), and `system_status` reports its activity stats and the time until the next consolidation. The four-phase `dream` cycle itself is user-triggered.
 
 **4. Accessibility Formula**
 
@@ -817,11 +806,11 @@ See [CLAUDE-SETUP.md](CLAUDE-SETUP.md) for the full template. The key elements:
 **During Work**:
 - Notice a pattern? `codebase(action="remember_pattern")`
 - Made a decision? `codebase(action="remember_decision")` with rationale
-- Something important? `importance()` to strengthen recent memories
+- Something important? `memory(action="promote", id="...")` to strengthen it
 
 **Memory Hygiene**:
-- When a memory helps: `promote_memory`
-- When a memory misleads: `demote_memory`
+- When a memory helps: `memory(action="promote", id="...")` (legacy alias: `promote_memory`)
+- When a memory misleads: `memory(action="demote", id="...")` (legacy alias: `demote_memory`)
 </details>
 
 ---
@@ -853,7 +842,7 @@ This folder is created by the fastembed library on first run, in whatever direct
 
 ### Model download fails
 
-First run requires internet to download the embedding model (~130MB). If behind a proxy:
+First run requires internet to download the embedding model (~547 MB) and the reranker (~1.11 GB). If behind a proxy:
 ```bash
 export HTTPS_PROXY=your-proxy:port
 ```

@@ -79,11 +79,11 @@ If you do not need the HTTP transport, leave the flag off — stdio is the prima
 
 All MCP tool inputs are validated before they reach storage:
 
-- Content size limit: 1 MB max per memory.
-- Query length limit: configurable via `VESTIGE_MAX_TOKEN_BUDGET`; tools default to safe ceilings.
-- FTS5 queries pass through `vestige_core::fts` which strips injection patterns and enforces length limits.
+- Content size limit: 1 MB max per memory (`smart_ingest` rejects longer content).
+- Query length limit: there is **no configurable cap on the query string itself**. `VESTIGE_MAX_TOKEN_BUDGET` (default 100,000) clamps the token budget of the *response*, not the request. The real query-side bound is in `vestige_core::fts`: queries are truncated to 1,000 characters and to at most 32 terms before they reach FTS5.
+- FTS5 handling: queries pass through `vestige_core::fts`, which drops boolean operators (`OR`/`AND`/`NOT`/`NEAR`), neutralises column targeting and unbalanced quotes, and enforces the character/term limits above.
 - All SQL uses parameterised queries (`params![]` macro) — no string interpolation.
-- The `restore` and `gc` tools default to `dry_run=true`. Destructive use requires explicit opt-in.
+- `gc` defaults to `dry_run=true`; `dry_run=false` is rejected unless the call also passes `confirmed: true`. `restore` has **no dry-run mode** and requires `confirmed: true` on every call (`tools/restore.rs`).
 
 ### Dependencies
 

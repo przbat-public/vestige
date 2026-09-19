@@ -84,8 +84,8 @@ The catalog is built in [`server/catalog.rs`](src/server/catalog.rs); every entr
 | `regenerate_embeddings` | backfill or rebuild embeddings (e.g. after model upgrade) | mutating, idempotent |
 | `backup` | create a SQLite snapshot file | mutating, additive |
 | `export` | JSON/JSONL dump (filter by tag/date) | read-only, idempotent |
-| `gc` | garbage collect below a retention threshold (default `dry_run=true`) | destructive, idempotent |
-| `restore` | restore from JSON backup (MCP wrapper / RecallResult / direct array formats) | destructive |
+| `gc` | garbage collect below a retention threshold (default `dry_run=true`; `dry_run=false` also requires `confirmed: true`) | destructive, idempotent |
+| `restore` | restore from JSON backup (MCP wrapper / RecallResult / direct array formats) — no dry-run mode, `confirmed: true` is mandatory | destructive |
 
 ## Available Resources (11)
 

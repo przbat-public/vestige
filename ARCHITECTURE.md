@@ -133,8 +133,8 @@ vestige/
    - Vector index: USearch HNSW
 2. **Rerank** — Cross-encoder rescoring (Jina Reranker v2 Base Multilingual, 278M params)
 3. **Temporal** — Recency + validity window boosting (85% relevance + 15% temporal)
-4. **Accessibility** — FSRS-6 retention filter (Active ≥0.7, Dormant ≥0.4, Silent ≥0.1)
-5. **Context** — Tulving 1973 encoding specificity (topic overlap → +30% boost)
+4. **Accessibility** — FSRS-6 retention filter. This stage buckets on raw `retention_strength` (`search_unified/pipeline/scoring.rs`): >0.7 Active, >0.3 Dormant, >0.1 Silent. Note the 0.3 cut-off for Dormant — `memory(action="state")` classifies on the accessibility composite with 0.4 instead (see [Memory States](#memory-states)).
+5. **Context** — Tulving 1973 encoding specificity (topic overlap via `context_topics` → up to +30% boost)
 6. **Competition** — Anderson 1994 retrieval-induced forgetting (winners strengthen, competitors weaken)
 7. **Activation** — Spreading activation side effects + predictive model + reconsolidation marking
 
@@ -174,10 +174,16 @@ ImportanceTracker, ReconsolidationManager (Nader — 5-minute labile window), In
 
 ### Memory States
 
-- **Active** (retention ≥ 0.7) — easily retrievable
+Two classifiers bucket memories into the same four states, and they do **not** currently share thresholds. This is a known divergence, documented rather than hidden:
+
+**1. Accessibility composite** — the canonical classifier behind `memory(action="state")`, the dashboard and `tools/memory_unified/helpers.rs` (`ACCESSIBILITY_ACTIVE = 0.7`, `ACCESSIBILITY_DORMANT = 0.4`, `ACCESSIBILITY_SILENT = 0.1`). It buckets the weighted composite `accessibility = 0.5 × retention + 0.3 × retrieval + 0.2 × storage`:
+
+- **Active** (accessibility ≥ 0.7) — easily retrievable
 - **Dormant** (≥ 0.4) — retrievable with effort
 - **Silent** (≥ 0.1) — difficult, needs cues
 - **Unavailable** (< 0.1) — needs reinforcement
+
+**2. Raw retention** — the search pipeline (`tools/search_unified/pipeline/scoring.rs`) and consolidation snapshots (`storage/sqlite/consolidation.rs`) bucket on `retention_strength` alone with a **0.3** Dormant cut-off (>0.7 Active, >0.3 Dormant, >0.1 Silent). A memory with `retention_strength = 0.35` therefore reads as Dormant in `memory(action="state")` but as Silent in search scoring and consolidation stats. Unifying the two thresholds is tracked as a follow-up; until then, quote the classifier you mean.
 
 ### Connection Types
 
@@ -193,7 +199,7 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 |-----------|---------|
 | **SQLite** | WAL mode, reader/writer connection split, PRAGMA optimizations |
 | **FTS5** | Full-text search with porter tokenizer, page_size tuning |
-| **Migrations** | Versions 1–14. FSRS, embeddings, neuroscience tables, graph/scopes, FSRS-6 upgrade, dream history, FTS5, autonomic fields, emotional/temporal hierarchy, V10 provenance tracking, V11 typed memory `MemoryKind`, V12 typed-memory tables (`decisions`, `hubs`, `insights` + foreign-key indexes), V13 tier/confidence columns on `insights` and `decisions`, V14 `auto_vacuum=INCREMENTAL` (reclaims deleted pages without a full `VACUUM`; runs outside a transaction, see `migrations/runner.rs`). All forward-only and idempotent. |
+| **Migrations** | Versions 1–15. FSRS, embeddings, neuroscience tables, graph/scopes, FSRS-6 upgrade, dream history, FTS5, autonomic fields, emotional/temporal hierarchy, V10 provenance tracking, V11 typed memory `MemoryKind`, V12 typed-memory tables (`decisions`, `hubs`, `insights` + foreign-key indexes), V13 tier/confidence columns on `insights` and `decisions`, V14 `auto_vacuum=INCREMENTAL` (reclaims deleted pages without a full `VACUUM`; runs outside a transaction, see `migrations/runner.rs`), V15 FTS5 tokenizer `porter unicode61 remove_diacritics 2` (accent folding, non-ASCII tokens). All forward-only and idempotent. |
 | **Vector index** | USearch HNSW, feature-gated behind `vector-search` |
 | **Embeddings** | Nomic Embed v1.5 via fastembed (local ONNX), feature-gated behind `embeddings` |
 | **FTS sanitization** | `fts.rs` — strips injection patterns, length limits, always available |
@@ -220,7 +226,7 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 
 ### REST API Endpoints
 
-40 routes total. Every response body is a `Json<T>` of a ts-rs DTO from `dashboard/wire/`; the dashboard re-validates the five highest-blast-radius endpoints with Zod at runtime.
+40 route registrations total (`dashboard/mod.rs`): 35 of them sit under `/api/*` and cover **33 distinct REST paths** (`/api/memories/{id}` is registered three times — GET/DELETE/PATCH), plus 4 page/SPA routes (`/dashboard`, `/dashboard/{*path}`, `/`, `/graph`) and 1 WebSocket route (`/ws`). Every response body is a `Json<T>` of a ts-rs DTO from `dashboard/wire/`; the dashboard re-validates the five highest-blast-radius endpoints with Zod at runtime.
 
 **Memory CRUD**
 
