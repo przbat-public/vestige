@@ -158,18 +158,24 @@ Every search strengthens the memories it finds (Testing Effect).
 
 **Provenance in results:** Use `detail_level: "full"` to include provenance metadata (session, agent, entities, relations, temporal anchors) in search results.
 
-### memory — Read, Edit, Delete, Promote, Demote, Batch Get
+### memory — Read, Edit, Delete, Promote, Demote, Review, Batch Get
 ```json
 { "action": "get", "id": "uuid" }
 { "action": "get_batch", "ids": ["uuid-1", "uuid-2", "uuid-3"] }
 { "action": "edit", "id": "uuid", "content": "updated text" }
-{ "action": "delete", "id": "uuid" }
+{ "action": "delete", "id": "uuid", "confirmed": true }
 { "action": "promote", "id": "uuid", "reason": "was helpful" }
 { "action": "demote", "id": "uuid", "reason": "was wrong" }
 { "action": "state", "id": "uuid" }
+{ "action": "review", "id": "uuid", "rating": "good" }
 ```
 `get_batch` retrieves up to 20 memories in one call (saves round-trips for expandable IDs from search).
 Promote/demote adjusts ranking, does NOT delete. Demoted memories rank lower; alternatives surface instead.
+**`delete` is destructive and requires `confirmed: true`** — a call without it is refused, so a model that
+reaches for `delete` by mistake cannot remove a memory.
+`review` records a spaced-repetition review of a due memory; `rating` is one of
+`again` | `hard` | `good` | `easy` and defaults to `good`. `mark_reviewed` still works as a
+backward-compatible alias for `review`.
 
 ### codebase — Code Patterns & Architectural Decisions
 ```json
@@ -279,7 +285,7 @@ Scans all memories for compound/multi-topic content. Returns a list with splitti
 - `dry_run: true` (default) — report only, no deletions
 - `dry_run: false` — delete compound memories after reporting (you must re-ingest as atomic items)
 
-**Workflow:** Run `split_memories` → for each compound memory, read full content with `memory(action="get")` → split into atomic facts → `smart_ingest` as batch → `memory(action="delete")` the original.
+**Workflow:** Run `split_memories` → for each compound memory, read full content with `memory(action="get")` → split into atomic facts → `smart_ingest` as batch → `memory(action="delete", confirmed: true)` the original.
 
 ### Maintenance Tools
 ```json
