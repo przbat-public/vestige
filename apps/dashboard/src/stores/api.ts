@@ -13,8 +13,8 @@ import type {
   InsightListResponse,
   IntentionItem,
   IntentionPriority,
-  Memory,
   MemoryChangelog,
+  MemoryStatus,
   PredictResponse,
   RetentionDistribution,
   ReviewQueueResponse,
@@ -77,24 +77,25 @@ export const api = {
       return wire.memoryList(await fetcher<unknown>(`/memories${qs}`));
     },
     get: async (id: string) => wire.memory(await fetcher<unknown>(`/memories/${id}`)),
-    delete: (id: string) => fetcher<{ deleted: boolean }>(`/memories/${id}`, { method: 'DELETE' }),
-    // Backend returns a status blob (`{ promoted: true, id, retentionStrength }`),
-    // not the full Memory object. The dashboard previously over-declared the
-    // shape as `Memory`, which would break any caller that consumed the result —
-    // today nobody does, but the lying type hid the divergence from reviewers.
-    promote: (id: string) =>
-      fetcher<{ promoted: boolean; id: string; retentionStrength: number }>(`/memories/${id}/promote`, {
-        method: 'POST',
-      }),
-    demote: (id: string) =>
-      fetcher<{ demoted: boolean; id: string; retentionStrength: number }>(`/memories/${id}/demote`, {
-        method: 'POST',
-      }),
-    update: (id: string, body: { content?: string; tags?: string[] }) =>
-      fetcher<Memory>(`/memories/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(body),
-      }),
+    // All three mutating endpoints answer with a DTO, not a booleans blob:
+    // `DELETE` / `POST …/promote` / `POST …/demote` share
+    // `MemoryStatusDto { ok, id, retentionStrength, action }`. The dashboard
+    // used to hand-write `{ deleted: boolean }` / `{ promoted: boolean, … }`,
+    // which lied about the field names — a future caller reading
+    // `result.promoted` would have silently received `undefined`.
+    delete: (id: string) => fetcher<MemoryStatus>(`/memories/${id}`, { method: 'DELETE' }),
+    promote: (id: string) => fetcher<MemoryStatus>(`/memories/${id}/promote`, { method: 'POST' }),
+    demote: (id: string) => fetcher<MemoryStatus>(`/memories/${id}/demote`, { method: 'POST' }),
+    // `PATCH` answers with `MemoryUpdateResultDto { memory, field }`, not a
+    // bare `Memory` — validate it so a drift here fails loudly instead of
+    // caching `undefined` under `queryKeys.memory(undefined)`.
+    update: async (id: string, body: { content?: string; tags?: string[] }) =>
+      wire.memoryUpdate(
+        await fetcher<unknown>(`/memories/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        }),
+      ),
     changelog: (id: string) => fetcher<MemoryChangelog>(`/memories/${id}/changelog`),
     review: (id: string, rating: FsrsRating) =>
       fetcher<ReviewResult>(`/memories/${id}/review`, {

@@ -98,14 +98,12 @@ export function InsightCard({ insight }: InsightCardProps) {
           {t('insights.subtitle', {
             date: createdAt.toLocaleDateString(locale),
             sources: insight.sourceMemoryIds.length,
-            defaultValue: '{{date}} · derived from {{sources}} memories',
           })}
           {validatedAt && (
             <>
               {' · '}
               {t('insights.validatedOn', {
                 date: validatedAt.toLocaleDateString(locale),
-                defaultValue: 'validated {{date}}',
               })}
             </>
           )}
@@ -117,12 +115,7 @@ export function InsightCard({ insight }: InsightCardProps) {
           <div className="flex justify-between text-muted-foreground mb-0.5">
             <span className="inline-flex items-center gap-1">
               {t('insights.confidence', 'Confidence')}
-              <InfoTooltip
-                content={t(
-                  'insights.confidenceTooltip',
-                  'How sure the engine is that the pattern actually holds across the source memories. Driven by support count and contradiction signals.',
-                )}
-              />
+              <InfoTooltip content={t('insights.confidenceTooltip')} />
             </span>
             <span>{confidencePct}%</span>
           </div>
@@ -134,12 +127,7 @@ export function InsightCard({ insight }: InsightCardProps) {
           <div className="flex justify-between text-muted-foreground mb-0.5">
             <span className="inline-flex items-center gap-1">
               {t('insights.novelty', 'Novelty')}
-              <InfoTooltip
-                content={t(
-                  'insights.noveltyTooltip',
-                  'How different this insight is from what was already known. High novelty means the dream cycle stitched something the existing graph did not encode.',
-                )}
-              />
+              <InfoTooltip content={t('insights.noveltyTooltip')} />
             </span>
             <span>{noveltyPct}%</span>
           </div>

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ProgressBar } from '@/components/ui/progress-bar';
@@ -19,6 +20,13 @@ interface MemoryListItemProps {
   selectionMode: boolean;
   /** True when the j/k cursor is on this row. Renders a subtle focus ring. */
   isFocused?: boolean;
+  /**
+   * Pinned state. Passed in by the list so a row does not have to subscribe to
+   * the pinned store itself: with 100 rendered rows, every pin/unpin used to
+   * fire 100 `localStorage` reads (one per row's `usePinned`) and re-render the
+   * whole list. Omit it only for standalone rows.
+   */
+  isPinned?: boolean;
   onActivate: (m: Memory) => void;
   onToggleSelect: (id: string, opts: { shift?: boolean; ctrl?: boolean }) => void;
 }
@@ -36,18 +44,21 @@ interface MemoryListItemProps {
  * (plain click) without losing their selection state. This matches Linear's
  * "click peeks, ctrl-click selects" pattern.
  */
-export function MemoryListItem({
+function MemoryListItemRow({
   memory,
   isActive,
   isSelected,
   selectionMode,
   isFocused = false,
+  isPinned: pinnedProp,
   onActivate,
   onToggleSelect,
 }: MemoryListItemProps) {
   const { t } = useTranslation();
+  // Fallback for standalone usage; the list passes the flag down so the
+  // subscription stays at one per page instead of one per row.
   const pinned = usePinned();
-  const isPinned = pinned.has(memory.id);
+  const isPinned = pinnedProp ?? pinned.has(memory.id);
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (e.shiftKey) {
@@ -105,8 +116,8 @@ export function MemoryListItem({
           {isPinned && (
             <span
               role="img"
-              aria-label={t('memories.pinnedAria', { defaultValue: 'Pinned' })}
-              title={t('memories.pinnedAria', { defaultValue: 'Pinned' })}
+              aria-label={t('memories.pinnedAria')}
+              title={t('memories.pinnedAria')}
               className="text-amber-500 text-[11px] leading-none flex-shrink-0"
             >
               ★
@@ -134,3 +145,11 @@ export function MemoryListItem({
     </div>
   );
 }
+
+/**
+ * Memoised: `MemoriesPage` renders up to `PAGE_SIZE` (100) rows in one list,
+ * and the search box is controlled at the page level, so every keystroke used
+ * to re-render all of them. Props are primitives plus two `useCallback`-stable
+ * handlers, so the shallow comparison is effective.
+ */
+export const MemoryListItem = memo(MemoryListItemRow);

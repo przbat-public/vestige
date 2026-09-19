@@ -1,6 +1,7 @@
 import { type QueryKey, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { withoutMemory } from '@/lib/memory-envelope';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { EVENT, track } from '@/stores/telemetry';
@@ -148,22 +149,11 @@ export function useMemoryMutations(options?: MemoryMutationsCallbacks) {
         snapshots.push([q.queryKey, q.state.data]);
       }
 
-      // Optimistically strip from any cached list. We don't know the exact
-      // shape (different endpoints return different envelopes), so handle the
-      // two we actually emit: `{ items: Memory[] }` and bare `Memory[]`.
-      qc.setQueriesData<unknown>({ queryKey: ['memories'] }, (old: unknown) => {
-        if (old && typeof old === 'object' && 'items' in old) {
-          const envelope = old as { items: Array<{ id: string }> };
-          return {
-            ...envelope,
-            items: envelope.items.filter((m) => m?.id !== id),
-          };
-        }
-        if (Array.isArray(old)) {
-          return (old as Array<{ id: string }>).filter((m) => m?.id !== id);
-        }
-        return old;
-      });
+      // Optimistically strip from every cached list. The cache holds the
+      // real `{ total, memories }` envelope (`MemoryListResponseDto`); the
+      // helper returns `undefined` for anything else so React Query leaves
+      // that entry alone.
+      qc.setQueriesData<unknown>({ queryKey: ['memories'] }, (old: unknown) => withoutMemory(old, id));
 
       track(EVENT.memory_delete);
       bumpInFlight(1);
@@ -225,7 +215,7 @@ export function useMemoryMutations(options?: MemoryMutationsCallbacks) {
   const update = useMutation({
     mutationFn: (input: { id: string; content?: string; tags?: string[] }) =>
       api.memories.update(input.id, { content: input.content, tags: input.tags }),
-    onSuccess: (memory) => {
+    onSuccess: ({ memory }) => {
       toast(t('memories.updatedToast'), 'success');
       // The single memory query is cached by id; refresh it eagerly so the
       // detail panel reflects new content/tags without a round-trip.

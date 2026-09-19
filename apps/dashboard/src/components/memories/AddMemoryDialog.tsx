@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { toast } from '@/stores/toast';
@@ -58,36 +59,18 @@ interface AddMemoryDialogProps {
  * - Initial focus lands on the textarea (autoFocus)
  * - On close, focus returns to whatever triggered the dialog so the
  *   user lands back where they were (WAI-ARIA APG modal pattern).
- *
- * We deliberately don't trap Tab focus — the dialog is short and adding a
- * focus trap pulls in either a dependency or 30 lines of edge-case
- * handling. If Tab leaves the dialog the user can shift+Tab back, and the
- * scrim is the primary dismiss path. Worth revisiting if a dialog grows
- * enough to make tab cycling material.
+ * - `useFocusTrap` keeps Tab inside the dialog. `aria-modal="true"` claims
+ *   the rest of the page is inert, so the dialog has to make that true
+ *   rather than rely on the user shift+Tab-ing back.
  */
 export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const titleId = useId();
   const descId = useId();
-  const dialogRef = useRef<HTMLDivElement>(null);
-  // Capture the element that opened the dialog so we can restore focus
-  // when it closes — keyboard users who triggered via ⌘N expect to land
-  // back on the same DOM node they started on, not at the top of the page.
-  const triggerRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    if (open) {
-      triggerRef.current = (document.activeElement as HTMLElement | null) ?? null;
-      return;
-    }
-    // Restore on close. Use rAF so React's commit phase finishes first
-    // (the dialog DOM has just unmounted; if we focus synchronously the
-    // browser sometimes scrolls the trigger out of view as a side effect).
-    const trigger = triggerRef.current;
-    if (trigger?.isConnected) {
-      requestAnimationFrame(() => trigger.focus({ preventScroll: true }));
-    }
-  }, [open]);
+  // Owns focus restore too: the trap remembers the opener (⌘N, the FAB, an
+  // empty-state CTA) and hands focus back to it on close.
+  const dialogRef = useFocusTrap<HTMLDivElement>({ active: open });
 
   const {
     register,
@@ -105,7 +88,7 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
       // The backend WebSocket emit triggers cache invalidation already, but
       // we kick a manual invalidation as a belt-and-braces measure for the
       // case where the WS connection is degraded or in flight.
-      qc.invalidateQueries({ queryKey: queryKeys.memories() });
+      qc.invalidateQueries({ queryKey: queryKeys.memoriesPrefix });
       qc.invalidateQueries({ queryKey: queryKeys.stats });
 
       // The backend may flag the write with a `compound_content_warning`
@@ -223,9 +206,7 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
               aria-invalid={!!errors.content}
               {...register('content')}
             />
-            {errors.content?.message && (
-              <p className="text-xs text-red-500 mt-1">{t(errors.content.message, { defaultValue: 'Required' })}</p>
-            )}
+            {errors.content?.message && <p className="text-xs text-red-500 mt-1">{t(errors.content.message)}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

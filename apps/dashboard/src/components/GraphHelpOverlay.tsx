@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 
 interface Props {
   open: boolean;
@@ -94,10 +95,12 @@ export function GraphHelpOverlay({ open, onClose }: Props) {
   // Move focus to the dialog on open so SR users hear the heading and
   // keyboard users have a sensible Tab origin. We don't use autoFocus on
   // the Close button — that would announce "Close button" as the first
-  // thing, which is the *exit*, not the content.
-  useEffect(() => {
-    if (open) dialogRef.current?.focus();
-  }, [open]);
+  // thing, which is the *exit*, not the content. The trap also cycles Tab
+  // inside the overlay (it is `aria-modal="true"`, so the rest of the page
+  // must really be unreachable) and restores focus to the opener on close —
+  // without that, closing dropped focus on `<body>` because the overlay
+  // unmounts wholesale.
+  const trapRef = useFocusTrap<HTMLDivElement>({ active: open, initialFocus: dialogRef });
 
   if (!open) return null;
 
@@ -111,7 +114,10 @@ export function GraphHelpOverlay({ open, onClose }: Props) {
         onClick={onClose}
       />
       <div
-        ref={dialogRef}
+        ref={(node) => {
+          dialogRef.current = node;
+          trapRef.current = node;
+        }}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

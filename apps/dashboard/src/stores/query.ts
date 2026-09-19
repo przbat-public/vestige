@@ -15,7 +15,15 @@ export const queryKeys = {
   stats: ['stats'] as const,
   health: ['health'] as const,
   retentionDistribution: ['retentionDistribution'] as const,
-  memories: (params?: Record<string, string>) => ['memories', params] as const,
+  /**
+   * Prefix for every cached list page. Use this — never
+   * `memories(undefined)` — when invalidating: `['memories', undefined]`
+   * is a *different* key from `['memories', { limit, offset }]` and
+   * `partialMatchKey` rejects it, so the invalidation silently does
+   * nothing.
+   */
+  memoriesPrefix: ['memories'] as const,
+  memories: (params: Record<string, string>) => ['memories', params] as const,
   memory: (id: string) => ['memory', id] as const,
   memoryChangelog: (id: string) => ['memory', id, 'changelog'] as const,
   graph: (params?: { query?: string; max_nodes?: number; depth?: number }) => ['graph', params] as const,

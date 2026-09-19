@@ -127,12 +127,7 @@ export function ReasoningPage() {
                 <Badge variant="secondary">
                   {t(`reasoning.intent.${result.intent}`, { defaultValue: result.intent })}
                 </Badge>
-                <InfoTooltip
-                  content={t(
-                    'reasoning.intentTooltip',
-                    'Detected intent — fact-check, timeline, root-cause, comparison, or synthesis. Drives which evidence the engine prioritises.',
-                  )}
-                />
+                <InfoTooltip content={t('reasoning.intentTooltip')} />
                 <span className="text-xs text-muted-foreground">
                   {t('reasoning.analyzed', { count: Number(result.memoriesAnalyzed) })}
                 </span>

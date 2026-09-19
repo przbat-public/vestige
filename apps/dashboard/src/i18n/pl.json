@@ -69,7 +69,9 @@
     "allFailedToast_one": "Nie udało się zaktualizować {{count}} wspomnienia: {{detail}}",
     "allFailedToast_few": "Nie udało się zaktualizować {{count}} wspomnień: {{detail}}",
     "allFailedToast_many": "Nie udało się zaktualizować {{count}} wspomnień: {{detail}}",
-    "allFailedToast_other": "Nie udało się zaktualizować {{count}} wspomnień: {{detail}}"
+    "allFailedToast_other": "Nie udało się zaktualizować {{count}} wspomnień: {{detail}}",
+    "deleteUndone_few": "Usuwanie cofnięte",
+    "deleteUndone_many": "Usuwanie cofnięte"
   },
   "commands": {
     "actionBadge": "Akcja",
@@ -116,7 +118,35 @@
     "backupDesc": "Snapshot bazy SQLite przez VACUUM INTO. Zapisany w ~/.vestige/backups.",
     "backupBtn": "Utwórz kopię",
     "backupSuccess": "Kopia utworzona.",
-    "backupResult": "Zapisano w {{path}} ({{kb}} KB)."
+    "backupResult": "Zapisano w {{path}} ({{kb}} KB).",
+    "dupSuccess_one": "Znaleziono {{count}} klaster pamięci bliskich sobie.",
+    "dupSuccess_few": "Znaleziono {{count}} klastry pamięci bliskich sobie.",
+    "dupSuccess_many": "Znaleziono {{count}} klastrów pamięci bliskich sobie.",
+    "dupSuccess_other": "Znaleziono {{count}} klastrów pamięci bliskich sobie.",
+    "gcConfirm_one": "Trwale usunąć {{count}} wspomnienie poniżej progu retencji? Tej operacji nie można cofnąć.",
+    "gcConfirm_few": "Trwale usunąć {{count}} wspomnienia poniżej progu retencji? Tej operacji nie można cofnąć.",
+    "gcConfirm_many": "Trwale usunąć {{count}} wspomnień poniżej progu retencji? Tej operacji nie można cofnąć.",
+    "gcConfirm_other": "Trwale usunąć {{count}} wspomnień poniżej progu retencji? Tej operacji nie można cofnąć.",
+    "gcDeleteBtn_one": "Usuń {{count}}",
+    "gcDeleteBtn_few": "Usuń {{count}}",
+    "gcDeleteBtn_many": "Usuń {{count}}",
+    "gcDeleteBtn_other": "Usuń {{count}}",
+    "gcDeleteResult_one": "Usunięto {{count}} wspomnienie.",
+    "gcDeleteResult_few": "Usunięto {{count}} wspomnienia.",
+    "gcDeleteResult_many": "Usunięto {{count}} wspomnień.",
+    "gcDeleteResult_other": "Usunięto {{count}} wspomnień.",
+    "gcDeleteSuccess_one": "Usunięto {{count}} wspomnienie.",
+    "gcDeleteSuccess_few": "Usunięto {{count}} wspomnienia.",
+    "gcDeleteSuccess_many": "Usunięto {{count}} wspomnień.",
+    "gcDeleteSuccess_other": "Usunięto {{count}} wspomnień.",
+    "gcPreviewResult_one": "{{count}} wspomnienie poniżej progu retencji.",
+    "gcPreviewResult_few": "{{count}} wspomnienia poniżej progu retencji.",
+    "gcPreviewResult_many": "{{count}} wspomnień poniżej progu retencji.",
+    "gcPreviewResult_other": "{{count}} wspomnień poniżej progu retencji.",
+    "gcPreviewSuccess_one": "{{count}} wspomnienie zostałoby usunięte.",
+    "gcPreviewSuccess_few": "{{count}} wspomnienia zostałyby usunięte.",
+    "gcPreviewSuccess_many": "{{count}} wspomnień zostałoby usuniętych.",
+    "gcPreviewSuccess_other": "{{count}} wspomnień zostałoby usuniętych."
   },
   "shortcuts": {
     "title": "Skróty klawiszowe",
@@ -189,13 +219,25 @@
     "yes": "tak",
     "no": "nie",
     "previous": "Poprzednia",
-    "next": "Następna"
+    "next": "Następna",
+    "more_one": "+{{count}} więcej",
+    "more_few": "+{{count}} więcej",
+    "more_many": "+{{count}} więcej",
+    "more_other": "+{{count}} więcej",
+    "total_one": "{{count}} łącznie",
+    "total_few": "{{count}} łącznie",
+    "total_many": "{{count}} łącznie",
+    "total_other": "{{count}} łącznie"
   },
   "status": {
     "connected": "Połączono",
     "disconnected": "Rozłączono",
     "memoriesCount": "{{count}} wspomnień",
-    "avgRetention": "Śr. pamięć {{value}}%"
+    "avgRetention": "Śr. pamięć {{value}}%",
+    "memoriesCount_one": "{{count}} wspomnienie",
+    "memoriesCount_few": "{{count}} wspomnienia",
+    "memoriesCount_many": "{{count}} wspomnień",
+    "memoriesCount_other": "{{count}} wspomnienia"
   },
   "graph": {
     "title": "Graf pamięci",
@@ -249,7 +291,11 @@
         "help": "Pokaż tę pomoc",
         "altClickDeselect": "Kliknij pustą przestrzeń, by wyczyścić zaznaczenie"
       }
-    }
+    },
+    "nodeOption_one": "{{count}} wspomnienie",
+    "nodeOption_few": "{{count}} wspomnienia",
+    "nodeOption_many": "{{count}} wspomnień",
+    "nodeOption_other": "{{count}} wspomnienia"
   },
   "memories": {
     "title": "Wspomnienia",
@@ -299,7 +345,8 @@
     "editTagsHint": "Oddzielone przecinkiem lub nową linią. Automatycznie przycinane i deduplikowane.",
     "changelog": {
       "title": "Historia zmian",
-      "empty": "Brak zarejestrowanych przejść stanów."
+      "empty": "Brak zarejestrowanych przejść stanów.",
+      "changedTo": "zmieniono na"
     },
     "localGraph": {
       "title": "Lokalne połączenia",
@@ -326,8 +373,10 @@
       "exploreTopicHint": "Otwiera konsolę temporal z tym tagiem wybranym.",
       "expiredRelative": "Wygasło {{days}} dni temu",
       "expiringRelative": "Wygasa za {{days}} dni",
-      "validRelative": "Ważne przez kolejne {{days}} dni"
-    }
+      "validRelative": "Ważne przez kolejne {{days}} dni",
+      "titleTooltip": "Po tej dacie wspomnienie jest traktowane jako wygasłe i przestaje pojawiać się w wynikach jako aktualne."
+    },
+    "reviewsTooltip": "Łączna liczba powtórzeń wykonanych przez Ciebie lub agenta."
   },
   "briefing": {
     "title": "Poranny briefing",
@@ -383,7 +432,11 @@
     "good": "Dobre",
     "goodHint": "Przywołane poprawnie",
     "easy": "Łatwe",
-    "easyHint": "Trywialne — przesuń dalej"
+    "easyHint": "Trywialne — przesuń dalej",
+    "sessionDoneHint_one": "Powtórzyłeś {{count}} wspomnienie. Nowe karty pojawią się wraz z nadejściem terminów powtórek.",
+    "sessionDoneHint_few": "Powtórzyłeś {{count}} wspomnienia. Nowe karty pojawią się wraz z nadejściem terminów powtórek.",
+    "sessionDoneHint_many": "Powtórzyłeś {{count}} wspomnień. Nowe karty pojawią się wraz z nadejściem terminów powtórek.",
+    "sessionDoneHint_other": "Powtórzyłeś {{count}} wspomnień. Nowe karty pojawią się wraz z nadejściem terminów powtórek."
   },
   "nodeTypes": {
     "fact": "Fakt",
@@ -432,8 +485,8 @@
   "insights": {
     "title": "Wnioski",
     "subtitleHeader": "Hipotezy z cykli snu i refleksji. Zweryfikuj kartę, żeby ją potwierdzić, albo odrzuć, żeby obniżyć ranking.",
-    "subtitle": "{{date}} · z {{sources}} wspomnień",
-    "validatedOn": "zweryfikowano {{date}}",
+    "subtitle": "{{date}} · na podstawie {{sources}} wspomnień",
+    "validatedOn": "zatwierdzone {{date}}",
     "confidence": "Pewność",
     "novelty": "Nowość",
     "summary": "{{validated}} z {{total}} zweryfikowanych",
@@ -459,7 +512,9 @@
       "title": "Brak wniosków",
       "description": "Uruchom cykl snu, żeby wygenerować zsyntetyzowane obserwacje z Twoich wspomnień.",
       "cta": "Uruchom cykl snu"
-    }
+    },
+    "confidenceTooltip": "Jak pewny jest silnik, że wzorzec rzeczywiście występuje we wszystkich wspomnieniach źródłowych. Zależy od liczby potwierdzeń i sygnałów sprzeczności.",
+    "noveltyTooltip": "Jak bardzo ta obserwacja różni się od tego, co już było znane. Wysoka nowość oznacza, że cykl śnienia połączył coś, czego nie kodował dotychczasowy graf."
   },
   "hubs": {
     "title": "Huby tematyczne",
@@ -468,23 +523,26 @@
     "summary_few": "{{count}} aktywne huby",
     "summary_many": "{{count}} aktywnych hubów",
     "summary_other": "{{count}} aktywnych hubów",
-    "subtitle": "ostatnio odświeżony {{last}} przez {{method}}",
+    "subtitle": "ostatnie odświeżenie {{last}} przez {{method}}",
     "range": "zakres {{from}} → {{to}}",
     "badge": {
       "children_one": "{{count}} wspomnienie",
       "children_few": "{{count}} wspomnienia",
       "children_many": "{{count}} wspomnień",
       "children_other": "{{count}} wspomnień",
-      "regenerated_one": "odświeżony {{count}}×",
-      "regenerated_few": "odświeżony {{count}}×",
-      "regenerated_many": "odświeżony {{count}}×",
-      "regenerated_other": "odświeżony {{count}}×"
+      "regenerated_one": "odtworzony {{count}}×",
+      "regenerated_few": "odtworzony {{count}}×",
+      "regenerated_many": "odtworzony {{count}}×",
+      "regenerated_other": "odtworzony {{count}}×",
+      "children": "{{count}} wspomnień",
+      "regenerated": "odtworzony {{count}}×"
     },
     "empty": {
       "title": "Brak hubów",
       "description": "Huby pojawiają się, gdy cykl snu odkryje klastry 5+ powiązanych wspomnień.",
       "cta": "Uruchom cykl snu"
-    }
+    },
+    "summary": "{{count}} aktywnych hubów"
   },
   "temporal": {
     "title": "Wersjonowanie czasowe",
@@ -559,7 +617,8 @@
       "merge": "Połączono z powiązanymi",
       "replace": "Zastąpiono istniejące",
       "add_context": "Dodano jako kontekst"
-    }
+    },
+    "required": "Pole wymagane"
   },
   "epistemic": {
     "world": "Zweryfikowany fakt",
@@ -577,7 +636,11 @@
     "retentionDistribution": "Rozkład zapamiętania",
     "endangered": "Zagrożone wspomnienia ({{count}})",
     "endangeredHint": "zapamiętanie < 30% — strefa uwagi (warto wzmocnić lub powtórzyć). GC kasuje dopiero poniżej 10%.",
-    "allHealthy": "Wszystkie wspomnienia powyżej 30% — nic nie wpadło do strefy uwagi."
+    "allHealthy": "Wszystkie wspomnienia powyżej 30% — nic nie wpadło do strefy uwagi.",
+    "endangered_one": "Zagrożone wspomnienia ({{count}})",
+    "endangered_few": "Zagrożone wspomnienia ({{count}})",
+    "endangered_many": "Zagrożonych wspomnień ({{count}})",
+    "endangered_other": "Zagrożone wspomnienia ({{count}})"
   },
   "dream": {
     "replayed": "Odtworzone",
@@ -674,7 +737,14 @@
     "doubtModeHint": "Tryb wątpliwości: najmniej pewne wspomnienia na górze. Promuj, by zweryfikować, lub osłab, by zmniejszyć ich wagę.",
     "doubtModeVerify": "Zweryfikuj",
     "doubtModeDemote": "Osłab",
-    "openMemoryTitle": "Otwórz wspomnienie {{id}}"
+    "openMemoryTitle": "Otwórz wspomnienie {{id}}",
+    "doubtModeTooltip": "Tryb wątpliwości pokazuje wspomnienia, co do których silnik ma niską pewność. Weryfikacja wzmacnia retencję FSRS, a obniżenie rangi każe silnikowi je wyciszyć bez usuwania.",
+    "doubtModeTooltipAria": "O trybie wątpliwości",
+    "pipelineStages_one": "{{count}} etap",
+    "pipelineStages_few": "{{count}} etapy",
+    "pipelineStages_many": "{{count}} etapów",
+    "pipelineStages_other": "{{count}} etapów",
+    "rerankerModel": "Jina Reranker v2 Base"
   },
   "feed": {
     "title": "Aktywność",
@@ -759,7 +829,12 @@
     "evidenceTitle_few": "{{count}} wspierające wspomnienia",
     "evidenceTitle_many": "{{count}} wspierających wspomnień",
     "evidenceTitle_other": "{{count}} wspierających wspomnień",
-    "stagesFooter": "Etapy: propagacja {{activation}} · wnioski ze snu {{dream}}"
+    "stagesFooter": "Etapy: propagacja {{activation}} · wnioski ze snu {{dream}}",
+    "intentTooltip": "Wykryta intencja — weryfikacja faktu, os czasu, przyczyna źródłowa, porównanie lub synteza. Decyduje, którym dowodom silnik daje priorytet.",
+    "depthLabel_one": "Analizuj {{count}} wspomnienie",
+    "depthLabel_few": "Analizuj {{count}} wspomnienia",
+    "depthLabel_many": "Analizuj {{count}} wspomnień",
+    "depthLabel_other": "Analizuj {{count}} wspomnień"
   },
   "intentions": {
     "title": "Przypomnienia",
@@ -824,7 +899,11 @@
       "degraded": "Pogorszony",
       "critical": "Krytyczny",
       "empty": "Pusty"
-    }
+    },
+    "heatmapCellTitle_one": "{{range}}: {{count}} z {{total}} wspomnienia",
+    "heatmapCellTitle_few": "{{range}}: {{count}} z {{total}} wspomnień",
+    "heatmapCellTitle_many": "{{range}}: {{count}} z {{total}} wspomnień",
+    "heatmapCellTitle_other": "{{range}}: {{count}} z {{total}} wspomnień"
   },
   "timeline": {
     "title": "Oś czasu",
@@ -837,7 +916,11 @@
     "moreCount_one": "+{{count}} więcej",
     "moreCount_few": "+{{count}} więcej",
     "moreCount_many": "+{{count}} więcej",
-    "moreCount_other": "+{{count}} więcej"
+    "moreCount_other": "+{{count}} więcej",
+    "memoriesOn_one": "{{count}} wspomnienie dnia {{date}}",
+    "memoriesOn_few": "{{count}} wspomnienia dnia {{date}}",
+    "memoriesOn_many": "{{count}} wspomnień dnia {{date}}",
+    "memoriesOn_other": "{{count}} wspomnień dnia {{date}}"
   },
   "notFound": {
     "title": "Nie znaleziono strony",
@@ -1161,7 +1244,7 @@
       "stabilityHint": "Jak dobrze wspomnienie jest nauczone. Wyższa stabilność → wolniejsze blaknięcie.",
       "stabilityAria": "Stabilność wspomnienia w dniach",
       "readout": "Po {{days}} dniach wspomnienie o stabilności {{stability}} dni daje {{retention}}% szansy na przywołanie.",
-      "svgAria": "Krzywa zapominania pokazująca zapamiętanie w ciągu 90 dni"
+      "svgAria": "Krzywa zapominania pokazująca retencję w kolejnych dniach"
     },
     "live": {
       "title": "Twoje najsilniejsze wspomnienie",

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { EVENT, track } from '@/stores/telemetry';
 import { markTourTaken } from '@/stores/tutorial-tour';
 
@@ -78,6 +79,9 @@ export function InteractiveTour({ open, onClose }: InteractiveTourProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [stepIdx, setStepIdx] = useState(0);
+  // Modal contract: Tab stays inside the tour, and focus returns to the
+  // "Start tour" button when it closes.
+  const trapRef = useFocusTrap<HTMLDivElement>({ active: open });
 
   useEffect(() => {
     if (!open) return;
@@ -119,9 +123,11 @@ export function InteractiveTour({ open, onClose }: InteractiveTourProps) {
 
   return (
     <div
+      ref={trapRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="tour-title"
+      tabIndex={-1}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) finish('skip');

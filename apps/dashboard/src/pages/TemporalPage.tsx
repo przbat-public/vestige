@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SegmentedControl } from '@/components/ui/segmented-control';
+import { formatDateTime } from '@/lib/format';
 import { api } from '@/stores/api';
 import { useDialogStore } from '@/stores/dialogs';
 import { queryKeys } from '@/stores/query';
@@ -90,7 +91,7 @@ export function TemporalPage() {
       // The mutation marks the memory as expired — both the current and
       // expired lists need to refresh, plus the global memory list.
       qc.invalidateQueries({ queryKey: ['temporal'] });
-      qc.invalidateQueries({ queryKey: queryKeys.memories() });
+      qc.invalidateQueries({ queryKey: queryKeys.memoriesPrefix });
     },
     onError: (err: Error) => toast(err.message || t('common.error'), 'error'),
   });
@@ -189,7 +190,7 @@ interface TemporalEntryCardProps {
 }
 
 function TemporalEntryCard({ entry, tab, onInvalidate, invalidating, onOpen }: TemporalEntryCardProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   // Badge logic mirrors `MemoryMetadataFooter` — expired vs expiring vs
   // valid. We compute days here rather than relying on `daysExpired` so
@@ -241,11 +242,11 @@ function TemporalEntryCard({ entry, tab, onInvalidate, invalidating, onOpen }: T
       )}
       <div className="flex items-center justify-between text-[10px] text-muted-foreground">
         <span className="tabular-nums">
-          {entry.validFrom && t('temporal.validFrom', { date: new Date(entry.validFrom).toLocaleString() })}
+          {entry.validFrom && t('temporal.validFrom', { date: formatDateTime(entry.validFrom, i18n.language) })}
           {entry.validUntil && (
             <>
               {entry.validFrom && ' · '}
-              {t('temporal.validUntil', { date: new Date(entry.validUntil).toLocaleString() })}
+              {t('temporal.validUntil', { date: formatDateTime(entry.validUntil, i18n.language) })}
             </>
           )}
         </span>

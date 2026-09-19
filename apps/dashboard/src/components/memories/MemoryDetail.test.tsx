@@ -93,9 +93,11 @@ describe('MemoryDetail', () => {
 
   it('submits content+tags to api.memories.update on Save', async () => {
     const user = userEvent.setup();
-    const updateSpy = vi
-      .spyOn(api.memories, 'update')
-      .mockResolvedValue({ ...baseMemory, content: 'Updated content', tags: ['gamma'] } as Memory);
+    // PATCH resolves with `MemoryUpdateResultDto { memory, field }`.
+    const updateSpy = vi.spyOn(api.memories, 'update').mockResolvedValue({
+      memory: { ...baseMemory, content: 'Updated content', tags: ['gamma'] },
+      field: 'content+tags',
+    });
 
     const { onUpdate } = renderDetail();
     await user.click(screen.getByRole('button', { name: /edit/i }));
@@ -117,6 +119,28 @@ describe('MemoryDetail', () => {
       }),
     );
     await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+  });
+
+  it('renders the saved content after a successful save (no stale snapshot)', async () => {
+    // Regression for the wire drift that made Save look like a no-op: the
+    // mutation resolves with `{ memory, field }`, the hook writes
+    // `memory` under `queryKeys.memory(id)`, and this panel must read that
+    // cache entry instead of the stale list snapshot it was handed.
+    const user = userEvent.setup();
+    vi.spyOn(api.memories, 'update').mockResolvedValue({
+      memory: { ...baseMemory, content: 'Fresh from the server' },
+      field: 'content',
+    });
+
+    renderDetail();
+    await user.click(screen.getByRole('button', { name: /edit/i }));
+    const textarea = screen.getByLabelText(/memory content/i);
+    await user.clear(textarea);
+    await user.type(textarea, 'Fresh from the server');
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(screen.getByText('Fresh from the server')).toBeInTheDocument());
+    expect(screen.queryByText('Original content')).not.toBeInTheDocument();
   });
 
   it('does not submit when content has not changed', async () => {

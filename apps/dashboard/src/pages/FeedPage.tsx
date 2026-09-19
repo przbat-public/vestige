@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { NativeSelect } from '@/components/ui/native-select';
+import { formatDateTime, formatTime } from '@/lib/format';
 import { useTrackPageView } from '@/stores/telemetry';
 import { useWebSocket } from '@/stores/websocket';
 import type { IdentifiedEvent, VestigeEventType } from '@/types';
@@ -38,7 +39,7 @@ function eventTimestamp(event: IdentifiedEvent): Date | null {
 
 export function FeedPage() {
   useTrackPageView('feed');
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   // FeedPage SHOULD re-render whenever `events` changes, but not for unrelated
   // store fields (memoryCount, avgRetention, connection state). Per-field
   // selectors give us identity-stable references that React can compare cheaply.
@@ -92,9 +93,9 @@ export function FeedPage() {
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
               className="text-xs"
-              aria-label={t('feed.filterByType', { defaultValue: 'Filter by type' })}
+              aria-label={t('feed.filterByType')}
             >
-              <option value="all">{t('feed.allTypes', { defaultValue: 'All types' })}</option>
+              <option value="all">{t('feed.allTypes')}</option>
               {availableTypes.map((type) => (
                 <option key={type} value={type}>
                   {type}
@@ -102,7 +103,7 @@ export function FeedPage() {
               ))}
             </NativeSelect>
             <Button variant={paused ? 'secondary' : 'ghost'} size="sm" onClick={togglePause} aria-pressed={paused}>
-              {paused ? t('feed.resume', { defaultValue: 'Resume' }) : t('feed.pause', { defaultValue: 'Pause' })}
+              {paused ? t('feed.resume') : t('feed.pause')}
             </Button>
             <Badge variant="secondary">{visible.length}</Badge>
             <Button variant="ghost" size="sm" onClick={clearEvents}>
@@ -137,10 +138,10 @@ export function FeedPage() {
                       {ts && (
                         <time
                           dateTime={ts.toISOString()}
-                          title={ts.toLocaleString()}
+                          title={formatDateTime(ts, i18n.language)}
                           className="text-[10px] tabular-nums text-muted-foreground shrink-0"
                         >
-                          {ts.toLocaleTimeString()}
+                          {formatTime(ts, i18n.language)}
                         </time>
                       )}
                       <span className="text-xs font-medium truncate" style={{ color }}>

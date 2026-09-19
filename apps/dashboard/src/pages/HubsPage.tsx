@@ -38,7 +38,6 @@ export function HubsPage() {
         <div className="text-xs text-muted-foreground">
           {t('hubs.summary', {
             count: hubs.length,
-            defaultValue: '{{count}} active hubs',
           })}
         </div>
       )}

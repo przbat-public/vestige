@@ -13,6 +13,7 @@ import { SearchInput } from '@/components/ui/search-input';
 import { SkeletonList } from '@/components/ui/skeleton';
 import { useMultiSelect } from '@/hooks/use-multi-select';
 import { runWithConcurrency } from '@/lib/concurrency';
+import { withoutMemories } from '@/lib/memory-envelope';
 import { api } from '@/stores/api';
 import { confirm } from '@/stores/confirm';
 import { useDialogStore } from '@/stores/dialogs';
@@ -87,6 +88,19 @@ export function MemoriesPage() {
 
   const rawMemories = activeQuery ? (searchData?.results ?? []) : (listData?.memories ?? []);
   const pinned = usePinned();
+
+  // Refresh the detail-panel snapshot when a list refetch returns a newer
+  // version of the open memory. `selected` is a snapshot handed to
+  // `MemoryDetail`, so without this the drawer keeps the pre-invalidation
+  // copy after an edit (the mutation invalidates `['memories']`, which
+  // refetches the active list query but never touched this state).
+  useEffect(() => {
+    setSelected((current) => {
+      if (!current) return current;
+      const fresh = rawMemories.find((m) => m.id === current.id);
+      return fresh && fresh !== current ? fresh : current;
+    });
+  }, [rawMemories]);
   // Float pinned memories to the top while preserving the underlying order
   // for everything else. Stable: we partition rather than full-sort so a
   // search-ordered or recency-ordered list keeps its shape below the pins.
@@ -340,18 +354,9 @@ export function MemoriesPage() {
       snapshots.push([q.queryKey, q.state.data]);
     }
 
-    // Optimistically strip from cached lists. Same shape-tolerant filter as
-    // the single-row path — handle `{ items }` envelopes and bare arrays.
-    qc.setQueriesData<unknown>({ queryKey: ['memories'] }, (old: unknown) => {
-      if (old && typeof old === 'object' && 'items' in old) {
-        const envelope = old as { items: Array<{ id: string }> };
-        return { ...envelope, items: envelope.items.filter((m) => !idSet.has(m?.id)) };
-      }
-      if (Array.isArray(old)) {
-        return (old as Array<{ id: string }>).filter((m) => !idSet.has(m?.id));
-      }
-      return old;
-    });
+    // Optimistically strip from cached lists. The helper knows the real
+    // `{ total, memories }` envelope and leaves any other cache entry alone.
+    qc.setQueriesData<unknown>({ queryKey: ['memories'] }, (old: unknown) => withoutMemories(old, idSet));
 
     // Close detail panel if its memory was in the selection.
     if (selected && idSet.has(selected.id)) setSelected(null);
@@ -391,7 +396,7 @@ export function MemoriesPage() {
     const timer = setTimeout(commit, BULK_UNDO_WINDOW_MS);
     pendingBulkRef.current = { timer, commit };
 
-    toast(t('bulk.deletedPending', { count, defaultValue: '{{count}} memories deleted' }), 'success', {
+    toast(t('bulk.deletedPending', { count }), 'success', {
       duration: BULK_UNDO_WINDOW_MS,
       action: {
         label: t('common.undo'),
@@ -403,7 +408,7 @@ export function MemoriesPage() {
           pendingBulkRef.current = null;
           restore();
           setBulkBusy(false);
-          toast(t('bulk.deleteUndone', { count, defaultValue: 'Deletion cancelled' }), 'info', { duration: 2500 });
+          toast(t('bulk.deleteUndone', { count }), 'info', { duration: 2500 });
         },
       },
     });
@@ -443,9 +448,7 @@ export function MemoriesPage() {
               starts typing, this row disappears to keep the page calm. */}
           {!query && recents.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap text-xs">
-              <span className="text-muted-foreground text-[11px] uppercase tracking-wider">
-                {t('memories.recent', { defaultValue: 'Recent' })}
-              </span>
+              <span className="text-muted-foreground text-[11px] uppercase tracking-wider">{t('memories.recent')}</span>
               {recents.map((q) => (
                 <button
                   key={q}
@@ -461,9 +464,9 @@ export function MemoriesPage() {
                 type="button"
                 onClick={clearRecents}
                 className="text-muted-foreground hover:text-foreground text-[11px] ml-1"
-                aria-label={t('memories.recentClearAria', { defaultValue: 'Clear recent searches' })}
+                aria-label={t('memories.recentClearAria')}
               >
-                {t('common.clear', { defaultValue: 'clear' })}
+                {t('common.clear')}
               </button>
             </div>
           )}
@@ -538,6 +541,7 @@ export function MemoriesPage() {
               isSelected={multi.isSelected(m.id)}
               selectionMode={multi.hasSelection}
               isFocused={cursorIndex === idx}
+              isPinned={pinned.has(m.id)}
               onActivate={setSelected}
               onToggleSelect={multi.toggle}
             />
@@ -548,11 +552,10 @@ export function MemoriesPage() {
           {!activeQuery && total > PAGE_SIZE && (
             <nav
               className="flex items-center justify-between gap-2 pt-2 px-2 text-xs text-muted-foreground"
-              aria-label={t('memories.pagination', { defaultValue: 'Pagination' })}
+              aria-label={t('memories.pagination')}
             >
               <span>
                 {t('memories.pageRange', {
-                  defaultValue: '{{from}}–{{to}} of {{total}}',
                   from: total === 0 ? 0 : pageOffset + 1,
                   to: Math.min(total, pageOffset + memories.length),
                   total,
@@ -566,7 +569,7 @@ export function MemoriesPage() {
                   disabled={pageOffset === 0 || loading}
                   onClick={() => setPageOffset((o) => Math.max(0, o - PAGE_SIZE))}
                 >
-                  {t('common.previous', { defaultValue: 'Previous' })}
+                  {t('common.previous')}
                 </Button>
                 <Button
                   type="button"
@@ -575,7 +578,7 @@ export function MemoriesPage() {
                   disabled={pageOffset + memories.length >= total || loading}
                   onClick={() => setPageOffset((o) => o + PAGE_SIZE)}
                 >
-                  {t('common.next', { defaultValue: 'Next' })}
+                  {t('common.next')}
                 </Button>
               </div>
             </nav>

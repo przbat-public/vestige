@@ -69,7 +69,6 @@ export function InsightsPage() {
           {t('insights.summary', {
             total: insights.length,
             validated: validatedCount,
-            defaultValue: '{{validated}} validated of {{total}} shown',
           })}
         </div>
       )}

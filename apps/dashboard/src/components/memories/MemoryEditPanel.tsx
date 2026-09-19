@@ -1,38 +1,39 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import type { Memory } from '@/types';
 
 interface Props {
-  draftContent: string;
-  draftTags: string;
-  onContentChange: (v: string) => void;
-  onTagsChange: (v: string) => void;
+  memory: Memory;
+  onSubmit: (draft: { content: string; tags: string }) => void;
   onCancel: () => void;
-  onSubmit: () => void;
   pending: boolean;
 }
 
-/** Inline edit form for memory content and tags (textarea + comma-separated input). */
-export function MemoryEditForm({
-  draftContent,
-  draftTags,
-  onContentChange,
-  onTagsChange,
-  onCancel,
-  onSubmit,
-  pending,
-}: Props) {
+/**
+ * Inline edit form for memory content and tags.
+ *
+ * The draft buffer lives *here*, not in `MemoryDetail`, and the caller keys
+ * this component on `memory.id`. Two reasons:
+ *   • switching rows cannot leak a half-typed buffer into another memory, and
+ *   • a save that lands in the query cache and re-renders the parent cannot
+ *     overwrite what the user is currently typing.
+ */
+export function MemoryEditPanel({ memory, onSubmit, onCancel, pending }: Props) {
   const { t } = useTranslation();
   const contentInputId = useId();
   const tagsInputId = useId();
+
+  const [draftContent, setDraftContent] = useState(memory.content);
+  const [draftTags, setDraftTags] = useState(memory.tags.join(', '));
 
   return (
     <form
       className="space-y-2"
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit();
+        onSubmit({ content: draftContent, tags: draftTags });
       }}
     >
       <div className="space-y-1">
@@ -42,7 +43,7 @@ export function MemoryEditForm({
         <textarea
           id={contentInputId}
           value={draftContent}
-          onChange={(e) => onContentChange(e.target.value)}
+          onChange={(e) => setDraftContent(e.target.value)}
           rows={6}
           className="w-full bg-accent border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y"
           aria-label={t('memories.editContentLabel')}
@@ -57,7 +58,7 @@ export function MemoryEditForm({
           id={tagsInputId}
           type="text"
           value={draftTags}
-          onChange={(e) => onTagsChange(e.target.value)}
+          onChange={(e) => setDraftTags(e.target.value)}
           placeholder={t('memories.editTagsPlaceholder')}
           aria-describedby={`${tagsInputId}-help`}
         />

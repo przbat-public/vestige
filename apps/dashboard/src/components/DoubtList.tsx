@@ -41,13 +41,7 @@ export function DoubtList({ results, limit = 5 }: DoubtListProps) {
     <div className="space-y-2 text-xs">
       <p className="text-muted-foreground inline-flex items-center gap-1.5">
         {t('settings.doubtModeHint')}
-        <InfoTooltip
-          ariaLabel={t('settings.doubtModeTooltipAria', { defaultValue: 'About doubt mode' })}
-          content={t(
-            'settings.doubtModeTooltip',
-            'Doubt mode surfaces memories the engine has low confidence in. Verifying strengthens FSRS retention; demoting tells the engine to suppress without deleting.',
-          )}
-        />
+        <InfoTooltip ariaLabel={t('settings.doubtModeTooltipAria')} content={t('settings.doubtModeTooltip')} />
       </p>
       {visible.map((item) => (
         <div

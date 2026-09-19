@@ -1,4 +1,4 @@
-// Zod schemas for the five highest-blast-radius endpoints. ts-rs gives
+// Zod schemas for the six highest-blast-radius endpoints. ts-rs gives
 // us compile-time confidence the dashboard reads the right *fields*;
 // these schemas catch the slower, sneakier failures: a Rust handler
 // quietly switching enum variants, a 500 page returning HTML where the
@@ -7,20 +7,23 @@
 //
 // Coverage rationale ("blast radius" = how badly a parse failure
 // degrades the UX):
-//   - GET  /api/memories         → list view; the entire dashboard home
-//   - GET  /api/memories/{id}    → memory detail panel; deep-link target
-//   - POST /api/search           → second-most-used view
-//   - POST /api/reflect          → drives the briefing's headline copy
-//   - POST /api/temporal         → time-series, easy to silently drift
+//   - GET   /api/memories         → list view; the entire dashboard home
+//   - GET   /api/memories/{id}    → memory detail panel; deep-link target
+//   - PATCH /api/memories/{id}    → edit form; the handler wraps the DTO
+//                                   in `{ memory, field }` (see below)
+//   - GET   /api/search           → second-most-used view
+//   - POST  /api/reflect          → drives the briefing's headline copy
+//   - POST  /api/temporal         → time-series, easy to silently drift
 //
 // Other endpoints stay TS-only — overhead vs benefit isn't there yet.
-// When you add a 6th, mirror the pattern below: a `z.object`, an `infer`,
+// When you add a 7th, mirror the pattern below: a `z.object`, an `infer`,
 // then `assertWire` at the call site.
 
 import { z } from 'zod';
 import type {
   MemoryDto,
   MemoryListResponseDto,
+  MemoryUpdateResultDto,
   ReflectResultDto,
   SearchResultDto,
   TemporalResultDto,
@@ -28,8 +31,8 @@ import type {
 
 // ---------------------------------------------------------------------------
 // Building blocks. These mirror enums emitted by ts-rs so the schema
-// stays in lockstep — adding a variant on the Rust side will fail the
-// `satisfies` check at the bottom of this file.
+// stays in lockstep — adding a variant on the Rust side fails the
+// compile-time assertions at the bottom of this file.
 // ---------------------------------------------------------------------------
 
 const epistemicStatus = z.enum(['world', 'experience', 'observation', 'opinion']);
@@ -55,6 +58,12 @@ const insightSchema = z.object({
 
 // `MemoryDto` has the most fields and matters most. Built once, reused
 // by list/get/search.
+//
+// Optional fields use `optional()`, not `nullish()`: `From<&KnowledgeNode>`
+// always populates them and `skip_serializing_if = "Option::is_none"`
+// *omits* the key when a handler blanks it (e.g. `into_list_view()`, or the
+// temporal/sentiment window `PATCH` clears) — the server never sends an
+// explicit `null` here.
 const memorySchema = z.object({
   id: z.string(),
   content: z.string(),
@@ -130,16 +139,85 @@ const temporalSchema = z.object({
   memories: z.array(temporalEntrySchema),
 });
 
-// Compile-time check that the Zod inference matches the generated DTO.
-// Drift either way (Zod adds a field, ts-rs removes one) → red squiggly.
-// `Z extends DTO ? T : never` makes the failure show on the helper itself,
-// not at the call site, which keeps error messages legible.
-type AssertSubset<Z, DTO> = Z extends DTO ? (DTO extends Z ? true : never) : never;
-type _CheckMemory = AssertSubset<z.infer<typeof memorySchema>, MemoryDto>;
-type _CheckMemoryList = AssertSubset<z.infer<typeof memoryListSchema>, MemoryListResponseDto>;
-type _CheckSearch = AssertSubset<z.infer<typeof searchSchema>, SearchResultDto>;
-type _CheckReflect = AssertSubset<z.infer<typeof reflectSchema>, ReflectResultDto>;
-type _CheckTemporal = AssertSubset<z.infer<typeof temporalSchema>, TemporalResultDto>;
+// `PATCH /api/memories/{id}` wraps the post-update DTO in an envelope:
+// `MemoryUpdateResultDto { memory, field }` (`wire/memory.rs`). The
+// dashboard used to declare the bare `Memory` here, which meant
+// `memory.id` was `undefined` at the call site and the per-id cache
+// entry was written under `['memory', undefined]`.
+const memoryUpdateSchema = z.object({
+  memory: memorySchema,
+  field: z.string(),
+});
+
+// ---------------------------------------------------------------------------
+// Compile-time checks that each Zod inference matches its generated DTO.
+//
+// These MUST stay `const` declarations assigned `true`: a bare
+// `type _Check = AssertSubset<…>` alias without a value is never
+// instantiated, so `tsc` silently skips it (the previous shape of this
+// block was a no-op). The assignments below are checked eagerly and fail
+// with TS2322 ("Type 'true' is not assignable to type 'never'") when the
+// two sides disagree.
+//
+// The comparison deliberately normalises `null`/`undefined` rather than
+// enumerating nullable fields, so a new nullable field doesn't require
+// touching this block. That keeps the two things worth catching:
+//   • a property that exists on one side only (schema/ts-rs drift), and
+//   • a property whose *value* type disagrees (`string` vs `number`, …),
+// while still rejecting `required` on one side and `optional` on the other.
+// ---------------------------------------------------------------------------
+
+/** Collapse `.extend()` intersections so error messages stay readable. */
+type Memoize<T> = { [K in keyof T]: T[K] } & {};
+
+/** Drop `null` from every property, recursively through arrays/objects. */
+type WithoutNull<T> = T extends readonly (infer U)[]
+  ? WithoutNull<U>[]
+  : T extends object
+    ? { [K in keyof T]: NormalizeOne<T[K]> }
+    : T;
+
+/**
+ * A DTO property that accepts `undefined` is optional: treat `null` as
+ * equivalent (ts-rs emits `field?: T`, a handler may serialise `null`).
+ * A required DTO property gets no such leniency.
+ */
+type NormalizeOne<V> = undefined extends V ? Exclude<WithoutNull<V>, null> | undefined : WithoutNull<V>;
+
+/** Reject Zod-side properties that the DTO doesn't declare at all. */
+type NoExtraProps<Z, DTO> = [Exclude<keyof Z, keyof DTO>] extends [never] ? true : false;
+
+/** Reject `undefined` on DTO properties the DTO itself declares required. */
+type DtoRequiredOk<Z, DTO> = {
+  [K in keyof DTO]-?: undefined extends DTO[K]
+    ? true
+    : K extends keyof Z
+      ? undefined extends Z[K]
+        ? false
+        : true
+      : false;
+}[keyof DTO] extends true
+  ? true
+  : false;
+
+type AssertSubset<Z, DTO> =
+  NoExtraProps<Z, DTO> extends true
+    ? WithoutNull<Z> extends WithoutNull<DTO>
+      ? DtoRequiredOk<Z, DTO> extends true
+        ? true
+        : never
+      : never
+    : never;
+
+export const _checkMemory: AssertSubset<Memoize<z.infer<typeof memorySchema>>, MemoryDto> = true;
+export const _checkMemoryList: AssertSubset<Memoize<z.infer<typeof memoryListSchema>>, MemoryListResponseDto> = true;
+export const _checkSearch: AssertSubset<Memoize<z.infer<typeof searchSchema>>, SearchResultDto> = true;
+export const _checkReflect: AssertSubset<Memoize<z.infer<typeof reflectSchema>>, ReflectResultDto> = true;
+export const _checkTemporal: AssertSubset<Memoize<z.infer<typeof temporalSchema>>, TemporalResultDto> = true;
+export const _checkMemoryUpdate: AssertSubset<
+  Memoize<z.infer<typeof memoryUpdateSchema>>,
+  MemoryUpdateResultDto
+> = true;
 
 // Helper: parse-or-throw with a tagged ValidationError. Components catch
 // it and render a "the server returned something we don't understand"
@@ -165,6 +243,7 @@ function assertWire<T>(endpoint: string, schema: z.ZodType<T>, value: unknown): 
 export const wire = {
   memory: (v: unknown): MemoryDto => assertWire('/memories/{id}', memorySchema, v),
   memoryList: (v: unknown): MemoryListResponseDto => assertWire('/memories', memoryListSchema, v),
+  memoryUpdate: (v: unknown): MemoryUpdateResultDto => assertWire('PATCH /memories/{id}', memoryUpdateSchema, v),
   search: (v: unknown): SearchResultDto => assertWire('/search', searchSchema, v),
   reflect: (v: unknown): ReflectResultDto => assertWire('/reflect', reflectSchema, v),
   temporal: (v: unknown): TemporalResultDto => assertWire('/temporal', temporalSchema, v),

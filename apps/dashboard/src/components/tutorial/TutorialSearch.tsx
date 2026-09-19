@@ -48,7 +48,7 @@ export function TutorialSearch() {
   return (
     <div className="relative max-w-sm">
       <label htmlFor={inputId} className="sr-only">
-        {t('tutorial.search.label', { defaultValue: 'Search tutorial' })}
+        {t('tutorial.search.label')}
       </label>
       <input
         id={inputId}

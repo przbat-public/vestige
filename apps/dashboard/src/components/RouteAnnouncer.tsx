@@ -1,36 +1,58 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router';
+import { NAV_ITEMS_FLAT } from './layout/nav-sections';
 
-// Keep this list in sync with `Sidebar.NAV_ITEMS` — every route the user can
-// reach from the nav must be announced here, otherwise screen-reader users
-// don't get any feedback when navigating to it. Missing `/review` and
-// `/briefing` was a regression after those pages were added.
-const ROUTE_TITLES: Record<string, string> = {
-  '/graph': 'nav.graph',
-  '/memories': 'nav.memories',
-  '/review': 'nav.review',
-  '/briefing': 'nav.briefing',
-  '/timeline': 'nav.timeline',
-  '/feed': 'nav.feed',
-  '/explore': 'nav.explore',
-  '/reasoning': 'nav.reasoning',
-  '/intentions': 'nav.intentions',
-  '/hubs': 'nav.hubs',
-  '/insights': 'nav.insights',
-  '/decisions': 'nav.decisions',
-  '/stats': 'nav.stats',
-  '/settings': 'nav.settings',
-  '/tutorial': 'nav.tutorial',
-};
+/**
+ * Route → i18n title key, derived from the sidebar's information architecture
+ * so the two cannot drift.
+ *
+ * The previous hand-maintained copy of this table silently fell behind: `/temporal`
+ * shipped in `NavSections` but never here, so that page produced no announcement
+ * and left `document.title` on the *previous* page's value (WCAG 2.4.2 / 2.4.8).
+ */
+const ROUTE_TITLES: Record<string, string> = Object.fromEntries(
+  // `nav.*` keys already carry the "…" prefix; the sidebar links are relative
+  // segments, hence the leading slash.
+  NAV_ITEMS_FLAT.map((item) => [`/${item.to}`, item.labelKey]),
+);
 
 function resolveTitle(pathname: string): string | null {
   const clean = pathname.replace(/^\/dashboard/, '');
   if (ROUTE_TITLES[clean]) return ROUTE_TITLES[clean];
-  for (const [route, key] of Object.entries(ROUTE_TITLES)) {
-    if (route !== '/' && clean.startsWith(route)) return key;
-  }
-  return null;
+  // Longest prefix wins so `/memories/123` resolves to the memories page
+  // rather than to whichever shorter route happens to be enumerated first.
+  const match = Object.keys(ROUTE_TITLES)
+    .filter((route) => route !== '/' && clean.startsWith(route))
+    .sort((a, b) => b.length - a.length)[0];
+  return match ? ROUTE_TITLES[match] : null;
+}
+
+/**
+ * Move focus to the `<main>` landmark after a client-side navigation.
+ *
+ * Without this, keyboard and screen-reader users stay parked on the sidebar
+ * link they just activated: the next Tab continues through the navigation
+ * instead of the page they asked for (WCAG 2.4.3, Focus Order). Skipped on
+ * first render, and skipped while a modal owns focus.
+ */
+function useRouteFocus(pathname: string) {
+  const isFirstRender = useRef(true);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the focus move is keyed on the route — `pathname` is the trigger, not an input
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    // A dialog (native or custom) owns focus while it is open; stealing it
+    // would break the dialog's own trap.
+    if (document.querySelector('[aria-modal="true"], dialog[open]')) return;
+    const main = document.getElementById('main-content');
+    if (!main) return;
+    // After commit, before paint — the new page's DOM is in place and focus
+    // does not visibly jump through the old content.
+    main.focus({ preventScroll: true });
+  }, [pathname]);
 }
 
 export function RouteAnnouncer() {
@@ -38,6 +60,8 @@ export function RouteAnnouncer() {
   const { pathname } = useLocation();
   const [announcement, setAnnouncement] = useState('');
   const prevPathRef = useRef(pathname);
+
+  useRouteFocus(pathname);
 
   useEffect(() => {
     if (pathname === prevPathRef.current) return;
@@ -66,3 +90,6 @@ export function RouteAnnouncer() {
     </div>
   );
 }
+
+/** Exposed for the nav/title parity test. */
+export const ROUTE_TITLE_KEYS = ROUTE_TITLES;

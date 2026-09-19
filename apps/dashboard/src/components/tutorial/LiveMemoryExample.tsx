@@ -37,7 +37,7 @@ export function LiveMemoryExample() {
           <CardDescription>{t('tutorial.live.subtitle')}</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-xs text-muted-foreground">{t('common.loading', { defaultValue: 'Loading…' })}</div>
+          <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
         </CardContent>
       </Card>
     );

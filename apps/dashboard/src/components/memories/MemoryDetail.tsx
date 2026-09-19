@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
@@ -6,12 +7,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useMemoryMutations } from '@/hooks/useMemoryMutations';
 import { togglePinned, usePinned } from '@/stores/pinned';
+import { queryKeys } from '@/stores/query';
 import { EVENT, track } from '@/stores/telemetry';
 import type { Memory } from '@/types';
 import { EPISTEMIC_STATUS_COLORS, MEMORY_SYSTEM_COLORS, NODE_TYPE_COLORS } from '@/types';
 import { MemoryActions } from './MemoryActions';
 import { MemoryChangelogPanel } from './MemoryChangelogPanel';
-import { MemoryEditForm } from './MemoryEditForm';
+import { MemoryEditPanel } from './MemoryEditPanel';
 import { MemoryLocalGraph } from './MemoryLocalGraph';
 import { MemoryMarkdownView } from './MemoryMarkdownView';
 import { MemoryMetadataFooter } from './MemoryMetadataFooter';
@@ -25,10 +27,34 @@ interface MemoryDetailProps {
   onClose: () => void;
 }
 
-export function MemoryDetail({ memory, onUpdate, onClose }: MemoryDetailProps) {
+export function MemoryDetail({ memory: listSnapshot, onUpdate, onClose }: MemoryDetailProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const pinned = usePinned();
+
+  /**
+   * The caller owns the "which memory is open" selection and passes the row
+   * object it already has. That object is a *snapshot*: after a successful
+   * save, the list row (and therefore this prop) still holds the pre-edit
+   * content, so rendering the prop directly made a successful save look like
+   * a no-op.
+   *
+   * `useMemoryMutations.update` writes the authoritative post-update memory
+   * into `queryKeys.memory(id)`. Read through that cache entry with the prop
+   * as `initialData`, and the panel re-renders with the saved value without
+   * asking the caller to keep its selection state in sync. `initialData` (not
+   * a fetch) keeps the existing behaviour: no network request here, and no
+   * `staleTime: 0` refetch storm.
+   */
+  const { data: memory } = useQuery({
+    queryKey: queryKeys.memory(listSnapshot.id),
+    queryFn: () => listSnapshot,
+    initialData: listSnapshot,
+    // Never treat the seeded snapshot as fresh enough to re-fetch from here;
+    // the mutations/WS layer owns invalidation.
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
   const isPinned = pinned.has(memory.id);
 
   const handleTogglePin = () => {
@@ -37,16 +63,15 @@ export function MemoryDetail({ memory, onUpdate, onClose }: MemoryDetailProps) {
   };
 
   const [editing, setEditing] = useState(false);
-  const [draftContent, setDraftContent] = useState(memory.content);
-  const [draftTags, setDraftTags] = useState(memory.tags.join(', '));
 
-  // Reset draft state whenever the active memory changes — selecting a
-  // different node should not preserve a stale edit buffer from another one.
+  // Leaving edit mode when a different memory is selected. The draft buffer
+  // itself lives in `MemoryEditPanel`, keyed on the id, so a stale buffer from
+  // another row is impossible — and a save landing through the cache can't
+  // clobber what the user is currently typing.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the effect *is* keyed on the id — this component is reused (not remounted) when the caller selects another row, so edit mode must be reset explicitly
   useEffect(() => {
     setEditing(false);
-    setDraftContent(memory.content);
-    setDraftTags(memory.tags.join(', '));
-  }, [memory.content, memory.tags]);
+  }, [memory.id]);
 
   const { promote, demote, remove, update } = useMemoryMutations({
     onPromote: onUpdate,
@@ -58,22 +83,10 @@ export function MemoryDetail({ memory, onUpdate, onClose }: MemoryDetailProps) {
     onUpdate,
   });
 
-  const startEdit = () => {
-    setDraftContent(memory.content);
-    setDraftTags(memory.tags.join(', '));
-    setEditing(true);
-  };
-
-  const cancelEdit = () => {
-    setEditing(false);
-    setDraftContent(memory.content);
-    setDraftTags(memory.tags.join(', '));
-  };
-
-  const saveEdit = () => {
-    const trimmed = draftContent.trim();
+  const saveEdit = (draft: { content: string; tags: string }) => {
+    const trimmed = draft.content.trim();
     if (!trimmed) return; // Required by backend (returns 400 on empty).
-    const nextTags = parseTagsInput(draftTags);
+    const nextTags = parseTagsInput(draft.tags);
     const contentChanged = trimmed !== memory.content;
     const tagsChanged = nextTags.length !== memory.tags.length || nextTags.some((tag, i) => tag !== memory.tags[i]);
 
@@ -102,7 +115,7 @@ export function MemoryDetail({ memory, onUpdate, onClose }: MemoryDetailProps) {
         </Badge>
         {!editing && (
           <MemoryActions
-            onEdit={startEdit}
+            onEdit={() => setEditing(true)}
             onPromote={() => promote.mutate(memory.id)}
             onDemote={() => demote.mutate(memory.id)}
             onDelete={() => remove.mutate(memory.id)}
@@ -116,13 +129,11 @@ export function MemoryDetail({ memory, onUpdate, onClose }: MemoryDetailProps) {
       </div>
 
       {editing ? (
-        <MemoryEditForm
-          draftContent={draftContent}
-          draftTags={draftTags}
-          onContentChange={setDraftContent}
-          onTagsChange={setDraftTags}
-          onCancel={cancelEdit}
+        <MemoryEditPanel
+          key={memory.id}
+          memory={memory}
           onSubmit={saveEdit}
+          onCancel={() => setEditing(false)}
           pending={update.isPending}
         />
       ) : (

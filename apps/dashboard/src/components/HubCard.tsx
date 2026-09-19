@@ -35,14 +35,12 @@ export function HubCard({ hub }: HubCardProps) {
             <Badge variant="secondary">
               {t('hubs.badge.children', {
                 count: hub.childIds.length,
-                defaultValue: '{{count}} memories',
               })}
             </Badge>
             {hub.regenerationCount > 0 && (
               <Badge variant="outline" className="text-muted-foreground">
                 {t('hubs.badge.regenerated', {
                   count: hub.regenerationCount,
-                  defaultValue: 'regenerated {{count}}×',
                 })}
               </Badge>
             )}
@@ -52,7 +50,6 @@ export function HubCard({ hub }: HubCardProps) {
           {t('hubs.subtitle', {
             last: lastRegenerated.toLocaleDateString(locale),
             method: hub.generationMethod,
-            defaultValue: 'last refreshed {{last}} via {{method}}',
           })}
           {rangeStart && rangeEnd && (
             <>
@@ -60,7 +57,6 @@ export function HubCard({ hub }: HubCardProps) {
               {t('hubs.range', {
                 from: new Date(rangeStart).toLocaleDateString(locale),
                 to: new Date(rangeEnd).toLocaleDateString(locale),
-                defaultValue: 'spans {{from}} → {{to}}',
               })}
             </>
           )}

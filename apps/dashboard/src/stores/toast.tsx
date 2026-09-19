@@ -9,11 +9,18 @@ interface ToastAction {
 }
 
 interface ToastOptions {
-  /** Auto-dismiss timeout (ms). Defaults to 5000. Use 0 to disable auto-dismiss. */
+  /** Auto-dismiss timeout (ms). Defaults to 5000, or 10s for `error`. Use 0 to disable auto-dismiss. */
   duration?: number;
   /** Optional inline action button (e.g. "Undo"). */
   action?: ToastAction;
 }
+
+/**
+ * Auto-dismiss window for error toasts. Long enough to read a sentence and
+ * to satisfy WCAG 2.2.1 (Timing Adjustable) for a message the user cannot
+ * recover on their own; short enough not to pile up.
+ */
+const ERROR_TOAST_MS = 10_000;
 
 interface Toast {
   id: number;
@@ -78,7 +85,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const addToast = useCallback((message: string, type: ToastType = 'error', options?: ToastOptions): number => {
     const id = ++globalToastId;
     setToasts((prev) => [...prev, { id, message, type, action: options?.action }]);
-    const duration = options?.duration ?? 5000;
+    // Errors need to outlive a glance: "your save failed" is the one message
+    // a user must not miss, and WCAG 2.2.1 asks for enough time to read it.
+    // Successes keep the snappy default.
+    const fallback = type === 'error' ? ERROR_TOAST_MS : 5000;
+    const duration = options?.duration ?? fallback;
     if (duration > 0) {
       const timer = setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -110,7 +121,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           {toasts.map((item) => (
             <div
               key={item.id}
-              role="status"
+              // Errors are assertive: a polite announcement queues behind
+              // whatever the screen reader is currently saying, which is how
+              // a failed save goes unheard. Successes stay polite so they
+              // don't interrupt.
+              role={item.type === 'error' ? 'alert' : 'status'}
               className={`pointer-events-auto glass-panel rounded-xl px-4 py-3 text-xs flex items-start gap-2 border-l-2 ${
                 item.type === 'error'
                   ? 'border-l-danger text-danger'

@@ -71,7 +71,7 @@ export function MemoryChangelogPanel({ memoryId }: MemoryChangelogPanelProps) {
                 </div>
                 <div className="text-foreground/80">
                   <span className="opacity-60">{entry.fromState}</span>
-                  <span role="img" aria-label="changed to" className="mx-1.5">
+                  <span role="img" aria-label={t('memories.changelog.changedTo')} className="mx-1.5">
                     →
                   </span>
                   <span>{entry.toState}</span>

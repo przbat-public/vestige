@@ -32,12 +32,10 @@ export function MemoryActions({
         variant="ghost"
         size="sm"
         onClick={onTogglePin}
-        aria-label={
-          isPinned ? t('memories.unpin', { defaultValue: 'Unpin' }) : t('memories.pin', { defaultValue: 'Pin' })
-        }
+        aria-label={isPinned ? t('memories.unpin') : t('memories.pin')}
         aria-pressed={isPinned}
         className={isPinned ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-foreground'}
-        title={isPinned ? t('memories.unpin', { defaultValue: 'Unpin' }) : t('memories.pin', { defaultValue: 'Pin' })}
+        title={isPinned ? t('memories.unpin') : t('memories.pin')}
       >
         {isPinned ? '★' : '☆'}
       </Button>

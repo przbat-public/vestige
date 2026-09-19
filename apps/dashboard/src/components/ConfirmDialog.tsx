@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useConfirmResolve, useConfirmState } from '@/stores/confirm';
 
 /**
@@ -17,10 +18,10 @@ import { useConfirmResolve, useConfirmState } from '@/stores/confirm';
  *  - Initial focus lands on the *cancel* button when the action is
  *    destructive, on the *confirm* button otherwise — same principle as
  *    macOS sheets ("don't make destruction the default").
- *  - Tab focus is intentionally not trapped: the dialog has at most two
- *    interactive elements, so cycling out-and-back via Shift+Tab is
- *    trivial and adding a full focus trap pulls in 30+ lines of edge
- *    cases. Mirrors AddMemoryDialog's decision.
+ *  - `useFocusTrap` cycles Tab inside the dialog and restores focus to the
+ *    opener on close. `aria-modal="true"` claims the rest of the document is
+ *    inert; without the trap that claim was false and Tab reached the sidebar
+ *    behind the scrim.
  */
 export function ConfirmDialogHost() {
   const { t } = useTranslation();
@@ -35,15 +36,9 @@ export function ConfirmDialogHost() {
   const resolveRef = useRef(resolve);
   resolveRef.current = resolve;
 
-  // Move focus to the safe default when the dialog mounts. The choice of
-  // initial focus is the single biggest difference between a thoughtful
-  // confirm UX and a dangerous one — destructive actions should never
-  // be activatable by a hasty Enter press.
-  useEffect(() => {
-    if (!pending) return;
-    const target = pending.destructive ? cancelRef.current : confirmRef.current;
-    target?.focus();
-  }, [pending]);
+  const destructive = pending?.destructive ?? false;
+  const safeTarget = destructive ? cancelRef : confirmRef;
+  const trapRef = useFocusTrap<HTMLDivElement>({ active: !!pending, initialFocus: safeTarget });
 
   // Escape always cancels (closing the dialog without the action).
   useEffect(() => {
@@ -72,10 +67,12 @@ export function ConfirmDialogHost() {
         onClick={() => resolve(false)}
       />
       <div
+        ref={trapRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descId}
+        tabIndex={-1}
         className="relative w-full max-w-md bg-card border border-border rounded-xl shadow-2xl p-6"
       >
         <h2 id={titleId} className="text-base font-semibold text-foreground mb-2">

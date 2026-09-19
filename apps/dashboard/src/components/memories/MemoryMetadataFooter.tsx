@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
+import { formatDateTime } from '@/lib/format';
 import type { Memory } from '@/types';
 import { formatNextReview } from './memoryDetailUtils';
 
@@ -36,12 +37,7 @@ export function MemoryMetadataFooter({ memory }: Props) {
       <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
         <span className="inline-flex items-center gap-1">
           {t('memories.reviews')}: <span className="text-foreground tabular-nums">{memory.reviewCount ?? 0}</span>
-          <InfoTooltip
-            content={t(
-              'memories.reviewsTooltip',
-              'How many times you have rated this memory in spaced repetition. The FSRS scheduler uses this to decide how often to surface it again.',
-            )}
-          />
+          <InfoTooltip content={t('memories.reviewsTooltip')} />
         </span>
         {nextReview && (
           <Badge
@@ -65,14 +61,14 @@ export function MemoryMetadataFooter({ memory }: Props) {
 
       <div className="text-xs text-muted-foreground space-y-1">
         <div>
-          {t('memories.created')}: {new Date(memory.createdAt).toLocaleString()}
+          {t('memories.created')}: {formatDateTime(memory.createdAt, i18n.language)}
         </div>
         <div>
-          {t('memories.updated')}: {new Date(memory.updatedAt).toLocaleString()}
+          {t('memories.updated')}: {formatDateTime(memory.updatedAt, i18n.language)}
         </div>
         {memory.lastAccessedAt && (
           <div>
-            {t('memories.accessed')}: {new Date(memory.lastAccessedAt).toLocaleString()}
+            {t('memories.accessed')}: {formatDateTime(memory.lastAccessedAt, i18n.language)}
           </div>
         )}
       </div>

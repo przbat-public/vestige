@@ -14,6 +14,7 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { NativeSelect } from '@/components/ui/native-select';
 import { QueryErrorPanel } from '@/components/ui/query-error-panel';
 import { SegmentedControl } from '@/components/ui/segmented-control';
+import { formatDate } from '@/lib/format';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { useTrackPageView } from '@/stores/telemetry';
@@ -34,7 +35,7 @@ type IntentionForm = z.infer<typeof intentionSchema>;
 
 export function IntentionsPage() {
   useTrackPageView('intentions');
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const [status, setStatus] = useState('active');
   const [showCreate, setShowCreate] = useState(false);
@@ -235,7 +236,7 @@ export function IntentionsPage() {
                   </Badge>
                   {item.deadline && (
                     <span>
-                      {t('intentions.deadline')}: {new Date(item.deadline).toLocaleDateString()}
+                      {t('intentions.deadline')}: {formatDate(item.deadline, i18n.language)}
                     </span>
                   )}
                 </div>

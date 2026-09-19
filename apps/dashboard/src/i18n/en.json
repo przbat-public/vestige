@@ -100,7 +100,21 @@
     "backupDesc": "Snapshot the SQLite store using VACUUM INTO. Stored under ~/.vestige/backups.",
     "backupBtn": "Create backup",
     "backupSuccess": "Backup created.",
-    "backupResult": "Saved to {{path}} ({{kb}} KB)."
+    "backupResult": "Saved to {{path}} ({{kb}} KB).",
+    "dupSuccess_one": "Found {{count}} cluster of near-duplicates.",
+    "dupSuccess_other": "Found {{count}} clusters of near-duplicates.",
+    "gcConfirm_one": "Permanently delete {{count}} memory below the retention threshold? This cannot be undone.",
+    "gcConfirm_other": "Permanently delete {{count}} memories below the retention threshold? This cannot be undone.",
+    "gcDeleteBtn_one": "Delete {{count}}",
+    "gcDeleteBtn_other": "Delete {{count}}",
+    "gcDeleteResult_one": "Deleted {{count}} memory.",
+    "gcDeleteResult_other": "Deleted {{count}} memories.",
+    "gcDeleteSuccess_one": "Deleted {{count}} memory.",
+    "gcDeleteSuccess_other": "Deleted {{count}} memories.",
+    "gcPreviewResult_one": "{{count}} memory below the retention threshold.",
+    "gcPreviewResult_other": "{{count}} memories below the retention threshold.",
+    "gcPreviewSuccess_one": "{{count}} memory would be deleted.",
+    "gcPreviewSuccess_other": "{{count}} memories would be deleted."
   },
   "a11y": {
     "currentPage": "current page",
@@ -173,13 +187,19 @@
     "yes": "yes",
     "no": "no",
     "previous": "Previous",
-    "next": "Next"
+    "next": "Next",
+    "more_one": "+{{count}} more",
+    "more_other": "+{{count}} more",
+    "total_one": "{{count}} total",
+    "total_other": "{{count}} total"
   },
   "status": {
     "connected": "Connected",
     "disconnected": "Disconnected",
     "memoriesCount": "{{count}} memories",
-    "avgRetention": "Avg. retention {{value}}%"
+    "avgRetention": "Avg. retention {{value}}%",
+    "memoriesCount_one": "{{count}} memory",
+    "memoriesCount_other": "{{count}} memories"
   },
   "graph": {
     "title": "Memory Graph",
@@ -233,7 +253,9 @@
         "help": "Show this help",
         "altClickDeselect": "Click the empty canvas to clear selection"
       }
-    }
+    },
+    "nodeOption_one": "{{count}} memory",
+    "nodeOption_other": "{{count}} memories"
   },
   "memories": {
     "title": "Memories",
@@ -283,7 +305,8 @@
     "editTagsHint": "Comma- or newline-separated. Trimmed and deduplicated automatically.",
     "changelog": {
       "title": "Edit history",
-      "empty": "No state transitions recorded yet."
+      "empty": "No state transitions recorded yet.",
+      "changedTo": "changed to"
     },
     "localGraph": {
       "title": "Local connections",
@@ -310,8 +333,10 @@
       "exploreTopicHint": "Opens the temporal console with this tag pre-selected.",
       "expiredRelative": "Expired {{days}}d ago",
       "expiringRelative": "Expires in {{days}}d",
-      "validRelative": "Valid for {{days}}d"
-    }
+      "validRelative": "Valid for {{days}}d",
+      "titleTooltip": "After this date, the memory is treated as expired and no longer surfaces as a current fact in searches."
+    },
+    "reviewsTooltip": "Total number of times you (or an agent) recalled this memory."
   },
   "nodeTypes": {
     "fact": "Fact",
@@ -385,7 +410,9 @@
       "title": "No insights yet",
       "description": "Run a dream cycle to generate synthesised observations across your memories.",
       "cta": "Run dream cycle"
-    }
+    },
+    "confidenceTooltip": "How sure the engine is that the pattern actually holds across the source memories. Driven by support count and contradiction signals.",
+    "noveltyTooltip": "How different this insight is from what was already known. High novelty means the dream cycle stitched something the existing graph did not encode."
   },
   "hubs": {
     "title": "Topic Hubs",
@@ -398,13 +425,16 @@
       "children_one": "{{count}} memory",
       "children_other": "{{count}} memories",
       "regenerated_one": "regenerated {{count}}×",
-      "regenerated_other": "regenerated {{count}}×"
+      "regenerated_other": "regenerated {{count}}×",
+      "children": "{{count}} memories",
+      "regenerated": "regenerated {{count}}×"
     },
     "empty": {
       "title": "No hubs yet",
       "description": "Topic hubs appear once a dream cycle discovers clusters of 5+ related memories.",
       "cta": "Run dream cycle"
-    }
+    },
+    "summary": "{{count}} active hubs"
   },
   "temporal": {
     "title": "Temporal versioning",
@@ -477,7 +507,8 @@
       "merge": "Merged with related",
       "replace": "Replaced existing",
       "add_context": "Added as context"
-    }
+    },
+    "required": "Required"
   },
   "briefing": {
     "title": "Morning briefing",
@@ -529,7 +560,9 @@
     "good": "Good",
     "goodHint": "Recalled correctly",
     "easy": "Easy",
-    "easyHint": "Trivially recalled — push out further"
+    "easyHint": "Trivially recalled — push out further",
+    "sessionDoneHint_one": "You reviewed {{count}} memory. New cards will appear as their next-review dates come due.",
+    "sessionDoneHint_other": "You reviewed {{count}} memories. New cards will appear as their next-review dates come due."
   },
   "epistemic": {
     "world": "Verified fact",
@@ -547,7 +580,9 @@
     "retentionDistribution": "Retention Distribution",
     "endangered": "Endangered Memories ({{count}})",
     "endangeredHint": "retention < 30% — needs attention (strengthen or review). GC only deletes below 10%.",
-    "allHealthy": "All memories above 30% retention — nothing in the warning zone."
+    "allHealthy": "All memories above 30% retention — nothing in the warning zone.",
+    "endangered_one": "Endangered Memories ({{count}})",
+    "endangered_other": "Endangered Memories ({{count}})"
   },
   "dream": {
     "replayed": "Replayed",
@@ -644,7 +679,12 @@
     "doubtModeHint": "Doubt mode: lowest-confidence memories first. Promote to verify, or demote to weaken.",
     "doubtModeVerify": "Verify",
     "doubtModeDemote": "Demote",
-    "openMemoryTitle": "Open memory {{id}}"
+    "openMemoryTitle": "Open memory {{id}}",
+    "doubtModeTooltip": "Doubt mode surfaces memories the engine has low confidence in. Verifying strengthens FSRS retention; demoting tells the engine to suppress without deleting.",
+    "doubtModeTooltipAria": "About doubt mode",
+    "pipelineStages_one": "{{count}} stage",
+    "pipelineStages_other": "{{count}} stages",
+    "rerankerModel": "Jina Reranker v2 Base"
   },
   "feed": {
     "title": "Activity Feed",
@@ -717,7 +757,10 @@
     "insightConfidence": "Dream confidence {{pct}}%",
     "evidenceTitle_one": "{{count}} supporting memory",
     "evidenceTitle_other": "{{count}} supporting memories",
-    "stagesFooter": "Stages: spreading activation {{activation}} · dream insights {{dream}}"
+    "stagesFooter": "Stages: spreading activation {{activation}} · dream insights {{dream}}",
+    "intentTooltip": "Detected intent — fact-check, timeline, root-cause, comparison, or synthesis. Drives which evidence the engine prioritises.",
+    "depthLabel_one": "Analyze {{count}} memory",
+    "depthLabel_other": "Analyze {{count}} memories"
   },
   "intentions": {
     "title": "Reminders",
@@ -782,7 +825,9 @@
       "degraded": "Degraded",
       "critical": "Critical",
       "empty": "Empty"
-    }
+    },
+    "heatmapCellTitle_one": "{{range}}: {{count}} of {{total}} memory",
+    "heatmapCellTitle_other": "{{range}}: {{count}} of {{total}} memories"
   },
   "timeline": {
     "title": "Timeline",
@@ -791,7 +836,9 @@
     "memoriesCount_one": "{{count}} memory",
     "memoriesCount_other": "{{count}} memories",
     "moreCount_one": "+{{count}} more",
-    "moreCount_other": "+{{count}} more"
+    "moreCount_other": "+{{count}} more",
+    "memoriesOn_one": "{{count}} memory on {{date}}",
+    "memoriesOn_other": "{{count}} memories on {{date}}"
   },
   "notFound": {
     "title": "Page not found",
@@ -1113,7 +1160,7 @@
       "stabilityHint": "How well-learned the memory is. Higher stability → slower decay.",
       "stabilityAria": "Memory stability in days",
       "readout": "After {{days}} day(s), a memory with {{stability}}-day stability has a {{retention}}% chance of being recalled.",
-      "svgAria": "Forgetting curve showing retention over the next 90 days"
+      "svgAria": "Forgetting curve showing retention over days"
     },
     "live": {
       "title": "Your strongest memory right now",

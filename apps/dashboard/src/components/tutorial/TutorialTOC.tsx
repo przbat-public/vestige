@@ -67,10 +67,7 @@ export function TutorialTOC({ visibleIds }: TutorialTOCProps) {
   if (sections.length === 0) return null;
 
   return (
-    <nav
-      aria-label={t('tutorial.toc.aria', { defaultValue: 'Tutorial sections' })}
-      className="hidden lg:block lg:w-56 lg:flex-shrink-0"
-    >
+    <nav aria-label={t('tutorial.toc.aria')} className="hidden lg:block lg:w-56 lg:flex-shrink-0">
       <div className="sticky top-4 space-y-1">
         <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2 px-2">
           {t('tutorial.toc.heading')}

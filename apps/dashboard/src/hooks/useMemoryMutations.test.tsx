@@ -40,6 +40,7 @@ vi.mock('@/stores/telemetry', async () => {
 });
 
 import { api } from '@/stores/api';
+import type { Memory, MemoryListResponse, MemoryStatus } from '@/types';
 import { useMemoryMutations } from './useMemoryMutations';
 
 type ToastArgs = [
@@ -69,9 +70,38 @@ function freshClient() {
   });
 }
 
-// Helper: a single memory entry of the shape api.memories.get/list returns.
-function memory(id: string, content = `Memory ${id}`) {
-  return { id, content, tags: [] as string[], node_type: 'fact' as const };
+// Helper: one entry of the shape `api.memories.list` returns. Fields the
+// list view omits (`lastAccessedAt`, `insight`, …) stay absent — that is
+// exactly what the backend sends for a paginated list.
+function memory(id: string, content = `Memory ${id}`): Memory {
+  return {
+    id,
+    content,
+    nodeType: 'fact',
+    tags: [],
+    retentionStrength: 0.8,
+    storageStrength: 0.7,
+    retrievalStrength: 0.6,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    epistemicStatus: 'world',
+    memorySystem: 'semantic',
+  };
+}
+
+/**
+ * A cached list page. The real cache holds `MemoryListResponseDto`
+ * (`{ total, memories }`) — never `{ items }` and never a bare array, which
+ * is why the old optimistic-delete test could pass while the production path
+ * was a no-op.
+ */
+function listPage(ids: string[], total = ids.length): MemoryListResponse {
+  return { total, memories: ids.map((id) => memory(id)) };
+}
+
+/** `MemoryStatusDto` as returned by delete / promote / demote. */
+function status(id: string, action: MemoryStatus['action'], retentionStrength: number): MemoryStatus {
+  return { ok: true, id, retentionStrength, action };
 }
 
 beforeEach(() => {
@@ -90,9 +120,9 @@ afterEach(() => {
 describe('useMemoryMutations — promote/demote', () => {
   it('promote: fires API, shows success toast, calls onPromote, invalidates lists', async () => {
     const qc = freshClient();
-    qc.setQueryData(['memories', 'list'], { items: [memory('a')] });
+    qc.setQueryData(['memories', 'list'], listPage(['a']));
     const invalidateSpy = vi.spyOn(qc, 'invalidateQueries');
-    vi.mocked(api.memories.promote).mockResolvedValue({ promoted: true, id: 'a', retentionStrength: 0.9 });
+    vi.mocked(api.memories.promote).mockResolvedValue(status('a', 'promoted', 0.9));
     const onPromote = vi.fn();
 
     const { result } = renderHook(() => useMemoryMutations({ onPromote }), { wrapper: wrapper(qc) });
@@ -123,8 +153,8 @@ describe('useMemoryMutations — promote/demote', () => {
 
   it('demote: emits a toast with an Undo action that re-promotes the memory', async () => {
     const qc = freshClient();
-    vi.mocked(api.memories.demote).mockResolvedValue({ demoted: true, id: 'a', retentionStrength: 0.4 });
-    vi.mocked(api.memories.promote).mockResolvedValue({ promoted: true, id: 'a', retentionStrength: 0.9 });
+    vi.mocked(api.memories.demote).mockResolvedValue(status('a', 'demoted', 0.4));
+    vi.mocked(api.memories.promote).mockResolvedValue(status('a', 'promoted', 0.9));
 
     const { result } = renderHook(() => useMemoryMutations(), { wrapper: wrapper(qc) });
     await act(async () => {
@@ -154,8 +184,8 @@ describe('useMemoryMutations — deferred delete', () => {
   it('optimistically strips from the list and commits after the undo window', async () => {
     vi.useFakeTimers();
     const qc = freshClient();
-    qc.setQueryData(['memories', 'list'], { items: [memory('a'), memory('b')] });
-    vi.mocked(api.memories.delete).mockResolvedValue({ deleted: true });
+    qc.setQueryData(['memories', 'list'], listPage(['a', 'b']));
+    vi.mocked(api.memories.delete).mockResolvedValue(status('a', 'deleted', 0.8));
     const onDelete = vi.fn();
 
     const { result } = renderHook(() => useMemoryMutations({ onDelete }), { wrapper: wrapper(qc) });
@@ -163,7 +193,9 @@ describe('useMemoryMutations — deferred delete', () => {
     act(() => result.current.remove.mutate('a'));
 
     // List view immediately reflects the delete without a server round-trip.
-    expect(qc.getQueryData(['memories', 'list'])).toEqual({ items: [memory('b')] });
+    // `total` is decremented too, otherwise the pagination footer keeps
+    // advertising a row that is no longer rendered.
+    expect(qc.getQueryData(['memories', 'list'])).toEqual(listPage(['b']));
     expect(result.current.remove.isPending).toBe(true);
     // The API call hasn't fired yet — that's the whole point of the window.
     expect(api.memories.delete).not.toHaveBeenCalled();
@@ -185,8 +217,8 @@ describe('useMemoryMutations — deferred delete', () => {
   it('undo within the window restores the list and never fires the API call', async () => {
     vi.useFakeTimers();
     const qc = freshClient();
-    qc.setQueryData(['memories', 'list'], { items: [memory('a'), memory('b')] });
-    vi.mocked(api.memories.delete).mockResolvedValue({ deleted: true });
+    qc.setQueryData(['memories', 'list'], listPage(['a', 'b']));
+    vi.mocked(api.memories.delete).mockResolvedValue(status('a', 'deleted', 0.8));
 
     const { result } = renderHook(() => useMemoryMutations(), { wrapper: wrapper(qc) });
 
@@ -200,7 +232,7 @@ describe('useMemoryMutations — deferred delete', () => {
     act(() => undo?.());
 
     // List restored, no API call, telemetry registered.
-    expect(qc.getQueryData(['memories', 'list'])).toEqual({ items: [memory('a'), memory('b')] });
+    expect(qc.getQueryData(['memories', 'list'])).toEqual(listPage(['a', 'b']));
     expect(api.memories.delete).not.toHaveBeenCalled();
     expect(trackMock).toHaveBeenCalledWith('memory_delete_undo');
 
@@ -213,11 +245,26 @@ describe('useMemoryMutations — deferred delete', () => {
     expect(result.current.remove.isPending).toBe(false);
   });
 
+  it('leaves cache entries that are not list envelopes untouched', async () => {
+    vi.useFakeTimers();
+    const qc = freshClient();
+    // A stale/foreign shape under the same prefix must not be corrupted (and
+    // must not be mistaken for a list page).
+    const foreign = { items: [memory('a'), memory('b')] };
+    qc.setQueryData(['memories', 'legacy'], foreign);
+    vi.mocked(api.memories.delete).mockResolvedValue(status('a', 'deleted', 0.8));
+
+    const { result } = renderHook(() => useMemoryMutations(), { wrapper: wrapper(qc) });
+    act(() => result.current.remove.mutate('a'));
+
+    expect(qc.getQueryData(['memories', 'legacy'])).toEqual(foreign);
+  });
+
   it('a second delete commits the first immediately so windows never overlap', async () => {
     vi.useFakeTimers();
     const qc = freshClient();
-    qc.setQueryData(['memories', 'list'], { items: [memory('a'), memory('b')] });
-    vi.mocked(api.memories.delete).mockResolvedValue({ deleted: true });
+    qc.setQueryData(['memories', 'list'], listPage(['a', 'b']));
+    vi.mocked(api.memories.delete).mockResolvedValue(status('a', 'deleted', 0.8));
 
     const { result } = renderHook(() => useMemoryMutations(), { wrapper: wrapper(qc) });
 
@@ -244,7 +291,7 @@ describe('useMemoryMutations — deferred delete', () => {
   it('restores the snapshot and toasts the error when the API call fails', async () => {
     vi.useFakeTimers();
     const qc = freshClient();
-    qc.setQueryData(['memories', 'list'], { items: [memory('a'), memory('b')] });
+    qc.setQueryData(['memories', 'list'], listPage(['a', 'b']));
     vi.mocked(api.memories.delete).mockRejectedValue(new Error('storage offline'));
 
     const { result } = renderHook(() => useMemoryMutations(), { wrapper: wrapper(qc) });
@@ -258,15 +305,15 @@ describe('useMemoryMutations — deferred delete', () => {
     // Switch to real timers so `waitFor` can poll for the catch handler
     // to land — see the comment in the success-path test for context.
     vi.useRealTimers();
-    await waitFor(() => expect(qc.getQueryData(['memories', 'list'])).toEqual({ items: [memory('a'), memory('b')] }));
+    await waitFor(() => expect(qc.getQueryData(['memories', 'list'])).toEqual(listPage(['a', 'b'])));
     expect(toastMock).toHaveBeenCalledWith('storage offline', 'error');
   });
 
   it('flushes the pending delete on unmount so the user does not silently lose intent', async () => {
     vi.useFakeTimers();
     const qc = freshClient();
-    qc.setQueryData(['memories', 'list'], { items: [memory('a')] });
-    vi.mocked(api.memories.delete).mockResolvedValue({ deleted: true });
+    qc.setQueryData(['memories', 'list'], listPage(['a']));
+    vi.mocked(api.memories.delete).mockResolvedValue(status('a', 'deleted', 0.8));
 
     const { result, unmount } = renderHook(() => useMemoryMutations(), { wrapper: wrapper(qc) });
     act(() => result.current.remove.mutate('a'));
@@ -284,7 +331,10 @@ describe('useMemoryMutations — update', () => {
   it('writes the returned memory into the per-id cache and invalidates lists', async () => {
     const qc = freshClient();
     const updated = { ...memory('a', 'updated content'), tags: ['x', 'y'] };
-    vi.mocked(api.memories.update).mockResolvedValue(updated);
+    // PATCH answers with `MemoryUpdateResultDto { memory, field }` — mocking a
+    // bare Memory here is what kept the "cache under ['memory', undefined]"
+    // bug green.
+    vi.mocked(api.memories.update).mockResolvedValue({ memory: updated, field: 'content+tags' });
     const invalidateSpy = vi.spyOn(qc, 'invalidateQueries');
     const onUpdate = vi.fn();
 
@@ -295,6 +345,8 @@ describe('useMemoryMutations — update', () => {
     });
 
     expect(qc.getQueryData(['memory', 'a'])).toEqual(updated);
+    // Nothing may be written under the `undefined` id — that was the bug.
+    expect(qc.getQueryData(['memory', undefined])).toBeUndefined();
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['memories'] });
     expect(toastMock).toHaveBeenCalledWith('memories.updatedToast', 'success');
     expect(onUpdate).toHaveBeenCalledOnce();

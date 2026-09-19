@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
+import { formatDateTime } from '@/lib/format';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { toast } from '@/stores/toast';
@@ -41,7 +42,7 @@ interface ValidityState {
  * older memories ingested before temporal anchoring shipped.
  */
 export function MemoryTemporalPanel({ memory }: MemoryTemporalPanelProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const navigate = useNavigate();
 
@@ -55,7 +56,7 @@ export function MemoryTemporalPanel({ memory }: MemoryTemporalPanelProps) {
       // memory list (validUntil flips), and this memory's individual
       // record so the drawer re-renders with the new window.
       qc.invalidateQueries({ queryKey: ['temporal'] });
-      qc.invalidateQueries({ queryKey: queryKeys.memories() });
+      qc.invalidateQueries({ queryKey: queryKeys.memoriesPrefix });
       qc.invalidateQueries({ queryKey: queryKeys.memory(memory.id) });
     },
     onError: (err: Error) => toast(err.message || t('common.error'), 'error'),
@@ -76,12 +77,7 @@ export function MemoryTemporalPanel({ memory }: MemoryTemporalPanelProps) {
           className="text-xs font-medium text-foreground inline-flex items-center gap-1"
         >
           {t('memories.temporalPanel.title')}
-          <InfoTooltip
-            content={t(
-              'memories.temporalPanel.titleTooltip',
-              'Temporal validity expresses when this memory is considered current. Marking it superseded removes it from "current" results without deleting the history.',
-            )}
-          />
+          <InfoTooltip content={t('memories.temporalPanel.titleTooltip')} />
         </h3>
         {badge && <Badge variant={badge.variant}>{badge.label}</Badge>}
       </div>
@@ -91,13 +87,13 @@ export function MemoryTemporalPanel({ memory }: MemoryTemporalPanelProps) {
           {memory.validFrom && (
             <div className="flex gap-2">
               <dt className="shrink-0 w-20">{t('memories.temporalPanel.validFromLabel')}</dt>
-              <dd className="tabular-nums text-foreground">{new Date(memory.validFrom).toLocaleString()}</dd>
+              <dd className="tabular-nums text-foreground">{formatDateTime(memory.validFrom, i18n.language)}</dd>
             </div>
           )}
           {memory.validUntil && (
             <div className="flex gap-2">
               <dt className="shrink-0 w-20">{t('memories.temporalPanel.validUntilLabel')}</dt>
-              <dd className="tabular-nums text-foreground">{new Date(memory.validUntil).toLocaleString()}</dd>
+              <dd className="tabular-nums text-foreground">{formatDateTime(memory.validUntil, i18n.language)}</dd>
             </div>
           )}
         </dl>

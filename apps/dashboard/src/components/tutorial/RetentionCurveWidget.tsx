@@ -103,9 +103,7 @@ export function RetentionCurveWidget() {
             viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
             className="w-full max-w-[480px] h-auto"
             role="img"
-            aria-label={t('tutorial.curve.svgAria', {
-              defaultValue: 'Forgetting curve showing retention over days',
-            })}
+            aria-label={t('tutorial.curve.svgAria')}
           >
             <title>{t('tutorial.curve.title')}</title>
 
@@ -194,7 +192,7 @@ export function RetentionCurveWidget() {
               value={day}
               onChange={(e) => onDay(Number(e.target.value))}
               className="w-full"
-              aria-label={t('tutorial.curve.daysAria', { defaultValue: 'Days since last review' })}
+              aria-label={t('tutorial.curve.daysAria')}
             />
             <div className="text-[10px] text-muted-foreground mt-0.5">{t('tutorial.curve.daysHint')}</div>
           </div>
@@ -211,7 +209,7 @@ export function RetentionCurveWidget() {
               value={stability}
               onChange={(e) => onStab(Number(e.target.value))}
               className="w-full"
-              aria-label={t('tutorial.curve.stabilityAria', { defaultValue: 'Memory stability in days' })}
+              aria-label={t('tutorial.curve.stabilityAria')}
             />
             <div className="text-[10px] text-muted-foreground mt-0.5">{t('tutorial.curve.stabilityHint')}</div>
           </div>
