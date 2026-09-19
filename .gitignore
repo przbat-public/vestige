@@ -131,6 +131,13 @@ credentials.json
 # =============================================================================
 apps/dashboard/.svelte-kit/
 apps/dashboard/node_modules/
+# TypeScript incremental build cache — regenerated on every build, not source.
+apps/dashboard/tsconfig.tsbuildinfo
+
+# =============================================================================
+# Release artifacts (produced by scripts/pack-for-team.sh, not committed)
+# =============================================================================
+*.tar.gz
 
 # =============================================================================
 # External repos (forks, submodules)

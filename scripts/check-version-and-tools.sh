@@ -83,7 +83,62 @@ fi
 note "ARCHITECTURE.md advertises ${EXPECTED_TOOL_COUNT} tools"
 
 # ----------------------------------------------------------------------------
-# 3. License consistency
+# 3. Migration version vs docs
+# ----------------------------------------------------------------------------
+# The authoritative schema version is the highest `version:` in the migration
+# registry (the runner applies these in order). Several docs quote the range
+# as "Migrations v1–vN"; this guard stops that range from going stale when a
+# new migration lands without a doc bump (the v13→v14 drift caught on
+# 2026-05-29). The dash below is an en-dash (–), matching the prose.
+REGISTRY="crates/vestige-core/src/storage/migrations/registry.rs"
+MIGRATION_COUNT="$(awk -F'[ ,]+' '/version:[[:space:]]*[0-9]+/{print $3}' "$REGISTRY" | sort -n | tail -1)"
+if [[ -z "${MIGRATION_COUNT:-}" || "$MIGRATION_COUNT" -eq 0 ]]; then
+  fail "Could not extract migration count from $REGISTRY"
+fi
+note "Migration registry tops out at v${MIGRATION_COUNT}"
+
+MIGRATION_RANGE="v1–v${MIGRATION_COUNT}"
+declare -a migration_doc_files=(
+  "README.md"
+  "ARCHITECTURE.md"
+  "CONTRIBUTING.md"
+  "AGENTS.md"
+)
+for f in "${migration_doc_files[@]}"; do
+  grep -qF "$MIGRATION_RANGE" "$f" || fail \
+    "$f does not advertise '${MIGRATION_RANGE}' (registry has v${MIGRATION_COUNT}). Update the migration range."
+done
+note "All docs advertise migration range ${MIGRATION_RANGE}"
+
+# ----------------------------------------------------------------------------
+# 4. Dashboard route count vs docs
+# ----------------------------------------------------------------------------
+# The dashboard router is a single chain of `.route(...)` calls in
+# dashboard/mod.rs. Several docs quote the total ("40 REST routes",
+# "40 routes total"). New v3.5 endpoints (deep_reference, hubs, intentions
+# PATCH) drifted past the documented 39 without a doc bump — caught on
+# 2026-05-29. The canonical count is the number of route call sites anchored
+# at line start (so a `.route(` inside a comment or string cannot inflate it).
+ROUTER="crates/vestige-mcp/src/dashboard/mod.rs"
+ROUTE_COUNT="$(grep -cE '^[[:space:]]*\.route\(' "$ROUTER")"
+if [[ -z "${ROUTE_COUNT:-}" || "$ROUTE_COUNT" -eq 0 ]]; then
+  fail "Could not extract route count from $ROUTER"
+fi
+note "Dashboard router exposes ${ROUTE_COUNT} routes"
+
+declare -a route_doc_files=(
+  "README.md"
+  "ARCHITECTURE.md"
+  "AGENTS.md"
+)
+for f in "${route_doc_files[@]}"; do
+  grep -qE "${ROUTE_COUNT}[[:space:]]+(REST[[:space:]]+)?routes?" "$f" || fail \
+    "$f does not advertise '${ROUTE_COUNT} routes' (router has ${ROUTE_COUNT}). Update the route count."
+done
+note "All docs advertise ${ROUTE_COUNT} routes"
+
+# ----------------------------------------------------------------------------
+# 5. License consistency
 # ----------------------------------------------------------------------------
 # All packages that declare a license must declare the SAME license string as
 # the workspace. The MCPB manifest historically drifted to "MIT" even though
@@ -105,7 +160,7 @@ done
 note "All package manifests match workspace license"
 
 # ----------------------------------------------------------------------------
-# 4. Rust toolchain
+# 6. Rust toolchain
 # ----------------------------------------------------------------------------
 if [[ -f rust-toolchain.toml ]]; then
   TOOLCHAIN_CHANNEL="$(awk -F'"' '/^channel/{print $2; exit}' rust-toolchain.toml)"
