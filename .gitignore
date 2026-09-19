@@ -5,6 +5,13 @@ target/
 **/*.rs.bk
 *.pdb
 
+# Scratch Cargo target dirs. A second CARGO_TARGET_DIR is the standard way to
+# keep a build from queueing behind another one on the shared `target/` lock,
+# and a benchmark or a parallel workstream may create one (`target-fc/` did).
+# They are build output, never source: without this pattern a single `git add
+# -A` would stage roughly a gigabyte of artifacts.
+/target-*/
+
 # Cargo.lock is included for binaries, excluded for libraries
 # Uncomment the next line if this is a library project
 # Cargo.lock
