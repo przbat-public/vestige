@@ -2,7 +2,6 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ProgressBar } from '@/components/ui/progress-bar';
-import { usePinned } from '@/stores/pinned';
 import type { Memory } from '@/types';
 import { EPISTEMIC_STATUS_COLORS, NODE_TYPE_COLORS, retentionColor } from '@/types';
 
@@ -21,12 +20,16 @@ interface MemoryListItemProps {
   /** True when the j/k cursor is on this row. Renders a subtle focus ring. */
   isFocused?: boolean;
   /**
-   * Pinned state. Passed in by the list so a row does not have to subscribe to
-   * the pinned store itself: with 100 rendered rows, every pin/unpin used to
-   * fire 100 `localStorage` reads (one per row's `usePinned`) and re-render the
-   * whole list. Omit it only for standalone rows.
+   * Pinned state, owned by the list.
+   *
+   * The row deliberately does not subscribe to the pinned store: with
+   * `PAGE_SIZE` (100) rendered rows, a `usePinned()` per row meant 100
+   * `localStorage` reads (`getItem` + `JSON.parse`) on mount and again on every
+   * pin/unpin, plus a re-render of the whole list. `MemoriesPage` reads the set
+   * once and passes the boolean down, so the row stays a pure function of its
+   * props and `memo` below is effective.
    */
-  isPinned?: boolean;
+  isPinned: boolean;
   onActivate: (m: Memory) => void;
   onToggleSelect: (id: string, opts: { shift?: boolean; ctrl?: boolean }) => void;
 }
@@ -50,15 +53,11 @@ function MemoryListItemRow({
   isSelected,
   selectionMode,
   isFocused = false,
-  isPinned: pinnedProp,
+  isPinned,
   onActivate,
   onToggleSelect,
 }: MemoryListItemProps) {
   const { t } = useTranslation();
-  // Fallback for standalone usage; the list passes the flag down so the
-  // subscription stays at one per page instead of one per row.
-  const pinned = usePinned();
-  const isPinned = pinnedProp ?? pinned.has(memory.id);
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (e.shiftKey) {
@@ -149,7 +148,7 @@ function MemoryListItemRow({
 /**
  * Memoised: `MemoriesPage` renders up to `PAGE_SIZE` (100) rows in one list,
  * and the search box is controlled at the page level, so every keystroke used
- * to re-render all of them. Props are primitives plus two `useCallback`-stable
- * handlers, so the shallow comparison is effective.
+ * to re-render all of them. Every prop is a primitive plus two
+ * `useCallback`-stable handlers, so the shallow comparison is effective.
  */
 export const MemoryListItem = memo(MemoryListItemRow);
