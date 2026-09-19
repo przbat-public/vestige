@@ -11,9 +11,11 @@ One-click installation bundle for Claude Desktop.
 
 That's it. No npm, no terminal, no config files.
 
-**Platform support.** The bundle contains one binary per OS+architecture and
-picks it at launch (`launch.sh`): macOS ARM64, Linux x86_64, Linux ARM64 and
-Windows x86_64. macOS Intel is not bundled — install
+**Platform support.** The bundle contains one binary per OS+architecture:
+macOS ARM64, Linux x86_64, Linux ARM64 and Windows x86_64. The three POSIX
+targets are picked at launch by `launch.sh`, which reads `uname`; Windows is
+picked earlier, by the manifest's `platform_overrides.win32`, because there is
+no POSIX shell there to run the launcher. macOS Intel is not bundled — install
 `npm install -g vestige-mcp-server` there instead; the launcher prints that
 instruction rather than failing with `exec format error`.
 
