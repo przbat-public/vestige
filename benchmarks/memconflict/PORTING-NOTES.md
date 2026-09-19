@@ -277,3 +277,98 @@ the repository.
 4. **`docs/BENCHMARKS.md`**: it exists upstream and the README used to require
    reading it. Porting it needs a write outside `benchmarks/memconflict/`, which
    this task forbade.
+
+## 11. FactConsolidation protocol (separate entry point, added 2026-09-19)
+
+`factconsolidation.py` is a **new** harness in this directory, not a port of
+anything upstream, so it gets its own deviation list. Nothing here modifies
+`run.py`, the four MemConflict arms, or the files they read. It pins a second,
+independent dataset (`FACTCONSOLIDATION.lock.json`) and has its own entry point
+because forcing it into `run.py` would have distorted both benchmarks: `run.py`
+is organised around simulated *users* with many sessions and four arms, whereas
+FactConsolidation is one haystack, one ingest order, one question at a time.
+
+**What is faithful.**
+
+* The dataset is the canonical distribution: `ai-hyz/MemoryAgentBench`
+  (`Conflict_Resolution` split), pinned by SHA-256 in
+  `FACTCONSOLIDATION.lock.json`, fetched by `fetch_factconsolidation.py`, which
+  hard-fails on a digest or size mismatch exactly like `fetch_dataset.py`.
+* The metric is a verbatim port of the official
+  `utils/eval_other_utils.py::normalize_answer` and
+  `substring_exact_match_score`, including the upstream quirk that punctuation
+  is deleted rather than replaced with a space. `factconsolidation_data.py`
+  contains both.
+* The ground truth for a conflict scenario is the value of the **last**
+  statement for the question's `(subject, relation)` key, and ingest replays the
+  haystack in the dataset's own document order. Document order *is* the
+  protocol; a hash-ordered or parallel ingest would destroy the thing being
+  measured, so the harness does not offer one.
+
+**Deviations, stated plainly.**
+
+1. **pyarrow is an optional dependency of the fetch step.** The canonical file
+   is parquet, and this harness is standard library only. The first attempt was
+   a hand-rolled stdlib parquet reader; it was abandoned rather than shipped,
+   because it silently mis-decoded the compact-protocol list header (the header
+   byte packs the size in the high nibble and the element type in the low
+   nibble, so reading the byte as the type yields ids like 252 instead of 12)
+   and produced an empty schema with no error. `fetch_factconsolidation.py`
+   therefore uses pyarrow once, interactively, and writes
+   `data/factconsolidation.jsonl`; **every benchmark run reads JSONL and has no
+   third-party dependency.** The JSONL is re-read and re-validated on every run
+   (row count, per-source question count, question/answer length parity), so a
+   truncated extraction fails loudly instead of scoring 0/0.
+2. **`parse_output` is not applied.** The official reader extracts the text
+   after `Answer:` from an instructed LLM's reply. This harness has no LLM, so
+   there is nothing to extract; applying it would only add a way to lose a
+   correct answer.
+3. **Retrieval stands in for a context window.** The paper feeds an LLM the whole
+   haystack; here the system's own `search` returns `--top-k` memories and the
+   reader is the concatenation of their `content`. Numbers are therefore a
+   floor and are not comparable to the paper's table. Only the smallest
+   single-hop haystack is exercised end to end (see 5).
+4. **Question templates are mapped by regex, and refusals are reported.** A
+   scenario is built only when the question maps to a `(subject, relation)` key
+   that has at least two statements with different values. Everything refused is
+   counted by reason in `--describe` and in the results JSON
+   (`scenario_coverage.refusal_reasons`), never silently dropped: a harness that
+   builds zero scenarios must not be able to print 0.0 accuracy as a result.
+   On the pinned `sh_6k` haystack: 381 of 455 fact lines parse, 59 scenarios are
+   built, and all 59 ground truths equal the last statement's value.
+5. **`factconsolidation_mh_*` builds zero scenarios.** Multi-hop questions
+   compose two facts through an unspecified hop chain; the harness refuses to
+   invent one. `--describe` reports it and a run against an `mh_*` source exits
+   without measuring anything.
+6. **`--ingest conflicts` exists and is not a benchmark.** It ingests only the
+   statements belonging to the scenarios' own conflict groups, which removes all
+   retrieval difficulty and isolates "cannot resolve freshness" from "never
+   found the statements". It is labelled as a plumbing check everywhere it
+   appears. Only `--ingest all` is the benchmark.
+7. **One fresh store per group of `--scenarios-per-store` scenarios** (default
+   10), for the same reason `run.py` uses one store per simulated user: the
+   server has no namespace argument. Scenario groups do not share subjects, but
+   this is a property of the pinned data, not an enforced invariant; the results
+   file records it as an assumption rather than a guarantee.
+8. **Scoring reads only retrieved memory content**, never the tool envelope or
+   field names -- the same discipline as
+   `run.py::VestigeArm._texts_from_search`.
+9. **`--seed` does not control the protocol.** Ingest order and question order are
+   the dataset's; the seed is recorded for provenance and is used only when
+   `--scenarios` forces sampling.
+
+**Known limitations.**
+
+* The reader is a substring check, so a reply that contains the current value
+  *and* the superseded one scores as correct. That is the official metric, but
+  it means `answer_accuracy` alone cannot distinguish "returned the current
+  fact" from "returned everything". `retrieved_current_value`,
+  `retrieved_superseded_value` and `retrieved_any_statement` are recorded per
+  scenario for exactly that reason.
+* One haystack size (6k) is measured end to end. The 32k/64k/262k variants have
+  2310/4580/18332 statements; at the measured ~12 statements/s that is 3 to 25
+  minutes of ingest *per store*, so they are available via `--source` but were
+  not run.
+* No confidence intervals, no significance test, and no cross-system
+  comparison: there is no second system in this harness.
+

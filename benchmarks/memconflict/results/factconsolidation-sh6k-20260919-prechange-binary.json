@@ -1,0 +1,2019 @@
+{
+  "harness": "factconsolidation",
+  "created_utc": "2026-09-19T13:37:38+00:00",
+  "protocol": {
+    "benchmark": "MemoryAgentBench FactConsolidation",
+    "paper": "arXiv:2507.05257",
+    "source": "factconsolidation_sh_6k",
+    "metric": "substring_exact_match over concatenated retrieved memories",
+    "ground_truth_rule": "value of the LAST statement for the question's (subject, relation) key",
+    "ingest_mode": "all",
+    "ingest_order": "dataset document order (the serial numbering)",
+    "top_k": 5,
+    "retrieval_mode": "balanced",
+    "detail_level": "summary",
+    "min_similarity": 0.0,
+    "min_retention": 0.0,
+    "warmup_seconds": 10.0,
+    "scenarios_per_store": 10,
+    "seed": 1234,
+    "statement_count": 381,
+    "statements_ingested": 2286
+  },
+  "scenario_coverage": {
+    "n_scenarios": 59,
+    "n_current_ground_truth": 59,
+    "n_superseded": 59,
+    "n_distinct_subjects": 59,
+    "subjects_disjoint": true,
+    "refused": 41,
+    "refusal_reasons": {
+      "no conflicting statement for the question's key": 26,
+      "question template not mapped": 15
+    },
+    "unparsed_fact_sentences": 74
+  },
+  "provenance": {
+    "git": {
+      "commit": "6ca19748e5deefe5cb653c461e7d5003f9b07ede",
+      "branch": "main",
+      "dirty": true
+    },
+    "binary": "/tmp/vestige-mcp-stale-20260919",
+    "binary_mtime_utc": "2026-09-19T13:24:56+00:00",
+    "python": "3.13.9",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "harness_argv": [
+      "benchmarks/memconflict/factconsolidation.py",
+      "--source",
+      "factconsolidation_sh_6k",
+      "--scenarios-per-store",
+      "10",
+      "--ingest",
+      "all",
+      "--warmup",
+      "10",
+      "--server-binary",
+      "/tmp/vestige-mcp-stale-20260919",
+      "--out",
+      "/tmp/fc-stale-binary.json"
+    ],
+    "env": {},
+    "dataset": {
+      "revision": "7ea066982b140a19337e17e60d45d4076e042faf",
+      "url": "https://huggingface.co/datasets/ai-hyz/MemoryAgentBench/resolve/7ea066982b140a19337e17e60d45d4076e042faf/data/Conflict_Resolution-00000-of-00001.parquet",
+      "sha256": "24d5c3f09ce0ce15625cb9f8a98f44f0d864ca6c94d7b4ad04eb697ca3a5ff45",
+      "bytes": 1491588,
+      "rows": 8,
+      "jsonl": "/Users/przemek/Projects/vestige/benchmarks/memconflict/data/factconsolidation.jsonl",
+      "jsonl_sha256": "1368e3cdcb08487bacd129d3fc11b051c31e2816041fe73aac4d184a39638bdc",
+      "metric": "substring_exact_match (official calculate_metrics)"
+    }
+  },
+  "stores": [
+    {
+      "store_index": 0,
+      "statements_ingested": 381,
+      "ingest_seconds": 20.57,
+      "ingest_errors": [],
+      "retrieve_errors": [],
+      "command": [
+        "/private/tmp/vestige-mcp-stale-20260919",
+        "--data-dir",
+        "/Users/przemek/Projects/vestige/benchmarks/memconflict/results/datadir-fc-20260919T133255Z/store-1789824775758/vestige.db"
+      ],
+      "ports": {
+        "http": 54265,
+        "dashboard": 54266
+      },
+      "binary_resolved": "/private/tmp/vestige-mcp-stale-20260919",
+      "binary_mtime_utc": "2026-09-19T13:24:56+00:00",
+      "env_switches": {},
+      "observed_warmup": {
+        "requested_seconds": 10.0,
+        "actual_seconds": 10.01,
+        "embedding_ready_signal": "2026-09-19T13:32:56.866740Z  INFO Embedding service initialized successfully",
+        "reranker_signal": "2026-09-19T13:32:59.792451Z  INFO cross-encoder reranker loaded model=\"Jina Reranker v2 Base Multilingual\" params=\"278M\""
+      }
+    },
+    {
+      "store_index": 1,
+      "statements_ingested": 381,
+      "ingest_seconds": 36.1,
+      "ingest_errors": [],
+      "retrieve_errors": [],
+      "command": [
+        "/private/tmp/vestige-mcp-stale-20260919",
+        "--data-dir",
+        "/Users/przemek/Projects/vestige/benchmarks/memconflict/results/datadir-fc-20260919T133255Z/store-1789824807346/vestige.db"
+      ],
+      "ports": {
+        "http": 54312,
+        "dashboard": 54313
+      },
+      "binary_resolved": "/private/tmp/vestige-mcp-stale-20260919",
+      "binary_mtime_utc": "2026-09-19T13:24:56+00:00",
+      "env_switches": {},
+      "observed_warmup": {
+        "requested_seconds": 10.0,
+        "actual_seconds": 10.0,
+        "embedding_ready_signal": "2026-09-19T13:33:30.250866Z  INFO Embedding service initialized successfully",
+        "reranker_signal": null
+      }
+    },
+    {
+      "store_index": 2,
+      "statements_ingested": 381,
+      "ingest_seconds": 40.15,
+      "ingest_errors": [],
+      "retrieve_errors": [],
+      "command": [
+        "/private/tmp/vestige-mcp-stale-20260919",
+        "--data-dir",
+        "/Users/przemek/Projects/vestige/benchmarks/memconflict/results/datadir-fc-20260919T133255Z/store-1789824858572/vestige.db"
+      ],
+      "ports": {
+        "http": 54335,
+        "dashboard": 54336
+      },
+      "binary_resolved": "/private/tmp/vestige-mcp-stale-20260919",
+      "binary_mtime_utc": "2026-09-19T13:24:56+00:00",
+      "env_switches": {},
+      "observed_warmup": {
+        "requested_seconds": 10.0,
+        "actual_seconds": 10.0,
+        "embedding_ready_signal": "2026-09-19T13:34:21.033728Z  INFO Embedding service initialized successfully",
+        "reranker_signal": null
+      }
+    },
+    {
+      "store_index": 3,
+      "statements_ingested": 381,
+      "ingest_seconds": 40.98,
+      "ingest_errors": [],
+      "retrieve_errors": [],
+      "command": [
+        "/private/tmp/vestige-mcp-stale-20260919",
+        "--data-dir",
+        "/Users/przemek/Projects/vestige/benchmarks/memconflict/results/datadir-fc-20260919T133255Z/store-1789824909040/vestige.db"
+      ],
+      "ports": {
+        "http": 54393,
+        "dashboard": 54394
+      },
+      "binary_resolved": "/private/tmp/vestige-mcp-stale-20260919",
+      "binary_mtime_utc": "2026-09-19T13:24:56+00:00",
+      "env_switches": {},
+      "observed_warmup": {
+        "requested_seconds": 10.0,
+        "actual_seconds": 10.0,
+        "embedding_ready_signal": "2026-09-19T13:35:10.926940Z  INFO Embedding service initialized successfully",
+        "reranker_signal": null
+      }
+    },
+    {
+      "store_index": 4,
+      "statements_ingested": 381,
+      "ingest_seconds": 35.23,
+      "ingest_errors": [],
+      "retrieve_errors": [],
+      "command": [
+        "/private/tmp/vestige-mcp-stale-20260919",
+        "--data-dir",
+        "/Users/przemek/Projects/vestige/benchmarks/memconflict/results/datadir-fc-20260919T133255Z/store-1789824960695/vestige.db"
+      ],
+      "ports": {
+        "http": 54427,
+        "dashboard": 54428
+      },
+      "binary_resolved": "/private/tmp/vestige-mcp-stale-20260919",
+      "binary_mtime_utc": "2026-09-19T13:24:56+00:00",
+      "env_switches": {},
+      "observed_warmup": {
+        "requested_seconds": 10.0,
+        "actual_seconds": 10.01,
+        "embedding_ready_signal": "2026-09-19T13:36:02.639599Z  INFO Embedding service initialized successfully",
+        "reranker_signal": null
+      }
+    },
+    {
+      "store_index": 5,
+      "statements_ingested": 381,
+      "ingest_seconds": 39.35,
+      "ingest_errors": [],
+      "retrieve_errors": [],
+      "command": [
+        "/private/tmp/vestige-mcp-stale-20260919",
+        "--data-dir",
+        "/Users/przemek/Projects/vestige/benchmarks/memconflict/results/datadir-fc-20260919T133255Z/store-1789825008137/vestige.db"
+      ],
+      "ports": {
+        "http": 54479,
+        "dashboard": 54480
+      },
+      "binary_resolved": "/private/tmp/vestige-mcp-stale-20260919",
+      "binary_mtime_utc": "2026-09-19T13:24:56+00:00",
+      "env_switches": {},
+      "observed_warmup": {
+        "requested_seconds": 10.0,
+        "actual_seconds": 10.0,
+        "embedding_ready_signal": "2026-09-19T13:36:50.140666Z  INFO Embedding service initialized successfully",
+        "reranker_signal": null
+      }
+    }
+  ],
+  "summary": {
+    "n_scenarios": 59,
+    "n_with_current_ground_truth": 59,
+    "answer_accuracy": 0.9831,
+    "answer_accuracy_measurable": 0.9831,
+    "top1_accuracy": 0.2542,
+    "top1_is_current": 0.2542,
+    "top1_is_superseded": 0.7458,
+    "both_statements_retrieved": 0.9831,
+    "retrieved_current_value": 0.9831,
+    "retrieved_superseded_value": 1.0,
+    "retrieved_any_statement": 1.0,
+    "empty_retrieval": 0.0,
+    "n_retrieved_mean": 2.49,
+    "reader_chars_mean": 132.8,
+    "latency_s_mean": 1.188
+  },
+  "per_scenario": [
+    {
+      "question": "Which sport is goaltender associated with?",
+      "key": {
+        "subject": "goaltender",
+        "relation": "sport"
+      },
+      "gold": "pesäpallo",
+      "current_serial": 310,
+      "current_value": "pesäpallo",
+      "superseded_serials": [
+        223
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 173,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        223,
+        310
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 0.752,
+      "total": 3
+    },
+    {
+      "question": "What is Nobuhiro Watsuki famous for?",
+      "key": {
+        "subject": "nobuhiro watsuki",
+        "relation": "famous_for"
+      },
+      "gold": "The Fairly OddParents",
+      "current_serial": 259,
+      "current_value": "fairly oddparents",
+      "superseded_serials": [
+        91
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 101,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        91,
+        259
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.216,
+      "total": 2
+    },
+    {
+      "question": "Which country was rugby union created in?",
+      "key": {
+        "subject": "rugby union",
+        "relation": "created_in"
+      },
+      "gold": "India",
+      "current_serial": 186,
+      "current_value": "india",
+      "superseded_serials": [
+        100
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 159,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        100,
+        186
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.142,
+      "total": 3
+    },
+    {
+      "question": "Who is the author of The Marriage of Figaro?",
+      "key": {
+        "subject": "marriage of figaro",
+        "relation": "author_of"
+      },
+      "gold": "Thomas Kyd",
+      "current_serial": 398,
+      "current_value": "thomas kyd",
+      "superseded_serials": [
+        271
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 112,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        271,
+        398
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.221,
+      "total": 2
+    },
+    {
+      "question": "Which sport is Tunisia national football team associated with?",
+      "key": {
+        "subject": "tunisia national football team",
+        "relation": "sport"
+      },
+      "gold": "basketball",
+      "current_serial": 418,
+      "current_value": "basketball",
+      "superseded_serials": [
+        235
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 159,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        235,
+        418
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.256,
+      "total": 2
+    },
+    {
+      "question": "Which sport is quarterback associated with?",
+      "key": {
+        "subject": "quarterback",
+        "relation": "sport"
+      },
+      "gold": "Muay Thai",
+      "current_serial": 50,
+      "current_value": "muay thai",
+      "superseded_serials": [
+        31
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 179,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        31,
+        50
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.914,
+      "total": 3
+    },
+    {
+      "question": "What is the official language of Japan?",
+      "key": {
+        "subject": "japan",
+        "relation": "official_language"
+      },
+      "gold": "Swedish",
+      "current_serial": 439,
+      "current_value": "swedish",
+      "superseded_serials": [
+        240
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 86,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        240,
+        439
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.077,
+      "total": 2
+    },
+    {
+      "question": "What position does Robert Parish play?",
+      "key": {
+        "subject": "robert parish",
+        "relation": "position"
+      },
+      "gold": "quarterback",
+      "current_serial": 334,
+      "current_value": "quarterback",
+      "superseded_serials": [
+        330
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 92,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        330,
+        334
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.812,
+      "total": 2
+    },
+    {
+      "question": "What is the country of citizenship of Cédric Klapisch?",
+      "key": {
+        "subject": "cédric klapisch",
+        "relation": "citizen_of"
+      },
+      "gold": "Malaysia",
+      "current_serial": 239,
+      "current_value": "malaysia",
+      "superseded_serials": [
+        210
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 81,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        210,
+        239
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.927,
+      "total": 2
+    },
+    {
+      "question": "Who is the author of Sidereus Nuncius?",
+      "key": {
+        "subject": "sidereus nuncius",
+        "relation": "author_of"
+      },
+      "gold": "Samuel Beckett",
+      "current_serial": 401,
+      "current_value": "samuel beckett",
+      "superseded_serials": [
+        124
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 100,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        124,
+        401
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.568,
+      "total": 2
+    },
+    {
+      "question": "Which continent is Germany located in?",
+      "key": {
+        "subject": "germany",
+        "relation": "continent"
+      },
+      "gold": "Africa",
+      "current_serial": 435,
+      "current_value": "africa",
+      "superseded_serials": [
+        41
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 93,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        41,
+        435
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.821,
+      "total": 2
+    },
+    {
+      "question": "Which religion is Kingdom of Ireland affiliated with?",
+      "key": {
+        "subject": "kingdom of ireland",
+        "relation": "religion"
+      },
+      "gold": "Zoroastrianism",
+      "current_serial": 260,
+      "current_value": "zoroastrianism",
+      "superseded_serials": [
+        70
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 140,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        70,
+        260
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.214,
+      "total": 2
+    },
+    {
+      "question": "Which country was association football created in?",
+      "key": {
+        "subject": "association football",
+        "relation": "created_in"
+      },
+      "gold": "Italy",
+      "current_serial": 389,
+      "current_value": "italy",
+      "superseded_serials": [
+        272
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 4,
+      "reader_chars": 288,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        272,
+        389
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 0.848,
+      "total": 4
+    },
+    {
+      "question": "Who is the chief executive officer of Microsoft?",
+      "key": {
+        "subject": "microsoft",
+        "relation": "ceo_of"
+      },
+      "gold": "Steve Jobs",
+      "current_serial": 188,
+      "current_value": "steve jobs",
+      "superseded_serials": [
+        85
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 114,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        85,
+        188
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.386,
+      "total": 2
+    },
+    {
+      "question": "Who is the director of American Broadcasting Company?",
+      "key": {
+        "subject": "american broadcasting company",
+        "relation": "director_of"
+      },
+      "gold": "Ernst Heinkel",
+      "current_serial": 392,
+      "current_value": "ernst heinkel",
+      "superseded_serials": [
+        64
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 4,
+      "reader_chars": 278,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        64,
+        392
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.747,
+      "total": 4
+    },
+    {
+      "question": "Which city did Gennady Rozhdestvensky die in?",
+      "key": {
+        "subject": "gennady rozhdestvensky",
+        "relation": "died_in"
+      },
+      "gold": "United States of America",
+      "current_serial": 451,
+      "current_value": "united states of america",
+      "superseded_serials": [
+        292
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 166,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        292,
+        451
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.915,
+      "total": 3
+    },
+    {
+      "question": "What is the capital of Tang Empire?",
+      "key": {
+        "subject": "tang empire",
+        "relation": "capital_of"
+      },
+      "gold": "Beaumont",
+      "current_serial": 177,
+      "current_value": "beaumont",
+      "superseded_serials": [
+        21
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 79,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        21,
+        177
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.832,
+      "total": 2
+    },
+    {
+      "question": "Who is the director of British Broadcasting Corporation?",
+      "key": {
+        "subject": "british broadcasting corporation",
+        "relation": "director_of"
+      },
+      "gold": "Narendra Modi",
+      "current_serial": 428,
+      "current_value": "narendra modi",
+      "superseded_serials": [
+        7
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 216,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        7,
+        428
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.844,
+      "total": 3
+    },
+    {
+      "question": "What type of music does Michael Mantler play?",
+      "key": {
+        "subject": "michael mantler",
+        "relation": "music_genre"
+      },
+      "gold": "post-punk",
+      "current_serial": 298,
+      "current_value": "postpunk",
+      "superseded_serials": [
+        289
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 112,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        289,
+        298
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.774,
+      "total": 2
+    },
+    {
+      "question": "Which city did Oscar Wilde die in?",
+      "key": {
+        "subject": "oscar wilde",
+        "relation": "died_in"
+      },
+      "gold": "Guangzhou",
+      "current_serial": 270,
+      "current_value": "guangzhou",
+      "superseded_serials": [
+        128
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 81,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        128,
+        270
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.616,
+      "total": 2
+    },
+    {
+      "question": "Which country was baseball created in?",
+      "key": {
+        "subject": "baseball",
+        "relation": "created_in"
+      },
+      "gold": "Japan",
+      "current_serial": 382,
+      "current_value": "japan",
+      "superseded_serials": [
+        160
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 4,
+      "reader_chars": 232,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        160,
+        382
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.031,
+      "total": 4
+    },
+    {
+      "question": "What is the country of citizenship of Ernst Heinkel?",
+      "key": {
+        "subject": "ernst heinkel",
+        "relation": "citizen_of"
+      },
+      "gold": "Tang Empire",
+      "current_serial": 203,
+      "current_value": "tang empire",
+      "superseded_serials": [
+        192
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 4,
+      "reader_chars": 206,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        192,
+        203
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.189,
+      "total": 4
+    },
+    {
+      "question": "Which country was rap rock created in?",
+      "key": {
+        "subject": "rap rock",
+        "relation": "created_in"
+      },
+      "gold": "Russian Empire",
+      "current_serial": 403,
+      "current_value": "russian empire",
+      "superseded_serials": [
+        359
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 189,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        359,
+        403
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.221,
+      "total": 3
+    },
+    {
+      "question": "What is the official language of United States of America?",
+      "key": {
+        "subject": "united states of america",
+        "relation": "official_language"
+      },
+      "gold": "German",
+      "current_serial": 295,
+      "current_value": "german",
+      "superseded_serials": [
+        242
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 131,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        242,
+        295
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.171,
+      "total": 2
+    },
+    {
+      "question": "Who performed Past Masters?",
+      "key": {
+        "subject": "past masters",
+        "relation": "performed_by"
+      },
+      "gold": "Madonna",
+      "current_serial": 364,
+      "current_value": "madonna",
+      "superseded_serials": [
+        251
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 81,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        251,
+        364
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.115,
+      "total": 2
+    },
+    {
+      "question": "What is the capital of France?",
+      "key": {
+        "subject": "france",
+        "relation": "capital_of"
+      },
+      "gold": "Harare",
+      "current_serial": 171,
+      "current_value": "harare",
+      "superseded_serials": [
+        163
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 64,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        163,
+        171
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.811,
+      "total": 2
+    },
+    {
+      "question": "Who is the developer of SteamOS?",
+      "key": {
+        "subject": "steamos",
+        "relation": "developed_by"
+      },
+      "gold": "ABB Group",
+      "current_serial": 277,
+      "current_value": "abb group",
+      "superseded_serials": [
+        238
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 144,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        238,
+        277
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.855,
+      "total": 3
+    },
+    {
+      "question": "Which sport is wide receiver associated with?",
+      "key": {
+        "subject": "wide receiver",
+        "relation": "sport"
+      },
+      "gold": "rugby",
+      "current_serial": 252,
+      "current_value": "rugby",
+      "superseded_serials": [
+        46
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 117,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        46,
+        252
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.945,
+      "total": 2
+    },
+    {
+      "question": "What position does Hines Ward play?",
+      "key": {
+        "subject": "hines ward",
+        "relation": "position"
+      },
+      "gold": "cornerback",
+      "current_serial": 36,
+      "current_value": "cornerback",
+      "superseded_serials": [
+        3
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 92,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        3,
+        36
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 0.981,
+      "total": 2
+    },
+    {
+      "question": "What is the capital of Australia?",
+      "key": {
+        "subject": "australia",
+        "relation": "capital_of"
+      },
+      "gold": "Oderzo",
+      "current_serial": 388,
+      "current_value": "oderzo",
+      "superseded_serials": [
+        284
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 73,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        284,
+        388
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.876,
+      "total": 2
+    },
+    {
+      "question": "Which continent is Malaysia located in?",
+      "key": {
+        "subject": "malaysia",
+        "relation": "continent"
+      },
+      "gold": "Antarctica",
+      "current_serial": 442,
+      "current_value": "antarctica",
+      "superseded_serials": [
+        373
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 97,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        373,
+        442
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.133,
+      "total": 2
+    },
+    {
+      "question": "Who is the author of A Wizard of Earthsea?",
+      "key": {
+        "subject": "wizard of earthsea",
+        "relation": "author_of"
+      },
+      "gold": "Pius XII",
+      "current_serial": 301,
+      "current_value": "pius xii",
+      "superseded_serials": [
+        10
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 104,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        10,
+        301
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.626,
+      "total": 2
+    },
+    {
+      "question": "Who is the author of Our Mutual Friend?",
+      "key": {
+        "subject": "our mutual friend",
+        "relation": "author_of"
+      },
+      "gold": "Charles Darwin",
+      "current_serial": 146,
+      "current_value": "charles darwin",
+      "superseded_serials": [
+        107
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 102,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        107,
+        146
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.014,
+      "total": 2
+    },
+    {
+      "question": "Which country was basketball created in?",
+      "key": {
+        "subject": "basketball",
+        "relation": "created_in"
+      },
+      "gold": "Soviet Union",
+      "current_serial": 348,
+      "current_value": "soviet union",
+      "superseded_serials": [
+        216
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 186,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        216,
+        348
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 0.989,
+      "total": 3
+    },
+    {
+      "question": "Which continent is Bengaluru located in?",
+      "key": {
+        "subject": "bengaluru",
+        "relation": "continent"
+      },
+      "gold": "Oceania",
+      "current_serial": 234,
+      "current_value": "oceania",
+      "superseded_serials": [
+        4
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 4,
+      "reader_chars": 184,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        4,
+        234
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 0.818,
+      "total": 4
+    },
+    {
+      "question": "Which sport is Slovakia national football team associated with?",
+      "key": {
+        "subject": "slovakia national football team",
+        "relation": "sport"
+      },
+      "gold": "cricket",
+      "current_serial": 279,
+      "current_value": "cricket",
+      "superseded_serials": [
+        18
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 231,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        18,
+        279
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.056,
+      "total": 3
+    },
+    {
+      "question": "Which religion is Imelda Marcos affiliated with?",
+      "key": {
+        "subject": "imelda marcos",
+        "relation": "religion"
+      },
+      "gold": "atheism",
+      "current_serial": 374,
+      "current_value": "atheism",
+      "superseded_serials": [
+        248
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 166,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        248,
+        374
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.92,
+      "total": 3
+    },
+    {
+      "question": "What type of music does Dana International play?",
+      "key": {
+        "subject": "dana international",
+        "relation": "music_genre"
+      },
+      "gold": "Australian hip hop",
+      "current_serial": 281,
+      "current_value": "australian hip hop",
+      "superseded_serials": [
+        243
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 188,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        243,
+        281
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.139,
+      "total": 3
+    },
+    {
+      "question": "What is the country of citizenship of Sable?",
+      "key": {
+        "subject": "sable",
+        "relation": "citizen_of"
+      },
+      "gold": "Czech Republic",
+      "current_serial": 299,
+      "current_value": "czech republic",
+      "superseded_serials": [
+        244
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 85,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        244,
+        299
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.969,
+      "total": 2
+    },
+    {
+      "question": "Which country was Charlie Hebdo created in?",
+      "key": {
+        "subject": "charlie hebdo",
+        "relation": "created_in"
+      },
+      "gold": "Italy",
+      "current_serial": 358,
+      "current_value": "italy",
+      "superseded_serials": [
+        155
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 158,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        155,
+        358
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.879,
+      "total": 3
+    },
+    {
+      "question": "Who is Elvis Presley married to?",
+      "key": {
+        "subject": "elvis presley",
+        "relation": "married_to"
+      },
+      "gold": "Charles the Bold",
+      "current_serial": 139,
+      "current_value": "charles bold",
+      "superseded_serials": [
+        120
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 152,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        120,
+        139
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.568,
+      "total": 3
+    },
+    {
+      "question": "Who performed Hermione Granger?",
+      "key": {
+        "subject": "hermione granger",
+        "relation": "performed_by"
+      },
+      "gold": "Kylie Minogue",
+      "current_serial": 425,
+      "current_value": "kylie minogue",
+      "superseded_serials": [
+        413
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 95,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        413,
+        425
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.476,
+      "total": 2
+    },
+    {
+      "question": "Which sport is Bo Ryan associated with?",
+      "key": {
+        "subject": "bo ryan",
+        "relation": "sport"
+      },
+      "gold": "association football",
+      "current_serial": 346,
+      "current_value": "association football",
+      "superseded_serials": [
+        194
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 113,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        194,
+        346
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.301,
+      "total": 2
+    },
+    {
+      "question": "What type of music does John McVie play?",
+      "key": {
+        "subject": "john mcvie",
+        "relation": "music_genre"
+      },
+      "gold": "rap rock",
+      "current_serial": 415,
+      "current_value": "rap rock",
+      "superseded_serials": [
+        90
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 1,
+      "reader_chars": 54,
+      "correct": false,
+      "current_value_retrieved": false,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        90
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": false,
+      "latency_s": 1.128,
+      "total": 1
+    },
+    {
+      "question": "What position does Rogério Ceni play?",
+      "key": {
+        "subject": "rogério ceni",
+        "relation": "position"
+      },
+      "gold": "flanker",
+      "current_serial": 434,
+      "current_value": "flanker",
+      "superseded_serials": [
+        6
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 90,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        6,
+        434
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.063,
+      "total": 2
+    },
+    {
+      "question": "Who is the chief executive officer of Twitter?",
+      "key": {
+        "subject": "twitter",
+        "relation": "ceo_of"
+      },
+      "gold": "Bernard Arnault",
+      "current_serial": 275,
+      "current_value": "bernard arnault",
+      "superseded_serials": [
+        109
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 113,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        109,
+        275
+      ],
+      "top1_correct": true,
+      "top1_is_current": true,
+      "top1_is_superseded": false,
+      "both_statements_retrieved": true,
+      "latency_s": 1.251,
+      "total": 2
+    },
+    {
+      "question": "Which sport is placekicker associated with?",
+      "key": {
+        "subject": "placekicker",
+        "relation": "sport"
+      },
+      "gold": "rugby",
+      "current_serial": 321,
+      "current_value": "rugby",
+      "superseded_serials": [
+        78
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 113,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        78,
+        321
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.177,
+      "total": 2
+    },
+    {
+      "question": "Who is Tony Blair married to?",
+      "key": {
+        "subject": "tony blair",
+        "relation": "married_to"
+      },
+      "gold": "Alan Jay Lerner",
+      "current_serial": 424,
+      "current_value": "alan jay lerner",
+      "superseded_serials": [
+        141
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 80,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        141,
+        424
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.212,
+      "total": 2
+    },
+    {
+      "question": "What position does Lisa Leslie play?",
+      "key": {
+        "subject": "lisa leslie",
+        "relation": "position"
+      },
+      "gold": "goaltender",
+      "current_serial": 169,
+      "current_value": "goaltender",
+      "superseded_serials": [
+        14
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 87,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        14,
+        169
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.716,
+      "total": 2
+    },
+    {
+      "question": "What is the country of citizenship of Ferdinand von Richthofen?",
+      "key": {
+        "subject": "ferdinand von richthofen",
+        "relation": "citizen_of"
+      },
+      "gold": "Canada",
+      "current_serial": 386,
+      "current_value": "canada",
+      "superseded_serials": [
+        24
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 98,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        24,
+        386
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.242,
+      "total": 2
+    },
+    {
+      "question": "Which religion is Karen Armstrong affiliated with?",
+      "key": {
+        "subject": "karen armstrong",
+        "relation": "religion"
+      },
+      "gold": "Church of Scotland",
+      "current_serial": 412,
+      "current_value": "church of scotland",
+      "superseded_serials": [
+        266
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 4,
+      "reader_chars": 283,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        266,
+        412
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 2.46,
+      "total": 4
+    },
+    {
+      "question": "What is the capital of Romania?",
+      "key": {
+        "subject": "romania",
+        "relation": "capital_of"
+      },
+      "gold": "Rajanpur",
+      "current_serial": 449,
+      "current_value": "rajanpur",
+      "superseded_serials": [
+        185
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 72,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        185,
+        449
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.122,
+      "total": 2
+    },
+    {
+      "question": "Which continent is India located in?",
+      "key": {
+        "subject": "india",
+        "relation": "continent"
+      },
+      "gold": "Africa",
+      "current_serial": 280,
+      "current_value": "africa",
+      "superseded_serials": [
+        228
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 4,
+      "reader_chars": 181,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        228,
+        280
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.959,
+      "total": 4
+    },
+    {
+      "question": "Which city did Olga of Kiev die in?",
+      "key": {
+        "subject": "olga of kiev",
+        "relation": "died_in"
+      },
+      "gold": "Rodez",
+      "current_serial": 450,
+      "current_value": "rodez",
+      "superseded_serials": [
+        125
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 125,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        125,
+        450
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.207,
+      "total": 3
+    },
+    {
+      "question": "Which sport is Surrey Senior Cup associated with?",
+      "key": {
+        "subject": "surrey senior cup",
+        "relation": "sport"
+      },
+      "gold": "basketball",
+      "current_serial": 315,
+      "current_value": "basketball",
+      "superseded_serials": [
+        291
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 133,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        291,
+        315
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 0.974,
+      "total": 2
+    },
+    {
+      "question": "What is the country of citizenship of Narendra Modi?",
+      "key": {
+        "subject": "narendra modi",
+        "relation": "citizen_of"
+      },
+      "gold": "Australia",
+      "current_serial": 217,
+      "current_value": "australia",
+      "superseded_serials": [
+        176
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 77,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        176,
+        217
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.147,
+      "total": 2
+    },
+    {
+      "question": "What is the country of citizenship of Charles Messier?",
+      "key": {
+        "subject": "charles messier",
+        "relation": "citizen_of"
+      },
+      "gold": "Iran",
+      "current_serial": 343,
+      "current_value": "iran",
+      "superseded_serials": [
+        204
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 118,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        204,
+        343
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.24,
+      "total": 3
+    },
+    {
+      "question": "What is the country of citizenship of Colin Irwin?",
+      "key": {
+        "subject": "colin irwin",
+        "relation": "citizen_of"
+      },
+      "gold": "Israel",
+      "current_serial": 441,
+      "current_value": "israel",
+      "superseded_serials": [
+        55
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 2,
+      "reader_chars": 79,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        55,
+        441
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.163,
+      "total": 2
+    },
+    {
+      "question": "Who is Charles Darwin married to?",
+      "key": {
+        "subject": "charles darwin",
+        "relation": "married_to"
+      },
+      "gold": "Amala Paul",
+      "current_serial": 335,
+      "current_value": "amala paul",
+      "superseded_serials": [
+        164
+      ],
+      "ground_truth_is_current": true,
+      "n_retrieved": 3,
+      "reader_chars": 131,
+      "correct": true,
+      "current_value_retrieved": true,
+      "superseded_value_retrieved": true,
+      "retrieved_any_statement": true,
+      "retrieved_serials": [
+        164,
+        335
+      ],
+      "top1_correct": false,
+      "top1_is_current": false,
+      "top1_is_superseded": true,
+      "both_statements_retrieved": true,
+      "latency_s": 1.083,
+      "total": 3
+    }
+  ],
+  "errors": {
+    "ingest": 0,
+    "retrieve": 0
+  },
+  "runtime_seconds": 283.2
+}

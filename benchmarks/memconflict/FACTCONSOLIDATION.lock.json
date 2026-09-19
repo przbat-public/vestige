@@ -1,0 +1,32 @@
+{
+  "_comment": "Pinned MemoryAgentBench (FactConsolidation) revision. Do not edit by hand; regenerate with fetch_factconsolidation.py --repin.",
+  "name": "MemoryAgentBench FactConsolidation",
+  "paper": "MemoryAgentBench: Evaluating Memory in LLM Agents via Incremental Multi-Turn Interactions (arXiv:2507.05257, ICLR 2026)",
+  "paper_url": "https://arxiv.org/abs/2507.05257",
+  "code_repo": "https://github.com/HUST-AI-HYZ/MemoryAgentBench",
+  "license": "MIT (dataset card on HuggingFace)",
+  "hf_dataset": "ai-hyz/MemoryAgentBench",
+  "revision": "7ea066982b140a19337e17e60d45d4076e042faf",
+  "revision_retrieved_utc": "2026-06-21T10:21:33.000Z",
+  "files": {
+    "Conflict_Resolution-00000-of-00001.parquet": {
+      "url": "https://huggingface.co/datasets/ai-hyz/MemoryAgentBench/resolve/7ea066982b140a19337e17e60d45d4076e042faf/data/Conflict_Resolution-00000-of-00001.parquet",
+      "sha256": "24d5c3f09ce0ce15625cb9f8a98f44f0d864ca6c94d7b4ad04eb697ca3a5ff45",
+      "bytes": 1491588,
+      "rows": 8,
+      "sub_datasets": [
+        "factconsolidation_sh_6k",
+        "factconsolidation_sh_32k",
+        "factconsolidation_sh_64k",
+        "factconsolidation_sh_262k",
+        "factconsolidation_mh_6k",
+        "factconsolidation_mh_32k",
+        "factconsolidation_mh_64k",
+        "factconsolidation_mh_262k"
+      ],
+      "questions_per_sub_dataset": 100
+    }
+  },
+  "metric_note": "Official FactConsolidation metric is substring_exact_match from utils/eval_other_utils.py::calculate_metrics. It is ported verbatim in factconsolidation_data.py; the official harness's LLM-only parse_output() step is deliberately NOT applied (see PORTING-NOTES.md section 11).",
+  "retrieved_utc": "2026-09-19"
+}

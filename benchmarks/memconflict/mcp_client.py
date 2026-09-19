@@ -57,6 +57,19 @@ from typing import Any, Dict, List, Optional
 
 DEFAULT_WARMUP_SECONDS = 45.0
 
+
+def mtime_utc(path: str) -> Optional[str]:
+    """Build timestamp of a binary, so a stale build is visible in results."""
+    try:
+        import datetime
+
+        ts = pathlib.Path(path).stat().st_mtime
+        return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).isoformat(
+            timespec="seconds"
+        )
+    except OSError:
+        return None
+
 #: Throwaway bearer token, long enough to satisfy the server's length warning.
 #: Never used: the harness speaks stdio only. Its only job is to stop the
 #: server from reading/creating the shared `auth_token` file.
@@ -262,6 +275,30 @@ class VestigeMCP:
 
     def stderr_tail(self, n: int = 40) -> List[str]:
         return self._stderr_lines[-n:]
+
+    def launch_provenance(self) -> Dict[str, Any]:
+        """What this child process was actually launched with.
+
+        Recorded into every results file. A measurement that names a binary but
+        not the switches it ran under is not reproducible, and Vestige's
+        behaviour is switch-dependent (`VESTIGE_NOMIC_PREFIXES` changes the
+        embedding space, the consolidation interval changes background work).
+        The throwaway auth token is deliberately NOT echoed.
+        """
+        interesting = {
+            k: v for k, v in sorted(self._extra_env.items())
+        }
+        for key in ("VESTIGE_NOMIC_PREFIXES", "VESTIGE_CONSOLIDATION_INTERVAL_HOURS",
+                    "VESTIGE_HTTP_PORT", "VESTIGE_DASHBOARD_PORT", "RUST_LOG"):
+            if key in os.environ:
+                interesting.setdefault(key, os.environ[key])
+        return {
+            "command": list(self.command),
+            "ports": dict(self.ports),
+            "binary_resolved": self.binary,
+            "binary_mtime_utc": mtime_utc(self.binary),
+            "env_switches": interesting,
+        }
 
     # -- tools -------------------------------------------------------------
 

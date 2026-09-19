@@ -198,3 +198,105 @@ exists, treat the delta as unproven and keep the lever off by default.
   they are printed for completeness, but any difference on them is noise, not a
   result. `statAA` is nevertheless where 80.7% of the published macro delta lives —
   see "Statistical significance".
+
+## Run 3 — FactConsolidation: does the current fact win? (2026-09-19)
+
+A different benchmark and a different question from Runs 1 and 2. MemoryAgentBench
+FactConsolidation (`arXiv:2507.05257`) gives one haystack in which the same
+`(subject, relation)` is stated more than once with different values, and asks about it.
+Only the **last** statement is current, so the correct answer is the last statement's
+value. This is the harness half of the review's "deterministic freshness resolution"
+item; the protocol, its deviations and its limits are in
+[`PORTING-NOTES.md`](PORTING-NOTES.md) §11. Nothing here is comparable to Runs 1–2, to
+MemConflict, or to the paper's published table.
+
+```sh
+python3 benchmarks/memconflict/fetch_factconsolidation.py
+cargo build --release -p vestige-mcp
+python3 benchmarks/memconflict/factconsolidation.py \
+  --source factconsolidation_sh_6k --scenarios-per-store 10 --ingest all --warmup 10 \
+  --out benchmarks/memconflict/results/factconsolidation-sh6k-20260919.json
+```
+
+59 scenarios, each the question plus every haystack statement for its key (all are
+2-statement conflicts), 381 statements ingested per store in document order, `--top-k 5`,
+`balanced`, `summary`. Binary `target/release/vestige-mcp`, sha256
+`37391d12da15dca9…`, built from a dirty tree at commit `6ca19748` (HEAD advanced during
+the run; no tracked source file changed between the build and the run). Dataset digest
+`24d5c3f09ce0ce15…`, `jsonl` digest `1368e3cdcb08487b…`.
+
+| metric | n | value |
+| --- | --- | --- |
+| answer accuracy (official `substring_exact_match`) | 59 | 0.9831 |
+| top-1 is the current value | 59 | 0.2542 |
+| top-1 is the superseded value | 59 | 0.7458 |
+| current value retrieved anywhere in top-5 | 59 | 0.9831 |
+| superseded value retrieved anywhere in top-5 | 59 | 1.0000 |
+| any statement of the conflict group retrieved | 59 | 1.0000 |
+| empty retrieval | 59 | 0.0000 |
+
+Reproduced three times at 0.9831 (58/59) with identical latency order of magnitude
+(~178–226 s); the single failure was the same scenario every time.
+
+**What this says about deterministic freshness resolution.** Retrieval gets the conflict
+right and the ranking does not. In 58 of 59 scenarios both conflicting statements reach
+the top-5, so the current value is available and the official metric scores the answer
+correct — but the current value is the *first* result only 25.4% of the time, and in the
+other 74.6% the superseded statement outranks it. Any consumer that reads one memory, or
+that takes the first convincing statement, gets the stale fact in three quarters of these
+conflicts. The measured bottleneck is therefore ordering, not recall.
+
+A second, smaller finding: the one failure (`What type of music does John McVie play?`,
+serial 90 vs 415) returned only the superseded statement — one result, `total: 1` — so the
+current value was never in the context. That is a retrieval miss, not a freshness failure,
+and the per-scenario JSON marks it as such (`retrieved_any_statement: true`,
+`current_value_retrieved: false`).
+
+### The same protocol against the pre-change binary
+
+The identical command was run against the pre-2026-09-19 build (the `target/release`
+binary as it stood at 12:02 local, saved before the rebuild):
+
+```sh
+python3 benchmarks/memconflict/factconsolidation.py \
+  --source factconsolidation_sh_6k --scenarios-per-store 10 --ingest all --warmup 10 \
+  --server-binary /tmp/vestige-mcp-stale-20260919 \
+  --out benchmarks/memconflict/results/factconsolidation-sh6k-20260919-prechange-binary.json
+```
+
+It reproduces the headline numbers exactly: answer accuracy 0.9831 (58/59), top-1 is
+current 0.2542, top-1 is superseded 0.7458, both statements retrieved 0.9831. Only the
+count of memories returned per question differs, on 4 of 59 questions, without crossing a
+scoring boundary.
+
+**So today's freshness work did not move this benchmark.** The 0.9831/0.2542 split is a
+property of the retrieval path as it already behaved, not a result of the new resolver.
+Either the resolver is not on the `search` path yet, or it is on it and changes nothing
+here; this harness cannot separate those two readings, and does not claim to. What it does
+establish is the baseline any resolver has to beat and where the headroom is (top-1
+staleness 0.7458 while 0.9831 of conflicts are fully retrieved). It also means that a claim
+that "the new resolver improves conflict resolution" cannot be supported by this
+measurement, because this measurement cannot see the difference.
+
+**What this does not say.** The official metric is a substring check, so "correct" here
+means "the current value appears somewhere in the retrieved text", not "the system chose
+it". The 0.9831 must therefore never be quoted as a conflict-resolution score: read it
+with the 0.2542 next to it. There is no confidence interval, no significance test, no
+second system to compare against, and only the 6k single-hop haystack was run.
+
+### Caveats that apply to Run 3
+
+- **`--ingest all` only.** The `--ingest conflicts` mode in the same script is a plumbing
+  check that removes every distractor; its numbers are not results and are not reported
+  here.
+- **Retrieval stands in for a context window.** The paper feeds an LLM the whole haystack;
+  here `search` returns 5 memories (`n_retrieved_mean` 2.44). The numbers are a floor and
+  are not comparable to `arXiv:2507.05257`'s table.
+- **19.8% of the haystack's fact lines do not parse** into a `(subject, relation)` pair
+  (381/455; 74 lines) and 41 of 100 questions are refused (15 unmapped templates, 26 with
+  no conflicting statement). Coverage is reported in the results JSON under
+  `scenario_coverage`; nothing is silently dropped.
+- **`factconsolidation_mh_*` builds zero scenarios** (multi-hop questions need a hop chain
+  the harness refuses to invent) and is not measured.
+- **Single run family.** `vestige` is not bit-reproducible; only the per-scenario records
+  are, and those were stable across three runs here.
