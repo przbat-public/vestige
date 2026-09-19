@@ -104,6 +104,8 @@ ts-rs = { version = "12", features = ["chrono-impl", "no-serde-warnings"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# `ServiceExt::oneshot` lets the HTTP transport be driven without binding a socket.
+tower = { version = "0.5", features = ["util"] }
 # `start_paused = true` requires test-util explicitly — it isn't in tokio's
 # `full` feature set. Keeps the production binary lean.
 tokio = { workspace = true, features = ["test-util"] }

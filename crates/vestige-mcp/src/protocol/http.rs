@@ -11,9 +11,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
+use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, post};
 use axum::{Json, Router};
 use subtle::ConstantTimeEq;
@@ -87,6 +88,175 @@ pub struct HttpTransportState {
     cognitive: Arc<Mutex<CognitiveEngine>>,
     event_tx: broadcast::Sender<VestigeEvent>,
     auth_token: String,
+    /// Origins a browser is allowed to call this transport from. Same list the CORS
+    /// layer advertises, so the header check and the response headers cannot drift.
+    allowed_origins: Arc<Vec<String>>,
+    /// `Host` values that may address this transport. Loopback by default; a
+    /// non-loopback bind has to name its hosts explicitly.
+    allowed_hosts: Arc<Vec<String>>,
+}
+
+/// Origins permitted to call the transport from a browser.
+///
+/// `VESTIGE_CORS_ORIGINS` extends the loopback defaults (comma-separated).
+fn allowed_origins(port: u16) -> Vec<String> {
+    let mut origins = vec![
+        format!("http://127.0.0.1:{port}"),
+        format!("http://localhost:{port}"),
+        format!("http://[::1]:{port}"),
+    ];
+    if let Ok(extra) = std::env::var("VESTIGE_CORS_ORIGINS") {
+        origins.extend(
+            extra
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+        );
+    }
+    origins
+}
+
+/// `Host` values permitted to address the transport.
+///
+/// Loopback plus whatever `VESTIGE_ALLOWED_HOSTS` names. A request whose `Host` is
+/// neither is the DNS-rebinding shape: the browser was tricked into resolving an
+/// attacker-controlled name to 127.0.0.1, so the name in the header is not ours.
+fn allowed_hosts(port: u16) -> Vec<String> {
+    let mut hosts = vec![
+        format!("127.0.0.1:{port}"),
+        format!("localhost:{port}"),
+        format!("[::1]:{port}"),
+    ];
+    if let Ok(extra) = std::env::var("VESTIGE_ALLOWED_HOSTS") {
+        hosts.extend(
+            extra
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+        );
+    }
+    hosts
+}
+
+/// Reject requests a browser should never be able to make against a local memory store.
+///
+/// MCP's transport spec makes this a MUST: "Servers MUST validate the Origin header on
+/// all incoming connections to prevent DNS rebinding attacks. If the Origin header is
+/// present and invalid, servers MUST respond with HTTP 403 Forbidden." The CORS layer
+/// that used to be the only Origin handling only sets response headers — it never
+/// rejects the request, and the browser still executes it (a cross-origin POST is sent,
+/// the page just cannot read the reply).
+///
+/// Requests without an `Origin` header are passed through: non-browser clients (the
+/// inspector, curl, another process) do not send one, and DNS rebinding is a browser
+/// attack. `Host` is checked for every request, which is the same attack from the other
+/// side — a rebound name arrives in `Host`, not in `Origin`.
+async fn guard_origin_and_host(
+    State(state): State<HttpTransportState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+
+    let host_allowed = host
+        .map(|h| {
+            state
+                .allowed_hosts
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(h))
+        })
+        .unwrap_or(false);
+
+    if !host_allowed {
+        warn!(
+            host = host.unwrap_or("<missing>"),
+            "Rejected request: Host header is not one this transport answers to"
+        );
+        return forbidden("Host header is missing or not allowed");
+    }
+
+    if let Some(origin) = request
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    {
+        let origin_allowed = state
+            .allowed_origins
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(origin));
+        if !origin_allowed {
+            warn!(origin, "Rejected request: Origin header is not allowed");
+            return forbidden("Origin header is not allowed");
+        }
+    }
+
+    next.run(request).await
+}
+
+/// 403 with a JSON-RPC error body, as the transport spec prescribes for a rejected
+/// Origin. The body carries no `id`: the request was refused before it was parsed.
+fn forbidden(message: &str) -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": { "code": -32600, "message": message },
+        })),
+    )
+        .into_response()
+}
+
+/// Build the transport router.
+///
+/// Extracted from [`start_http_transport`] so tests can drive it directly
+/// (`tower::ServiceExt::oneshot`) instead of binding a socket.
+fn build_router(state: HttpTransportState) -> Router {
+    let origins: Vec<axum::http::HeaderValue> = state
+        .allowed_origins
+        .iter()
+        .filter_map(|origin| origin.parse().ok())
+        .collect();
+
+    let bind = std::env::var("VESTIGE_HTTP_BIND").unwrap_or_default();
+    if bind == "0.0.0.0" || bind == "::" {
+        tracing::info!(
+            bind_addr = %bind,
+            "VESTIGE_HTTP_BIND is non-localhost — set VESTIGE_CORS_ORIGINS and \
+             VESTIGE_ALLOWED_HOSTS for browser access from remote hosts"
+        );
+    }
+
+    Router::new()
+        .route("/mcp", post(post_mcp))
+        .route("/mcp", delete(delete_mcp))
+        .layer(
+            ServiceBuilder::new()
+                .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
+                .layer(ConcurrencyLimitLayer::new(CONCURRENCY_LIMIT))
+                .layer(
+                    CorsLayer::new()
+                        .allow_origin(origins)
+                        .allow_methods([
+                            axum::http::Method::POST,
+                            axum::http::Method::DELETE,
+                            axum::http::Method::OPTIONS,
+                        ])
+                        .allow_headers([
+                            axum::http::header::CONTENT_TYPE,
+                            axum::http::header::AUTHORIZATION,
+                        ]),
+                )
+                // Outermost of the small stack: a request from an origin we do not answer
+                // to is refused before it reaches the session machinery.
+                .layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    guard_origin_and_host,
+                )),
+        )
+        .with_state(state)
 }
 
 /// Start the HTTP MCP transport on `127.0.0.1:<port>`.
@@ -105,6 +275,8 @@ pub async fn start_http_transport(
         cognitive,
         event_tx,
         auth_token,
+        allowed_origins: Arc::new(allowed_origins(port)),
+        allowed_hosts: Arc::new(allowed_hosts(port)),
     };
 
     // Spawn session reaper
@@ -134,40 +306,7 @@ pub async fn start_http_transport(
         });
     }
 
-    let app = Router::new()
-        .route("/mcp", post(post_mcp))
-        .route("/mcp", delete(delete_mcp))
-        .layer(
-            ServiceBuilder::new()
-                .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
-                .layer(ConcurrencyLimitLayer::new(CONCURRENCY_LIMIT))
-                .layer(
-                    {
-                        let mut origins = vec![
-                            format!("http://127.0.0.1:{}", port),
-                            format!("http://localhost:{}", port),
-                        ];
-                        if let Ok(extra) = std::env::var("VESTIGE_CORS_ORIGINS") {
-                            origins.extend(extra.split(',').map(|s| s.trim().to_string()));
-                        }
-                        let bind = std::env::var("VESTIGE_HTTP_BIND").unwrap_or_default();
-                        if bind == "0.0.0.0" || bind == "::" {
-                            tracing::info!(bind_addr = %bind, "VESTIGE_HTTP_BIND is non-localhost — set VESTIGE_CORS_ORIGINS for browser access from remote hosts");
-                        }
-                        CorsLayer::new()
-                            .allow_origin(
-                                origins
-                                    .into_iter()
-                                    .filter(|s| !s.is_empty())
-                                    .filter_map(|s| s.parse().ok())
-                                    .collect::<Vec<_>>(),
-                            )
-                            .allow_methods([axum::http::Method::POST, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
-                            .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
-                    }
-                ),
-        )
-        .with_state(state);
+    let app = build_router(state);
 
     // Bind to localhost only — use VESTIGE_HTTP_BIND=0.0.0.0 for remote access
     let bind_addr: std::net::IpAddr = std::env::var("VESTIGE_HTTP_BIND")
@@ -428,5 +567,179 @@ async fn delete_mcp(
         (StatusCode::OK, "Session deleted").into_response()
     } else {
         (StatusCode::NOT_FOUND, "Session not found").into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode as Code};
+    use tower::ServiceExt;
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+
+    fn test_state(port: u16) -> HttpTransportState {
+        let dir = tempfile::TempDir::new().unwrap();
+        let storage = Arc::new(Storage::new(Some(dir.path().join("http-test.db"))).unwrap());
+        // Leak the temp dir for the lifetime of the test process: `Storage` holds the
+        // connection, and the tests never look at the file again.
+        std::mem::forget(dir);
+        let (event_tx, _) = broadcast::channel(16);
+
+        HttpTransportState {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            storage,
+            cognitive: Arc::new(Mutex::new(CognitiveEngine::new())),
+            event_tx,
+            auth_token: TOKEN.to_string(),
+            allowed_origins: Arc::new(allowed_origins(port)),
+            allowed_hosts: Arc::new(allowed_hosts(port)),
+        }
+    }
+
+    fn post(host: &str, origin: Option<&str>, token: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri("/mcp")
+            .header(header::HOST, host)
+            .header(header::CONTENT_TYPE, "application/json");
+
+        if let Some(origin) = origin {
+            builder = builder.header(header::ORIGIN, origin);
+        }
+        if let Some(token) = token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+
+        builder
+            .body(Body::from(
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/list",
+                })
+                .to_string(),
+            ))
+            .unwrap()
+    }
+
+    async fn status_of(request: Request<Body>) -> Code {
+        let port = 3928;
+        build_router(test_state(port))
+            .oneshot(request)
+            .await
+            .unwrap()
+            .status()
+    }
+
+    #[tokio::test]
+    async fn foreign_origin_is_rejected_with_403() {
+        // The transport spec makes this a MUST: a browser that has been tricked into
+        // resolving an attacker-controlled name to loopback still sends the attacker's
+        // Origin. CORS only hides the response — the request itself would still run.
+        let status = status_of(post(
+            "127.0.0.1:3928",
+            Some("https://evil.example"),
+            Some(TOKEN),
+        ))
+        .await;
+        assert_eq!(status, Code::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn loopback_origin_is_accepted() {
+        // Reaches auth (the token is valid, so the guard let it through and the empty
+        // session map produced the "no session" answer rather than a 403).
+        let status = status_of(post(
+            "127.0.0.1:3928",
+            Some("http://127.0.0.1:3928"),
+            Some(TOKEN),
+        ))
+        .await;
+        assert_eq!(
+            status,
+            Code::BAD_REQUEST,
+            "an allowed Origin must reach the session logic, not the guard"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_without_origin_is_allowed() {
+        // Non-browser clients (curl, the MCP inspector, another local process) send no
+        // Origin, and DNS rebinding is a browser attack.
+        let status = status_of(post("127.0.0.1:3928", None, Some(TOKEN))).await;
+        assert_eq!(status, Code::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn foreign_host_is_rejected_with_403() {
+        // The same attack from the other side: a rebound name arrives in `Host`.
+        let status = status_of(post(
+            "attacker.example:3928",
+            Some("https://evil.example"),
+            Some(TOKEN),
+        ))
+        .await;
+        assert_eq!(status, Code::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn missing_token_is_unauthorized() {
+        let status = status_of(post("127.0.0.1:3928", None, None)).await;
+        assert_eq!(status, Code::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn wrong_token_is_forbidden() {
+        let status = status_of(post(
+            "127.0.0.1:3928",
+            None,
+            Some("ffffffffffffffffffffffffffffffff"),
+        ))
+        .await;
+        assert_eq!(status, Code::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn session_id_of_the_wrong_shape_is_rejected() {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/mcp")
+            .header(header::HOST, "127.0.0.1:3928")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+            .header("mcp-session-id", "not-a-uuid")
+            .body(Body::from(
+                serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })
+                    .to_string(),
+            ))
+            .unwrap();
+        let status = status_of(request).await;
+        assert_eq!(
+            status,
+            Code::BAD_REQUEST,
+            "a malformed session id must be rejected before it is used as a map key"
+        );
+    }
+
+    #[test]
+    fn defaults_cover_loopback_only() {
+        let origins = allowed_origins(3928);
+        assert!(origins.iter().any(|o| o == "http://127.0.0.1:3928"));
+        assert!(origins.iter().any(|o| o == "http://localhost:3928"));
+        assert!(
+            !origins.iter().any(|o| o.contains("evil")),
+            "no wildcard, no remote origin by default"
+        );
+
+        let hosts = allowed_hosts(3928);
+        assert!(hosts.iter().any(|h| h == "127.0.0.1:3928"));
+        assert!(hosts.iter().any(|h| h == "localhost:3928"));
+        assert_eq!(
+            hosts.len(),
+            3,
+            "loopback v4, v6 and localhost — nothing else"
+        );
     }
 }
