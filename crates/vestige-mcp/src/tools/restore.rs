@@ -182,6 +182,20 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
     }))
 }
 
+/// Whether `path` begins with the SQLite file header.
+///
+/// A `VACUUM INTO` snapshot is a full SQLite database, so the magic string is the
+/// cheapest unambiguous discriminator between it and the JSON export.
+fn is_sqlite_snapshot(path: &std::path::Path) -> bool {
+    use std::io::Read;
+
+    let mut header = [0u8; 16];
+    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut header)) {
+        Ok(()) => &header == b"SQLite format 3\0",
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,19 +382,5 @@ mod tests {
         let result = execute(&storage, Some(restore_args(&path))).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap()["restored"], 1);
-    }
-}
-
-/// Whether `path` begins with the SQLite file header.
-///
-/// A `VACUUM INTO` snapshot is a full SQLite database, so the magic string is the
-/// cheapest unambiguous discriminator between it and the JSON export.
-fn is_sqlite_snapshot(path: &std::path::Path) -> bool {
-    use std::io::Read;
-
-    let mut header = [0u8; 16];
-    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut header)) {
-        Ok(()) => &header == b"SQLite format 3\0",
-        Err(_) => false,
     }
 }
