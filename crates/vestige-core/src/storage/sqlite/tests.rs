@@ -680,3 +680,109 @@ fn find_path_between_respects_max_depth() {
     assert_eq!(storage.find_path_between(&a, &d, 2).unwrap(), None);
     assert!(storage.find_path_between(&a, &d, 3).unwrap().is_some());
 }
+
+#[test]
+fn snapshot_round_trip_restores_memories_and_fts() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+
+    let first = source
+        .ingest(IngestInput {
+            content: "The staging cluster runs the blue deployment".to_string(),
+            node_type: "fact".to_string(),
+            tags: vec!["infra".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+    source
+        .ingest(IngestInput {
+            content: "Rollback of the blue deployment is a single command".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let snapshot = dir.path().join("vestige-snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    assert!(snapshot.exists(), "backup must produce a file");
+    drop(source);
+
+    // A second store, as a user recovering onto a fresh machine would have.
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+
+    assert_eq!(report.nodes_imported, 2, "both memories must arrive");
+    assert_eq!(report.nodes_in_snapshot, 2);
+    assert_eq!(target.get_stats().unwrap().total_nodes, 2);
+    assert_eq!(
+        target.get_node(&first.id).unwrap().map(|n| n.content),
+        Some("The staging cluster runs the blue deployment".to_string()),
+        "content must survive the round trip verbatim"
+    );
+
+    // The FTS index is external-content, and INSERT OR REPLACE does not fire the delete
+    // trigger — the import rebuilds it explicitly, so keyword search has to work here.
+    let hits = target.keyword_search("blue deployment", 10, 0.0).unwrap();
+    assert!(
+        !hits.is_empty(),
+        "restored memories must be searchable, not just present"
+    );
+}
+
+#[test]
+fn snapshot_restore_merges_instead_of_replacing() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let imported = source
+        .ingest(IngestInput {
+            content: "Memory that exists only in the snapshot".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    target
+        .ingest(IngestInput {
+            content: "Memory that already lived in the target store".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(report.nodes_imported, 1);
+    assert_eq!(
+        target.get_stats().unwrap().total_nodes,
+        2,
+        "import is a merge: the local memory must survive"
+    );
+    assert!(target.get_node(&imported.id).unwrap().is_some());
+}
+
+#[test]
+fn snapshot_restore_rejects_a_newer_schema() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    // Pretend the snapshot was written by a future binary.
+    {
+        let conn = rusqlite::Connection::open(&snapshot).unwrap();
+        conn.execute_batch("UPDATE schema_version SET version = 99;")
+            .unwrap();
+    }
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let err = target.restore_from_snapshot(&snapshot).unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("newer than this build"),
+        "a future snapshot must be refused with an explanation, got: {message}"
+    );
+}

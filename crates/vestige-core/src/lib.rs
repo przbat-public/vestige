@@ -189,7 +189,8 @@ pub use fsrs::{
 pub use storage::{
     ConnectionRecord, ConsolidationHistoryRecord, DEFAULT_HYBRID_KEYWORD_WEIGHT,
     DEFAULT_HYBRID_SEMANTIC_WEIGHT, DreamHistoryRecord, InsightRecord, IntentionRecord, Result,
-    SmartIngestResult, StateTransitionRecord, Storage, StorageError, default_hybrid_weights,
+    SmartIngestResult, SnapshotRestoreReport, StateTransitionRecord, Storage, StorageError,
+    default_hybrid_weights,
 };
 
 // Consolidation (sleep-inspired memory processing)

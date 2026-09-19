@@ -12,6 +12,27 @@ pub(super) fn run_restore(backup_path: PathBuf) -> anyhow::Result<()> {
     println!();
     println!("Loading backup from: {}", backup_path.display());
 
+    // A `.db` snapshot from the `backup` tool is a SQLite database, not JSON; route it to
+    // the snapshot importer instead of failing on UTF-8 decoding.
+    if is_sqlite_snapshot(&backup_path) {
+        let storage = Storage::new(None)?;
+        let report = storage.restore_from_snapshot(&backup_path)?;
+        println!(
+            "Imported {} of {} memories from the snapshot ({} vectors, {} awaiting re-embedding).",
+            report.nodes_imported,
+            report.nodes_in_snapshot,
+            report.embeddings_imported,
+            report.embeddings_reset
+        );
+        println!();
+        println!(
+            "{}",
+            "Run `vestige-mcp` and the regenerate_embeddings tool to rebuild semantic search."
+                .yellow()
+        );
+        return Ok(());
+    }
+
     // Read and parse backup
     let backup_content = std::fs::read_to_string(&backup_path)?;
 
@@ -102,4 +123,15 @@ pub(super) fn run_restore(backup_path: PathBuf) -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+/// Whether `path` begins with the SQLite file header (see `tools::restore`).
+fn is_sqlite_snapshot(path: &std::path::Path) -> bool {
+    use std::io::Read;
+
+    let mut header = [0u8; 16];
+    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut header)) {
+        Ok(()) => &header == b"SQLite format 3\0",
+        Err(_) => false,
+    }
 }

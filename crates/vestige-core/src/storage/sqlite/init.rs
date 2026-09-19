@@ -279,7 +279,7 @@ impl Storage {
     /// rebuild path below — the sidecar is purely a cache, never the source
     /// of truth.
     #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-    fn load_embeddings_into_index(&self) -> Result<()> {
+    pub(super) fn load_embeddings_into_index(&self) -> Result<()> {
         let reader = self
             .reader
             .lock()

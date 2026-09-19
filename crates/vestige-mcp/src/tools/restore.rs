@@ -17,7 +17,7 @@ pub fn schema() -> Value {
         "properties": {
             "path": {
                 "type": "string",
-                "description": "Path to the backup JSON file to restore from"
+                "description": "Path to the backup file to restore from: either the JSON export or the `.db` snapshot the `backup` tool writes (a VACUUM INTO copy of the store). The format is detected from the file header."
             },
             "confirmed": {
                 "type": "boolean",
@@ -76,6 +76,29 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
     let path = std::path::Path::new(&args.path);
     if !path.exists() {
         return Err(format!("Backup file not found: {}", args.path));
+    }
+
+    // `backup` writes a SQLite snapshot (VACUUM INTO), and until now nothing could read
+    // it back: the JSON path below fails on a binary file with "stream did not contain
+    // valid UTF-8", so the artefact the tool tells users to keep was a dead end. Detect
+    // the format from the file header before attempting to decode it as text.
+    if is_sqlite_snapshot(path) {
+        let report = storage
+            .restore_from_snapshot(path)
+            .map_err(|e| format!("Failed to restore snapshot: {}", e))?;
+
+        return Ok(serde_json::json!({
+            "tool": "restore",
+            "format": "sqlite-snapshot",
+            "path": args.path,
+            "nodesImported": report.nodes_imported,
+            "nodesInSnapshot": report.nodes_in_snapshot,
+            "embeddingsImported": report.embeddings_imported,
+            "embeddingsReset": report.embeddings_reset,
+            "snapshotSchemaVersion": report.snapshot_schema_version,
+            "liveSchemaVersion": report.live_schema_version,
+            "note": "Merged by id (INSERT OR REPLACE); the full-text index was rebuilt. Memories whose vector did not travel are marked without an embedding — run regenerate_embeddings to restore semantic search for them.",
+        }));
     }
 
     // Read and parse backup
@@ -345,5 +368,19 @@ mod tests {
         let result = execute(&storage, Some(restore_args(&path))).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap()["restored"], 1);
+    }
+}
+
+/// Whether `path` begins with the SQLite file header.
+///
+/// A `VACUUM INTO` snapshot is a full SQLite database, so the magic string is the
+/// cheapest unambiguous discriminator between it and the JSON export.
+fn is_sqlite_snapshot(path: &std::path::Path) -> bool {
+    use std::io::Read;
+
+    let mut header = [0u8; 16];
+    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut header)) {
+        Ok(()) => &header == b"SQLite format 3\0",
+        Err(_) => false,
     }
 }

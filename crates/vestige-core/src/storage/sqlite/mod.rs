@@ -80,6 +80,7 @@ mod review;
 mod search;
 #[cfg(all(feature = "embeddings", feature = "vector-search"))]
 mod smart_ingest;
+mod snapshot_restore;
 mod states;
 mod stats;
 mod tags;
@@ -97,4 +98,5 @@ pub use records::{
 pub use search::{
     DEFAULT_HYBRID_KEYWORD_WEIGHT, DEFAULT_HYBRID_SEMANTIC_WEIGHT, default_hybrid_weights,
 };
+pub use snapshot_restore::SnapshotRestoreReport;
 pub(crate) use tags::normalize_tags;

@@ -44,6 +44,23 @@ fn main() -> anyhow::Result<()> {
     let backup_path = PathBuf::from(&args[1]);
     println!("Loading backup from: {}", backup_path.display());
 
+    // Handle the SQLite snapshot the `backup` tool writes (VACUUM INTO), not just JSON.
+    if is_sqlite_snapshot(&backup_path) {
+        println!("Detected a SQLite snapshot — importing it.");
+        let storage = Storage::new(None)?;
+        let report = storage.restore_from_snapshot(&backup_path)?;
+        println!(
+            "Imported {} of {} memories ({} vectors copied, {} awaiting re-embedding).",
+            report.nodes_imported,
+            report.nodes_in_snapshot,
+            report.embeddings_imported,
+            report.embeddings_reset
+        );
+        println!();
+        println!("Run the `regenerate_embeddings` MCP tool to rebuild vector search.");
+        return Ok(());
+    }
+
     let backup_content = std::fs::read_to_string(&backup_path)?;
     let wrapper: Vec<BackupWrapper> = serde_json::from_str(&backup_content)?;
     let recall_result: RecallResult = serde_json::from_str(&wrapper[0].text)?;
@@ -103,5 +120,16 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         format!("{}...", &s[..n])
+    }
+}
+
+/// Whether `path` begins with the SQLite file header.
+fn is_sqlite_snapshot(path: &std::path::Path) -> bool {
+    use std::io::Read;
+
+    let mut header = [0u8; 16];
+    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut header)) {
+        Ok(()) => &header == b"SQLite format 3\0",
+        Err(_) => false,
     }
 }
