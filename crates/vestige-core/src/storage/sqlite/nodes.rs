@@ -251,8 +251,27 @@ impl Storage {
         Ok(())
     }
 
-    /// Update the content of an existing node
+    /// Update the content of an existing node and the vector that indexes it.
+    ///
+    /// The replacement vector is computed *before* anything is written. The
+    /// previous order — `index.remove` first, re-embed second — dropped the
+    /// memory out of HNSW whenever the embedding backend was unavailable or
+    /// failed, and still returned `Ok(())`: semantic search lost the memory
+    /// until someone ran `regenerate_embeddings { force: true }`, while
+    /// `has_embedding` stayed 1 so no automatic backfill ever noticed it.
+    ///
+    /// Failing closed (no content write, no index change, `Err`) keeps the
+    /// stored text and the vector that indexes it in agreement; a caller that
+    /// sees the error can retry once the backend is back.
     pub fn update_node_content(&self, id: &str, new_content: &str) -> Result<()> {
+        #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+        let embedding = self.embed_text(new_content).map_err(|e| {
+            StorageError::Init(format!(
+                "refusing to update node {}: could not embed the new content ({})",
+                id, e
+            ))
+        })?;
+
         let now = Utc::now();
 
         {
@@ -266,18 +285,11 @@ impl Storage {
             )?;
         }
 
-        // Regenerate embedding for updated content
+        // `store_embedding_for_node` upserts both `node_embeddings` and the
+        // HNSW entry (`VectorIndex::add` replaces a key it already holds), so
+        // the memory is never absent from the index between the two writes.
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-        {
-            // Remove old embedding from index
-            if let Ok(mut index) = self.vector_index.lock() {
-                let _ = index.remove(id);
-            }
-            // Generate new embedding
-            if let Err(e) = self.generate_embedding_for_node(id, new_content) {
-                tracing::warn!("Failed to regenerate embedding for {}: {}", id, e);
-            }
-        }
+        self.store_embedding_for_node(id, &embedding)?;
 
         Ok(())
     }
@@ -315,20 +327,51 @@ impl Storage {
         Ok(nodes)
     }
 
-    /// Delete a node
+    /// Delete a node and evict its vector from the index.
+    ///
+    /// The eviction result is no longer discarded, and the sidecar is rewritten
+    /// before returning. Previously the sidecar was only written by
+    /// consolidation and by the startup rebuild, so a deleted UUID stayed in
+    /// `vestige.hnsw` and — once unrelated ingests brought the row count back
+    /// to what the meta recorded — could be loaded again on the next boot.
     pub fn delete_node(&self, id: &str) -> Result<bool> {
-        let writer = self
-            .writer
-            .lock()
-            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-        let rows = writer.execute("DELETE FROM knowledge_nodes WHERE id = ?1", params![id])?;
+        let rows = {
+            let writer = self
+                .writer
+                .lock()
+                .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+            writer.execute("DELETE FROM knowledge_nodes WHERE id = ?1", params![id])?
+        };
 
         // Clean up vector index to prevent stale search results
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-        if rows > 0
-            && let Ok(mut index) = self.vector_index.lock()
-        {
-            let _ = index.remove(id);
+        if rows > 0 {
+            match self.vector_index.lock() {
+                Ok(mut index) => {
+                    if let Err(e) = index.remove(id) {
+                        tracing::warn!(
+                            node_id = %id,
+                            error = %e,
+                            "vector index eviction failed — the deleted memory can still be \
+                             returned by semantic search until the index is rebuilt"
+                        );
+                    }
+                }
+                Err(_) => tracing::warn!(
+                    node_id = %id,
+                    "vector index lock poisoned — the deleted memory was not evicted"
+                ),
+            }
+
+            // Persist immediately: leaving the rewrite to the next
+            // consolidation is what let a deleted UUID survive in the sidecar.
+            if let Err(e) = self.persist_vector_index() {
+                tracing::warn!(
+                    error = %e,
+                    "could not rewrite the vector index sidecar after delete — \
+                     next startup rebuilds from SQLite instead of the sidecar"
+                );
+            }
         }
 
         Ok(rows > 0)

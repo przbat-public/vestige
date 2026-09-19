@@ -7,7 +7,10 @@ use crate::fsrs::Rating;
 use crate::memory::IngestInput;
 
 use super::Storage;
-use super::init::VectorIndexSource;
+use super::StorageError;
+use super::init::{
+    ENCRYPTION_KEY_ENV, EncryptionConfig, REQUIRE_ENCRYPTION_ENV, VectorIndexSource,
+};
 use super::records::{ConnectionRecord, DreamHistoryRecord, InsightRecord};
 
 fn create_test_storage() -> Storage {
@@ -1184,5 +1187,529 @@ fn right_to_erasure_rolls_back_when_a_step_fails() {
     assert_eq!(
         embedding_rows, 1,
         "the embedding must survive a rolled-back erasure"
+    );
+}
+
+// ============================================================================
+// GDPR bulk erasure — exact tag membership (gdpr-tag-exact)
+//
+// `erase_by_tag` built a LIKE pattern `%"<tag>%` with no closing quote and no
+// wildcard escaping: erasing `code` also erased every `codebase`, and a tag
+// containing `%`/`_` matched unrelated tags. Over-deletion on this path is
+// irreversible, so membership is now an exact `json_each` match.
+// ============================================================================
+
+#[test]
+fn erase_by_tag_removes_only_exact_tag_matches() {
+    let storage = create_test_storage();
+
+    let code = ingest_id(&storage, "memory tagged code");
+    let codebase = ingest_id(&storage, "memory tagged codebase");
+    storage
+        .update_node_tags(&code, &["code".to_string()])
+        .unwrap();
+    storage
+        .update_node_tags(&codebase, &["codebase".to_string()])
+        .unwrap();
+
+    let (erased, _) = storage.erase_by_tag("code").unwrap();
+    assert_eq!(erased, 1, "only the exact `code` tag may be erased");
+    assert!(
+        storage.get_node(&code).unwrap().is_none(),
+        "the memory tagged `code` must be erased"
+    );
+    assert!(
+        storage.get_node(&codebase).unwrap().is_some(),
+        "`codebase` is not `code` — erasing one must not erase the other"
+    );
+}
+
+#[test]
+fn erase_by_tag_treats_like_wildcards_literally() {
+    let storage = create_test_storage();
+
+    let percent = ingest_id(&storage, "memory tagged 100%");
+    let prefix = ingest_id(&storage, "memory tagged 100x");
+    storage
+        .update_node_tags(&percent, &["100%".to_string()])
+        .unwrap();
+    storage
+        .update_node_tags(&prefix, &["100x".to_string()])
+        .unwrap();
+
+    let (erased, _) = storage.erase_by_tag("100%").unwrap();
+    assert_eq!(erased, 1, "`%` must match only the literal percent tag");
+    assert!(
+        storage.get_node(&percent).unwrap().is_none(),
+        "the literal `100%` tag must still be erasable"
+    );
+    assert!(
+        storage.get_node(&prefix).unwrap().is_some(),
+        "`%` leaked into the match as a wildcard and erased an unrelated tag"
+    );
+
+    // `_` is the single-character wildcard in LIKE. No stored tag can hold one
+    // (`normalize_tags` folds it to `-`), so the query must not treat it as a
+    // wildcard either.
+    let underscore_victim = ingest_id(&storage, "memory tagged xyz");
+    storage
+        .update_node_tags(&underscore_victim, &["xyz".to_string()])
+        .unwrap();
+    let (erased, _) = storage.erase_by_tag("x_z").unwrap();
+    assert_eq!(erased, 0, "`_` must not match an arbitrary character");
+    assert!(
+        storage.get_node(&underscore_victim).unwrap().is_some(),
+        "`_` leaked into the match as a wildcard and erased an unrelated tag"
+    );
+
+    // A caller passing a non-canonical surface form still hits the stored tag.
+    let shouty = ingest_id(&storage, "memory tagged code");
+    storage
+        .update_node_tags(&shouty, &["code".to_string()])
+        .unwrap();
+    let (erased, _) = storage.erase_by_tag(" CODE ").unwrap();
+    assert_eq!(
+        erased, 1,
+        "the query must be canonicalized like stored tags"
+    );
+    assert!(storage.get_node(&shouty).unwrap().is_none());
+}
+
+// ============================================================================
+// Vector index lifecycle — content edit and delete (index-consistency)
+//
+// `update_node_content` evicted the old vector *before* re-embedding, so an
+// unavailable embedder dropped the memory out of semantic search for good
+// while reporting success; `delete_node` swallowed `index.remove` and left the
+// deleted UUID in the on-disk sidecar.
+// ============================================================================
+
+/// A failed re-embed must not cost the memory its place in the index, and must
+/// not be reported as success. Empty text is rejected by the embedder before
+/// any model access, so the failure branch is reachable without an ONNX model.
+#[test]
+fn content_update_keeps_previous_vector_when_embedding_fails() {
+    use crate::embeddings::{EMBEDDING_DIMENSIONS, Embedding};
+
+    let storage = create_test_storage();
+    let node = storage
+        .ingest(IngestInput {
+            content: "original wording".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Seed a known vector through the production persistence path so this test
+    // does not depend on the embedding model being downloadable.
+    let previous = Embedding::new(vec![0.5f32; EMBEDDING_DIMENSIONS]);
+    storage
+        .store_embedding_for_node(&node.id, &previous)
+        .unwrap();
+    let stored_before: Vec<u8> = storage
+        .reader
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT embedding FROM node_embeddings WHERE node_id = ?1",
+            rusqlite::params![node.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    let err = storage
+        .update_node_content(&node.id, "")
+        .expect_err("a re-embed that never happened must not be reported as success");
+    assert!(
+        err.to_string().contains("embed"),
+        "the error must name the embedding failure, got: {err}"
+    );
+
+    assert!(
+        storage.vector_index.lock().unwrap().contains(&node.id),
+        "the previous vector must stay in the index when re-embedding fails"
+    );
+    assert_eq!(
+        storage.get_node(&node.id).unwrap().unwrap().content,
+        "original wording",
+        "content whose vector could not be computed must not be written"
+    );
+    let stored_after: Vec<u8> = storage
+        .reader
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT embedding FROM node_embeddings WHERE node_id = ?1",
+            rusqlite::params![node.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        stored_after, stored_before,
+        "the persisted vector must still match the stored content"
+    );
+}
+
+/// A delete must leave the on-disk sidecar consistent with the database. When
+/// it did not, the sidecar kept the deleted UUID and the next process could
+/// load it whenever the row count happened to line up again.
+#[test]
+fn deleting_a_memory_rewrites_the_index_sidecar() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("delete.db");
+
+    let (deleted_id, kept_id) = {
+        let storage = Storage::new(Some(db_path.clone())).unwrap();
+        let deleted = storage
+            .ingest(IngestInput {
+                content: "memory that gets deleted".to_string(),
+                node_type: "fact".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        let kept = storage
+            .ingest(IngestInput {
+                content: "memory that survives".to_string(),
+                node_type: "fact".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        storage.persist_vector_index().unwrap();
+        assert!(storage.delete_node(&deleted.id).unwrap());
+        (deleted.id, kept.id)
+    };
+
+    let reloaded = Storage::new(Some(db_path)).unwrap();
+    assert_eq!(
+        reloaded.vector_index_source(),
+        VectorIndexSource::Loaded,
+        "the delete must leave a sidecar that is valid, not one that every later boot rejects"
+    );
+    let index = reloaded.vector_index.lock().unwrap();
+    assert!(
+        !index.contains(&deleted_id),
+        "the deleted UUID came back from the persisted sidecar"
+    );
+    assert!(
+        index.contains(&kept_id),
+        "the surviving memory must still be indexed"
+    );
+}
+
+// ============================================================================
+// Physical erasure — secure_delete, WAL checkpoint, FTS merge (ephemeral-data)
+//
+// The erasure path claimed the data was gone while the raw file still held it:
+// `secure_delete` was off, the FTS5 tombstone left the terms in
+// `knowledge_fts_data`, and nothing checkpointed the WAL.
+// ============================================================================
+
+#[test]
+fn writer_connection_runs_with_secure_delete() {
+    let storage = create_test_storage();
+    let enabled: i64 = storage
+        .writer
+        .lock()
+        .unwrap()
+        .query_row("PRAGMA secure_delete", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        enabled, 1,
+        "without secure_delete, freed cells keep the deleted text readable in the file"
+    );
+}
+
+/// The marker is lowercase and stem-free on purpose: `knowledge_fts` tokenizes
+/// with porter, so a marker that stems differently would never appear verbatim
+/// in the index and the precondition below would be vacuous.
+const ERASURE_MARKER: &str = "zqxjvmrk9c2f";
+
+fn bytes_contain(haystack: &[u8], needle: &str) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle.as_bytes())
+}
+
+/// A missing file counts as empty: a truncated WAL is deleted on some
+/// platforms instead of being left at zero length.
+fn read_file_bytes(path: &std::path::Path) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_default()
+}
+
+#[test]
+fn erasure_scrubs_the_content_from_database_and_wal_bytes() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("erasure.db");
+    let wal_path = dir.path().join("erasure.db-wal");
+
+    let storage = Storage::new(Some(db_path.clone())).unwrap();
+    let node = storage
+        .ingest(IngestInput {
+            content: format!("{ERASURE_MARKER} {}", "erasable padding ".repeat(200)),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Flush first so the precondition describes the on-disk state, not the WAL.
+    storage.wal_checkpoint().unwrap();
+    assert!(
+        bytes_contain(&read_file_bytes(&db_path), ERASURE_MARKER),
+        "precondition: the content must be readable on disk before the erasure"
+    );
+
+    storage.right_to_erasure(&node.id).unwrap();
+
+    assert!(
+        !bytes_contain(&read_file_bytes(&db_path), ERASURE_MARKER),
+        "erased content is still readable in the raw database file"
+    );
+    assert!(
+        !bytes_contain(&read_file_bytes(&wal_path), ERASURE_MARKER),
+        "erased content is still readable in the write-ahead log"
+    );
+}
+
+// ============================================================================
+// At-rest encryption — fail closed (encryption-fail-closed)
+//
+// A missing `VESTIGE_ENCRYPTION_KEY` used to be ignored, so a process built or
+// configured for encryption happily created a plaintext database.
+// ============================================================================
+
+/// Environment stub for the encryption-policy tests: the getter is a parameter
+/// exactly so these branches can be exercised without mutating process-wide
+/// env vars (which would race with every other test in the binary).
+fn env_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + 'static {
+    let map: std::collections::HashMap<String, String> = pairs
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect();
+    move |name: &str| map.get(name).cloned()
+}
+
+#[test]
+fn encryption_config_requires_a_nonempty_key_when_encryption_is_requested() {
+    assert_eq!(
+        Storage::encryption_config(&env_from(&[(ENCRYPTION_KEY_ENV, "s3cret")])),
+        EncryptionConfig::Key("s3cret".to_string()),
+        "a passphrase on its own is a request for encryption"
+    );
+    assert_eq!(
+        Storage::encryption_config(&env_from(&[(REQUIRE_ENCRYPTION_ENV, "yes")])),
+        EncryptionConfig::RequestedWithoutKey,
+        "the explicit switch without a passphrase must be refused upstream"
+    );
+    assert_eq!(
+        Storage::encryption_config(&env_from(&[
+            (REQUIRE_ENCRYPTION_ENV, "true"),
+            (ENCRYPTION_KEY_ENV, "k"),
+        ])),
+        EncryptionConfig::Key("k".to_string())
+    );
+    for blank in ["", "   ", "\t"] {
+        assert_eq!(
+            Storage::encryption_config(&env_from(&[(ENCRYPTION_KEY_ENV, blank)])),
+            EncryptionConfig::Plaintext,
+            "a blank passphrase is not a passphrase (got {blank:?})"
+        );
+    }
+    assert_eq!(
+        Storage::encryption_config(&env_from(&[])),
+        EncryptionConfig::Plaintext,
+        "no key and no switch must stay plaintext-with-warning, not an error"
+    );
+}
+
+#[test]
+fn encryption_config_only_honours_truthy_switches() {
+    for value in ["1", "true", "TRUE", "Yes", " on "] {
+        assert_eq!(
+            Storage::encryption_config(&env_from(&[(REQUIRE_ENCRYPTION_ENV, value)])),
+            EncryptionConfig::RequestedWithoutKey,
+            "{REQUIRE_ENCRYPTION_ENV}={value:?} must count as a request"
+        );
+    }
+    for value in ["0", "false", "no", "off", "maybe", "2"] {
+        assert_eq!(
+            Storage::encryption_config(&env_from(&[(REQUIRE_ENCRYPTION_ENV, value)])),
+            EncryptionConfig::Plaintext,
+            "{REQUIRE_ENCRYPTION_ENV}={value:?} must not count as a request"
+        );
+    }
+}
+
+#[test]
+fn explicit_encryption_request_without_key_is_refused() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let err = Storage::configure_connection(&conn, &EncryptionConfig::RequestedWithoutKey, true)
+        .expect_err("an explicit encryption request must never fall back to plaintext");
+    let message = err.to_string();
+    assert!(
+        message.contains(ENCRYPTION_KEY_ENV),
+        "the refusal must name the missing variable: {message}"
+    );
+}
+
+/// Without SQLCipher compiled in there is no way to apply the passphrase, so a
+/// present key must stop the process rather than be dropped.
+#[cfg(not(feature = "encryption"))]
+#[test]
+fn key_without_sqlcipher_feature_is_refused() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let err = Storage::configure_connection(&conn, &EncryptionConfig::Key("s3cret".into()), true)
+        .expect_err("a passphrase without SQLCipher must not produce a plaintext database");
+    let message = err.to_string();
+    assert!(
+        message.contains("encryption"),
+        "the refusal must name the missing cargo feature: {message}"
+    );
+    assert!(
+        !message.contains("s3cret"),
+        "the passphrase must never be echoed back: {message}"
+    );
+}
+
+/// An encrypted database opened without its key is indistinguishable from
+/// garbage (`SQLITE_NOTADB`); the open must fail closed with the actionable
+/// reason instead of a bare sqlite error from the PRAGMA batch.
+#[test]
+fn opening_a_database_that_needs_a_key_is_refused() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("encrypted.db");
+    // Stand-in for a SQLCipher file: bytes that are not a SQLite header.
+    std::fs::write(&db_path, vec![0xA5u8; 4096]).unwrap();
+
+    match Storage::new(Some(db_path)) {
+        Err(StorageError::Init(message)) => assert!(
+            message.contains(ENCRYPTION_KEY_ENV),
+            "the refusal must tell the operator how to supply the key: {message}"
+        ),
+        Err(other) => panic!("expected a fail-closed Init error, got {other:?}"),
+        Ok(_) => panic!("opening a file that needs a key must not succeed"),
+    }
+}
+
+// ============================================================================
+// Embedding-space drift — sidecar validation and the startup signal
+//
+// An upgrade of the embedding function leaves every row untouched, so a
+// sidecar written in the previous space still passed the row-count and
+// embedding-state checks and was loaded as if it were current: queries from
+// the new space were compared against documents from the old one.
+// ============================================================================
+
+#[test]
+fn vector_index_sidecar_from_another_embedding_space_is_rebuilt() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("space.db");
+
+    let node_id = {
+        let storage = Storage::new(Some(db_path.clone())).unwrap();
+        let node = storage
+            .ingest(IngestInput {
+                content: "memory embedded in the current space".to_string(),
+                node_type: "fact".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        storage.persist_vector_index().unwrap();
+        node.id
+    };
+
+    let meta_path = {
+        let storage = Storage::new(Some(db_path.clone())).unwrap();
+        storage.vector_index_meta_path()
+    };
+    let mut meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    let written_space = meta
+        .get("embedding_space")
+        .and_then(|value| value.as_str())
+        .expect("the sidecar meta must record the embedding space it was written in")
+        .to_string();
+    assert!(
+        !written_space.is_empty(),
+        "an empty space id would make every sidecar look stale"
+    );
+
+    // Same rows, same row count, same embedding-state stamp — only the space
+    // differs, exactly as after an upgrade of the embedding function.
+    meta["embedding_space"] = serde_json::json!("nomic-embed-text-v1.5|v1|d384|pre-v2");
+    std::fs::write(&meta_path, meta.to_string()).unwrap();
+
+    let reloaded = Storage::new(Some(db_path)).unwrap();
+    assert_eq!(
+        reloaded.vector_index_source(),
+        VectorIndexSource::Rebuilt,
+        "a sidecar written in another embedding space must be rebuilt from SQLite, not loaded"
+    );
+    assert!(
+        reloaded.vector_index.lock().unwrap().contains(&node_id),
+        "the rebuild must still index the store's vectors"
+    );
+}
+
+/// Rejecting the sidecar fixes the index, but the stored vectors stay in the
+/// old space until they are recomputed. Startup must say so — with the count
+/// and the remedy — and must not re-embed anything by itself.
+#[test]
+fn vectors_from_an_older_embedding_space_produce_an_actionable_warning() {
+    use crate::embeddings::{EMBEDDING_DIMENSIONS, Embedding};
+
+    let storage = create_test_storage();
+    let node = storage
+        .ingest(IngestInput {
+            content: "memory with a recorded embedding".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+    // Written through the production path, so the tag is whatever this build
+    // records for a current vector (independent of the ONNX model being there).
+    storage
+        .store_embedding_for_node(
+            &node.id,
+            &Embedding::new(vec![0.25f32; EMBEDDING_DIMENSIONS]),
+        )
+        .unwrap();
+
+    assert_eq!(
+        storage.stale_embedding_space_warning().unwrap(),
+        None,
+        "a store whose vectors all carry the current tag must stay quiet"
+    );
+
+    // What a pre-upgrade store looks like: same row, same vector, an older
+    // provenance tag.
+    storage
+        .writer
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE knowledge_nodes SET embedding_model = 'nomic-embed-text-v1.5' WHERE id = ?1",
+            rusqlite::params![node.id],
+        )
+        .unwrap();
+
+    let message = storage
+        .stale_embedding_space_warning()
+        .unwrap()
+        .expect("a vector tagged in an older space must be reported");
+    assert!(
+        message.contains('1'),
+        "the number of affected memories must be named: {message}"
+    );
+    assert!(
+        message.contains("regenerate_embeddings"),
+        "the remedy must be named: {message}"
+    );
+    assert!(
+        message.contains("force: true"),
+        "the remedy must include the flag that makes it effective: {message}"
+    );
+    assert!(
+        message.contains(crate::embeddings::embedding_model_tag()),
+        "the current space must be named so the user can tell what is old: {message}"
     );
 }

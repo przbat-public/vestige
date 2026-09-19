@@ -21,6 +21,38 @@ use crate::search::VectorIndex;
 
 use super::error::{Result, StorageError};
 
+/// Passphrase for the SQLCipher-encrypted database.
+///
+/// Set (non-empty) ⇒ the database MUST be encrypted: this process refuses to
+/// open a plaintext file, and refuses to start at all if it was built without
+/// the `encryption` cargo feature (SQLCipher). Whitespace-only values are
+/// treated as unset — an empty passphrase is not encryption.
+pub(super) const ENCRYPTION_KEY_ENV: &str = "VESTIGE_ENCRYPTION_KEY";
+
+/// Explicit switch (truthy: `1`, `true`, `yes`, `on`) demanding an encrypted
+/// database even when `VESTIGE_ENCRYPTION_KEY` is missing or empty.
+///
+/// Exists so an operator can state the intent in a unit file / launchd plist
+/// without a key material file present: the process then fails closed instead
+/// of quietly creating a plaintext database. Without this switch (and without
+/// a key) plaintext is still allowed, but only with a warning.
+pub(super) const REQUIRE_ENCRYPTION_ENV: &str = "VESTIGE_REQUIRE_ENCRYPTION";
+
+/// What the environment asks of the database file, resolved once per open.
+///
+/// Modelled as a value (rather than read inline where it is used) so every
+/// branch is testable without mutating process-wide environment variables,
+/// which would race with every other test in the binary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum EncryptionConfig {
+    /// No passphrase and no explicit request: the database is plaintext.
+    Plaintext,
+    /// `VESTIGE_ENCRYPTION_KEY` holds a non-empty passphrase.
+    Key(String),
+    /// `VESTIGE_REQUIRE_ENCRYPTION` is truthy but the passphrase is missing.
+    RequestedWithoutKey,
+}
+
 /// How the in-memory vector index was populated on startup.
 ///
 /// Exposed for diagnostics: a healthy long-lived process should mostly see
@@ -84,17 +116,72 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Apply PRAGMAs and optional encryption to a connection
-    fn configure_connection(conn: &Connection) -> Result<()> {
-        // Apply encryption key if SQLCipher is enabled and key is provided
-        #[cfg(feature = "encryption")]
-        {
-            if let Ok(key) = std::env::var("VESTIGE_ENCRYPTION_KEY")
-                && !key.is_empty()
-            {
-                conn.pragma_update(None, "key", &key)?;
+    /// Read the encryption switches.
+    ///
+    /// Precedence: a non-empty passphrase wins over everything (it states
+    /// intent on its own); otherwise the explicit switch decides between
+    /// "fail closed" and plaintext-with-warning.
+    pub(super) fn encryption_config(get: &dyn Fn(&str) -> Option<String>) -> EncryptionConfig {
+        match get(ENCRYPTION_KEY_ENV).filter(|key| !key.trim().is_empty()) {
+            Some(key) => EncryptionConfig::Key(key),
+            None if env_truthy(REQUIRE_ENCRYPTION_ENV, get) => {
+                EncryptionConfig::RequestedWithoutKey
             }
+            None => EncryptionConfig::Plaintext,
         }
+    }
+
+    /// [`Self::encryption_config`] against the real process environment.
+    fn encryption_config_from_env() -> EncryptionConfig {
+        Self::encryption_config(&|name| std::env::var(name).ok())
+    }
+
+    /// Apply the encryption policy, PRAGMAs and readability check to a
+    /// connection. `secure_delete` is only ever true for the writer.
+    ///
+    /// `PRAGMA secure_delete = ON` zeroes freed cells and pages instead of just
+    /// unlinking them, which is what makes an erasure physical. The cost is
+    /// paid on every `DELETE`/shrinking `UPDATE` — extra page writes — so it is
+    /// enabled on the writer connection only (readers never delete) and
+    /// deliberately not on connections that only read.
+    pub(super) fn configure_connection(
+        conn: &Connection,
+        encryption: &EncryptionConfig,
+        secure_delete: bool,
+    ) -> Result<()> {
+        match encryption {
+            EncryptionConfig::Key(key) => {
+                #[cfg(feature = "encryption")]
+                // Must be the first statement on the connection: SQLCipher
+                // derives the file key from it before reading the header.
+                conn.pragma_update(None, "key", key)?;
+
+                #[cfg(not(feature = "encryption"))]
+                {
+                    // Never log the passphrase itself.
+                    let _ = key;
+                    return Err(StorageError::Init(format!(
+                        "{ENCRYPTION_KEY_ENV} is set but this build cannot encrypt: it was compiled \
+                         without the `encryption` cargo feature (SQLCipher). Rebuild with \
+                         `--features encryption` or unset the variable — refusing to open a \
+                         plaintext database"
+                    )));
+                }
+            }
+            EncryptionConfig::RequestedWithoutKey => {
+                return Err(StorageError::Init(format!(
+                    "{REQUIRE_ENCRYPTION_ENV} asks for an encrypted database but {ENCRYPTION_KEY_ENV} \
+                     is missing or empty; set a non-empty passphrase (and build with the `encryption` \
+                     cargo feature for SQLCipher) — refusing to fall back to a plaintext database"
+                )));
+            }
+            EncryptionConfig::Plaintext => {}
+        }
+
+        // Check readability before the PRAGMA batch: `journal_mode = WAL` on a
+        // file we cannot decrypt already fails with a bare "file is not a
+        // database", which reads like corruption instead of a missing key.
+        Self::verify_readable(conn, matches!(encryption, EncryptionConfig::Key(_)))?;
 
         // Configure SQLite for performance
         conn.execute_batch(
@@ -109,7 +196,51 @@ impl Storage {
              PRAGMA optimize = 0x10002;",
         )?;
 
+        if secure_delete {
+            // Zero freed cells/pages instead of merely unlinking them, so an
+            // erased row is physically gone from the file. Costs extra page
+            // writes on every DELETE and every shrinking UPDATE, so it is set
+            // on the writer only (readers never delete) — see
+            // `gdpr::post_erasure_cleanup` for the erasure sequence it backs.
+            conn.execute_batch("PRAGMA secure_delete = ON;")?;
+        }
+
         Ok(())
+    }
+
+    /// Refuse to continue when the file on disk is not a database this
+    /// connection can read.
+    ///
+    /// A SQLCipher file opened without its key is indistinguishable from
+    /// garbage to SQLite: both surface as `SQLITE_NOTADB`. Treating that as
+    /// "corrupt" and carrying on would let the process create a *new* plaintext
+    /// database next to (or over) the encrypted one, so the only safe reading
+    /// is "encrypted or corrupt — stop and say why".
+    fn verify_readable(conn: &Connection, key_supplied: bool) -> Result<()> {
+        match conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| {
+            row.get::<_, i64>(0)
+        }) {
+            Ok(_) => Ok(()),
+            Err(e) if Self::is_not_a_database(&e) => Err(StorageError::Init(if key_supplied {
+                format!(
+                    "{ENCRYPTION_KEY_ENV} was supplied but the database could not be decrypted: \
+                     the passphrase is wrong or the file is not a SQLCipher database"
+                )
+            } else {
+                format!(
+                    "the database file is not a readable SQLite database — it is encrypted (set \
+                     {ENCRYPTION_KEY_ENV}) or corrupt; refusing to continue"
+                )
+            })),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn is_not_a_database(err: &rusqlite::Error) -> bool {
+        matches!(
+            err,
+            rusqlite::Error::SqliteFailure(e, _) if e.code == rusqlite::ErrorCode::NotADatabase
+        )
     }
 
     /// Create new storage instance
@@ -134,6 +265,22 @@ impl Storage {
             }
         };
 
+        // Resolved once per open, then reused for every connection so the
+        // three connections cannot disagree about how the file is keyed.
+        let encryption = Self::encryption_config_from_env();
+        if encryption == EncryptionConfig::Plaintext {
+            // One warning per process: an operator who never asked for
+            // encryption should still learn that the memories land on disk in
+            // the clear, without a warning storm from every connection.
+            static PLAINTEXT_WARNING: std::sync::Once = std::sync::Once::new();
+            PLAINTEXT_WARNING.call_once(|| {
+                tracing::warn!(
+                    "database is NOT encrypted: neither {ENCRYPTION_KEY_ENV} nor \
+                     {REQUIRE_ENCRYPTION_ENV} is set, so memories are stored in plaintext"
+                );
+            });
+        }
+
         // Open writer connection
         let writer_conn = Connection::open(&path)?;
 
@@ -145,7 +292,9 @@ impl Storage {
             let _ = std::fs::set_permissions(&path, perms);
         }
 
-        Self::configure_connection(&writer_conn)?;
+        // The writer is the only connection that deletes, so it is the only
+        // one that pays for `secure_delete`.
+        Self::configure_connection(&writer_conn, &encryption, true)?;
 
         // Apply migrations on writer only
         crate::storage::migrations::apply_migrations(&writer_conn)?;
@@ -153,9 +302,9 @@ impl Storage {
         // Open primary + secondary reader connections to same path (SQLite WAL
         // supports concurrent readers, so two connections reduce lock contention).
         let reader_conn = Connection::open(&path)?;
-        Self::configure_connection(&reader_conn)?;
+        Self::configure_connection(&reader_conn, &encryption, false)?;
         let reader_secondary_conn = Connection::open(&path)?;
-        Self::configure_connection(&reader_secondary_conn)?;
+        Self::configure_connection(&reader_secondary_conn, &encryption, false)?;
 
         #[cfg(feature = "embeddings")]
         let embedding_service = EmbeddingService::new();
@@ -189,6 +338,19 @@ impl Storage {
 
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
         storage.load_embeddings_into_index()?;
+
+        // Report — never perform — the migration an embedding-function upgrade
+        // needs. Re-embedding every memory is long and destroys the previous
+        // vectors, so it stays an explicit user decision.
+        #[cfg(feature = "embeddings")]
+        match storage.stale_embedding_space_warning() {
+            Ok(Some(message)) => tracing::warn!("{message}"),
+            Ok(None) => {}
+            Err(e) => tracing::debug!(
+                error = %e,
+                "could not check for vectors written in an older embedding space"
+            ),
+        }
 
         // Pick up a previously-optimized w20 if consolidation has produced
         // one. Best-effort: a missing column or a read error means we keep
@@ -227,6 +389,37 @@ impl Storage {
         VectorIndexSource::from_u8(self.vector_index_source.load(Ordering::Relaxed))
     }
 
+    /// One actionable line when the store holds vectors produced by an older
+    /// embedding function, or `None` when every stored vector is current.
+    ///
+    /// Rejecting a sidecar only rebuilds the *index*; the vectors themselves
+    /// stay in the previous space until they are recomputed from content. That
+    /// is a long, user-visible operation, so this only reports it — nothing in
+    /// storage re-embeds on its own. Returned as a string rather than logged
+    /// here so the wording is testable.
+    #[cfg(feature = "embeddings")]
+    pub(super) fn stale_embedding_space_warning(&self) -> Result<Option<String>> {
+        let current_tag = crate::embeddings::embedding_model_tag();
+        let reader = self.acquire_reader()?;
+        // `COALESCE` counts a NULL tag as stale too: a row with a vector but
+        // no recorded provenance cannot be proven current.
+        let stale: i64 = reader.query_row(
+            "SELECT COUNT(*) FROM knowledge_nodes
+             WHERE has_embedding = 1 AND COALESCE(embedding_model, '') <> ?1",
+            rusqlite::params![current_tag],
+            |row| row.get(0),
+        )?;
+
+        if stale == 0 {
+            return Ok(None);
+        }
+        Ok(Some(format!(
+            "{stale} memories hold vectors from an older embedding function (tag other than \
+             {current_tag}); semantic search mixes embedding spaces until they are recomputed \
+             — run `regenerate_embeddings` with `force: true` to re-embed them"
+        )))
+    }
+
     /// Cheap state fingerprint of the `node_embeddings` table.
     ///
     /// The HNSW sidecar is only valid for the exact embedding rows it was
@@ -237,6 +430,12 @@ impl Storage {
     /// `store_embedding_for_node` refreshes `created_at` on every write, so
     /// `(COUNT(*), MAX(created_at))` changes whenever an embedding row is
     /// added, replaced or deleted.
+    ///
+    /// It also misses an upgrade of the embedding *function*: the rows are
+    /// untouched by an upgrade, so a sidecar full of vectors from the previous
+    /// space would still look current and semantic search would rank a query
+    /// from one space against documents from another. The current space id is
+    /// therefore part of the stamp.
     #[cfg(feature = "vector-search")]
     fn embeddings_fingerprint(&self) -> Result<String> {
         let reader = self.acquire_reader()?;
@@ -245,7 +444,17 @@ impl Storage {
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        Ok(format!("{}:{}", rows, newest.unwrap_or_default()))
+        let state = format!("{}:{}", rows, newest.unwrap_or_default());
+
+        #[cfg(feature = "embeddings")]
+        return Ok(format!(
+            "{}|{}",
+            crate::embeddings::embedding_space_fingerprint(),
+            state
+        ));
+
+        #[cfg(not(feature = "embeddings"))]
+        Ok(state)
     }
 
     /// Persist the current HNSW index to its sidecar.
@@ -271,12 +480,19 @@ impl Storage {
             .save(&path)
             .map_err(|e| StorageError::Init(format!("vector index save failed: {}", e)))?;
 
-        let meta = serde_json::json!({
-            "schema": 1,
-            "row_count": row_count,
-            "dimensions": index.dimensions(),
-            "embeddings_fingerprint": fingerprint,
-        });
+        // The meta is built as a map (not a `json!` literal) so the embedding
+        // space can be added only in builds that have an embedding function.
+        let mut meta = serde_json::Map::new();
+        meta.insert("schema".to_string(), 1.into());
+        meta.insert("row_count".to_string(), row_count.into());
+        meta.insert("dimensions".to_string(), index.dimensions().into());
+        meta.insert("embeddings_fingerprint".to_string(), fingerprint.into());
+        #[cfg(feature = "embeddings")]
+        meta.insert(
+            "embedding_space".to_string(),
+            crate::embeddings::embedding_space_fingerprint().into(),
+        );
+        let meta = serde_json::Value::Object(meta);
         let meta_path = self.vector_index_meta_path();
         if let Err(e) = std::fs::write(
             &meta_path,
@@ -423,10 +639,11 @@ impl Storage {
     /// Returns `true` only when:
     /// 1. Both `vestige.hnsw` and `vestige.hnsw.meta.json` exist.
     /// 2. Meta schema is recognized.
-    /// 3. `meta.row_count` matches the current DB row count.
-    /// 4. `meta.embeddings_fingerprint` matches the current embedding state.
-    /// 5. `VectorIndex::load` and the mappings sidecar both succeed.
-    /// 6. Loaded index reports the expected size.
+    /// 3. `meta.embedding_space` is the space this build produces.
+    /// 4. `meta.row_count` matches the current DB row count.
+    /// 5. `meta.embeddings_fingerprint` matches the current embedding state.
+    /// 6. `VectorIndex::load` and the mappings sidecar both succeed.
+    /// 7. Loaded index reports the expected size.
     ///
     /// Any failure is logged and returns `false` so the caller falls through
     /// to the rebuild path.
@@ -460,6 +677,29 @@ impl Storage {
             tracing::info!(schema, "vector index meta schema mismatch — rebuilding");
             return false;
         }
+
+        // An upgrade of the embedding function leaves every row untouched, so
+        // row count and embedding-state stamp both still match; without this
+        // check the process would load vectors from the previous space and
+        // silently rank cross-space distances. A meta written before this
+        // field existed has no `embedding_space` and is rebuilt once.
+        #[cfg(feature = "embeddings")]
+        {
+            let expected_space = crate::embeddings::embedding_space_fingerprint();
+            let meta_space = meta_val
+                .get("embedding_space")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if meta_space != expected_space {
+                tracing::info!(
+                    meta_space,
+                    %expected_space,
+                    "vector index sidecar was written in a different embedding space — rebuilding"
+                );
+                return false;
+            }
+        }
+
         let meta_rows = meta_val
             .get("row_count")
             .and_then(|v| v.as_u64())
@@ -585,6 +825,20 @@ impl Storage {
 
         Ok(())
     }
+}
+
+/// Truthiness for Vestige's own switches: `1`, `true`, `yes`, `on`
+/// (case-insensitive, surrounding whitespace ignored). Unset or anything else
+/// is false — a typo must never be read as consent to anything.
+fn env_truthy(name: &str, get: &dyn Fn(&str) -> Option<String>) -> bool {
+    get(name)
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 /// Compute `<db_dir>/<db_stem>.<suffix>` so sidecar paths live next to the DB

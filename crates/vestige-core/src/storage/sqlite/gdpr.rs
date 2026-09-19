@@ -13,7 +13,7 @@
 
 use rusqlite::params;
 
-use super::{Result, Storage, StorageError};
+use super::{Result, Storage, StorageError, normalize_tags};
 
 impl Storage {
     /// GDPR Article 17 "Right to Erasure" — remove a memory and ALL associated
@@ -95,16 +95,29 @@ impl Storage {
         Ok(erased)
     }
 
-    /// Reclaim free pages and refresh the HNSW sidecar after an erasure.
+    /// Make the erasure physical, then refresh the HNSW sidecar.
     ///
-    /// Best-effort by design: the erasure itself is already committed, and a
-    /// failure to reclaim pages or rewrite the cache must not be reported as a
-    /// failed erasure.
+    /// Reporting a memory as erased while its text is still readable in the
+    /// database file is the failure this guards against: GDPR audits read raw
+    /// bytes, not query results. Best-effort by design — the erasure itself is
+    /// already committed, and a failure to reclaim pages or rewrite the cache
+    /// must not be reported as a failed erasure.
     fn post_erasure_cleanup(&self) {
-        // `incremental_vacuum` only does work when the database runs with
-        // `auto_vacuum = INCREMENTAL` (V14); elsewhere it is a no-op.
         if let Ok(writer) = self.writer.lock() {
+            // The AFTER DELETE trigger only leaves a tombstone in the FTS
+            // index: the erased terms stay in `knowledge_fts_data` (and are
+            // still returned by `optimize`-less raw reads) until the segments
+            // are merged. Merging is expensive, which is exactly why it is
+            // reserved for this path.
+            let _ = writer
+                .execute_batch("INSERT INTO knowledge_fts(knowledge_fts) VALUES('optimize');");
+            // `incremental_vacuum` only does work when the database runs with
+            // `auto_vacuum = INCREMENTAL` (V14); elsewhere it is a no-op.
             let _ = writer.execute_batch("PRAGMA incremental_vacuum;");
+            // The WAL holds pre-delete page images until a checkpoint, so
+            // `strings vestige.db-wal` could still recover the erased text
+            // after every query agreed the row was gone.
+            let _ = writer.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
         }
 
         #[cfg(feature = "vector-search")]
@@ -117,18 +130,33 @@ impl Storage {
         }
     }
 
-    /// Erase all memories matching a tag pattern (GDPR bulk erasure).
+    /// Erase all memories carrying exactly `tag` (GDPR bulk erasure).
     /// Returns (memories_erased, total_artifacts_erased).
+    ///
+    /// Membership is an exact element match over the stored JSON array, not a
+    /// substring match. The previous `LOWER(tags) LIKE '%"<tag>%'` pattern had
+    /// no closing quote and escaped no wildcards, so erasing `code` also
+    /// erased `codebase` — irreversible over-deletion in the one code path
+    /// where over-deletion cannot be undone.
     pub fn erase_by_tag(&self, tag: &str) -> Result<(i64, i64)> {
+        // Canonicalize exactly like the writers do (`normalize_tags` also
+        // lowercases and folds spaces/underscores to `-`), otherwise a caller
+        // passing "Code" would silently match nothing.
+        let normalized = normalize_tags(&[tag.to_string()]);
+        let Some(tag) = normalized.first() else {
+            return Ok((0, 0));
+        };
+
         let ids: Vec<String> = {
             let reader = self
                 .reader
                 .lock()
                 .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-            let pattern = format!("%\"{}%", tag.to_lowercase());
-            let mut stmt =
-                reader.prepare("SELECT id FROM knowledge_nodes WHERE LOWER(tags) LIKE ?1")?;
-            stmt.query_map(params![pattern], |row| row.get(0))?
+            let mut stmt = reader.prepare(
+                "SELECT id FROM knowledge_nodes
+                 WHERE EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?1)",
+            )?;
+            stmt.query_map(params![tag], |row| row.get(0))?
                 .filter_map(|r| r.ok())
                 .collect()
         };
@@ -138,9 +166,11 @@ impl Storage {
         for id in &ids {
             total_artifacts += self.erasure_rows(id)?;
         }
-        // One page-reclaim + sidecar rewrite for the whole batch instead of one
-        // per id.
-        self.post_erasure_cleanup();
+        if count > 0 {
+            // One page-reclaim + sidecar rewrite for the whole batch instead of
+            // one per id.
+            self.post_erasure_cleanup();
+        }
 
         Ok((count, total_artifacts))
     }
