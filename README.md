@@ -317,7 +317,7 @@ The canonical catalog lives in [`crates/vestige-mcp/src/server/catalog.rs`](crat
 | `memory_timeline` | Browse chronologically, grouped by day |
 | `memory_changelog` | Audit trail of state transitions |
 | `split_memories` | Find compound/multi-topic memories that should be split into atomic pieces |
-| `regenerate_embeddings` | Backfill or rebuild embeddings (e.g. after a model upgrade or a long offline stretch) |
+| `regenerate_embeddings` | Backfill or rebuild embeddings (e.g. after a model upgrade, a long offline stretch, or any change to the embedding space — after upgrading to a build with a new embedding-space version run it with `force: true`, otherwise vectors from the old and new spaces coexist and semantic ranking degrades silently) |
 | `backup` / `export` / `gc` | Database backup, JSON export, garbage collection (`gc` is dry-run by default; the destructive pass needs `confirmed: true`) |
 | `restore` | Restore from JSON backup — no dry-run mode; every call must pass `confirmed: true` |
 
@@ -355,7 +355,7 @@ At the start of every session:
 | **Language** | Rust 2024 edition (MSRV 1.91) |
 | **Codebase** | 1,080+ tests + 10 scientific validation + 18 cognitive journey tests |
 | **Binary size** | ~20MB |
-| **Embeddings** | Nomic Embed Text v1.5 (768D → 384D Matryoshka, 8192 context; ~547 MB ONNX) |
+| **Embeddings** | Nomic Embed Text v1.5 (768D → 384D Matryoshka, 8192 context; ~547 MB ONNX). Model-card recipe: LayerNorm over the full 768D → slice to 384D → L2, with the mandated `search_document:`/`search_query:` task prefixes on the default path (embedding-space version 2; older stores need `regenerate_embeddings` with `force: true`) |
 | **Vector search** | USearch HNSW (in-memory ANN, single-thread reads via mutex) |
 | **Reranker** | Jina Reranker v2 Base Multilingual (278M params, ~1.11 GB ONNX) |
 | **Search** | Triple hybrid scoring (BM25 + semantic + RRF) + metacognition + interference resolution |

@@ -129,7 +129,7 @@ vestige/
 
 0. **Decompose** — compound queries split into sub-queries (semicolons, question chains, conjunctions), searched independently, merged via max-score dedup. Mitigates the single-embedding-per-multi-topic-query failure mode; no formal effect-size benchmark on production traffic.
 1. **Overfetch** — 3x results from triple hybrid search (BM25 keyword + semantic vector + Reciprocal Rank Fusion)
-   - Embeddings: nomic-embed-text-v1.5, 768D → 384D Matryoshka truncation, 8K token context
+   - Embeddings: nomic-embed-text-v1.5, 768D → 384D Matryoshka, 8K token context. The reduction is the model card's order — `layer_norm` over the full 768D, *then* the slice, *then* L2 — and documents/queries carry the mandated `search_document:`/`search_query:` task prefixes by default (`VESTIGE_NOMIC_PREFIXES=0` selects the legacy raw regime). Both the recipe and the prefix regime change the numbers, so the module versions them (`EMBEDDING_SPACE_VERSION`, currently 2) and every stored vector records its space in `knowledge_nodes.embedding_model` (`nomic-embed-text-v1.5+v2+prefix`); a store holding an older version must be re-embedded with `regenerate_embeddings` (`force: true`)
    - Vector index: USearch HNSW
 2. **Rerank** — Cross-encoder rescoring (Jina Reranker v2 Base Multilingual, 278M params)
 3. **Temporal** — Recency + validity window boosting (85% relevance + 15% temporal)
@@ -201,7 +201,7 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 | **FTS5** | Full-text search with porter tokenizer, page_size tuning |
 | **Migrations** | Versions 1–15. FSRS, embeddings, neuroscience tables, graph/scopes, FSRS-6 upgrade, dream history, FTS5, autonomic fields, emotional/temporal hierarchy, V10 provenance tracking, V11 typed memory `MemoryKind`, V12 typed-memory tables (`decisions`, `hubs`, `insights` + foreign-key indexes), V13 tier/confidence columns on `insights` and `decisions`, V14 `auto_vacuum=INCREMENTAL` (reclaims deleted pages without a full `VACUUM`; runs outside a transaction, see `migrations/runner.rs`), V15 FTS5 tokenizer `porter unicode61 remove_diacritics 2` (accent folding, non-ASCII tokens). All forward-only and idempotent. |
 | **Vector index** | USearch HNSW, feature-gated behind `vector-search` |
-| **Embeddings** | Nomic Embed v1.5 via fastembed (local ONNX), feature-gated behind `embeddings` |
+| **Embeddings** | Nomic Embed v1.5 via fastembed (local ONNX), feature-gated behind `embeddings`. Embedding space is versioned (`crates/vestige-core/src/embeddings/local.rs`: `EMBEDDING_SPACE_VERSION`, `embedding_space_fingerprint()`, `embedding_model_tag()`); version 2 = LayerNorm→slice→L2 plus task prefixes on by default. The HNSW sidecar meta does **not** yet include the space fingerprint — it validates `(COUNT(*), MAX(created_at))` only — so an upgraded binary can reload a sidecar built from the previous space until the store is re-embedded |
 | **FTS sanitization** | `fts.rs` — strips injection patterns, length limits, always available |
 
 ---
