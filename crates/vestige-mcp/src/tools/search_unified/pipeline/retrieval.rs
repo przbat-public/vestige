@@ -57,6 +57,19 @@ pub(in crate::tools::search_unified) async fn run(
     };
     let overfetch_limit = (config.limit * overfetch_multiplier).min(100);
 
+    // How many results the rerank stage is allowed to keep. With MMR enabled this is a
+    // *pool* to select from rather than the final answer: diversity reordering can only
+    // change which memories survive if it has more candidates than slots. It used to run
+    // after the truncation to `config.limit` and keep the same count, so it permuted an
+    // already-decided set — which is why the A/B measured exactly zero difference.
+    let final_limit = config.limit as usize;
+    let mmr_on = mmr_enabled();
+    let keep_limit = if mmr_on {
+        (final_limit * 4).clamp(final_limit, overfetch_limit as usize)
+    } else {
+        final_limit
+    };
+
     let raw = hybrid_with_decompose(
         storage,
         &args.query,
@@ -106,7 +119,7 @@ pub(in crate::tools::search_unified) async fn run(
                 colbert,
                 &args.query,
                 candidates.clone(),
-                config.limit as usize,
+                keep_limit,
             )
             .ok()
             .map(|ranked| ranked.into_iter().map(|r| r.item).collect())
@@ -116,18 +129,18 @@ pub(in crate::tools::search_unified) async fn run(
 
         if let Some(ranked) = colbert_ranked {
             filtered_results = ranked;
-        } else if let Ok(reranked) =
-            cog.reranker
-                .rerank(&args.query, candidates, Some(config.limit as usize))
+        } else if let Ok(reranked) = cog
+            .reranker
+            .rerank(&args.query, candidates, Some(keep_limit))
         {
-            filtered_results = reranked.into_iter().map(|rr| rr.item).collect();
+            filtered_results = carry_rerank_scores(reranked);
         } else {
-            filtered_results.truncate(config.limit as usize);
+            filtered_results.truncate(keep_limit);
         }
     } else {
         crate::cognitive::try_lock_metrics::record_miss("search_rerank");
         tracing::debug!("Search stage 2: cognitive lock contention, skipping reranker");
-        filtered_results.truncate(config.limit as usize);
+        filtered_results.truncate(keep_limit);
     }
 
     // ====================================================================
@@ -169,15 +182,15 @@ pub(in crate::tools::search_unified) async fn run(
     // ====================================================================
     // STAGE 2C: MMR diversity (multi-hop synthesis substrate)
     //
-    // A pure relevance ranking can hand the answerer K near-duplicate
-    // memories about the single most-relevant fact, starving multi-hop
-    // synthesis of the *other* facts it must combine. MMR (Carbonell &
-    // Goldstein 1998) reorders the survivors to balance relevance against
-    // novelty, so the downstream context budget keeps a diverse set.
+    // A pure relevance ranking can hand the answerer K near-duplicate memories about the
+    // single most-relevant fact, starving multi-hop synthesis of the *other* facts it must
+    // combine. MMR (Carbonell & Goldstein 1998) picks, at each step, the candidate that
+    // maximises `lambda * relevance - (1 - lambda) * max_similarity_to_already_picked`.
+    //
     // Opt-in + tunable so it can be A/B'd against the plain ranking:
     //   VESTIGE_MMR=on, VESTIGE_MMR_LAMBDA ∈ [0,1] (default 0.7).
     // ====================================================================
-    if mmr_enabled() && filtered_results.len() > 2 {
+    if mmr_on && filtered_results.len() > 2 {
         let lambda = mmr_lambda();
         let scored: Vec<(SearchResult, f32)> = filtered_results
             .into_iter()
@@ -186,19 +199,57 @@ pub(in crate::tools::search_unified) async fn run(
                 (r, score)
             })
             .collect();
-        let keep = scored.len();
+
+        // Select `final_limit` out of the reranked pool — this is the step that can change
+        // *which* memories are returned, not merely their order.
         filtered_results = vestige_core::search::mmr_select(
             scored,
             |a, b| content_overlap(&a.node.content, &b.node.content) as f32,
             lambda,
-            keep,
+            final_limit,
         );
+    } else if filtered_results.len() > final_limit {
+        filtered_results.truncate(final_limit);
     }
 
     Ok(Ok(RetrievalOutput {
         results: filtered_results,
         dedup_removed,
     }))
+}
+
+/// Move the cross-encoder's score into `combined_score`, min-max normalised to the batch.
+///
+/// The reranker's *order* is the whole point of stage 2, and the scoring stage re-sorts by
+/// `combined_score` once every adjustment settles — so a score that stays in the
+/// `RerankedResult` never reaches the ranking. The previous code dropped it (`.map(|rr|
+/// rr.item)`), which meant the surviving order was the hybrid one from before the rerank
+/// and the cross-encoder was decorative. Normalising keeps the batch's relative order
+/// while staying on the same 0..1 scale the rest of the pipeline manipulates.
+fn carry_rerank_scores(
+    reranked: Vec<vestige_core::search::RerankedResult<SearchResult>>,
+) -> Vec<SearchResult> {
+    let min = reranked
+        .iter()
+        .map(|r| r.score)
+        .fold(f32::INFINITY, f32::min);
+    let max = reranked
+        .iter()
+        .map(|r| r.score)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let span = if (max - min).abs() < f32::EPSILON {
+        1.0
+    } else {
+        max - min
+    };
+
+    reranked
+        .into_iter()
+        .map(|mut rr| {
+            rr.item.combined_score = (rr.score - min) / span;
+            rr.item
+        })
+        .collect()
 }
 
 /// Whether MMR diversity reordering is enabled (`VESTIGE_MMR`). Off by default

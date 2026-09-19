@@ -153,6 +153,34 @@ Both levers are already off by default (`VESTIGE_MMR` unset, `VESTIGE_LATE_INTER
 unset), so nothing here changes the shipped behaviour — this run is the baseline the
 next change has to beat.
 
+## Run 2 — the retrieval levers after they were rewired (2026-09-19)
+
+Run 1 measured MMR as a no-op, and the reason was structural: the pipeline truncated to
+`limit` *before* the MMR stage, which then kept `scored.len()` items, so it could only
+permute a set that had already been decided. Two changes followed — the cross-encoder score
+now travels into `combined_score` (it used to be dropped, leaving the pre-rerank hybrid
+order as the ranking), and MMR now selects `final_limit` from a reranked pool four times
+that size.
+
+```sh
+cargo build --release -p vestige-mcp
+env -u VESTIGE_MMR python3 benchmarks/memconflict/run.py --instances 1 --sessions 25 --top-k 5 --warmup 10 --data-dir /tmp/mmr-ab2/d1 --out /tmp/mmr-ab2/off.json
+VESTIGE_MMR=on     python3 benchmarks/memconflict/run.py --instances 1 --sessions 25 --top-k 5 --warmup 10 --data-dir /tmp/mmr-ab2/d2 --out /tmp/mmr-ab2/on.json
+```
+
+| arm | n | macroAA | microAA | dynAA | statAA | CRSlex | retrieved/q | reader chars/q |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `vestige`, MMR off | 52 | 0.6014 | 0.3462 | 0.3043 | 0.5000 | 0.0000 | 2.94 | 546 |
+| `vestige`, MMR on | 52 | 0.6087 | 0.3654 | 0.3261 | 0.5000 | 0.0000 | 4.94 | 857 |
+
+The lever is no longer inert: the arm now returns 4.94 memories per question instead of
+2.94, so the pool change reaches the answer. The metric movement (+0.73 pp macro,
++1.92 pp micro) **cannot be attributed to diversity**, because the same change hands the
+judge 57% more text and the harness's own confound check (`reader_chars_mean`, warned above
+1.25×) flags exactly that. Separating the two needs a third arm that keeps the larger pool
+but skips the MMR selection, so both arms return the same number of memories — until that
+exists, treat the delta as unproven and keep the lever off by default.
+
 ### Caveats that apply to every number above
 
 - Absolute values are not comparable to MemConflict's published table: different
