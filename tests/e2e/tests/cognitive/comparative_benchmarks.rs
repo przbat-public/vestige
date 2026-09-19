@@ -1,11 +1,36 @@
-//! # Comparative Benchmarks E2E Tests (Phase 7.6)
+//! # Arm-vs-baseline behaviour tests (Phase 7.6)
 //!
-//! These tests prove that Vestige's algorithms outperform traditional approaches:
+//! Each test here runs one arm on real product code and, where it compares,
+//! contrasts it with a **baseline implemented in this file**. What that means
+//! for reading a green run: these are *behaviour* tests - every assertion is
+//! about the numbers two arms produce on one input, none about throughput or
+//! wall-clock speed.
 //!
-//! 1. **FSRS-6 vs SM-2**: Modern spaced repetition beats the 1987 algorithm
-//! 2. **Spreading Activation vs Similarity**: Association networks find hidden connections
-//! 3. **Retroactive Importance**: A capability unique to Vestige
-//! 4. **Hippocampal Indexing**: Two-phase retrieval is faster and more efficient
+//! 1. **FSRS-6 vs SM-2** — the FSRS arm is the production
+//!    `vestige_core::fsrs::FSRSScheduler` (weights, rating paths, lapse path,
+//!    interval formula, retrievability). The SM-2 arm is a local
+//!    implementation ([`sm2_review`], [`sm2_retention`]) and is the baseline.
+//!    A test comparing them therefore pins the *behaviour of two deterministic
+//!    algorithms*, not product superiority over a real SM-2 deployment; the
+//!    published accuracy of FSRS over SM-2 comes from the open
+//!    srs-benchmark, not from this file.
+//! 2. **Spreading activation vs similarity** — the activation arm is the
+//!    production `ActivationNetwork` (also used by the search pipeline's
+//!    finalize stage); the similarity arm is the local [`SimilaritySearch`]
+//!    mock over hand-written vectors, chosen so that the 1-hop/2-hop/3-hop
+//!    contrast is exactly constructible. It is not the product's HNSW path.
+//! 3. **Retroactive importance** — production `SynapticTaggingSystem`. There
+//!    is no baseline arm in these tests; they pin what the capture window
+//!    captures.
+//! 4. **Hippocampal indexing** — production `HippocampalIndex`. "Two-phase"
+//!    names the compressed-index design; no flat-search arm is timed here.
+//!
+//! An earlier revision of this file reimplemented FSRS-6 in the test
+//! (`fsrs6_review`/`fsrs6_interval`/`FSRS6_WEIGHTS`) and asserted
+//! `fsrs6_retention >= 0.85` on the local copy, so a regression in the
+//! production scheduler could not have failed any test in it. The FSRS arm is
+//! now the scheduler; assertions are directional comparisons between the two
+//! arms' actual outputs on identical inputs, with the numbers printed.
 //!
 //! Reference papers:
 //! - FSRS: https://github.com/open-spaced-repetition/fsrs4anki
@@ -17,6 +42,11 @@
 use chrono::{Duration, Utc};
 use std::collections::{HashMap, HashSet};
 
+// Production FSRS-6 scheduler: the arm under test in every `fsrs6_*` test.
+use vestige_core::fsrs::{
+    FSRSParameters, FSRSScheduler, FSRSState, Rating, next_interval_with_decay,
+    retrievability_with_decay,
+};
 use vestige_core::neuroscience::hippocampal_index::{
     BarcodeGenerator, ContentPointer, ContentType, HippocampalIndex, HippocampalIndexConfig,
     INDEX_EMBEDDING_DIM, IndexQuery, MemoryBarcode,
@@ -29,9 +59,34 @@ use vestige_core::neuroscience::synaptic_tagging::{
     SynapticTaggingSystem,
 };
 
+/// Build the production scheduler used by the FSRS arm.
+///
+/// `enable_fuzz: false` is what makes the arm deterministic: with fuzzing on,
+/// the next interval depends on `state.last_review`, which `FSRSScheduler::review`
+/// stamps with `Utc::now()`, so the same input sequence would produce different
+/// intervals on different runs and the arm-vs-baseline comparisons below would
+/// not be reproducible. `desired_retention` stays at the product default of 0.9.
+fn production_scheduler() -> FSRSScheduler {
+    FSRSScheduler::new(FSRSParameters {
+        enable_fuzz: false,
+        ..FSRSParameters::default()
+    })
+}
+
 // ============================================================================
-// SM-2 ALGORITHM IMPLEMENTATION (For Comparison)
+// BASELINE ARM: SM-2 (implemented in this file, NOT product code)
 // ============================================================================
+//
+// The baseline arm of every `*_vs_local_sm2_*` test is this implementation:
+// the 1987 SM-2 interval rule with the original EF update. It is written here
+// on purpose — there is no SM-2 in the product to call.
+//
+// `sm2_retention` below is *not* part of SM-2: the algorithm defines intervals,
+// never a recall curve. It is a local approximation (linear ramp before the due
+// date, exponential decay after it) whose only role is to put a number on the
+// baseline arm's implied retention so it can be printed next to the production
+// scheduler's own curve. A comparison between the two curves says that two
+// formulas disagree; it is not evidence about either one's real-world recall.
 
 /// SM-2 state for a card
 #[derive(Debug, Clone)]
@@ -101,7 +156,8 @@ fn sm2_review(state: &SM2State, grade: SM2Grade) -> SM2State {
     }
 }
 
-/// Calculate SM-2 retention after elapsed time (approximate)
+/// Calculate the baseline's implied retention after elapsed time (local model,
+/// not part of SM-2 - see the section header).
 fn sm2_retention(interval: i32, elapsed_days: i32) -> f64 {
     if elapsed_days <= interval {
         // Not yet due - assume high retention
@@ -114,125 +170,7 @@ fn sm2_retention(interval: i32, elapsed_days: i32) -> f64 {
 }
 
 // ============================================================================
-// FSRS-6 SIMPLIFIED IMPLEMENTATION (For Comparison)
-// ============================================================================
-
-/// FSRS-6 default weights
-const FSRS6_WEIGHTS: [f64; 21] = [
-    0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835,
-    0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542,
-];
-
-/// FSRS-6 state
-#[derive(Debug, Clone)]
-struct FSRS6State {
-    difficulty: f64,
-    stability: f64,
-    reps: i32,
-}
-
-impl Default for FSRS6State {
-    fn default() -> Self {
-        Self {
-            difficulty: 5.0,
-            stability: 2.3065, // Good initial stability
-            reps: 0,
-        }
-    }
-}
-
-/// FSRS-6 grade (1-4)
-#[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
-enum FSRS6Grade {
-    Again = 1,
-    Hard = 2,
-    Good = 3,
-    Easy = 4,
-}
-
-/// FSRS-6 forgetting factor
-fn fsrs6_factor(w20: f64) -> f64 {
-    0.9_f64.powf(-1.0 / w20) - 1.0
-}
-
-/// FSRS-6 retrievability calculation
-fn fsrs6_retrievability(stability: f64, elapsed_days: f64, w20: f64) -> f64 {
-    if stability <= 0.0 || elapsed_days <= 0.0 {
-        return 1.0;
-    }
-    let factor = fsrs6_factor(w20);
-    (1.0 + factor * elapsed_days / stability)
-        .powf(-w20)
-        .clamp(0.0, 1.0)
-}
-
-/// FSRS-6 interval calculation
-fn fsrs6_interval(stability: f64, desired_retention: f64, w20: f64) -> i32 {
-    if stability <= 0.0 || desired_retention >= 1.0 || desired_retention <= 0.0 {
-        return 0;
-    }
-    let factor = fsrs6_factor(w20);
-    let interval = stability / factor * (desired_retention.powf(-1.0 / w20) - 1.0);
-    interval.max(0.0).round() as i32
-}
-
-/// FSRS-6 review
-fn fsrs6_review(state: &FSRS6State, grade: FSRS6Grade, elapsed_days: f64) -> FSRS6State {
-    let w = &FSRS6_WEIGHTS;
-    let w20 = w[20];
-
-    let r = fsrs6_retrievability(state.stability, elapsed_days, w20);
-
-    let new_stability = match grade {
-        FSRS6Grade::Again => {
-            // Lapse formula
-            w[11]
-                * state.difficulty.powf(-w[12])
-                * ((state.stability + 1.0).powf(w[13]) - 1.0)
-                * (w[14] * (1.0 - r)).exp()
-        }
-        _ => {
-            // Recall formula
-            let hard_penalty = if matches!(grade, FSRS6Grade::Hard) {
-                w[15]
-            } else {
-                1.0
-            };
-            let easy_bonus = if matches!(grade, FSRS6Grade::Easy) {
-                w[16]
-            } else {
-                1.0
-            };
-
-            state.stability
-                * (w[8].exp()
-                    * (11.0 - state.difficulty)
-                    * state.stability.powf(-w[9])
-                    * ((w[10] * (1.0 - r)).exp() - 1.0)
-                    * hard_penalty
-                    * easy_bonus
-                    + 1.0)
-        }
-    };
-
-    // Difficulty update
-    let g = grade as i32 as f64;
-    let delta = -w[6] * (g - 3.0);
-    let mean_reversion = (10.0 - state.difficulty) / 9.0;
-    let d0 = w[4] - (w[5] * 2.0).exp() + 1.0;
-    let new_difficulty =
-        (w[7] * d0 + (1.0 - w[7]) * (state.difficulty + delta * mean_reversion)).clamp(1.0, 10.0);
-
-    FSRS6State {
-        difficulty: new_difficulty,
-        stability: new_stability.clamp(0.1, 36500.0),
-        reps: state.reps + 1,
-    }
-}
-
-// ============================================================================
-// LEITNER BOX SYSTEM (For Comparison)
+// BASELINE ARM: Leitner boxes (this file only)
 // ============================================================================
 
 /// Leitner box state
@@ -271,18 +209,24 @@ fn leitner_review(state: &LeitnerState, correct: bool) -> LeitnerState {
 }
 
 // ============================================================================
-// FIXED INTERVAL SYSTEM (For Comparison)
+// BASELINE ARMS: fixed 7-day cadence (this file only)
 // ============================================================================
 
-/// Fixed interval - always reviews at same interval
-#[allow(dead_code)]
+/// Fixed interval baseline - always reviews at the same interval, ignoring
+/// whether the last recall succeeded.
 fn fixed_interval_schedule(_correct: bool) -> i32 {
     7 // Always 7 days
 }
 
 // ============================================================================
-// SIMILARITY SEARCH MOCK (For Comparison)
+// BASELINE ARM: cosine-similarity search mock (this file only)
 // ============================================================================
+//
+// Hand-written vectors and a plain cosine ranking. The product's retrieval
+// path is FTS5 + HNSW + RRF inside `Storage`; this mock exists so the hop-count
+// contrast with `ActivationNetwork` is exactly constructible (e.g. two vectors
+// can be made orthogonal), which the real embedder of hand-written memories
+// cannot guarantee.
 
 /// Mock similarity search that only uses direct embedding similarity
 struct SimilaritySearch {
@@ -332,434 +276,463 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
 }
 
 // ============================================================================
-// FSRS-6 VS SM-2 TESTS (8 tests)
+// FSRS-6 (production scheduler) vs SM-2 (local baseline) - 7 tests
+//
+// Every test in this section drives `FSRSScheduler` - the same type `Storage`
+// holds for its review path, so a change to the product's scheduler moves these
+// numbers. The SM-2 arm is always the local baseline defined above, and every
+// comparison prints both arms' numbers. Nothing here measures recall in humans.
 // ============================================================================
 
-/// Test that FSRS-6 achieves same retention with fewer reviews than SM-2.
+/// Same review sequence through both arms: 10 successful recalls, always
+/// "recalled with effort" (production `Rating::Good`, baseline q = 4 - the
+/// matching grade on SM-2's 0-5 scale).
 ///
-/// Simulates learning 100 cards over 30 days and compares total reviews needed.
+/// Pinned: the production scheduler reviews at its own 0.9 design target (the
+/// `retrievability(S, t = interval) = 0.9` calibration), its interval grows
+/// monotonically on a lapse-free sequence, it reaches a longer interval than
+/// the baseline at the same review count, and at the baseline's own horizon the
+/// production curve still predicts more retention than the baseline's local
+/// curve. The last one compares two formulas, not two measurements of recall -
+/// the baseline's curve is this file's invention (SM-2 has no recall model).
 #[test]
-fn test_fsrs6_vs_sm2_efficiency() {
-    const NUM_CARDS: usize = 100;
+fn test_fsrs6_scheduler_vs_local_sm2_baseline_identical_successful_reviews() {
+    const REVIEWS: usize = 10;
+
+    let scheduler = production_scheduler();
+    let w20 = scheduler.params().weights[20];
+
+    let mut fsrs_state = scheduler.new_card();
+    let mut elapsed_days = 0.0_f64;
+    let mut fsrs_intervals = Vec::with_capacity(REVIEWS);
+
+    for round in 0..REVIEWS {
+        let outcome = scheduler.review(&fsrs_state, Rating::Good, elapsed_days, None);
+        // Round 0 is the first review of a New card: no interval to be due at
+        // yet, so retrievability is reported as 1.0. Every later review is due
+        // at the previous scheduled interval, i.e. at t = S, where the FSRS-6
+        // curve is 0.9 by construction; whole-day rounding of the interval is
+        // what allows the small deviation.
+        if round > 0 {
+            assert!(
+                (outcome.retrievability - 0.9).abs() < 0.02,
+                "round {round}: the production scheduler must review at its 0.9 target, got {:.4}",
+                outcome.retrievability
+            );
+        }
+        fsrs_intervals.push(outcome.interval);
+        fsrs_state = outcome.state;
+        elapsed_days = outcome.interval as f64;
+    }
+
+    let mut sm2_state = SM2State::default();
+    let mut sm2_intervals = Vec::with_capacity(REVIEWS);
+    for _ in 0..REVIEWS {
+        sm2_state = sm2_review(&sm2_state, SM2Grade::CorrectHesitation);
+        sm2_intervals.push(sm2_state.interval);
+    }
+
+    let fsrs_final_interval = *fsrs_intervals.last().unwrap();
+    let sm2_final_interval = *sm2_intervals.last().unwrap();
+    let fsrs_retention_at = |days: f64| retrievability_with_decay(fsrs_state.stability, days, w20);
+
+    println!(
+        "FSRS (production) after {REVIEWS} successful recalls: stability {:.1}d, intervals {fsrs_intervals:?}",
+        fsrs_state.stability
+    );
+    println!("SM-2 (local baseline) intervals: {sm2_intervals:?}");
+    println!(
+        "implied retention at the baseline horizon ({sm2_final_interval}d): production FSRS-6 {:.4} vs local SM-2 curve {:.4}",
+        fsrs_retention_at(sm2_final_interval as f64),
+        sm2_retention(sm2_final_interval, sm2_final_interval)
+    );
+    println!(
+        "implied retention at the production horizon ({fsrs_final_interval}d): production FSRS-6 {:.4} vs local SM-2 curve {:.4}",
+        fsrs_retention_at(fsrs_final_interval as f64),
+        sm2_retention(sm2_final_interval, fsrs_final_interval)
+    );
+
+    assert!(
+        fsrs_intervals.windows(2).all(|pair| pair[1] > pair[0]),
+        "the production scheduler's interval must grow on a lapse-free sequence: {fsrs_intervals:?}"
+    );
+    assert!(
+        fsrs_final_interval > sm2_final_interval,
+        "after {REVIEWS} identical successful recalls the production scheduler should schedule a \
+         longer interval than the local SM-2 baseline: {fsrs_final_interval}d vs {sm2_final_interval}d"
+    );
+    assert!(
+        fsrs_retention_at(sm2_final_interval as f64)
+            > sm2_retention(sm2_final_interval, sm2_final_interval),
+        "at the baseline's own scheduled interval the production curve should still predict more \
+         retention than the baseline's local curve (model-implied, not empirical): {:.4} vs {:.4}",
+        fsrs_retention_at(sm2_final_interval as f64),
+        sm2_retention(sm2_final_interval, sm2_final_interval)
+    );
+}
+
+/// 100 cards over 30 days, reviewed whenever due, always successful. Each arm's
+/// own scheduled interval decides the next due day, so this is the original
+/// "FSRS-6 needs fewer reviews than SM-2 for the same learning window" claim,
+/// measured on the production scheduler instead of a local copy of FSRS-6.
+///
+/// Pinned: the production arm does not need *more* reviews than the baseline for
+/// the same window. Both counts are printed; with the current weights the arms
+/// tie at 4 reviews per card, so read this as "no worse", not "better".
+#[test]
+fn test_fsrs6_scheduler_vs_local_sm2_review_count_over_30_days() {
+    const CARDS: usize = 100;
     const DAYS: i32 = 30;
-    const TARGET_RETENTION: f64 = 0.9;
 
-    // Simulate SM-2
-    let mut sm2_reviews = 0;
-    let mut sm2_states: Vec<(SM2State, i32)> =
-        (0..NUM_CARDS).map(|_| (SM2State::default(), 0)).collect();
+    let scheduler = production_scheduler();
 
+    let mut sm2_reviews = 0_usize;
+    let mut sm2_cards: Vec<(SM2State, i32)> =
+        (0..CARDS).map(|_| (SM2State::default(), 0)).collect();
     for day in 1..=DAYS {
-        for (state, next_review) in sm2_states.iter_mut() {
-            if *next_review <= day {
-                // Review due
+        for (state, next_due) in sm2_cards.iter_mut() {
+            if *next_due <= day {
                 sm2_reviews += 1;
-                let grade = SM2Grade::CorrectHesitation; // Assume successful
-                *state = sm2_review(state, grade);
-                *next_review = day + state.interval;
+                *state = sm2_review(state, SM2Grade::CorrectHesitation);
+                *next_due = day + state.interval;
             }
         }
     }
 
-    // Simulate FSRS-6
-    let mut fsrs_reviews = 0;
-    let mut fsrs_states: Vec<(FSRS6State, i32)> =
-        (0..NUM_CARDS).map(|_| (FSRS6State::default(), 0)).collect();
-
+    let mut fsrs_reviews = 0_usize;
+    let mut fsrs_cards: Vec<(FSRSState, i32)> =
+        (0..CARDS).map(|_| (scheduler.new_card(), 0)).collect();
     for day in 1..=DAYS {
-        for (state, next_review) in fsrs_states.iter_mut() {
-            if *next_review <= day {
-                // Review due
+        for (state, next_due) in fsrs_cards.iter_mut() {
+            if *next_due <= day {
                 fsrs_reviews += 1;
-                let elapsed = (day - *next_review + state.reps.max(1)) as f64;
-                let grade = FSRS6Grade::Good;
-                *state = fsrs6_review(state, grade, elapsed.max(1.0));
-                let interval = fsrs6_interval(state.stability, TARGET_RETENTION, FSRS6_WEIGHTS[20]);
-                *next_review = day + interval.max(1);
+                // Reviewed on the due day: one day since the last review, never
+                // the same-day branch.
+                let outcome = scheduler.review(state, Rating::Good, 1.0, None);
+                *state = outcome.state;
+                *next_due = day + outcome.interval.max(1);
             }
         }
     }
 
-    // FSRS-6 should require fewer reviews for same learning period
+    println!(
+        "{CARDS} cards over {DAYS} days: production FSRS-6 {fsrs_reviews} reviews, local SM-2 baseline {sm2_reviews} reviews"
+    );
+
+    assert!(
+        fsrs_reviews > 0,
+        "the production arm must have scheduled at least one review"
+    );
     assert!(
         fsrs_reviews <= sm2_reviews,
-        "FSRS-6 should be more efficient: {} reviews vs SM-2's {} reviews",
-        fsrs_reviews,
-        sm2_reviews
-    );
-
-    // At minimum, FSRS-6 shouldn't be significantly worse
-    let efficiency_ratio = fsrs_reviews as f64 / sm2_reviews as f64;
-    assert!(
-        efficiency_ratio <= 1.5,
-        "FSRS-6 efficiency ratio should be reasonable: {}",
-        efficiency_ratio
+        "the production scheduler must not need more reviews than the local SM-2 baseline for the \
+         same {DAYS}-day window: {fsrs_reviews} vs {sm2_reviews}"
     );
 }
 
-/// Test that with equal review counts, FSRS-6 achieves higher retention.
-#[test]
-fn test_fsrs6_vs_sm2_retention_same_reviews() {
-    const TOTAL_REVIEWS: i32 = 10;
-
-    // SM-2: Fixed review pattern
-    let mut sm2_state = SM2State::default();
-    for _ in 0..TOTAL_REVIEWS {
-        sm2_state = sm2_review(&sm2_state, SM2Grade::CorrectHesitation);
-    }
-    let _sm2_retention = sm2_retention(sm2_state.interval, sm2_state.interval);
-
-    // FSRS-6: Same number of reviews
-    let mut fsrs_state = FSRS6State::default();
-    let mut _total_elapsed = 0.0;
-    for _ in 0..TOTAL_REVIEWS {
-        let interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]).max(1);
-        _total_elapsed += interval as f64;
-        fsrs_state = fsrs6_review(&fsrs_state, FSRS6Grade::Good, interval as f64);
-    }
-    let fsrs_retention = fsrs6_retrievability(
-        fsrs_state.stability,
-        fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]) as f64,
-        FSRS6_WEIGHTS[20],
-    );
-
-    // FSRS-6 should maintain higher retention
-    assert!(
-        fsrs_retention >= 0.85,
-        "FSRS-6 should maintain high retention: {:.2}%",
-        fsrs_retention * 100.0
-    );
-}
-
-/// Test that FSRS-6 achieves better retention efficiency over time.
+/// One card, 30 days, lapse-free, production scheduler vs the two fixed-cadence
+/// local baselines in this file: a constant 7-day interval and Leitner boxes,
+/// both driven over the same window.
 ///
-/// FSRS-6's key advantages over SM-2:
-/// 1. Personalized forgetting curves (w20 parameter)
-/// 2. Better handling of difficult items
-/// 3. More efficient scheduling for well-learned items
-///
-/// This test focuses on demonstrating the mathematical properties.
+/// Pinned: the production arm's interval grows with each successful recall and
+/// ends up longer than both fixed cadences - which is what "adaptive beats
+/// fixed" means once the fixed arms are the ones written down here.
 #[test]
-fn test_fsrs6_vs_sm2_reviews_same_retention() {
-    // Test the core efficiency: stability growth vs interval growth
-
-    // SM-2: Interval growth is linear with EF
-    // After n successful reviews: interval ≈ previous * 2.5
-    let _sm2_intervals = [1, 6, 15, 38, 95]; // Approximate SM-2 progression
-
-    // FSRS-6: Stability grows based on forgetting curve parameters
-    // This allows for more nuanced interval optimization
-    let mut fsrs_state = FSRS6State::default();
-
-    // Simulate 5 successful reviews
-    for _ in 0..5 {
-        let interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]).max(1);
-        fsrs_state = fsrs6_review(&fsrs_state, FSRS6Grade::Good, interval as f64);
-    }
-
-    // FSRS-6 key advantages:
-    // 1. Uses retrievability to determine optimal review time
-    // 2. Difficulty affects stability growth (harder items grow slower)
-    // 3. Can be personalized with w20
-
-    // Test that FSRS-6 produces reasonable intervals
-    let fsrs_final_interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]);
-
-    assert!(
-        fsrs_final_interval > 0,
-        "FSRS-6 should produce positive intervals: {}",
-        fsrs_final_interval
-    );
-
-    // Test that stability has grown from initial value
-    assert!(
-        fsrs_state.stability > FSRS6State::default().stability,
-        "Stability should grow after successful reviews: {:.2} > {:.2}",
-        fsrs_state.stability,
-        FSRS6State::default().stability
-    );
-
-    // Test the core FSRS-6 innovation: difficulty modulation
-    // Create a "hard" card and compare stability growth
-    let mut hard_state = FSRS6State {
-        difficulty: 8.0, // Hard card
-        stability: FSRS6State::default().stability,
-        reps: 0,
-    };
-
-    let mut easy_state = FSRS6State {
-        difficulty: 2.0, // Easy card
-        stability: FSRS6State::default().stability,
-        reps: 0,
-    };
-
-    // Same number of reviews
-    for _ in 0..5 {
-        let hard_interval = fsrs6_interval(hard_state.stability, 0.9, FSRS6_WEIGHTS[20]).max(1);
-        hard_state = fsrs6_review(&hard_state, FSRS6Grade::Good, hard_interval as f64);
-
-        let easy_interval = fsrs6_interval(easy_state.stability, 0.9, FSRS6_WEIGHTS[20]).max(1);
-        easy_state = fsrs6_review(&easy_state, FSRS6Grade::Good, easy_interval as f64);
-    }
-
-    // Easy cards should achieve higher stability
-    assert!(
-        easy_state.stability > hard_state.stability,
-        "Easy cards should achieve higher stability: {:.2} > {:.2}",
-        easy_state.stability,
-        hard_state.stability
-    );
-
-    // This is FSRS-6's key advantage: difficulty-aware scheduling
-    // SM-2 only adjusts EF, but FSRS-6 integrates difficulty into the stability model
-}
-
-/// Test that FSRS-6 beats naive fixed-interval scheduling.
-#[test]
-fn test_fsrs6_vs_fixed_interval() {
+fn test_fsrs6_scheduler_expands_intervals_past_local_fixed_cadences() {
     const SIMULATION_DAYS: i32 = 30;
-    const FIXED_INTERVAL: i32 = 7;
 
-    // Fixed interval: reviews every 7 days
-    let _fixed_reviews = SIMULATION_DAYS / FIXED_INTERVAL + 1;
-
-    // FSRS-6: Adaptive intervals
-    let mut _fsrs_reviews = 0;
-    let mut fsrs_state = FSRS6State::default();
-    let mut next_review = 1;
+    let scheduler = production_scheduler();
+    let mut state = scheduler.new_card();
+    let mut next_due = 1;
+    let mut intervals = Vec::new();
 
     for day in 1..=SIMULATION_DAYS {
-        if day >= next_review {
-            _fsrs_reviews += 1;
-            let elapsed = (day - next_review + 1) as f64;
-            fsrs_state = fsrs6_review(&fsrs_state, FSRS6Grade::Good, elapsed);
-            let interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]);
-            next_review = day + interval.max(1);
+        if day >= next_due {
+            let outcome = scheduler.review(&state, Rating::Good, 1.0, None);
+            intervals.push(outcome.interval);
+            state = outcome.state;
+            next_due = day + outcome.interval.max(1);
         }
     }
+    let production_reviews = intervals.len();
+    let final_interval = *intervals.last().unwrap_or(&0);
 
-    // After initial learning, FSRS-6 intervals grow, so it should need fewer reviews
-    // for material that's being successfully learned
-    let final_interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]);
-
-    assert!(
-        final_interval > FIXED_INTERVAL,
-        "FSRS-6 should achieve longer intervals than fixed: {} days vs {} days",
-        final_interval,
-        FIXED_INTERVAL
-    );
-}
-
-/// Test that FSRS-6 beats Leitner box system.
-#[test]
-fn test_fsrs6_vs_leitner() {
-    const SIMULATION_DAYS: i32 = 30;
-
-    // Leitner: Box-based intervals
-    let mut _leitner_reviews = 0;
+    // Leitner baseline over the same window: every recall succeeds, so the card
+    // climbs one box per review until box 5, whose interval is the ceiling.
     let mut leitner_state = LeitnerState::default();
     let mut leitner_next = 1;
-
+    let mut leitner_reviews = 0_usize;
     for day in 1..=SIMULATION_DAYS {
         if day >= leitner_next {
-            _leitner_reviews += 1;
+            leitner_reviews += 1;
             leitner_state = leitner_review(&leitner_state, true);
             leitner_next = day + leitner_interval(leitner_state.box_number);
         }
     }
+    let leitner_ceiling = leitner_interval(leitner_state.box_number);
+    let fixed_interval = fixed_interval_schedule(true);
 
-    // FSRS-6: Continuous stability-based
-    let mut _fsrs_reviews = 0;
-    let mut fsrs_state = FSRS6State::default();
-    let mut fsrs_next = 1;
+    println!(
+        "production intervals over {SIMULATION_DAYS} days: {intervals:?} ({production_reviews} reviews); \
+         Leitner reached box {} with a {leitner_ceiling}d ceiling ({leitner_reviews} reviews); fixed cadence {fixed_interval}d",
+        leitner_state.box_number
+    );
 
-    for day in 1..=SIMULATION_DAYS {
-        if day >= fsrs_next {
-            _fsrs_reviews += 1;
-            let elapsed = (day - fsrs_next + 1) as f64;
-            fsrs_state = fsrs6_review(&fsrs_state, FSRS6Grade::Good, elapsed);
-            let interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]);
-            fsrs_next = day + interval.max(1);
-        }
+    assert!(
+        intervals.len() >= 2,
+        "the production arm must have scheduled more than one review: {intervals:?}"
+    );
+    assert!(
+        intervals.windows(2).all(|pair| pair[1] > pair[0]),
+        "each successful recall must lengthen the production interval: {intervals:?}"
+    );
+    assert!(
+        final_interval > fixed_interval,
+        "the production interval must pass the fixed {fixed_interval}-day cadence: {final_interval}d"
+    );
+    assert!(
+        final_interval > leitner_ceiling,
+        "the production interval must pass the Leitner ceiling of box {} ({leitner_ceiling}d): {final_interval}d",
+        leitner_state.box_number
+    );
+}
+
+/// From one identical card state, the three recall ratings must order stability
+/// and difficulty the way the FSRS-6 update prescribes: Hard < Good < Easy in
+/// stability, Hard > Good > Easy in difficulty.
+#[test]
+fn test_fsrs6_scheduler_recall_ratings_order_stability() {
+    let scheduler = production_scheduler();
+    let first = scheduler.review(&scheduler.new_card(), Rating::Good, 0.0, None);
+    let elapsed = first.interval as f64;
+
+    let hard = scheduler.review(&first.state, Rating::Hard, elapsed, None);
+    let good = scheduler.review(&first.state, Rating::Good, elapsed, None);
+    let easy = scheduler.review(&first.state, Rating::Easy, elapsed, None);
+
+    println!(
+        "same card (stability {:.2}d, difficulty {:.3}), elapsed {elapsed}d: hard {:.2}d/{:.3}, good {:.2}d/{:.3}, easy {:.2}d/{:.3}",
+        first.state.stability,
+        first.state.difficulty,
+        hard.state.stability,
+        hard.state.difficulty,
+        good.state.stability,
+        good.state.difficulty,
+        easy.state.stability,
+        easy.state.difficulty
+    );
+
+    assert!(
+        hard.state.stability < good.state.stability,
+        "Hard must grow stability less than Good: {:.2} vs {:.2}",
+        hard.state.stability,
+        good.state.stability
+    );
+    assert!(
+        good.state.stability < easy.state.stability,
+        "Good must grow stability less than Easy: {:.2} vs {:.2}",
+        good.state.stability,
+        easy.state.stability
+    );
+    assert!(
+        hard.state.difficulty > good.state.difficulty,
+        "Hard must raise difficulty above Good: {:.3} vs {:.3}",
+        hard.state.difficulty,
+        good.state.difficulty
+    );
+    assert!(
+        good.state.difficulty > easy.state.difficulty,
+        "Good must leave difficulty above Easy: {:.3} vs {:.3}",
+        good.state.difficulty,
+        easy.state.difficulty
+    );
+}
+
+/// The same-day branch (`elapsed < 1`) is separate from the multi-day recall
+/// path in `FSRSScheduler::review`.
+///
+/// Pinned: a same-day Easy grows stability, a same-day Again shrinks it, and
+/// same-day Good moves it less than Easy does. A passing same-day repeat is
+/// clamped to `sinc >= 1` by the production formula, so Good cannot shorten the
+/// schedule; the assertion that Good moves stability less than Easy is what
+/// would catch that clamp being dropped.
+#[test]
+fn test_fsrs6_scheduler_same_day_review_path() {
+    let scheduler = production_scheduler();
+    let mut state = scheduler.new_card();
+    let mut elapsed = 0.0_f64;
+
+    // Three normal recalls leave the card in the Review state with a mid-range
+    // stability, which is when a same-day repeat is possible at all.
+    for _ in 0..3 {
+        let outcome = scheduler.review(&state, Rating::Good, elapsed, None);
+        state = outcome.state;
+        elapsed = outcome.interval as f64;
+    }
+    let base_stability = state.stability;
+
+    let same_day = |rating: Rating| scheduler.review(&state, rating, 0.5, None);
+    let again = same_day(Rating::Again);
+    let good = same_day(Rating::Good);
+    let easy = same_day(Rating::Easy);
+
+    println!(
+        "same-day review (elapsed 0.5d) from stability {base_stability:.2}d: again {:.2}d, good {:.2}d, easy {:.2}d",
+        again.state.stability, good.state.stability, easy.state.stability
+    );
+
+    assert!(
+        easy.state.stability > base_stability,
+        "a same-day Easy must grow stability: {:.2} vs {:.2}",
+        easy.state.stability,
+        base_stability
+    );
+    assert!(
+        again.state.stability < base_stability,
+        "a same-day Again must shrink stability: {:.2} vs {:.2}",
+        again.state.stability,
+        base_stability
+    );
+    assert!(
+        (good.state.stability - base_stability).abs()
+            < (easy.state.stability - base_stability).abs(),
+        "a same-day Good must move stability less than Easy: |{:.2} - {:.2}| vs |{:.2} - {:.2}|",
+        good.state.stability,
+        base_stability,
+        easy.state.stability,
+        base_stability
+    );
+}
+
+/// A single `Again` after a long successful run. The production lapse path
+/// multiplies stability down through the FSRS-6 forgetting formula but keeps a
+/// non-trivial interval; the local SM-2 baseline resets repetitions to 0 and
+/// the interval to 1 day.
+///
+/// Pinned: both behaviours, side by side, with the numbers printed. This is a
+/// statement about the two schedulers' lapse rules, not about which one is
+/// right for a given user.
+#[test]
+fn test_fsrs6_scheduler_lapse_vs_local_sm2_reset() {
+    const REVIEWS: usize = 10;
+
+    let scheduler = production_scheduler();
+    let mut fsrs_state = scheduler.new_card();
+    let mut elapsed_days = 0.0_f64;
+    for _ in 0..REVIEWS {
+        let outcome = scheduler.review(&fsrs_state, Rating::Good, elapsed_days, None);
+        fsrs_state = outcome.state;
+        elapsed_days = outcome.interval as f64;
+    }
+    let stability_before = fsrs_state.stability;
+    let difficulty_before = fsrs_state.difficulty;
+
+    let lapse = scheduler.review(&fsrs_state, Rating::Again, elapsed_days, None);
+
+    let mut sm2_state = SM2State::default();
+    for _ in 0..REVIEWS {
+        sm2_state = sm2_review(&sm2_state, SM2Grade::CorrectHesitation);
+    }
+    let sm2_lapse = sm2_review(&sm2_state, SM2Grade::Incorrect);
+
+    println!(
+        "lapse after {REVIEWS} successful recalls: production FSRS-6 stability {stability_before:.1}d -> {:.1}d, interval {}d, difficulty {difficulty_before:.3} -> {:.3}",
+        lapse.state.stability, lapse.interval, lapse.state.difficulty
+    );
+    println!(
+        "local SM-2 baseline: interval {}d, repetitions {}, EF {:.3}",
+        sm2_lapse.interval, sm2_lapse.repetitions, sm2_lapse.easiness_factor
+    );
+
+    assert!(
+        lapse.is_lapse,
+        "a failed review of a card in the Review state must be reported as a lapse"
+    );
+    assert!(
+        lapse.state.stability < stability_before,
+        "a lapse must reduce stability: {:.1} -> {:.1}",
+        stability_before,
+        lapse.state.stability
+    );
+    assert!(
+        lapse.state.stability > 0.0,
+        "the lapse path must not zero out stability: {:.3}",
+        lapse.state.stability
+    );
+    assert!(
+        lapse.interval > sm2_lapse.interval,
+        "the production lapse path keeps some of the learned stability, unlike the baseline's \
+         reset to 1 day: {}d vs {}d",
+        lapse.interval,
+        sm2_lapse.interval
+    );
+}
+
+/// Pure formula property of the production FSRS-6 curve: the personalizable
+/// decay weight w20 reshapes the forgetting function while the curve stays
+/// pinned at R = 0.9 when t = S. A flatter curve (lower w20) must imply both
+/// higher retention past the scheduled interval and a longer interval for the
+/// same target retention.
+///
+/// This is the mathematical content behind "personalization". Whether fitting
+/// w20 to a real review log improves a real user's recall needs that log and a
+/// ground-truth recall measurement; neither exists in this test.
+#[test]
+fn test_fsrs6_decay_weight_reshapes_the_forgetting_curve() {
+    const STABILITY: f64 = 10.0;
+    const PAST_OPTIMAL: f64 = 15.0; // 1.5 x stability
+    const TARGET_RETENTION: f64 = 0.85;
+
+    let default_w20 = production_scheduler().params().weights[20];
+    let flat_w20 = 0.08; // slower decay
+    let steep_w20 = 0.35; // faster decay
+
+    for w20 in [flat_w20, default_w20, steep_w20] {
+        let at_optimal = retrievability_with_decay(STABILITY, STABILITY, w20);
+        assert!(
+            (at_optimal - 0.9).abs() < 1e-9,
+            "every decay weight must keep the curve pinned at 0.9 when t = S, got {at_optimal} for w20 = {w20}"
+        );
     }
 
-    // FSRS-6 stability should exceed Leitner's max interval (14 days for box 5)
-    let fsrs_final_interval = fsrs6_interval(fsrs_state.stability, 0.9, FSRS6_WEIGHTS[20]);
-    let leitner_max_interval = leitner_interval(5);
+    let flat_retention = retrievability_with_decay(STABILITY, PAST_OPTIMAL, flat_w20);
+    let default_retention = retrievability_with_decay(STABILITY, PAST_OPTIMAL, default_w20);
+    let steep_retention = retrievability_with_decay(STABILITY, PAST_OPTIMAL, steep_w20);
 
-    assert!(
-        fsrs_final_interval >= leitner_max_interval,
-        "FSRS-6 should achieve longer intervals: {} vs Leitner max {}",
-        fsrs_final_interval,
-        leitner_max_interval
+    let flat_interval = next_interval_with_decay(STABILITY, TARGET_RETENTION, flat_w20);
+    let default_interval = next_interval_with_decay(STABILITY, TARGET_RETENTION, default_w20);
+    let steep_interval = next_interval_with_decay(STABILITY, TARGET_RETENTION, steep_w20);
+
+    println!(
+        "stability {STABILITY}d at t = {PAST_OPTIMAL}d: retention flat(w20={flat_w20}) {flat_retention:.4}, default({default_w20}) {default_retention:.4}, steep(w20={steep_w20}) {steep_retention:.4}"
     );
-}
-
-/// Test that personalized w20 parameter improves FSRS-6 results.
-///
-/// Note: The FSRS-6 formula is designed so that R = 0.9 when t = S for any w20.
-/// The w20 parameter affects the SHAPE of the forgetting curve:
-/// - Lower w20 = slower decay rate (flatter curve)
-/// - Higher w20 = faster decay rate (steeper curve)
-///
-/// Personalization means users with steeper forgetting curves (higher w20)
-/// get shorter intervals, and users with flatter curves (lower w20) get longer.
-#[test]
-fn test_fsrs6_personalization_improvement() {
-    let default_w20 = FSRS6_WEIGHTS[20]; // 0.1542
-
-    // User with faster forgetting (higher w20 = steeper curve)
-    let fast_forgetter_w20 = 0.35;
-
-    // User with slower forgetting (lower w20 = flatter curve)
-    let slow_forgetter_w20 = 0.08;
-
-    let stability = 10.0;
-
-    // Test at a point past the optimal interval to see curve differences
-    // At t=15 (1.5x stability), we should see different retention based on curve shape
-    let elapsed_past_optimal = 15.0;
-
-    let default_r_past = fsrs6_retrievability(stability, elapsed_past_optimal, default_w20);
-    let fast_r_past = fsrs6_retrievability(stability, elapsed_past_optimal, fast_forgetter_w20);
-    let slow_r_past = fsrs6_retrievability(stability, elapsed_past_optimal, slow_forgetter_w20);
-
-    // At t > S, steeper curve (higher w20) = lower retention
-    // At t > S, flatter curve (lower w20) = higher retention
-    // This seems counterintuitive but is correct: higher w20 means faster decay
-    assert!(
-        slow_r_past > default_r_past,
-        "Slow forgetter (flatter curve) should have higher retention past optimal: {:.4} > {:.4}",
-        slow_r_past,
-        default_r_past
-    );
-    assert!(
-        fast_r_past < default_r_past,
-        "Fast forgetter (steeper curve) should have lower retention past optimal: {:.4} < {:.4}",
-        fast_r_past,
-        default_r_past
+    println!(
+        "interval for {TARGET_RETENTION} retention: flat {flat_interval}d, default {default_interval}d, steep {steep_interval}d"
     );
 
-    // The key insight: w20 affects optimal interval calculation
-    // For same desired_retention (0.9), different w20 gives different intervals
-    let desired_retention = 0.85; // Target 85% to see interval differences
-    let default_interval = fsrs6_interval(stability, desired_retention, default_w20);
-    let fast_interval = fsrs6_interval(stability, desired_retention, fast_forgetter_w20);
-    let slow_interval = fsrs6_interval(stability, desired_retention, slow_forgetter_w20);
-
-    // Intervals should differ based on curve shape
     assert!(
-        default_interval > 0 && fast_interval > 0 && slow_interval > 0,
-        "All intervals should be positive: default={}, fast={}, slow={}",
-        default_interval,
-        fast_interval,
-        slow_interval
+        flat_retention > default_retention && default_retention > steep_retention,
+        "past the scheduled interval a flatter curve must retain more: {flat_retention:.4} > {default_retention:.4} > {steep_retention:.4}"
     );
-
-    // The total range of intervals demonstrates personalization value
-    let interval_range = (slow_interval - fast_interval).abs();
     assert!(
-        interval_range > 0,
-        "Personalized w20 should produce different intervals: range={}",
-        interval_range
-    );
-}
-
-/// Test that same-day review handling (w17-w19) is effective.
-#[test]
-fn test_fsrs6_same_day_handling() {
-    let w = &FSRS6_WEIGHTS;
-    let state = FSRS6State {
-        difficulty: 5.0,
-        stability: 5.0,
-        reps: 3,
-    };
-
-    // Same-day review formula: S' = S * e^(w17 * (G - 3 + w18)) * S^(-w19)
-    fn same_day_stability(s: f64, grade: i32, w: &[f64; 21]) -> f64 {
-        let g = grade as f64;
-        s * (w[17] * (g - 3.0 + w[18])).exp() * s.powf(-w[19])
-    }
-
-    // Same-day review with "Good"
-    let same_day_good = same_day_stability(state.stability, 3, w);
-
-    // Same-day review with "Easy"
-    let same_day_easy = same_day_stability(state.stability, 4, w);
-
-    // Same-day review with "Again"
-    let same_day_again = same_day_stability(state.stability, 1, w);
-
-    // Easy should increase stability
-    assert!(
-        same_day_easy > state.stability,
-        "Easy same-day review should increase stability: {:.2} > {:.2}",
-        same_day_easy,
-        state.stability
-    );
-
-    // Again should decrease stability
-    assert!(
-        same_day_again < state.stability,
-        "Again same-day review should decrease stability: {:.2} < {:.2}",
-        same_day_again,
-        state.stability
-    );
-
-    // Good should keep stability relatively stable
-    let good_change = (same_day_good - state.stability).abs() / state.stability;
-    assert!(
-        good_change < 0.5,
-        "Good same-day review should keep stability relatively stable: {:.2}% change",
-        good_change * 100.0
-    );
-}
-
-/// Test that hard penalty (w15) correctly adjusts intervals.
-#[test]
-fn test_fsrs6_hard_penalty_effectiveness() {
-    let state = FSRS6State {
-        difficulty: 5.0,
-        stability: 10.0,
-        reps: 5,
-    };
-
-    let elapsed = 10.0;
-
-    // Review with "Good"
-    let good_state = fsrs6_review(&state, FSRS6Grade::Good, elapsed);
-
-    // Review with "Hard"
-    let hard_state = fsrs6_review(&state, FSRS6Grade::Hard, elapsed);
-
-    // Hard penalty (w15 = 0.6014) should result in lower stability increase
-    assert!(
-        hard_state.stability < good_state.stability,
-        "Hard review should result in lower stability: {:.2} < {:.2}",
-        hard_state.stability,
-        good_state.stability
-    );
-
-    // The penalty should be approximately w15
-    let hard_penalty = FSRS6_WEIGHTS[15];
-    let stability_ratio = hard_state.stability / good_state.stability;
-
-    // The ratio should be in a reasonable range around the penalty
-    assert!(
-        stability_ratio < 1.0 && stability_ratio > hard_penalty * 0.5,
-        "Hard penalty effect should be significant: ratio = {:.2}, w15 = {:.2}",
-        stability_ratio,
-        hard_penalty
+        flat_interval > default_interval && default_interval > steep_interval,
+        "a flatter curve must be allowed a longer interval for the same target retention: {flat_interval} > {default_interval} > {steep_interval}"
     );
 }
 
 // ============================================================================
-// SPREADING ACTIVATION VS SIMILARITY TESTS (8 tests)
+// SPREADING ACTIVATION (production) vs COSINE MOCK (this file) - 8 tests
+//
+// The activation arm is `ActivationNetwork`, the same type the product's
+// search finalize stage calls. The similarity arm is the `SimilaritySearch`
+// mock above over hand-written vectors - it exists to make the hop-count
+// contrast exact, not to stand in for the product's FTS5 + HNSW + RRF path.
 // ============================================================================
 
-/// Test 1-hop: Both methods should find direct connections.
+/// 1-hop: production activation and the local cosine mock both reach the two
+/// direct neighbours of the seed.
 #[test]
-fn test_spreading_vs_similarity_1_hop() {
+fn test_activation_network_vs_local_cosine_mock_1_hop() {
     // Setup spreading activation network
     let mut network = ActivationNetwork::new();
     network.add_edge(
@@ -813,9 +786,10 @@ fn test_spreading_vs_similarity_1_hop() {
     );
 }
 
-/// Test 2-hop: Spreading activation finds indirect connections.
+/// 2-hop: production activation reaches through the bridge; the local cosine
+/// mock finds the bridge but not what lies behind it.
 #[test]
-fn test_spreading_vs_similarity_2_hop() {
+fn test_activation_network_vs_local_cosine_mock_2_hop() {
     let config = ActivationConfig {
         decay_factor: 0.8,
         max_hops: 3,
@@ -867,9 +841,10 @@ fn test_spreading_vs_similarity_2_hop() {
     );
 }
 
-/// Test 3-hop: Spreading finds deep chains.
+/// 3-hop: production activation reaches the far end of a pure chain whose
+/// vector is orthogonal to the seed, so the local cosine mock cannot.
 #[test]
-fn test_spreading_vs_similarity_3_hop() {
+fn test_activation_network_vs_local_cosine_mock_3_hop() {
     let config = ActivationConfig {
         decay_factor: 0.8,
         max_hops: 4,
@@ -937,9 +912,10 @@ fn test_spreading_vs_similarity_3_hop() {
     );
 }
 
-/// Test that spreading finds chains that similarity completely misses.
+/// A debugging chain where the answer shares no vocabulary with the symptom:
+/// production activation walks the chain, the local cosine mock cannot.
 #[test]
-fn test_spreading_finds_chains_similarity_misses() {
+fn test_activation_network_finds_chains_the_local_cosine_mock_misses() {
     let mut network = ActivationNetwork::new();
 
     // Real-world scenario: User debugging a memory leak
@@ -995,7 +971,8 @@ fn test_spreading_finds_chains_similarity_misses() {
     );
 }
 
-/// Test that spreading activation provides meaningful paths.
+/// Production activation must report the concrete path it walked, with
+/// activation decaying along it.
 #[test]
 fn test_spreading_path_quality() {
     let mut network = ActivationNetwork::new();
@@ -1054,7 +1031,8 @@ fn test_spreading_path_quality() {
     );
 }
 
-/// Test that spreading activation remains efficient at scale.
+/// Production activation at 1000 nodes / ~3000 edges: the reachable set must
+/// be found, and fast enough to sit in the search pipeline.
 #[test]
 fn test_spreading_scale_performance() {
     let config = ActivationConfig {
@@ -1095,15 +1073,29 @@ fn test_spreading_scale_performance() {
         duration
     );
 
-    // Should find multiple results
-    assert!(
-        results.len() > 10,
-        "Should find multiple connected nodes: found {}",
-        results.len()
-    );
+    // Reachable set, derived from the construction above instead of guessed:
+    // every node has out-edges to i+7, i+14 and i+21, so from node_0 three hops
+    // reach exactly the 3+3+3 distinct nodes below (each hop multiplies
+    // activation by strength 0.8 and decay 0.7, i.e. 0.56 per hop, so the third
+    // hop arrives at 0.1756 - above the 0.1 threshold).
+    //
+    // The previous assertion here was `results.len() > 10`, a number nothing in
+    // this graph or in `activate` implies: the real count is 9, so the test
+    // asserted something false about the production code and failed.
+    let found: Vec<&str> = results.iter().map(|r| r.memory_id.as_str()).collect();
+    for expected in [
+        "node_7", "node_14", "node_21", "node_28", "node_35", "node_42", "node_49", "node_56",
+        "node_63",
+    ] {
+        assert!(
+            found.contains(&expected),
+            "{expected} is within 3 hops of node_0 in this graph and must be activated; got {found:?}"
+        );
+    }
 }
 
-/// Test spreading activation on dense vs sparse networks.
+/// Production activation on dense vs sparse graphs: a denser neighbourhood
+/// reaches more nodes, each with less activation.
 #[test]
 fn test_spreading_dense_vs_sparse() {
     // Dense network: Many connections per node
@@ -1161,7 +1153,8 @@ fn test_spreading_dense_vs_sparse() {
     );
 }
 
-/// Test that different link types are handled correctly.
+/// Production activation must traverse every `LinkType` and report the type
+/// that brought the activation in.
 #[test]
 fn test_spreading_mixed_link_types() {
     let mut network = ActivationNetwork::new();
@@ -1227,15 +1220,18 @@ fn test_spreading_mixed_link_types() {
 }
 
 // ============================================================================
-// RETROACTIVE IMPORTANCE TESTS (5 tests)
+// SYNAPTIC TAGGING AND CAPTURE (production) - 5 tests
+//
+// All five drive the production `SynapticTaggingSystem` / `CaptureWindow`.
+// There is no baseline arm in this section: nothing here is compared against
+// another algorithm, and no claim is made about systems that are not in this
+// repository. What is pinned is what the capture window and the PRP trigger do
+// with the inputs each test constructs.
 // ============================================================================
 
-/// Test that retroactive importance beats timestamp-only importance.
-///
-/// Scenario: Memory encoded at time T becomes important due to event at T+N.
-/// Traditional systems would miss this; Vestige's STC captures it.
+/// Memories tagged just before a user flag are captured by the PRP trigger.
 #[test]
-fn test_retroactive_vs_timestamp_importance() {
+fn test_prp_captures_tagged_memories_on_user_flag() {
     let config = SynapticTaggingConfig {
         capture_window: CaptureWindow::new(9.0, 2.0), // 9 hours back, 2 hours forward
         prp_threshold: 0.7,
@@ -1280,14 +1276,11 @@ fn test_retroactive_vs_timestamp_importance() {
             captured.temporal_distance_hours
         );
     }
-
-    // Traditional timestamp-based importance would miss these
-    // (memories were "ordinary" at encoding time)
 }
 
-/// Test that STC captures memories related to importance events.
+/// An emotional event forms a cluster that holds the memories tagged before it.
 #[test]
-fn test_retroactive_captures_related_memories() {
+fn test_prp_cluster_contains_the_tagged_memories() {
     let mut stc = SynapticTaggingSystem::new();
 
     // Encode several memories
@@ -1320,9 +1313,10 @@ fn test_retroactive_captures_related_memories() {
     );
 }
 
-/// Test that the capture window (9 hours back) works correctly.
+/// The capture window's boundaries (9 hours back, 2 hours forward): inside the
+/// window a capture probability exists, outside it the memory is not captured.
 #[test]
-fn test_retroactive_window_effectiveness() {
+fn test_capture_window_boundaries() {
     let window = CaptureWindow::new(9.0, 2.0);
     let event_time = Utc::now();
 
@@ -1366,9 +1360,10 @@ fn test_retroactive_window_effectiveness() {
     }
 }
 
-/// Test that semantic filtering affects capture probability.
+/// Tag strength - not semantic similarity, which this system never sees at this
+/// layer - decides which tagged memories are captured and how strongly.
 #[test]
-fn test_retroactive_semantic_filtering() {
+fn test_capture_probability_ranks_by_tag_strength() {
     let config = SynapticTaggingConfig {
         capture_window: CaptureWindow::new(9.0, 2.0),
         prp_threshold: 0.7,
@@ -1432,12 +1427,15 @@ fn test_retroactive_semantic_filtering() {
     );
 }
 
-/// Test that retroactive importance is unique to Vestige.
+/// A memory tagged before a later user flag is captured retroactively: the
+/// vacation note becomes part of the important cluster only after the
+/// departure announcement arrives.
 ///
-/// This test demonstrates a capability that no other memory system has:
-/// making a previously ordinary memory important based on future events.
+/// This pins the ordering the production system implements (tag first, flag
+/// later). It is deliberately not a claim that no other system can do this -
+/// nothing in this repository measures another system.
 #[test]
-fn test_proof_unique_to_vestige() {
+fn test_prp_captures_a_prior_memory_when_a_later_user_flag_arrives() {
     // Scenario: AI assistant conversation
     // 1. User mentions "Bob is taking a vacation next week"
     // 2. Hours later, user says "Bob is leaving the company"
@@ -1473,7 +1471,7 @@ fn test_proof_unique_to_vestige() {
 
     assert!(
         vacation_captured,
-        "UNIQUE TO VESTIGE: The vacation memory is now important because of the departure news!"
+        "the vacation memory must be captured retroactively by the later user flag"
     );
 
     // Verify the capture details
@@ -1499,21 +1497,24 @@ fn test_proof_unique_to_vestige() {
         vacation_capture.consolidated_importance
     );
 
-    // This is impossible in traditional systems:
-    // - Traditional: Importance = f(content at encoding time)
-    // - Vestige: Importance = f(content, future events, associations)
-    //
-    // Key insight: The memory was ORDINARY when encoded, but became IMPORTANT
-    // due to a subsequent event. No other AI memory system can do this!
+    // The measured contrast: the memory carried no importance of its own at
+    // tagging time; its consolidated importance is a function of the later
+    // event, which is what `trigger_prp` implements.
 }
 
 // ============================================================================
-// HIPPOCAMPAL INDEXING TESTS (4 tests)
+// HIPPOCAMPAL INDEXING (production) - 4 tests
+//
+// All four drive the production `HippocampalIndex` / `ContentPointer`. "Two
+// phase" describes the design (compressed barcode index, then the content
+// pointer); no flat-search arm is built or timed here, so nothing in this
+// section compares retrieval strategies.
 // ============================================================================
 
-/// Test that two-phase retrieval is faster than flat search.
+/// Index search returns matches inside its time budget and the index reports
+/// the compressed embedding dimension it stores instead of the full vector.
 #[test]
-fn test_two_phase_vs_flat_search() {
+fn test_index_search_returns_matches_with_compressed_dimensions() {
     let index = HippocampalIndex::new();
     let now = Utc::now();
 
@@ -1534,7 +1535,7 @@ fn test_two_phase_vs_flat_search() {
         );
     }
 
-    // Phase 1: Fast index search (compressed embeddings)
+    // Search the compressed index (no content fetch in this phase).
     let query = IndexQuery::from_text("memory").with_limit(10);
 
     let start = std::time::Instant::now();
@@ -1551,8 +1552,8 @@ fn test_two_phase_vs_flat_search() {
     // Should find results
     assert!(!results.is_empty(), "Should find matching memories");
 
-    // The index search uses compressed embeddings (128 dim vs 384)
-    // which is fundamentally faster for large-scale search
+    // The index stores its own compressed vectors, not the caller's 384-dim
+    // ones; that is the design claim this assertion can actually check.
     let stats = index.stats();
     assert_eq!(
         stats.index_dimensions, INDEX_EMBEDDING_DIM,
@@ -1561,13 +1562,14 @@ fn test_two_phase_vs_flat_search() {
     );
 }
 
-/// Test that index embeddings are smaller than full embeddings.
+/// The index's summary dimension is a real compression of the product's
+/// embedding dimension, and the default config is the documented 128.
 #[test]
 fn test_index_compression_ratio() {
     let config = HippocampalIndexConfig::default();
 
-    // Full embedding size (e.g., BGE-base-en-v1.5 = 768 or 384)
-    let full_embedding_dim = 384;
+    // The product's embedding width, not a literal copied into the test.
+    let full_embedding_dim = vestige_core::embeddings::EMBEDDING_DIMENSIONS;
 
     // Index embedding size
     let index_embedding_dim = config.summary_dimensions; // 128 by default
@@ -1600,9 +1602,10 @@ fn test_index_compression_ratio() {
     );
 }
 
-/// Test that barcodes are unique and orthogonal.
+/// Barcodes are unique per memory and their content fingerprints collide only
+/// for identical content (the index's dedup signal).
 #[test]
-fn test_barcode_orthogonality() {
+fn test_barcode_uniqueness_and_content_fingerprints() {
     let mut generator = BarcodeGenerator::new();
     let now = Utc::now();
 
@@ -1658,7 +1661,8 @@ fn test_barcode_orthogonality() {
     );
 }
 
-/// Test that content pointers correctly locate data.
+/// Content pointers keep table, row, type, chunk range and hash, and survive an
+/// index round-trip.
 #[test]
 fn test_content_pointer_accuracy() {
     // Test SQLite pointer

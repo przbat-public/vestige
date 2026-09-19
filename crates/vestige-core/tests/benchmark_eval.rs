@@ -1,127 +1,298 @@
-//! Benchmark Evaluation Harness (LoCoMo/LongMemEval format)
+//! Retrieval tests over the real `Storage` pipeline, plus two pure-maths
+//! properties of the decay and activation helpers.
 //!
-//! Evaluates Vestige's end-to-end memory quality by running standardized
-//! scenarios: ingest a corpus, query, and verify that relevant memories
-//! surface in the top-K results.
+//! What this file does: writes a small hand-built corpus through
+//! `Storage::ingest` into a temporary SQLite database, runs each query through
+//! the production retrieval path (`Storage::keyword_search` for FTS5/BM25 and,
+//! with the `embeddings` + `vector-search` features on, `Storage::hybrid_search`
+//! for BM25 + HNSW cosine fused by RRF) and asserts that the memory carrying the
+//! query's distinctive term is retrieved. The metrics are computed from the
+//! product's own result lists, so a regression in FTS5, the HNSW index, RRF or
+//! the ingest path can fail these tests.
 //!
-//! Inspired by:
-//! - LoCoMo (Long-Context Memory-Optimized) benchmark
-//! - LongMemEval evaluation framework
-//! - MTEB Retrieval benchmarks
-//!
-//! Metrics:
-//! - Recall@K: fraction of relevant memories found in top K results
-//! - MRR (Mean Reciprocal Rank): average 1/rank of first relevant result
-//! - Precision@K: fraction of top K results that are relevant
+//! What this file is NOT: a LoCoMo/LongMemEval benchmark, despite the earlier
+//! header claiming that format. The corpus is six memories written here, so the
+//! printed recall@5 / MRR / precision@3 numbers describe only this corpus and
+//! must not be quoted as product quality. The previous revision of this file
+//! also computed those metrics with a private scorer
+//! (`word_hits * 2.0 + tag_hits`) over `KnowledgeNode`s built in memory and then
+//! asserted `recall@5 >= 0.75` / `mrr >= 0.50`: a regression anywhere in the
+//! retrieval pipeline could not have failed it, and a green run said nothing
+//! about the product.
 
-use vestige_core::memory::{KnowledgeNode, StrengthDecay};
+use std::path::PathBuf;
+
+use tempfile::TempDir;
+use vestige_core::memory::StrengthDecay;
 use vestige_core::neuroscience::spreading_activation::ActivationNetwork;
+use vestige_core::{IngestInput, Storage};
 
-struct BenchmarkScenario {
+/// One retrieval query: the text, the corpus entry it must find, and the term
+/// (or term combination) that makes that entry identifiable among the corpus.
+struct RetrievalQuery {
+    text: &'static str,
+    /// Index into the scenario corpus of the one memory that must be retrieved.
+    target: usize,
+    /// Term or term combination carried by the target memory and by no other
+    /// corpus entry; the failure message names it so a broken assertion points
+    /// at the discriminating input rather than at "recall".
+    distinctive_terms: &'static str,
+}
+
+struct RetrievalScenario {
     name: &'static str,
+    /// `(content, node_type, tags)` per memory, in a stable order.
     corpus: Vec<(&'static str, &'static str, Vec<&'static str>)>,
-    queries: Vec<BenchmarkQuery>,
+    queries: Vec<RetrievalQuery>,
 }
 
-struct BenchmarkQuery {
-    query: &'static str,
-    expected_relevant: Vec<usize>,
+/// Which production retrieval path a scenario was run through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetrievalPath {
+    /// `Storage::keyword_search` - FTS5/BM25 only.
+    Keyword,
+    /// `Storage::hybrid_search` - BM25 + HNSW fused by RRF.
+    #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+    Hybrid,
 }
 
-struct BenchmarkResult {
-    #[allow(dead_code)]
-    scenario: String,
+impl RetrievalPath {
+    fn label(self) -> &'static str {
+        match self {
+            RetrievalPath::Keyword => "keyword_search (FTS5/BM25)",
+            #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+            RetrievalPath::Hybrid => "hybrid_search (BM25 + HNSW + RRF)",
+        }
+    }
+}
+
+/// Every retrieval path this build can exercise.
+fn retrieval_paths() -> Vec<RetrievalPath> {
+    let mut paths = vec![RetrievalPath::Keyword];
+    #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+    paths.push(RetrievalPath::Hybrid);
+    paths
+}
+
+/// The mock embedder must be on *before* the first `Storage::new`: without it
+/// the first ingest lazily initializes the real ONNX model, which downloads
+/// ~547 MB on a cold cache. Unlike `tests/e2e`, the unit-test override in
+/// `embeddings::local` is `#[cfg(test)]` and therefore not visible to this
+/// integration test, so the environment switch is the only lever here.
+///
+/// Set once per process and never restored: every test in this binary wants the
+/// mock embedder, and restoring it mid-run would race the other test threads
+/// against a half-configured service.
+fn enable_mock_embeddings() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: `call_once` runs this exactly once, before any test in this
+        // binary opens a `Storage`, and the value is never changed afterwards,
+        // so no other thread can observe a concurrent write.
+        unsafe {
+            std::env::set_var(vestige_core::embeddings::MOCK_EMBEDDINGS_ENV, "1");
+        }
+    });
+}
+
+/// A `Storage` on a fresh temporary SQLite file inside its own subdirectory.
+///
+/// Each store gets its own directory because `Storage` also persists an HNSW
+/// sidecar next to the database file: two stores sharing a directory would share
+/// that sidecar too, and the second path under test would start with the first
+/// path's index. The directory (and the sidecar) is removed when the returned
+/// `TempDir` drops.
+fn open_store(dir: &TempDir, name: &str) -> Storage {
+    enable_mock_embeddings();
+    let store_dir = dir.path().join(name);
+    std::fs::create_dir_all(&store_dir).expect("per-store temp dir must be creatable");
+    let db_path: PathBuf = store_dir.join("retrieval.db");
+    Storage::new(Some(db_path)).expect("temporary Storage must open")
+}
+
+/// Ingest the scenario corpus and return the ids in corpus order.
+fn ingest_corpus(storage: &Storage, scenario: &RetrievalScenario) -> Vec<String> {
+    let ids: Vec<String> = scenario
+        .corpus
+        .iter()
+        .map(|(content, node_type, tags)| {
+            let input = IngestInput {
+                content: (*content).to_string(),
+                node_type: (*node_type).to_string(),
+                tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+                ..IngestInput::default()
+            };
+            storage
+                .ingest(input)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "ingest of {:?} failed: {error}",
+                        &content[..40.min(content.len())]
+                    )
+                })
+                .id
+        })
+        .collect();
+
+    let stored = storage
+        .count_nodes_filtered(None, None, None)
+        .expect("counting ingested memories must not error");
+    assert_eq!(
+        stored,
+        scenario.corpus.len(),
+        "[{}] every corpus memory must persist as exactly one row (got {stored})",
+        scenario.name
+    );
+
+    ids
+}
+
+/// Run one query through the production retrieval path and return the ids in
+/// the order the product ranked them.
+fn retrieve(storage: &Storage, path: RetrievalPath, query: &str, limit: i32) -> Vec<String> {
+    match path {
+        RetrievalPath::Keyword => storage
+            .keyword_search(query, limit, 0.0)
+            .expect("keyword_search must not error")
+            .into_iter()
+            .map(|node| node.id)
+            .collect(),
+        #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+        RetrievalPath::Hybrid => storage
+            .hybrid_search(
+                query,
+                limit,
+                vestige_core::DEFAULT_HYBRID_KEYWORD_WEIGHT,
+                vestige_core::DEFAULT_HYBRID_SEMANTIC_WEIGHT,
+            )
+            .expect("hybrid_search must not error")
+            .into_iter()
+            .map(|result| result.node.id)
+            .collect(),
+    }
+}
+
+/// Metrics computed from the product's result lists, not from a scorer written
+/// here. With one relevant memory per query, recall@5 is 1.0 exactly when that
+/// memory appears in the top 5, which every caller asserts per query.
+struct Metrics {
     recall_at_5: f64,
     mrr: f64,
-    #[allow(dead_code)]
     precision_at_3: f64,
 }
 
-fn run_scenario(scenario: &BenchmarkScenario) -> BenchmarkResult {
-    let mut nodes: Vec<KnowledgeNode> = Vec::new();
-    for (i, (content, node_type, tags)) in scenario.corpus.iter().enumerate() {
-        let node = KnowledgeNode {
-            id: format!("bench-{}", i),
-            content: content.to_string(),
-            node_type: node_type.to_string(),
-            tags: tags.iter().map(|t| t.to_string()).collect(),
-            retention_strength: 0.8,
-            retrieval_strength: 0.7,
-            ..Default::default()
-        };
-        nodes.push(node);
-    }
+/// Exercise one scenario through one production path. Returns the metrics for
+/// printing; the per-query assertion inside is what pins retrieval.
+fn run_scenario(storage: &Storage, scenario: &RetrievalScenario, path: RetrievalPath) -> Metrics {
+    // `ingest_corpus` asserts that the store holds exactly one row per corpus
+    // memory before any query runs.
+    let ids = ingest_corpus(storage, scenario);
 
-    let mut total_recall = 0.0;
-    let mut total_mrr = 0.0;
-    let mut total_precision = 0.0;
-    let query_count = scenario.queries.len() as f64;
+    let mut recall_sum = 0.0;
+    let mut mrr_sum = 0.0;
+    let mut precision_sum = 0.0;
 
     for query in &scenario.queries {
-        let lower_query = query.query.to_lowercase();
-        let query_words: Vec<&str> = lower_query.split_whitespace().collect();
+        let ranked = retrieve(storage, path, query.text, 5);
+        let top_5: Vec<&String> = ranked.iter().take(5).collect();
+        let top_3: Vec<&String> = ranked.iter().take(3).collect();
+        let target_id = &ids[query.target];
+        let rank = ranked.iter().position(|id| id == target_id);
 
-        let mut scored: Vec<(usize, f64)> = nodes
-            .iter()
-            .enumerate()
-            .map(|(i, node)| {
-                let lower_content = node.content.to_lowercase();
-                let word_hits = query_words
-                    .iter()
-                    .filter(|w| lower_content.contains(*w))
-                    .count() as f64;
-                let tag_hits = node
-                    .tags
-                    .iter()
-                    .filter(|t| query_words.iter().any(|w| t.to_lowercase().contains(w)))
-                    .count() as f64;
-                (i, word_hits * 2.0 + tag_hits)
-            })
-            .collect();
+        println!(
+            "[{} / {}] query {:?} -> rank {:?}; top 5: {:?}",
+            scenario.name,
+            path.label(),
+            query.text,
+            rank.map(|position| position + 1),
+            top_5
+                .iter()
+                .map(|id| {
+                    let index = ids
+                        .iter()
+                        .position(|known| known == *id)
+                        .unwrap_or(usize::MAX);
+                    scenario.corpus.get(index).map_or("?", |entry| {
+                        entry.0.split('.').next().unwrap_or(entry.0).trim()
+                    })
+                })
+                .collect::<Vec<_>>()
+        );
 
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        let top_5: Vec<usize> = scored.iter().take(5).map(|s| s.0).collect();
-        let top_3: Vec<usize> = scored.iter().take(3).map(|s| s.0).collect();
+        assert!(
+            top_5.contains(&target_id),
+            "[{} / {}] the memory identified by {:?} must be retrieved for {:?}; got {} results",
+            scenario.name,
+            path.label(),
+            query.distinctive_terms,
+            query.text,
+            ranked.len()
+        );
 
-        let relevant_in_5 = query
-            .expected_relevant
-            .iter()
-            .filter(|r| top_5.contains(r))
-            .count() as f64;
-        total_recall += relevant_in_5 / query.expected_relevant.len() as f64;
-
-        let first_relevant_rank = top_5
-            .iter()
-            .position(|idx| query.expected_relevant.contains(idx));
-        if let Some(rank) = first_relevant_rank {
-            total_mrr += 1.0 / (rank as f64 + 1.0);
+        recall_sum += 1.0;
+        precision_sum += if top_3.contains(&target_id) {
+            1.0 / 3.0
+        } else {
+            0.0
+        };
+        if let Some(position) = rank {
+            mrr_sum += 1.0 / (position as f64 + 1.0);
         }
-
-        let relevant_in_3 = query
-            .expected_relevant
-            .iter()
-            .filter(|r| top_3.contains(r))
-            .count() as f64;
-        total_precision += relevant_in_3 / 3.0;
     }
 
-    BenchmarkResult {
-        scenario: scenario.name.to_string(),
-        recall_at_5: total_recall / query_count,
-        mrr: total_mrr / query_count,
-        precision_at_3: total_precision / query_count,
+    let query_count = scenario.queries.len() as f64;
+    Metrics {
+        recall_at_5: recall_sum / query_count,
+        mrr: mrr_sum / query_count,
+        precision_at_3: precision_sum / query_count,
+    }
+}
+
+/// Assert and report a scenario's metrics. `recall@5 = 1.0` is implied by the
+/// per-query assertions above (one relevant memory per query); it is asserted
+/// again so the aggregate cannot drift if a query is edited to have none.
+fn assert_and_report(scenario: &RetrievalScenario, path: RetrievalPath, metrics: &Metrics) {
+    println!(
+        "[{} / {}] recall@5 = {:.2}, MRR = {:.3}, precision@3 = {:.3} over {} queries and {} corpus memories",
+        scenario.name,
+        path.label(),
+        metrics.recall_at_5,
+        metrics.mrr,
+        metrics.precision_at_3,
+        scenario.queries.len(),
+        scenario.corpus.len()
+    );
+    assert_eq!(
+        metrics.recall_at_5,
+        1.0,
+        "[{} / {}] every query has exactly one relevant memory and each is asserted individually",
+        scenario.name,
+        path.label()
+    );
+}
+
+/// Run every path this build supports and report both.
+fn run_all_paths(scenario: &RetrievalScenario, dir: &TempDir) {
+    for (index, path) in retrieval_paths().into_iter().enumerate() {
+        // Each path gets its own database so the ingest under test is the only
+        // state the retrieval sees (no index warmed by a previous path).
+        let storage = open_store(dir, &format!("path-{index}"));
+        let metrics = run_scenario(&storage, scenario, path);
+        assert_and_report(scenario, path, &metrics);
     }
 }
 
 // ==========================================================================
-// Scenario 1: Bug-Fix Knowledge Retrieval
+// Scenario 1: Bug-fix knowledge retrieval
 //
-// Tests whether bug fix memories are retrievable by error description.
-// This is the bread and butter of a developer memory system.
+// One query per bug-fix memory, each containing that memory's distinctive
+// token (the error type, the failure mode). This is the bread-and-butter case
+// of a developer memory system: the fix must come back for a description of
+// the symptom.
 // ==========================================================================
 #[test]
-fn bench_bug_fix_retrieval() {
-    let scenario = BenchmarkScenario {
+fn test_bug_fix_memories_are_retrieved_by_error_description() {
+    let scenario = RetrievalScenario {
         name: "Bug-Fix Retrieval",
         corpus: vec![
             (
@@ -156,46 +327,42 @@ fn bench_bug_fix_retrieval() {
             ),
         ],
         queries: vec![
-            BenchmarkQuery {
-                query: "connection timeout error auth API",
-                expected_relevant: vec![0],
+            RetrievalQuery {
+                text: "connection timeout error auth API",
+                target: 0,
+                distinctive_terms: "auth API",
             },
-            BenchmarkQuery {
-                query: "out of memory crash pipeline",
-                expected_relevant: vec![1],
+            RetrievalQuery {
+                text: "out of memory crash pipeline backpressure",
+                target: 1,
+                distinctive_terms: "backpressure",
             },
-            BenchmarkQuery {
-                query: "race condition session concurrent",
-                expected_relevant: vec![3],
+            RetrievalQuery {
+                text: "race condition session concurrent locking",
+                target: 3,
+                distinctive_terms: "locking",
             },
-            BenchmarkQuery {
-                query: "websocket memory leak event listener",
-                expected_relevant: vec![5],
+            RetrievalQuery {
+                text: "websocket memory leak event listener cleanup",
+                target: 5,
+                distinctive_terms: "WebSocket",
             },
         ],
     };
 
-    let result = run_scenario(&scenario);
-    assert!(
-        result.recall_at_5 >= 0.75,
-        "Bug-fix recall@5 should be >=75%, got {:.0}%",
-        result.recall_at_5 * 100.0
-    );
-    assert!(
-        result.mrr >= 0.5,
-        "Bug-fix MRR should be >=0.50, got {:.2}",
-        result.mrr
-    );
+    let dir = TempDir::new().expect("temp dir");
+    run_all_paths(&scenario, &dir);
 }
 
 // ==========================================================================
-// Scenario 2: Decision Knowledge Retrieval
+// Scenario 2: Decision knowledge retrieval
 //
-// Tests retrieval of architectural decisions — the "why did we do X?" case.
+// The "why did we do X?" case: each query carries the distinctive technology
+// name of exactly one decision memory.
 // ==========================================================================
 #[test]
-fn bench_decision_retrieval() {
-    let scenario = BenchmarkScenario {
+fn test_decision_memories_are_retrieved_by_rationale_query() {
+    let scenario = RetrievalScenario {
         name: "Decision Retrieval",
         corpus: vec![
             (
@@ -230,47 +397,47 @@ fn bench_decision_retrieval() {
             ),
         ],
         queries: vec![
-            BenchmarkQuery {
-                query: "why Redis for sessions",
-                expected_relevant: vec![0],
+            RetrievalQuery {
+                text: "why Redis for sessions",
+                target: 0,
+                distinctive_terms: "Redis",
             },
-            BenchmarkQuery {
-                query: "gRPC migration decision API",
-                expected_relevant: vec![1],
+            RetrievalQuery {
+                text: "gRPC migration decision API",
+                target: 1,
+                distinctive_terms: "gRPC",
             },
-            BenchmarkQuery {
-                query: "Kubernetes deployment decision",
-                expected_relevant: vec![3],
+            RetrievalQuery {
+                text: "Kubernetes deployment decision",
+                target: 3,
+                distinctive_terms: "Kubernetes",
             },
-            BenchmarkQuery {
-                query: "TypeScript Python API decision language",
-                expected_relevant: vec![5],
+            RetrievalQuery {
+                text: "TypeScript Python API decision language",
+                target: 5,
+                distinctive_terms: "TypeScript",
             },
         ],
     };
 
-    let result = run_scenario(&scenario);
-    assert!(
-        result.recall_at_5 >= 0.75,
-        "Decision recall@5 should be >=75%, got {:.0}%",
-        result.recall_at_5 * 100.0
-    );
-    assert!(
-        result.mrr >= 0.5,
-        "Decision MRR should be >=0.50, got {:.2}",
-        result.mrr
-    );
+    let dir = TempDir::new().expect("temp dir");
+    run_all_paths(&scenario, &dir);
 }
 
 // ==========================================================================
-// Scenario 3: Cross-Domain Retrieval
+// Scenario 3: Cross-domain retrieval
 //
-// Tests retrieval across different knowledge domains — can the system
-// find relevant memories when the query spans multiple topics?
+// The query names three topics that meet in exactly one memory; the other
+// corpus entries each carry one of them. The assertion is the same shape as
+// above - the spanning memory must be in the top 5 - but here the competing
+// entries share part of the query vocabulary, so this is the case where a
+// ranking regression would show up first. It deliberately does *not* assert
+// recall@5 = 1.0 for a multi-relevant query: only the spanning memory is
+// asserted, and the printed metrics cover it.
 // ==========================================================================
 #[test]
-fn bench_cross_domain_retrieval() {
-    let scenario = BenchmarkScenario {
+fn test_cross_domain_query_retrieves_the_memory_spanning_the_topics() {
+    let scenario = RetrievalScenario {
         name: "Cross-Domain Retrieval",
         corpus: vec![
             (
@@ -305,95 +472,121 @@ fn bench_cross_domain_retrieval() {
             ),
         ],
         queries: vec![
-            BenchmarkQuery {
-                query: "Rust PostgreSQL distributed service",
-                expected_relevant: vec![5, 0, 3],
+            RetrievalQuery {
+                text: "Rust PostgreSQL distributed service",
+                target: 5,
+                distinctive_terms: "rust + postgresql + distributed (all three in one memory)",
             },
-            BenchmarkQuery {
-                query: "database transaction isolation",
-                expected_relevant: vec![1],
+            RetrievalQuery {
+                text: "database transaction isolation",
+                target: 1,
+                distinctive_terms: "transaction isolation",
             },
         ],
     };
 
-    let result = run_scenario(&scenario);
-    assert!(
-        result.recall_at_5 >= 0.5,
-        "Cross-domain recall@5 should be >=50%, got {:.0}%",
-        result.recall_at_5 * 100.0
-    );
+    let dir = TempDir::new().expect("temp dir");
+    for (index, path) in retrieval_paths().into_iter().enumerate() {
+        let storage = open_store(&dir, &format!("cross-domain-{index}"));
+        let metrics = run_scenario(&storage, &scenario, path);
+        println!(
+            "[{} / {}] recall@5 = {:.2}, MRR = {:.3}, precision@3 = {:.3} (only the spanning memory is asserted per query)",
+            scenario.name,
+            path.label(),
+            metrics.recall_at_5,
+            metrics.mrr,
+            metrics.precision_at_3
+        );
+        assert!(
+            metrics.recall_at_5 > 0.0,
+            "[{} / {}] the asserted targets must be found",
+            scenario.name,
+            path.label()
+        );
+    }
 }
 
 // ==========================================================================
-// Scenario 4: Temporal Freshness
+// Pure-maths properties of the decay and activation helpers
 //
-// Verifies that the memory system can distinguish between stale and fresh
-// memories when queried about recent events.
+// These two tests never touch Storage: they pin the shape of
+// `StrengthDecay::retrieval_at` and of `ActivationNetwork::activate` themselves.
+// They are named after the property, not after a comparison with another
+// system, because no other system is exercised here.
 // ==========================================================================
+
+/// `StrengthDecay::retrieval_at` must be a decreasing function of elapsed time:
+/// a memory just encoded is fully retained, retention at 1 day exceeds
+/// retention at 30 days, and both are still above zero.
 #[test]
-fn bench_decay_favors_recent_memories() {
-    let old_decay = StrengthDecay::new(5.0, 0.0);
-    let recent_decay = StrengthDecay::new(5.0, 0.0);
+fn test_strength_decay_curve_decreases_with_elapsed_time() {
+    let decay = StrengthDecay::new(5.0, 0.0);
+    let horizons = [0.0_f64, 1.0, 5.0, 30.0, 365.0];
+    let retentions: Vec<f64> = horizons
+        .iter()
+        .map(|days| decay.retrieval_at(*days))
+        .collect();
 
-    let old_retention = old_decay.retrieval_at(30.0);
-    let recent_retention = recent_decay.retrieval_at(1.0);
+    println!("StrengthDecay(stability 5d) retention at {horizons:?} = {retentions:?}");
 
-    assert!(
-        recent_retention > old_retention,
-        "Recent memory retention ({:.4}) should exceed 30-day-old ({:.4})",
-        recent_retention,
-        old_retention
+    assert_eq!(
+        retentions[0], 1.0,
+        "a memory that has not aged must be fully retained"
     );
-
-    let ratio = recent_retention / old_retention;
     assert!(
-        ratio > 1.5,
-        "Recent/old ratio should be >1.5x, got {:.2}x",
-        ratio
+        retentions.windows(2).all(|pair| pair[1] < pair[0]),
+        "retention must decrease strictly with elapsed time: {horizons:?} -> {retentions:?}"
+    );
+    assert!(
+        retentions.iter().all(|retention| *retention > 0.0),
+        "retention must stay positive: {retentions:?}"
     );
 }
 
-// ==========================================================================
-// Scenario 5: Activation Network preserves retrieval paths
-//
-// Validates that multi-hop retrieval through the activation network
-// can surface indirectly related memories (2-hop connections).
-// ==========================================================================
+/// `ActivationNetwork::activate` must reach two hops with decaying activation:
+/// activation spreads from a seed through its direct neighbour to the second
+/// hop, and the direct neighbour carries more activation than the node reached
+/// through it.
 #[test]
-fn bench_multi_hop_activation_retrieval() {
+fn test_activation_network_reaches_two_hops_with_decaying_activation() {
     use vestige_core::neuroscience::spreading_activation::LinkType;
 
     let mut net = ActivationNetwork::default();
     net.add_edge("auth".into(), "session".into(), LinkType::Semantic, 0.8);
     net.add_edge("session".into(), "redis".into(), LinkType::Semantic, 0.7);
-    net.add_edge("redis".into(), "cache".into(), LinkType::Semantic, 0.6);
 
     let activated = net.activate("auth", 1.0);
     let ids: Vec<&str> = activated.iter().map(|a| a.memory_id.as_str()).collect();
 
+    println!(
+        "activated from 'auth': {:?}",
+        activated
+            .iter()
+            .map(|a| (a.memory_id.as_str(), a.activation, a.distance))
+            .collect::<Vec<_>>()
+    );
+
     assert!(
         ids.contains(&"session"),
-        "Direct neighbor 'session' should be activated"
+        "direct neighbour 'session' must be activated; got {ids:?}"
     );
     assert!(
         ids.contains(&"redis"),
-        "2-hop neighbor 'redis' should be activated via session"
+        "2-hop neighbour 'redis' must be activated via session; got {ids:?}"
     );
 
     let session_act = activated
         .iter()
         .find(|a| a.memory_id == "session")
-        .unwrap()
+        .expect("session must be present")
         .activation;
     let redis_act = activated
         .iter()
         .find(|a| a.memory_id == "redis")
-        .unwrap()
+        .expect("redis must be present")
         .activation;
     assert!(
         session_act > redis_act,
-        "Direct neighbor ({:.4}) should have higher activation than 2-hop ({:.4})",
-        session_act,
-        redis_act
+        "activation must decay with distance: session ({session_act:.4}) > redis ({redis_act:.4})"
     );
 }
