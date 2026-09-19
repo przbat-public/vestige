@@ -528,4 +528,71 @@ mod tests {
         let results = index.search(&v, 1).unwrap();
         assert_eq!(results[0].0, "custom");
     }
+
+    #[test]
+    fn test_save_and_load_roundtrip_preserves_vectors_and_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vestige.hnsw");
+
+        let mut index = VectorIndex::new().unwrap();
+        let v1 = create_test_vector(1.0);
+        index.add("node-1", &v1).unwrap();
+        index.add("node-2", &create_test_vector(2.0)).unwrap();
+        index.save(&path).unwrap();
+
+        let loaded = VectorIndex::load(&path, VectorIndexConfig::default()).unwrap();
+
+        assert_eq!(loaded.len(), 2, "sidecar must restore every vector");
+        assert!(loaded.contains("node-1"));
+        assert_eq!(loaded.search(&v1, 1).unwrap()[0].0, "node-1");
+    }
+
+    /// A sidecar whose payload is truncated or garbage must come back as `Err`, never as
+    /// a usable index: callers treat any load error as "rebuild from SQLite"
+    /// (`storage/sqlite/init.rs`), so an index that silently trusts a bogus header would
+    /// make `len()`/`search()` walk past the bytes the file actually contains. This is the
+    /// contract usearch 2.26.x hardened in `view()`.
+    #[test]
+    fn corrupt_sidecar_is_rejected_instead_of_trusted() {
+        let dir = tempfile::tempdir().unwrap();
+        let valid = dir.path().join("valid.hnsw");
+
+        let mut index = VectorIndex::new().unwrap();
+        index.add("node-1", &create_test_vector(1.0)).unwrap();
+        index.save(&valid).unwrap();
+
+        // Positive control: the same shape of file loads when intact.
+        assert_eq!(
+            VectorIndex::load(&valid, VectorIndexConfig::default())
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let bytes = std::fs::read(&valid).unwrap();
+        let cases: [(&str, Vec<u8>); 4] = [
+            ("truncated payload", bytes[..bytes.len() / 4].to_vec()),
+            ("header only", bytes[..8].to_vec()),
+            ("empty file", Vec::new()),
+            ("garbage", vec![0xAB; 4096]),
+        ];
+
+        for (name, payload) in cases {
+            let path = dir.path().join("vestige.hnsw");
+            std::fs::write(&path, &payload).unwrap();
+            // Keep the mappings sidecar valid: a missing/unreadable mappings file would
+            // also produce an error and would hide a payload that was wrongly accepted.
+            std::fs::copy(
+                valid.with_extension("mappings.json"),
+                path.with_extension("mappings.json"),
+            )
+            .unwrap();
+
+            let loaded = VectorIndex::load(&path, VectorIndexConfig::default());
+            assert!(
+                loaded.is_err(),
+                "{name}: a corrupt sidecar must be rejected, not loaded"
+            );
+        }
+    }
 }

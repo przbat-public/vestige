@@ -90,7 +90,11 @@ fastembed = { version = "5.13", default-features = false, features = [
 # ============================================================================
 # OPTIONAL: Vector Search (USearch HNSW; in-memory only for now)
 # ============================================================================
-usearch = { version = "2", optional = true }
+# 2.26.2 adds bounds checks to the serialized-header parser that 2.25.2 lacked:
+# the memory-mapped `view()` path trusted `matrix_rows * matrix_cols` from the
+# file and could describe a span past the end of the mapping. This crate calls
+# only `save`/`load`, so the check is defence in depth for the HNSW sidecar.
+usearch = { version = "2.26.2", optional = true }
 
 # Late-interaction (ColBERT) reranker. `ort` is pinned to the EXACT version
 # fastembed uses so cargo unifies them into a single ONNX runtime build;
