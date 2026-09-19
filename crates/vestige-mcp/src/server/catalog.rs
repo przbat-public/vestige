@@ -66,6 +66,26 @@ fn read_only_safe(title: &str) -> ToolAnnotations {
     }
 }
 
+/// Retrieval tool that is *not* read-only in the MCP sense.
+///
+/// Every search path runs `strengthen_batch_on_access` on what it returns — the Testing
+/// Effect, deliberately: recalling a memory is what keeps it alive. That writes FSRS
+/// state (`retrieval_strength`, `last_accessed`, `times_retrieved`), so the tool observes
+/// a side effect even though it looks like a query. Marking it `readOnlyHint: true` told
+/// clients they could call it unattended and skip confirmation, which is how a "read"
+/// quietly rewrote half the store's scheduling state. It is mutating but not destructive:
+/// nothing is deleted or overwritten, so `destructiveHint` stays false.
+fn retrieval_mutating(title: &str) -> ToolAnnotations {
+    ToolAnnotations {
+        title: Some(title.to_string()),
+        read_only_hint: Some(false),
+        destructive_hint: Some(false),
+        // Repeated identical calls keep stacking retrieval strength.
+        idempotent_hint: Some(false),
+        open_world_hint: Some(false),
+    }
+}
+
 /// Mutating tool whose updates are additive (adds a memory, attaches a tag,
 /// records an outcome). Repeated calls may stack but do not delete data.
 fn mutating(title: &str, idempotent: bool) -> ToolAnnotations {
@@ -125,7 +145,7 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
             tools::search_unified::schema(),
             // Search performs FSRS strengthening on hits, but the user-visible
             // contract is "read"; clients can auto-call without prompting.
-            read_only_safe("Search memories"),
+            retrieval_mutating("Search memories"),
         ),
         tool(
             "memory",
@@ -213,7 +233,7 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
             "Export memories",
             "Export memories as JSON or JSONL. Supports tag and date filters.",
             tools::maintenance::export_schema(),
-            read_only_safe("Export memories"),
+            mutating("Export memories", false),
         ),
         tool(
             "gc",
@@ -308,7 +328,7 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
             "Session context packet",
             "One-call session initialization. Combines search, intentions, status, predictions, and codebase context into a single token-budgeted response. Replaces 5 separate calls at session start.",
             tools::session_context::schema(),
-            read_only_safe("Session context packet"),
+            retrieval_mutating("Session context packet"),
         ),
         // ================================================================
         // AUTONOMIC TOOLS (v1.9+)
@@ -335,7 +355,7 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
             "Metacognitive reflection",
             "Deliberate metacognitive reflection — analyzes memories for contradictions, knowledge gaps, stale decisions, overconfident memories, and pattern clusters. Unlike 'dream' (unconscious consolidation), 'reflect' is active self-examination. Returns actionable insights.",
             tools::reflect::schema(),
-            read_only_safe("Metacognitive reflection"),
+            retrieval_mutating("Metacognitive reflection"),
         ),
         tool(
             "temporal",
@@ -361,7 +381,7 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
             "Deep reference (cognitive reasoning)",
             "Cognitive reasoning engine across memories. Combines hybrid search, FSRS-6 trust scoring, intent classification, temporal supersession, contradiction analysis, dream insight integration, and structured synthesis. Use for factual questions, fact-checking, timelines, root-cause analysis, comparisons, and topic synthesis. 'cross_reference' is a backward-compatible alias.",
             tools::cross_reference::schema(),
-            read_only_safe("Deep reference (cognitive reasoning)"),
+            retrieval_mutating("Deep reference (cognitive reasoning)"),
         ),
     ]
 }
@@ -458,6 +478,69 @@ mod tests {
             28,
             "build_tools_list must advertise exactly 28 tools; update scripts/check-version-and-tools.sh if you add or remove one"
         );
+    }
+
+    /// Tools whose *purpose* is retrieval still write FSRS state: every search path
+    /// strengthens what it returns (the Testing Effect). Advertising them as read-only
+    /// told clients they could be called unattended without confirmation — a "read" that
+    /// quietly rewrote scheduling state for half the store. This test keeps the
+    /// annotations honest; `export` is here because it writes a file to disk.
+    #[test]
+    fn retrieval_and_file_writing_tools_are_not_advertised_as_read_only() {
+        let tools = build_tools_list();
+
+        for name in [
+            "search",
+            "session_context",
+            "reflect",
+            "deep_reference",
+            "export",
+        ] {
+            let tool = tools
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("{name} missing from the catalog"));
+            let annotations = tool
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name} has no annotations"));
+
+            assert_eq!(
+                annotations.read_only_hint,
+                Some(false),
+                "{name} writes state (FSRS strengthening and/or files) and must not claim read-only"
+            );
+            assert_eq!(
+                annotations.destructive_hint,
+                Some(false),
+                "{name} is additive: it must not be advertised as destructive either"
+            );
+        }
+    }
+
+    /// The tools that really do only read keep their read-only annotation, so the fix
+    /// above does not quietly turn the whole surface into "ask the user first".
+    #[test]
+    fn pure_read_tools_stay_read_only() {
+        let tools = build_tools_list();
+
+        for name in [
+            "system_status",
+            "memory_health",
+            "importance_score",
+            "find_duplicates",
+            "explore_connections",
+        ] {
+            let tool = tools
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("{name} missing from the catalog"));
+            assert_eq!(
+                tool.annotations.as_ref().and_then(|a| a.read_only_hint),
+                Some(true),
+                "{name} only inspects state and should stay read-only"
+            );
+        }
     }
 
     #[test]
