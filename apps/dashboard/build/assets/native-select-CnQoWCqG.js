@@ -1,1 +1,0 @@
-import{j as t}from"./react-CstDIzCn.js";import{c as n}from"./index-4G5XZM3G.js";function c({className:r,ref:o,...e}){return t.jsx("select",{ref:o,className:n("px-2 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition",r),...e})}export{c as N};

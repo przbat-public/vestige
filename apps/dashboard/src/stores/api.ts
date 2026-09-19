@@ -43,12 +43,23 @@ export class ApiError extends Error {
   }
 }
 
-async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
+/**
+ * `acceptStatuses` exists for endpoints that use a non-2xx code to report a
+ * *result* rather than a failure — `/api/health` answers 503 when the store is
+ * critical, which is the endpoint doing its job. Without it the generic
+ * non-2xx throw would discard the DTO body in exactly the state an operator
+ * most needs to read it.
+ */
+type FetcherOptions = RequestInit & { acceptStatuses?: number[] };
+
+async function fetcher<T>(path: string, options?: FetcherOptions): Promise<T> {
+  const { acceptStatuses, ...init } = options ?? {};
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
-    ...options,
+    ...init,
   });
-  if (!res.ok) {
+  const accepted = acceptStatuses ? acceptStatuses.includes(res.status) : res.ok;
+  if (!accepted) {
     let code: string | undefined;
     let detail: string | undefined;
     if (res.headers.get('content-type')?.includes('application/json')) {
@@ -193,7 +204,9 @@ export const api = {
   search: async (q: string, limit = 20) =>
     wire.search(await fetcher<unknown>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`)),
   stats: () => fetcher<SystemStats>('/stats'),
-  health: () => fetcher<HealthCheck>('/health'),
+  // 503 means "critical", not "request failed": the body still carries the
+  // health DTO, and the pages that render the critical pill need it.
+  health: () => fetcher<HealthCheck>('/health', { acceptStatuses: [200, 503] }),
   timeline: (days = 7, limit = 200) => fetcher<TimelineResponse>(`/timeline?days=${days}&limit=${limit}`),
   graph: (params?: { query?: string; center_id?: string; depth?: number; max_nodes?: number }) => {
     const qs = params
