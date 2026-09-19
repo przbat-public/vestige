@@ -405,7 +405,12 @@ mod tests {
     #[tokio::test]
     async fn sets_valid_until_to_now_plus_ttl() {
         let (storage, _dir) = test_storage().await;
-        seed(&storage, "PKCE prevents auth-code interception attacks", vec![]).await;
+        seed(
+            &storage,
+            "PKCE prevents auth-code interception attacks",
+            vec![],
+        )
+        .await;
 
         let before = Utc::now();
         let args = serde_json::json!({ "topic": "PKCE", "ttl_hours": 3 });
@@ -477,7 +482,12 @@ mod tests {
     async fn provenance_lists_source_ids_on_persisted_memory() {
         let (storage, _dir) = test_storage().await;
         let id1 = seed(&storage, "Cache invalidation is hard", vec![]).await;
-        let id2 = seed(&storage, "Cache lookup cost grows with key cardinality", vec![]).await;
+        let id2 = seed(
+            &storage,
+            "Cache lookup cost grows with key cardinality",
+            vec![],
+        )
+        .await;
 
         let args = serde_json::json!({ "topic": "cache" });
         let result = execute(&storage, &test_cognitive(), Some(args))
@@ -529,8 +539,14 @@ mod tests {
             slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
             "slug must be ascii-alnum + dash: `{slug}`",
         );
-        assert!(!slug.starts_with('-') && !slug.ends_with('-'), "slug `{slug}` must not have boundary dashes");
-        assert!(!slug.contains("--"), "slug `{slug}` should collapse repeated dashes");
+        assert!(
+            !slug.starts_with('-') && !slug.ends_with('-'),
+            "slug `{slug}` must not have boundary dashes"
+        );
+        assert!(
+            !slug.contains("--"),
+            "slug `{slug}` should collapse repeated dashes"
+        );
     }
 
     #[test]

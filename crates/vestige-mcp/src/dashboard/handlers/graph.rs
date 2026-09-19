@@ -577,11 +577,7 @@ mod tests {
             resp.0.results
         );
         assert!(
-            resp.0
-                .nodes
-                .as_ref()
-                .map(|n| n.is_empty())
-                .unwrap_or(true),
+            resp.0.nodes.as_ref().map(|n| n.is_empty()).unwrap_or(true),
             "no path → no subgraph nodes"
         );
     }

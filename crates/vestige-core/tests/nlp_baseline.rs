@@ -51,7 +51,7 @@ const CONTRADICTION_MIN_RECALL: f32 = 0.60;
 /// Overall F1 the heuristic opinion detector must clear.
 const OPINION_MIN_F1: f32 = 0.70;
 const OPINION_MIN_PRECISION: f32 = 0.75; // Opinions misclassified as facts
-                                          // get over-promoted by FSRS-6.
+// get over-promoted by FSRS-6.
 const OPINION_MIN_RECALL: f32 = 0.55;
 
 /// Overall F1 the heuristic future-relevance detector must clear.
@@ -75,7 +75,10 @@ const MAX_ECE: f32 = 0.35;
 // ====================================================================
 
 fn print_report(report: &EvalReport) {
-    eprintln!("\n=== {} on {} ===", report.detector_name, report.dataset_name);
+    eprintln!(
+        "\n=== {} on {} ===",
+        report.detector_name, report.dataset_name
+    );
     eprintln!(
         "  total: {}  TP={}  FP={}  TN={}  FN={}",
         report.total,
@@ -109,12 +112,7 @@ fn print_report(report: &EvalReport) {
     }
 }
 
-fn assert_thresholds(
-    report: &EvalReport,
-    min_f1: f32,
-    min_precision: f32,
-    min_recall: f32,
-) {
+fn assert_thresholds(report: &EvalReport, min_f1: f32, min_precision: f32, min_recall: f32) {
     assert!(
         report.precision >= min_precision,
         "{} precision {:.3} < min {:.3}",
@@ -320,12 +318,15 @@ fn contradiction_detector_handles_adversarial_inputs() {
             );
             if r.positive {
                 // Positive results must carry at least one evidence span.
-                assert!(!r.evidence.is_empty(),
-                    "positive without evidence for ({a:?}, {b:?})");
+                assert!(
+                    !r.evidence.is_empty(),
+                    "positive without evidence for ({a:?}, {b:?})"
+                );
                 for ev in &r.evidence {
                     assert!(
                         ev.span_end >= ev.span_start,
-                        "inverted span for ({a:?}, {b:?}): {:?}", ev,
+                        "inverted span for ({a:?}, {b:?}): {:?}",
+                        ev,
                     );
                 }
             } else {
@@ -527,7 +528,10 @@ fn regression_correction_phrase_is_caught() {
 
     for (new, old, why) in cases {
         let r = detector.detect(new, old);
-        assert!(r.positive, "missed correction ({why}): new={new:?} old={old:?}");
+        assert!(
+            r.positive,
+            "missed correction ({why}): new={new:?} old={old:?}"
+        );
     }
 }
 
@@ -542,8 +546,11 @@ fn regression_opinion_with_factual_context() {
          the async I/O improvements aren't as impactful as the marketing \
          suggests.",
     );
-    assert!(r.positive, "missed opinion in mixed factual/opinion: evidence={:?}",
-        r.evidence);
+    assert!(
+        r.positive,
+        "missed opinion in mixed factual/opinion: evidence={:?}",
+        r.evidence
+    );
 }
 
 #[test]

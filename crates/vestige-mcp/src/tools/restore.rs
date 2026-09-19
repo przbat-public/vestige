@@ -254,7 +254,10 @@ mod tests {
         let path = write_temp_file(&dir, "no.json", &backup.to_string());
         let args = serde_json::json!({ "path": path, "confirmed": false });
         let result = execute(&storage, Some(args)).await;
-        assert!(result.is_err(), "explicit confirmed=false must remain blocked");
+        assert!(
+            result.is_err(),
+            "explicit confirmed=false must remain blocked"
+        );
     }
 
     // ---- Original happy-path tests (now with `confirmed: true`) -----

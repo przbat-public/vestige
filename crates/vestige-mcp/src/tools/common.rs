@@ -120,8 +120,14 @@ mod tests {
     fn missing_confirmation_error_mentions_operation_and_flag() {
         let msg = missing_confirmation_error("gc", "This will permanently delete 42 memories.");
         assert!(msg.contains("`gc`"), "must mention the operation: {msg}");
-        assert!(msg.contains("confirmed: true"), "must mention the flag: {msg}");
-        assert!(msg.contains("requestedSchema"), "must include elicitation schema: {msg}");
+        assert!(
+            msg.contains("confirmed: true"),
+            "must mention the flag: {msg}"
+        );
+        assert!(
+            msg.contains("requestedSchema"),
+            "must include elicitation schema: {msg}"
+        );
         assert!(
             msg.contains("permanently delete 42 memories"),
             "must echo the human summary: {msg}",

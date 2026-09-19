@@ -203,7 +203,11 @@ impl MemoryDto {
 /// min_retention) — same definition the dashboard already relied on.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "MemoryListResponseDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "MemoryListResponseDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct MemoryListResponseDto {
     pub total: usize,
     pub memories: Vec<MemoryDto>,
@@ -245,7 +249,11 @@ pub enum MemoryStatusAction {
 /// correctly ("Content updated" vs "Tags updated").
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "MemoryUpdateResultDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "MemoryUpdateResultDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct MemoryUpdateResultDto {
     pub memory: MemoryDto,
     /// Free-form discriminator: "content", "tags", "content+tags".

@@ -65,10 +65,28 @@ pub fn detect_language(text: &str) -> Language {
 
     // Cheap pre-filter: Polish diacritics are a one-shot signal. If we see
     // any, we're done.
-    let has_polish_diacritic = text
-        .chars()
-        .any(|c| matches!(c, 'ą' | 'ć' | 'ę' | 'ł' | 'ń' | 'ó' | 'ś' | 'ź' | 'ż'
-                 | 'Ą' | 'Ć' | 'Ę' | 'Ł' | 'Ń' | 'Ó' | 'Ś' | 'Ź' | 'Ż'));
+    let has_polish_diacritic = text.chars().any(|c| {
+        matches!(
+            c,
+            'ą' | 'ć'
+                | 'ę'
+                | 'ł'
+                | 'ń'
+                | 'ó'
+                | 'ś'
+                | 'ź'
+                | 'ż'
+                | 'Ą'
+                | 'Ć'
+                | 'Ę'
+                | 'Ł'
+                | 'Ń'
+                | 'Ó'
+                | 'Ś'
+                | 'Ź'
+                | 'Ż'
+        )
+    });
 
     // Tokenize on ASCII word boundaries. We don't need a real tokenizer —
     // unicode word segmentation would be more correct but adds a dep for
@@ -136,27 +154,103 @@ fn polish_function_words() -> &'static HashSet<&'static str> {
         [
             // Core function words & particles (skip single-char ones —
             // they're stripped by the tokenizer).
-            "nie", "się", "to", "tym", "tego", "tej", "tych", "tę", "ta",
-            "ten", "te", "ci", "ich", "ją", "go", "mu", "jej",
+            "nie",
+            "się",
+            "to",
+            "tym",
+            "tego",
+            "tej",
+            "tych",
+            "tę",
+            "ta",
+            "ten",
+            "te",
+            "ci",
+            "ich",
+            "ją",
+            "go",
+            "mu",
+            "jej",
             // Conjunctions
-            "lub", "ale", "albo", "lecz", "bo", "ponieważ", "więc",
-            "oraz", "czy", "jeśli", "gdy", "kiedy", "jak", "żeby",
-            "że", "iż",
+            "lub",
+            "ale",
+            "albo",
+            "lecz",
+            "bo",
+            "ponieważ",
+            "więc",
+            "oraz",
+            "czy",
+            "jeśli",
+            "gdy",
+            "kiedy",
+            "jak",
+            "żeby",
+            "że",
+            "iż",
             // Prepositions
-            "na", "we", "ze", "do", "od", "po", "przed", "za",
-            "dla", "bez", "przy", "nad", "pod", "przez",
+            "na",
+            "we",
+            "ze",
+            "do",
+            "od",
+            "po",
+            "przed",
+            "za",
+            "dla",
+            "bez",
+            "przy",
+            "nad",
+            "pod",
+            "przez",
             // Modifiers / common adverbs
-            "tylko", "tak", "tu", "tam", "tutaj", "też", "także",
-            "jeszcze", "już", "może", "trzeba", "warto", "raczej",
+            "tylko",
+            "tak",
+            "tu",
+            "tam",
+            "tutaj",
+            "też",
+            "także",
+            "jeszcze",
+            "już",
+            "może",
+            "trzeba",
+            "warto",
+            "raczej",
             // Negation/correction (also used by contradiction.rs)
-            "nigdy", "żaden", "żadna", "żadne",
+            "nigdy",
+            "żaden",
+            "żadna",
+            "żadne",
             // Common verbs (1st/3rd person sing)
-            "jest", "był", "była", "było", "byli", "były", "będzie",
-            "musi", "musisz", "muszę", "trzeba", "mam", "masz", "ma",
-            "mają", "robię", "robi", "robisz", "dotyczy", "wynosi",
-            "powinno", "powinien", "powinna",
+            "jest",
+            "był",
+            "była",
+            "było",
+            "byli",
+            "były",
+            "będzie",
+            "musi",
+            "musisz",
+            "muszę",
+            "trzeba",
+            "mam",
+            "masz",
+            "ma",
+            "mają",
+            "robię",
+            "robi",
+            "robisz",
+            "dotyczy",
+            "wynosi",
+            "powinno",
+            "powinien",
+            "powinna",
             // Question/relative
-            "który", "która", "które", "kto",
+            "który",
+            "która",
+            "które",
+            "kto",
         ]
         .into_iter()
         .collect()
@@ -171,20 +265,16 @@ fn english_function_words() -> &'static HashSet<&'static str> {
             "the", "an",
             // Pronouns (skip `I` — single-char `i` is dropped; we rely on
             // density of other markers like `the`, `and`, `to`).
-            "you", "he", "she", "it", "we", "they", "this", "that",
-            "these", "those", "my", "your", "his", "her", "its", "our",
-            "their", "me", "him", "us", "them",
+            "you", "he", "she", "it", "we", "they", "this", "that", "these", "those", "my", "your",
+            "his", "her", "its", "our", "their", "me", "him", "us", "them",
             // Common verbs
-            "is", "are", "was", "were", "be", "been", "being", "have",
-            "has", "had", "do", "does", "did", "will", "would", "could",
-            "should", "may", "might", "can", "must",
+            "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does",
+            "did", "will", "would", "could", "should", "may", "might", "can", "must",
             // Conjunctions
-            "and", "or", "but", "so", "yet", "for", "nor", "because", "if",
-            "when", "while", "though", "although", "since", "unless",
-            // Prepositions
-            "in", "on", "at", "to", "from", "with", "by", "about", "into",
-            "through", "during", "before", "after", "between", "of",
-            // Negation
+            "and", "or", "but", "so", "yet", "for", "nor", "because", "if", "when", "while",
+            "though", "although", "since", "unless", // Prepositions
+            "in", "on", "at", "to", "from", "with", "by", "about", "into", "through", "during",
+            "before", "after", "between", "of", // Negation
             "not", "no", "never",
         ]
         .into_iter()
@@ -247,7 +337,8 @@ mod tests {
     #[test]
     fn polish_dominates_mixed_text() {
         // Polish prose with some English technical terms.
-        let text = "Naprawiłem bug w komponencie React. Trzeba sprawdzić czy useState działa poprawnie.";
+        let text =
+            "Naprawiłem bug w komponencie React. Trzeba sprawdzić czy useState działa poprawnie.";
         assert_eq!(detect_language(text), Language::Polish);
     }
 
@@ -279,7 +370,10 @@ mod tests {
     #[test]
     fn capital_polish_diacritic_detected() {
         // Capital diacritic — easy to miss in a naive impl.
-        assert_eq!(detect_language("ŁADNIE wykonane zadanie."), Language::Polish);
+        assert_eq!(
+            detect_language("ŁADNIE wykonane zadanie."),
+            Language::Polish
+        );
     }
 
     #[test]

@@ -11,10 +11,10 @@ use serde_json::Value;
 
 use super::super::events::VestigeEvent;
 use super::super::state::AppState;
+use super::super::wire::memory::MemoryStatusAction;
 use super::super::wire::{
     MemoryDto, MemoryListResponseDto, MemoryStatusDto, MemoryUpdateResultDto,
 };
-use super::super::wire::memory::MemoryStatusAction;
 use super::{log_err, log_join_err};
 
 #[derive(Debug, Deserialize)]

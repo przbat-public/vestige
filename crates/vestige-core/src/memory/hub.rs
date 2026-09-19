@@ -172,11 +172,7 @@ mod tests {
         let now = Utc::now();
         HubMetadata {
             child_ids: vec!["a".into(), "b".into(), "c".into()],
-            cluster_signature: cluster_signature(&[
-                "a".into(),
-                "b".into(),
-                "c".into(),
-            ]),
+            cluster_signature: cluster_signature(&["a".into(), "b".into(), "c".into()]),
             regeneration_count: 1,
             last_regenerated_at: now,
             generation_method: "template_v1".into(),
@@ -230,12 +226,7 @@ mod tests {
     fn signature_is_order_independent_and_dedup() {
         let s1 = cluster_signature(&["a".into(), "b".into(), "c".into()]);
         let s2 = cluster_signature(&["c".into(), "b".into(), "a".into()]);
-        let s3 = cluster_signature(&[
-            "c".into(),
-            "b".into(),
-            "a".into(),
-            "a".into(),
-        ]);
+        let s3 = cluster_signature(&["c".into(), "b".into(), "a".into(), "a".into()]);
         assert_eq!(s1, s2);
         assert_eq!(s1, s3);
         assert_eq!(s1.len(), 16, "FNV-1a 64-bit hex is 16 chars");

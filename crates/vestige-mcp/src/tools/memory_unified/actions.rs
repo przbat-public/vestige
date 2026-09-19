@@ -266,8 +266,12 @@ pub(super) async fn execute_promote(
     // parsing extra_json. Best-effort: a tag write failure is logged but
     // doesn't fail the promote.
     if insight_validated_now {
-        let mut new_tags: Vec<String> =
-            node.tags.iter().filter(|t| *t != "unvalidated").cloned().collect();
+        let mut new_tags: Vec<String> = node
+            .tags
+            .iter()
+            .filter(|t| *t != "unvalidated")
+            .cloned()
+            .collect();
         if !new_tags.iter().any(|t| t == "validated") {
             new_tags.push("validated".to_string());
         }

@@ -49,7 +49,11 @@ pub struct DeepRefEvidenceDto {
 /// "supersedes" lands in `superseded` instead.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "DeepRefContradictionDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "DeepRefContradictionDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct DeepRefContradictionDto {
     pub memory_a: String,
     pub memory_b: String,
@@ -66,7 +70,11 @@ pub struct DeepRefContradictionDto {
 /// exists in history.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "DeepRefSupersededDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "DeepRefSupersededDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct DeepRefSupersededDto {
     pub superseded_id: String,
     pub superseded_by: String,
@@ -120,7 +128,11 @@ pub struct DeepRefStagesDto {
 /// only as a hint for which sub-panel to lead with.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "DeepReferenceResultDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "DeepReferenceResultDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct DeepReferenceResultDto {
     pub intent: String,
     pub query: String,
@@ -148,4 +160,3 @@ pub struct DeepReferenceResultDto {
     #[serde(default)]
     pub stages_completed: DeepRefStagesDto,
 }
-

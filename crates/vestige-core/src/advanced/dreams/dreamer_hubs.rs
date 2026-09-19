@@ -69,8 +69,7 @@ impl MemoryDreamer {
                 continue;
             }
 
-            let mut child_ids: Vec<String> =
-                members.iter().map(|m| m.id.clone()).collect();
+            let mut child_ids: Vec<String> = members.iter().map(|m| m.id.clone()).collect();
             child_ids.sort_unstable();
             child_ids.dedup();
 
@@ -85,16 +84,9 @@ impl MemoryDreamer {
 
             let dominant_tags = compute_dominant_tags(&members);
             let date_range = compute_date_range(&members);
-            let content = render_template_body(
-                &members,
-                &dominant_tags,
-                date_range,
-            );
+            let content = render_template_body(&members, &dominant_tags, date_range);
 
-            let mut node_tags: Vec<String> = vec![
-                "hub".into(),
-                "auto-generated".into(),
-            ];
+            let mut node_tags: Vec<String> = vec!["hub".into(), "auto-generated".into()];
             node_tags.extend(dominant_tags.iter().take(8).cloned());
 
             out.push(HubCandidate {
@@ -136,10 +128,7 @@ fn compute_dominant_tags(members: &[&&DreamMemory]) -> Vec<String> {
         }
     }
 
-    let mut ranked: Vec<(&str, usize)> = counts
-        .into_iter()
-        .filter(|(_, c)| *c > half)
-        .collect();
+    let mut ranked: Vec<(&str, usize)> = counts.into_iter().filter(|(_, c)| *c > half).collect();
     // Sort by frequency desc, tie-break on tag string for determinism.
     ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
     ranked.truncate(HUB_MAX_DOMINANT_TAGS);

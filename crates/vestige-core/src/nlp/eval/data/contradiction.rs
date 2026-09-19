@@ -147,7 +147,6 @@ const EXAMPLES: &[Example] = &[
         label: Label::Positive,
         rationale: "'should be' indicates correction.",
     },
-
     // ========================================================================
     // ENGLISH NEGATIVE (no contradiction)
     // ========================================================================
@@ -290,7 +289,6 @@ const EXAMPLES: &[Example] = &[
         label: Label::Negative,
         rationale: "Addition, both are true.",
     },
-
     // ========================================================================
     // POLISH POSITIVE (contradiction does exist)
     // ========================================================================
@@ -422,7 +420,6 @@ const EXAMPLES: &[Example] = &[
         label: Label::Positive,
         rationale: "'błędnie skonfigurowano' korekcja.",
     },
-
     // ========================================================================
     // POLISH NEGATIVE (no contradiction)
     // ========================================================================

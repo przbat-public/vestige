@@ -249,7 +249,11 @@ mod tests {
     fn english_hedge_probably_is_opinion() {
         let r = detector().detect("Probably the cache invalidation is broken.");
         assert!(r.positive);
-        assert!(r.evidence.iter().any(|e| matches!(e.kind, EvidenceKind::Hedge)));
+        assert!(
+            r.evidence
+                .iter()
+                .any(|e| matches!(e.kind, EvidenceKind::Hedge))
+        );
     }
 
     #[test]
@@ -316,7 +320,10 @@ mod tests {
             // We accept it because the FP rate on real Vestige memories
             // is acceptable, but we don't want the test to silently regress
             // if someone "fixes" it later.
-            assert!(r.confidence < 0.9, "if we accept the FP, confidence shouldn't be max");
+            assert!(
+                r.confidence < 0.9,
+                "if we accept the FP, confidence shouldn't be max"
+            );
         }
     }
 
@@ -332,7 +339,11 @@ mod tests {
         // anywhere, no PL function words.
         let r = detector().detect("The deployment finished at 14:23 UTC sharp.");
         // No EN opinion frame, no PL frame because language is EN → negative.
-        assert!(!r.positive, "fired on plain EN factual sentence: {:?}", r.evidence);
+        assert!(
+            !r.positive,
+            "fired on plain EN factual sentence: {:?}",
+            r.evidence
+        );
     }
 
     #[test]
@@ -343,12 +354,14 @@ mod tests {
         // cross-language routing should only kick in when the language is
         // unambiguous. Document the limitation so we don't accidentally
         // "fix" it without considering the bilingual edge cases.
-        let r = detector()
-            .detect("The Polish word for 'I believe' is 'uważam' (literal).");
+        let r = detector().detect("The Polish word for 'I believe' is 'uważam' (literal).");
         // Diacritic 'ż' biases lang detection to PL → PL lexicon matches
         // 'uważam'. The result IS positive; this test pins the behavior.
         // A future ONNX-based language detector would handle this better.
-        assert!(r.positive, "expected the documented bilingual-routing behavior");
+        assert!(
+            r.positive,
+            "expected the documented bilingual-routing behavior"
+        );
     }
 
     #[test]

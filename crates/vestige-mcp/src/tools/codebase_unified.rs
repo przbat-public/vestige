@@ -132,8 +132,7 @@ struct CodebaseArgs {
     choices: Option<Vec<vestige_core::memory::Choice>>,
     criteria: Option<Vec<vestige_core::memory::Criterion>>,
     #[serde(default)]
-    score_matrix:
-        Option<std::collections::HashMap<String, std::collections::HashMap<String, u8>>>,
+    score_matrix: Option<std::collections::HashMap<String, std::collections::HashMap<String, u8>>>,
     valid_until: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     supersedes: Option<Vec<String>>,

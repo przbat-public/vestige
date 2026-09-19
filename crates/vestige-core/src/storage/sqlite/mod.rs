@@ -90,11 +90,11 @@ mod tests;
 
 pub use error::{Result, SmartIngestResult, StorageError};
 pub use init::Storage;
-pub use search::{
-    DEFAULT_HYBRID_KEYWORD_WEIGHT, DEFAULT_HYBRID_SEMANTIC_WEIGHT, default_hybrid_weights,
-};
 pub use records::{
     ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,
     IntentionRecord, MemoryStateRecord, StateTransitionRecord,
+};
+pub use search::{
+    DEFAULT_HYBRID_KEYWORD_WEIGHT, DEFAULT_HYBRID_SEMANTIC_WEIGHT, default_hybrid_weights,
 };
 pub(crate) use tags::normalize_tags;

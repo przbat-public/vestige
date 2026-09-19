@@ -59,9 +59,8 @@ impl Storage {
     fn ingest_inner(
         &self,
         mut input: IngestInput,
-        #[cfg(all(feature = "embeddings", feature = "vector-search"))] precomputed_embedding: Option<
-            &crate::embeddings::Embedding,
-        >,
+        #[cfg(all(feature = "embeddings", feature = "vector-search"))]
+        precomputed_embedding: Option<&crate::embeddings::Embedding>,
     ) -> Result<KnowledgeNode> {
         let now = Utc::now();
         let id = Uuid::new_v4().to_string();
@@ -406,9 +405,7 @@ impl Storage {
             // `tags` is JSON like `["foo","bar"]`. `json_each` flattens it
             // into a virtual row per element; EXISTS short-circuits on
             // the first match.
-            clauses.push(
-                "EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?)",
-            );
+            clauses.push("EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?)");
             params_dyn.push(Box::new(t.to_string()));
         }
         if let Some(min_ret) = min_retention {
@@ -424,8 +421,7 @@ impl Storage {
         params_dyn.push(Box::new(offset));
 
         let mut stmt = reader.prepare(&sql)?;
-        let refs: Vec<&dyn rusqlite::ToSql> =
-            params_dyn.iter().map(|b| b.as_ref()).collect();
+        let refs: Vec<&dyn rusqlite::ToSql> = params_dyn.iter().map(|b| b.as_ref()).collect();
         let nodes = stmt.query_map(refs.as_slice(), Self::row_to_node)?;
 
         let mut result = Vec::new();
@@ -463,9 +459,7 @@ impl Storage {
             params_dyn.push(Box::new(nt.to_string()));
         }
         if let Some(t) = tag {
-            clauses.push(
-                "EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?)",
-            );
+            clauses.push("EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?)");
             params_dyn.push(Box::new(t.to_string()));
         }
         if let Some(min_ret) = min_retention {
@@ -478,8 +472,7 @@ impl Storage {
         }
 
         let mut stmt = reader.prepare(&sql)?;
-        let refs: Vec<&dyn rusqlite::ToSql> =
-            params_dyn.iter().map(|b| b.as_ref()).collect();
+        let refs: Vec<&dyn rusqlite::ToSql> = params_dyn.iter().map(|b| b.as_ref()).collect();
         let count: i64 = stmt.query_row(refs.as_slice(), |row| row.get(0))?;
         Ok(count.max(0) as usize)
     }
@@ -491,10 +484,7 @@ impl Storage {
     ///
     /// Backed by the partial index `idx_nodes_hub_signature` from
     /// migration v13, so the lookup is O(log N) even on dense bases.
-    pub fn find_hub_by_signature(
-        &self,
-        signature: &str,
-    ) -> Result<Option<KnowledgeNode>> {
+    pub fn find_hub_by_signature(&self, signature: &str) -> Result<Option<KnowledgeNode>> {
         let reader = self
             .reader
             .lock()

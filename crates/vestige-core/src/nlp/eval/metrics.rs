@@ -195,8 +195,7 @@ pub fn expected_calibration_error(
             (0.0, 0.0)
         } else {
             let mc = bucket.iter().map(|(c, _)| *c).sum::<f32>() / count as f32;
-            let ma =
-                bucket.iter().filter(|(_, ok)| *ok).count() as f32 / count as f32;
+            let ma = bucket.iter().filter(|(_, ok)| *ok).count() as f32 / count as f32;
             (mc, ma)
         };
         ece += (count as f32 / total) * (mean_conf - mean_acc).abs();
@@ -303,11 +302,7 @@ mod tests {
 
     #[test]
     fn ece_buckets_have_correct_ranges() {
-        let samples = vec![
-            (true, 0.05, true),
-            (true, 0.15, true),
-            (true, 0.95, true),
-        ];
+        let samples = vec![(true, 0.05, true), (true, 0.15, true), (true, 0.95, true)];
         let (_, buckets) = expected_calibration_error(&samples, 10);
         assert_eq!(buckets.len(), 10);
         assert!(approx(buckets[0].lower, 0.0));

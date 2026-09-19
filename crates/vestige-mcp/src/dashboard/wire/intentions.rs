@@ -61,7 +61,11 @@ pub struct CreateIntentionResponseDto {
 /// the MCP layer, so the list grew stale.
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "UpdateIntentionRequestDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "UpdateIntentionRequestDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct UpdateIntentionRequestDto {
     /// New status — accepts `fulfilled` | `cancelled` | `snoozed` | `active`.
     /// Anything else is rejected with 400 so the storage layer never sees
@@ -72,7 +76,11 @@ pub struct UpdateIntentionRequestDto {
 /// `PATCH /api/intentions/{id}` response.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "UpdateIntentionResponseDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "UpdateIntentionResponseDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct UpdateIntentionResponseDto {
     pub id: String,
     pub status: String,

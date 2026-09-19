@@ -172,21 +172,50 @@ fn triggers_for(language: Language) -> &'static [&'static str] {
 
     let en = EN.get_or_init(|| {
         vec![
-            "not", "no", "never", "neither", "nor", "without",
-            "don't", "doesn't", "didn't", "won't", "wouldn't", "can't",
-            "cannot", "couldn't", "shouldn't", "isn't", "aren't", "wasn't",
-            "weren't", "hasn't", "haven't", "hadn't",
-            "do not", "does not", "did not", "will not", "would not",
-            "can not", "could not", "should not", "is not", "are not",
-            "was not", "were not", "has not", "have not", "had not",
+            "not",
+            "no",
+            "never",
+            "neither",
+            "nor",
+            "without",
+            "don't",
+            "doesn't",
+            "didn't",
+            "won't",
+            "wouldn't",
+            "can't",
+            "cannot",
+            "couldn't",
+            "shouldn't",
+            "isn't",
+            "aren't",
+            "wasn't",
+            "weren't",
+            "hasn't",
+            "haven't",
+            "hadn't",
+            "do not",
+            "does not",
+            "did not",
+            "will not",
+            "would not",
+            "can not",
+            "could not",
+            "should not",
+            "is not",
+            "are not",
+            "was not",
+            "were not",
+            "has not",
+            "have not",
+            "had not",
             "no longer",
         ]
     });
     let pl = PL.get_or_init(|| {
         vec![
             // Polish negation pivots on `nie` + verb / `nie` + adjective.
-            "nie", "nigdy", "żaden", "żadna", "żadne", "żadni", "żadnych",
-            "bez", "ani",
+            "nie", "nigdy", "żaden", "żadna", "żadne", "żadni", "żadnych", "bez", "ani",
         ]
     });
     let all = ALL.get_or_init(|| {
@@ -210,14 +239,30 @@ fn terminators_for(language: Language) -> &'static [&'static str] {
 
     let en = EN.get_or_init(|| {
         vec![
-            "but", "however", "although", "though", "yet", "still",
-            "nevertheless", "nonetheless", "except", "besides",
+            "but",
+            "however",
+            "although",
+            "though",
+            "yet",
+            "still",
+            "nevertheless",
+            "nonetheless",
+            "except",
+            "besides",
         ]
     });
     let pl = PL.get_or_init(|| {
         vec![
-            "ale", "jednak", "lecz", "chociaż", "choć", "pomimo",
-            "natomiast", "tylko", "zaś", "wprawdzie",
+            "ale",
+            "jednak",
+            "lecz",
+            "chociaż",
+            "choć",
+            "pomimo",
+            "natomiast",
+            "tylko",
+            "zaś",
+            "wprawdzie",
         ]
     });
     let all = ALL.get_or_init(|| {
@@ -313,7 +358,8 @@ mod tests {
 
     #[test]
     fn polish_nie_scopes_following_words() {
-        let scopes = find_negation_scopes("Nie używaj tej biblioteki w produkcji.", Language::Polish);
+        let scopes =
+            find_negation_scopes("Nie używaj tej biblioteki w produkcji.", Language::Polish);
         assert_eq!(scopes.len(), 1);
         assert_eq!(scopes[0].trigger, "nie");
         assert!(scopes[0].scope_text.contains("używaj"));
@@ -334,10 +380,8 @@ mod tests {
 
     #[test]
     fn scope_ends_at_terminator_jednak() {
-        let scopes = find_negation_scopes(
-            "Nie używaj X jednak Y jest w porządku.",
-            Language::Polish,
-        );
+        let scopes =
+            find_negation_scopes("Nie używaj X jednak Y jest w porządku.", Language::Polish);
         assert_eq!(scopes.len(), 1);
         let scope = &scopes[0];
         assert!(scope.scope_text.contains("X"));
@@ -355,10 +399,7 @@ mod tests {
 
     #[test]
     fn multiple_scopes_in_one_text() {
-        let scopes = find_negation_scopes(
-            "Don't use X. Don't use Y either.",
-            Language::English,
-        );
+        let scopes = find_negation_scopes("Don't use X. Don't use Y either.", Language::English);
         assert_eq!(scopes.len(), 2);
         assert!(scopes[0].scope_text.contains("X"));
         assert!(scopes[1].scope_text.contains("Y"));

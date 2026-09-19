@@ -243,7 +243,9 @@ async fn persist_relation_edges(
 /// `Serialize` representations change — the dashboard and dream
 /// traversal already grep on these strings.
 #[cfg(feature = "preprocessing")]
-fn link_type_label(link_type: vestige_core::neuroscience::spreading_activation::LinkType) -> &'static str {
+fn link_type_label(
+    link_type: vestige_core::neuroscience::spreading_activation::LinkType,
+) -> &'static str {
     use vestige_core::neuroscience::spreading_activation::LinkType;
     match link_type {
         LinkType::Causal => "causal",

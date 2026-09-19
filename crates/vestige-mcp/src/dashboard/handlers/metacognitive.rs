@@ -157,13 +157,15 @@ fn parse_or_502<T>(raw: Value, source: &'static str) -> Result<Json<T>, StatusCo
 where
     T: serde::de::DeserializeOwned,
 {
-    serde_json::from_value::<T>(raw.clone()).map(Json).map_err(|e| {
-        tracing::error!(
-            source = source,
-            error = %e,
-            payload_preview = %raw.to_string().chars().take(300).collect::<String>(),
-            "Wire DTO drift — tool returned a shape the dashboard contract doesn't accept"
-        );
-        StatusCode::BAD_GATEWAY
-    })
+    serde_json::from_value::<T>(raw.clone())
+        .map(Json)
+        .map_err(|e| {
+            tracing::error!(
+                source = source,
+                error = %e,
+                payload_preview = %raw.to_string().chars().take(300).collect::<String>(),
+                "Wire DTO drift — tool returned a shape the dashboard contract doesn't accept"
+            );
+            StatusCode::BAD_GATEWAY
+        })
 }

@@ -308,16 +308,74 @@ fn stopword_set() -> &'static std::collections::HashSet<&'static str> {
         [
             // English stopwords (subset of standard list, focused on
             // what shows up in scope contexts).
-            "the", "and", "for", "with", "from", "this", "that", "are",
-            "was", "were", "have", "has", "had", "but", "not", "you",
-            "your", "our", "their", "his", "her", "its", "into", "onto",
-            "out", "off", "all", "any", "some", "more", "most", "such",
-            "then", "than", "very", "much", "many", "few",
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "this",
+            "that",
+            "are",
+            "was",
+            "were",
+            "have",
+            "has",
+            "had",
+            "but",
+            "not",
+            "you",
+            "your",
+            "our",
+            "their",
+            "his",
+            "her",
+            "its",
+            "into",
+            "onto",
+            "out",
+            "off",
+            "all",
+            "any",
+            "some",
+            "more",
+            "most",
+            "such",
+            "then",
+            "than",
+            "very",
+            "much",
+            "many",
+            "few",
             // Polish stopwords
-            "który", "która", "które", "być", "jest", "byli", "były",
-            "tego", "tym", "ten", "tej", "tych", "tych", "oraz", "ale",
-            "lub", "albo", "lecz", "ponieważ", "więc", "dla", "bez",
-            "przy", "nad", "pod", "przez", "się", "tak", "też",
+            "który",
+            "która",
+            "które",
+            "być",
+            "jest",
+            "byli",
+            "były",
+            "tego",
+            "tym",
+            "ten",
+            "tej",
+            "tych",
+            "tych",
+            "oraz",
+            "ale",
+            "lub",
+            "albo",
+            "lecz",
+            "ponieważ",
+            "więc",
+            "dla",
+            "bez",
+            "przy",
+            "nad",
+            "pod",
+            "przez",
+            "się",
+            "tak",
+            "też",
         ]
         .into_iter()
         .collect()
@@ -337,10 +395,7 @@ fn lowered_contains_word(haystack: &str, needle: &str) -> bool {
     // For triggers that are intended as prefixes (suffix-stripping for PL),
     // we accept matches followed by a letter — these are the `błędn`,
     // `przestarz`, `nieaktualn` family.
-    let is_prefix_trigger = matches!(
-        needle,
-        "błędn" | "przestarz" | "nieaktualn"
-    );
+    let is_prefix_trigger = matches!(needle, "błędn" | "przestarz" | "nieaktualn");
 
     let bytes = haystack.as_bytes();
     let mut start = 0;
@@ -420,7 +475,11 @@ mod tests {
     fn empty_old_whitespace_only_does_not_contradict() {
         // Whitespace-only old must be treated the same as empty.
         let r = detector().detect("Don't deploy on Friday.", "   \n\t  ");
-        assert!(!r.positive, "false positive vs whitespace old: {:?}", r.evidence);
+        assert!(
+            !r.positive,
+            "false positive vs whitespace old: {:?}",
+            r.evidence
+        );
     }
 
     #[test]
@@ -446,7 +505,11 @@ mod tests {
             "The deployment goes straight to production.",
         );
         assert!(r.positive);
-        assert!(r.evidence.iter().any(|e| matches!(e.kind, EvidenceKind::CorrectionPhrase)));
+        assert!(
+            r.evidence
+                .iter()
+                .any(|e| matches!(e.kind, EvidenceKind::CorrectionPhrase))
+        );
         assert!(r.confidence >= 0.5, "got {}", r.confidence);
     }
 
@@ -458,7 +521,11 @@ mod tests {
         );
         assert!(r.positive);
         // Should match BOTH a correction phrase and an asymmetric negation.
-        assert!(r.evidence.iter().any(|e| matches!(e.kind, EvidenceKind::CorrectionPhrase)));
+        assert!(
+            r.evidence
+                .iter()
+                .any(|e| matches!(e.kind, EvidenceKind::CorrectionPhrase))
+        );
     }
 
     #[test]
@@ -527,7 +594,11 @@ mod tests {
             "Saturday deployments work great.",
         );
         // Saturday is NOT in the negation scope, so this should be negative.
-        assert!(!r.positive, "scope leaked past terminator: {:?}", r.evidence);
+        assert!(
+            !r.positive,
+            "scope leaked past terminator: {:?}",
+            r.evidence
+        );
     }
 
     // ========================================================================
@@ -538,10 +609,7 @@ mod tests {
     fn asymmetric_negation_legacy_behavior() {
         // No scope overlap (different topics), but "deprecated" in new
         // is a strong asymmetric signal.
-        let r = detector().detect(
-            "This API is deprecated.",
-            "We use this API extensively.",
-        );
+        let r = detector().detect("This API is deprecated.", "We use this API extensively.");
         assert!(r.positive);
         assert!(
             r.evidence
@@ -610,8 +678,14 @@ mod tests {
         );
         assert!(r.positive);
         // Should have CorrectionPhrase + NegationScope.
-        let has_correction = r.evidence.iter().any(|e| matches!(e.kind, EvidenceKind::CorrectionPhrase));
-        let has_scope = r.evidence.iter().any(|e| matches!(e.kind, EvidenceKind::NegationScope));
+        let has_correction = r
+            .evidence
+            .iter()
+            .any(|e| matches!(e.kind, EvidenceKind::CorrectionPhrase));
+        let has_scope = r
+            .evidence
+            .iter()
+            .any(|e| matches!(e.kind, EvidenceKind::NegationScope));
         assert!(has_correction || has_scope, "got: {:?}", r.evidence);
         // Fused confidence should be high.
         assert!(r.confidence >= 0.6, "confidence={}", r.confidence);
@@ -631,7 +705,11 @@ mod tests {
         ];
         for (new, old) in cases {
             let r = detector().detect(new, old);
-            assert!(r.confidence >= 0.0 && r.confidence <= 1.0, "out of range: {}", r.confidence);
+            assert!(
+                r.confidence >= 0.0 && r.confidence <= 1.0,
+                "out of range: {}",
+                r.confidence
+            );
         }
     }
 

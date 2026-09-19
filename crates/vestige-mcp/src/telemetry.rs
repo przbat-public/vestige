@@ -106,7 +106,9 @@ mod tests {
         // holding the lock. The env state was already restored by `EnvGuard`'s
         // `Drop` even on unwind, so the lock content (`()`) is meaningful
         // again — recover and continue.
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|p| p.into_inner())
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
     }
 
     /// Helper: snapshot + clear the env vars we look at so concurrent tests
@@ -162,7 +164,9 @@ mod tests {
     #[test]
     fn from_env_reads_vestige_namespaced_var() {
         let _g = EnvGuard::snapshot_and_clear();
-        unsafe { env::set_var("VESTIGE_OTLP_ENDPOINT", "http://collector:4317"); }
+        unsafe {
+            env::set_var("VESTIGE_OTLP_ENDPOINT", "http://collector:4317");
+        }
         let cfg = TelemetryConfig::from_env();
         assert_eq!(cfg.endpoint.as_deref(), Some("http://collector:4317"));
     }
@@ -170,7 +174,9 @@ mod tests {
     #[test]
     fn from_env_falls_back_to_otel_standard_var() {
         let _g = EnvGuard::snapshot_and_clear();
-        unsafe { env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://standard:4318"); }
+        unsafe {
+            env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://standard:4318");
+        }
         let cfg = TelemetryConfig::from_env();
         assert_eq!(cfg.endpoint.as_deref(), Some("http://standard:4318"));
     }
@@ -178,7 +184,9 @@ mod tests {
     #[test]
     fn from_env_treats_empty_string_as_unset() {
         let _g = EnvGuard::snapshot_and_clear();
-        unsafe { env::set_var("VESTIGE_OTLP_ENDPOINT", "   "); }
+        unsafe {
+            env::set_var("VESTIGE_OTLP_ENDPOINT", "   ");
+        }
         let cfg = TelemetryConfig::from_env();
         assert_eq!(cfg.endpoint, None);
     }

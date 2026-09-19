@@ -66,7 +66,11 @@ pub struct ImportanceScoreDto {
 /// Dashboard surfaces these in a "what just happened" toast.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "ConsolidationResultDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "ConsolidationResultDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct ConsolidationResultDto {
     pub nodes_processed: i64,
     pub decay_applied: i64,

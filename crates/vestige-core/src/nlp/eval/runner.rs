@@ -90,7 +90,11 @@ struct Sample {
     truth: bool,
 }
 
-fn finalize_report(dataset: &Dataset, detector_name: &'static str, samples: Vec<Sample>) -> EvalReport {
+fn finalize_report(
+    dataset: &Dataset,
+    detector_name: &'static str,
+    samples: Vec<Sample>,
+) -> EvalReport {
     let pre_calibration: Vec<(bool, f32, bool)> = samples
         .iter()
         .map(|s| (s.predicted, s.confidence, s.truth))

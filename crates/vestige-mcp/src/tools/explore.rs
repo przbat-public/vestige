@@ -624,7 +624,10 @@ mod tests {
             .expect("causal_chain must not error");
         assert_eq!(result["action"], "causal_chain");
         let nodes = result["nodes"].as_array().expect("nodes array");
-        let node_ids: Vec<&str> = nodes.iter().filter_map(|n| n["memory_id"].as_str()).collect();
+        let node_ids: Vec<&str> = nodes
+            .iter()
+            .filter_map(|n| n["memory_id"].as_str())
+            .collect();
         assert!(
             node_ids.contains(&id_b.as_str()),
             "expected B in causal chain from A; got {:?}",
@@ -656,7 +659,10 @@ mod tests {
             .await
             .expect("causal_chain must not error");
         let nodes = result["nodes"].as_array().expect("nodes array");
-        let node_ids: Vec<&str> = nodes.iter().filter_map(|n| n["memory_id"].as_str()).collect();
+        let node_ids: Vec<&str> = nodes
+            .iter()
+            .filter_map(|n| n["memory_id"].as_str())
+            .collect();
         assert!(
             node_ids.contains(&id_b.as_str()),
             "depth=1 must reach the immediate neighbour B"

@@ -110,8 +110,7 @@ async fn test_system_status_reports_reranker_readiness() {
         "rerankerReady must be a boolean flag (operators rely on it for monitoring)"
     );
     assert_eq!(
-        value["rerankerReady"],
-        false,
+        value["rerankerReady"], false,
         "default CognitiveEngine has no cross-encoder loaded"
     );
 }
@@ -350,7 +349,10 @@ async fn test_gc_destructive_call_with_confirmation_proceeds() {
         result.err()
     );
     let value = result.unwrap();
-    assert_eq!(value["dryRun"], false, "must record that this WAS destructive");
+    assert_eq!(
+        value["dryRun"], false,
+        "must record that this WAS destructive"
+    );
 }
 
 #[tokio::test]
@@ -364,5 +366,9 @@ async fn test_gc_rejects_string_confirmed_to_avoid_hallucinated_flags() {
     });
     let result = execute_gc(&storage, Some(args)).await;
     let err = result.expect_err("string `confirmed` must NOT be accepted as a boolean");
-    assert!(err.contains("`gc`"), "expected gc-mentioning error: `{}`", err);
+    assert!(
+        err.contains("`gc`"),
+        "expected gc-mentioning error: `{}`",
+        err
+    );
 }

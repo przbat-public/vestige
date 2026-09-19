@@ -197,9 +197,15 @@ async fn test_smart_ingest_default_node_type_is_fact() {
 // ========================================================================
 
 /// Helper: ingest one piece of content and return its node id.
-async fn ingest_content(storage: &Arc<Storage>, cognitive: &Arc<Mutex<CognitiveEngine>>, content: &str) -> String {
+async fn ingest_content(
+    storage: &Arc<Storage>,
+    cognitive: &Arc<Mutex<CognitiveEngine>>,
+    content: &str,
+) -> String {
     let args = serde_json::json!({ "content": content });
-    let result = execute(storage, cognitive, Some(args)).await.expect("ingest");
+    let result = execute(storage, cognitive, Some(args))
+        .await
+        .expect("ingest");
     result["nodeId"].as_str().expect("nodeId").to_string()
 }
 
@@ -213,7 +219,9 @@ async fn ingest_force_create(
     content: &str,
 ) -> String {
     let args = serde_json::json!({ "content": content, "forceCreate": true });
-    let result = execute(storage, cognitive, Some(args)).await.expect("ingest");
+    let result = execute(storage, cognitive, Some(args))
+        .await
+        .expect("ingest");
     result["nodeId"].as_str().expect("nodeId").to_string()
 }
 
@@ -223,18 +231,24 @@ async fn ingest_force_create(
 #[cfg(feature = "preprocessing")]
 #[test]
 fn preprocess_classifies_causes_as_causal_at_pipeline_layer() {
-    use vestige_core::preprocessing::{PreprocessingConfig, preprocess};
     use vestige_core::neuroscience::spreading_activation::LinkType;
+    use vestige_core::preprocessing::{PreprocessingConfig, preprocess};
 
     let result = preprocess(
         "The Stress causes the Insomnia disorder.",
         &PreprocessingConfig::default(),
     );
     let entity_names: Vec<&str> = result.entities.iter().map(|e| e.text.as_str()).collect();
-    let predicates: Vec<(&str, LinkType)> =
-        result.relations.iter().map(|r| (r.predicate.as_str(), r.link_type)).collect();
+    let predicates: Vec<(&str, LinkType)> = result
+        .relations
+        .iter()
+        .map(|r| (r.predicate.as_str(), r.link_type))
+        .collect();
     assert!(
-        result.relations.iter().any(|r| r.link_type == LinkType::Causal),
+        result
+            .relations
+            .iter()
+            .any(|r| r.link_type == LinkType::Causal),
         "preprocess() must classify `causes` as Causal; entities={:?} relations={:?}",
         entity_names,
         predicates,
@@ -311,7 +325,9 @@ async fn smart_ingest_persists_causal_edges_to_storage() {
         connections.iter().map(|c| &c.link_type).collect::<Vec<_>>()
     );
     assert!(
-        causal.iter().any(|c| c.target_id == insomnia_id || c.source_id == insomnia_id),
+        causal
+            .iter()
+            .any(|c| c.target_id == insomnia_id || c.source_id == insomnia_id),
         "causal edge must connect stress → insomnia; got: {:?}",
         causal,
     );

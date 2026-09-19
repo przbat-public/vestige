@@ -27,7 +27,11 @@ use vestige_core::memory::{Choice, Criterion, DecisionPayload};
 /// as `—` rather than as 0.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "DecisionScoreCellDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "DecisionScoreCellDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct DecisionScoreCellDto {
     pub criterion_id: String,
     pub choice_id: String,
@@ -62,7 +66,11 @@ impl From<&Choice> for DecisionChoiceDto {
 /// uses it to bias the radar visualisation.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "DecisionCriterionDto.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "DecisionCriterionDto.ts",
+    rename_all = "camelCase"
+)]
 pub struct DecisionCriterionDto {
     pub id: String,
     pub label: String,

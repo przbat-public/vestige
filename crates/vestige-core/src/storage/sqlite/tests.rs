@@ -352,19 +352,25 @@ fn test_count_nodes_filtered_matches_filters() {
 
     // node_type filter → 7 facts
     assert_eq!(
-        storage.count_nodes_filtered(Some("fact"), None, None).unwrap(),
+        storage
+            .count_nodes_filtered(Some("fact"), None, None)
+            .unwrap(),
         7
     );
 
     // tag filter → 10 (all tagged with "common")
     assert_eq!(
-        storage.count_nodes_filtered(None, Some("common"), None).unwrap(),
+        storage
+            .count_nodes_filtered(None, Some("common"), None)
+            .unwrap(),
         10
     );
 
     // unknown tag → 0
     assert_eq!(
-        storage.count_nodes_filtered(None, Some("missing"), None).unwrap(),
+        storage
+            .count_nodes_filtered(None, Some("missing"), None)
+            .unwrap(),
         0
     );
 
@@ -375,7 +381,9 @@ fn test_count_nodes_filtered_matches_filters() {
         .unwrap();
     assert_eq!(page.len(), 3);
     assert_eq!(
-        storage.count_nodes_filtered(Some("fact"), None, None).unwrap(),
+        storage
+            .count_nodes_filtered(Some("fact"), None, None)
+            .unwrap(),
         7,
         "count must reflect the population, not the page size"
     );

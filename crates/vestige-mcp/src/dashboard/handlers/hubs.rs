@@ -34,12 +34,11 @@ pub async fn list_hubs(
     let limit = params.limit.unwrap_or(100).clamp(1, 500);
 
     let storage = state.storage.clone();
-    let nodes = tokio::task::spawn_blocking(move || {
-        storage.get_nodes_by_type_and_tag("hub", None, limit)
-    })
-    .await
-    .map_err(log_join_err("list_hubs task panicked"))?
-    .map_err(log_err("list_hubs storage"))?;
+    let nodes =
+        tokio::task::spawn_blocking(move || storage.get_nodes_by_type_and_tag("hub", None, limit))
+            .await
+            .map_err(log_join_err("list_hubs task panicked"))?
+            .map_err(log_err("list_hubs storage"))?;
 
     let mut hubs: Vec<HubDto> = nodes
         .iter()

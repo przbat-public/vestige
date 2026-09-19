@@ -430,9 +430,7 @@ pub async fn execute(
         Ok(cog) => Some(std::sync::Arc::clone(&cog.activation_network)),
         Err(_) => {
             crate::cognitive::try_lock_metrics::record_miss("deep_reference");
-            tracing::warn!(
-                "deep_reference: cognitive engine locked, spreading activation skipped"
-            );
+            tracing::warn!("deep_reference: cognitive engine locked, spreading activation skipped");
             None
         }
     };

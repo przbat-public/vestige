@@ -121,9 +121,7 @@ impl InsightMetadata {
             return Err(format!("novelty must be in [0,1], got {}", self.novelty));
         }
         if self.validated_by_agent && self.validated_at.is_none() {
-            return Err(
-                "validated_at must be set when validated_by_agent is true".into(),
-            );
+            return Err("validated_at must be set when validated_by_agent is true".into());
         }
         Ok(())
     }

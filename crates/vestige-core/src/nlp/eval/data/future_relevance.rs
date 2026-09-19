@@ -138,7 +138,6 @@ const EXAMPLES: &[Example] = &[
         label: Label::Positive,
         rationale: "'plan to' without first-person prefix.",
     },
-
     // ========================================================================
     // ENGLISH NOT FUTURE-RELEVANT
     // ========================================================================
@@ -263,7 +262,6 @@ const EXAMPLES: &[Example] = &[
         label: Label::Negative,
         rationale: "API doc.",
     },
-
     // ========================================================================
     // POLISH FUTURE-RELEVANT
     // ========================================================================
@@ -387,7 +385,6 @@ const EXAMPLES: &[Example] = &[
         label: Label::Positive,
         rationale: "'zamierzam'.",
     },
-
     // ========================================================================
     // POLISH NOT FUTURE-RELEVANT
     // ========================================================================

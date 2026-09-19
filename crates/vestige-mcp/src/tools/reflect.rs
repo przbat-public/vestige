@@ -773,10 +773,7 @@ mod tests {
     fn test_share_key_term_rejects_stopwords() {
         // "should" and "use" are stopwords, so even though both texts share
         // them, share_key_term returns false.
-        assert!(!share_key_term(
-            "you should use it",
-            "you should use that"
-        ));
+        assert!(!share_key_term("you should use it", "you should use that"));
         // Capitalized proper noun ≥3 chars passes even though `rust`/`fast`
         // are below the lowercase floor.
         assert!(share_key_term("Rust is great", "Rust is fast"));
@@ -834,9 +831,8 @@ mod tests {
         // `expired_explicit`, not as `stale_implicit`, even though the node
         // was just created (last_accessed = now).
         let dir = tempfile::TempDir::new().unwrap();
-        let storage = Arc::new(
-            vestige_core::Storage::new(Some(dir.path().join("test.db"))).unwrap(),
-        );
+        let storage =
+            Arc::new(vestige_core::Storage::new(Some(dir.path().join("test.db"))).unwrap());
 
         let expired = fixture_decision_payload(Some(Utc::now() - Duration::days(3)));
         for _ in 0..5 {
@@ -895,9 +891,8 @@ mod tests {
     #[tokio::test]
     async fn test_contradiction_pairs_are_deduped_across_shared_tags() {
         let dir = tempfile::TempDir::new().unwrap();
-        let storage = Arc::new(
-            vestige_core::Storage::new(Some(dir.path().join("test.db"))).unwrap(),
-        );
+        let storage =
+            Arc::new(vestige_core::Storage::new(Some(dir.path().join("test.db"))).unwrap());
 
         // Noise so reflect's `memories.len() < 3` guard doesn't bail.
         for _ in 0..3 {
@@ -983,9 +978,8 @@ mod tests {
         // untouched for > 30 days with low retention. Must surface with
         // reason="stale_implicit" and severity="medium".
         let dir = tempfile::TempDir::new().unwrap();
-        let storage = Arc::new(
-            vestige_core::Storage::new(Some(dir.path().join("test.db"))).unwrap(),
-        );
+        let storage =
+            Arc::new(vestige_core::Storage::new(Some(dir.path().join("test.db"))).unwrap());
         for _ in 0..3 {
             storage
                 .ingest(vestige_core::IngestInput {

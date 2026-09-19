@@ -87,8 +87,8 @@ fn apply_temporal_boost(
         );
         // Blend: 85% relevance + 15% temporal signal.
         let temporal_factor = recency * validity;
-        result.combined_score = result.combined_score * 0.85
-            + (result.combined_score * temporal_factor as f32) * 0.15;
+        result.combined_score =
+            result.combined_score * 0.85 + (result.combined_score * temporal_factor as f32) * 0.15;
     }
 }
 

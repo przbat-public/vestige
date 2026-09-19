@@ -332,12 +332,12 @@ pub async fn execute(
         // surfaces work through the regular memory pipeline (search,
         // promote/demote, FSRS-6 review).
         let mut persist_one = |insight_text: &str,
-                                source_memories: Vec<String>,
-                                confidence: f64,
-                                novelty: f64,
-                                insight_type: String,
-                                origin: InsightOrigin,
-                                tags: Vec<String>| {
+                               source_memories: Vec<String>,
+                               confidence: f64,
+                               novelty: f64,
+                               insight_type: String,
+                               origin: InsightOrigin,
+                               tags: Vec<String>| {
             let record_id = uuid::Uuid::new_v4().to_string();
             let record = InsightRecord {
                 id: record_id.clone(),
@@ -466,8 +466,7 @@ pub async fn execute(
                     }
                     metadata.touch_regeneration(now);
 
-                    let new_extra =
-                        merge_hub_into_extra(existing.extra_json.as_ref(), &metadata);
+                    let new_extra = merge_hub_into_extra(existing.extra_json.as_ref(), &metadata);
                     if storage_persist
                         .update_node_extra_json(&existing.id, Some(&new_extra))
                         .is_ok()

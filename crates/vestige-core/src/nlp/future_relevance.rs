@@ -332,8 +332,8 @@ mod tests {
     #[test]
     fn realistic_polish_memory() {
         // From real Vestige usage patterns.
-        let r = detector()
-            .detect("Trzeba pamiętać o tym przy następnym refaktorze pipeline'u CI/CD.");
+        let r =
+            detector().detect("Trzeba pamiętać o tym przy następnym refaktorze pipeline'u CI/CD.");
         assert!(r.positive);
     }
 
