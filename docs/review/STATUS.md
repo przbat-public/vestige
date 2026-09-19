@@ -253,7 +253,24 @@ Statusy: **wdrożone** · **wdrożone częściowo** · **zaplanowane** · **odrz
 
 ---
 
-## 11. Korekty weryfikatorów, które nie zmieniły statusu
+## 11. Znaleziska wykryte w tej sesji (poza audytem)
+
+Rzeczy, których audyt nie widział, a które wyszły przy domykaniu — każda z dowodem, nie z wrażenia. Nie są częścią 112 pozycji; wchodzą do tego samego planu fal.
+
+- **[high] Nieaktualny fakt wygrywa ranking wyszukiwania** — zmierzone, nie zgadnięte: harness `benchmarks/memconflict/factconsolidation.py` (MemoryAgentBench FactConsolidation, `factconsolidation_sh_6k`, n=59 scenariuszy konfliktowych, top-k 5, binarka z tego drzewa) daje `answer_accuracy` 0.9831 przy `top1_is_current` **0.2542** — oba sprzeczne zdania trafiają do wyników (0.9831), ale **przestarzałe stoi pierwsze w 74,6%** przypadków. Konsument czytający jeden wynik dostaje fakt nieaktualny. Baseline zapisany w `benchmarks/memconflict/results/factconsolidation-sh6k-20260919.json`.
+  Miejsce decyzji (wskazane z kodu, nie z przeczucia): `crates/vestige-mcp/src/tools/search_unified/pipeline/scoring.rs:98-131` (jedyny pairwise test świeżości — bramkowany `tag_jaccard >= 0.5`, a ten zwraca 0.0 dla pustych tagów, i tylko ≤ +10% korekty), `:51-55` (sort bez drugiego klucza), `:364-425` (5F wybiera „starszego" zależnie od kolejności i wymaga zapisanej krawędzi `contradiction`), `finalize.rs:166-170` (podbicie po ostatnim sortowaniu). Po stronie zapisu harness robi `forceCreate: true`, więc nic nigdy nie zostaje oznaczone jako superseded.
+  **Wniosek wykonawczy:** dzisiejsza praca nad deterministycznym rozstrzyganiem świeżości (`memory/freshness.rs`) **nie ruszyła tego wyniku** — binarka sprzed zmiany daje identyczne 0.9831 / 0.2542 / 0.7458, bo reguła nie jest na ścieżce odczytu. Nie wolno twierdzić, że poprawiła rozstrzyganie konfliktów na podstawie tego pomiaru.
+- **[medium] `SnapshotRestoreReport::embeddings_reset` raportuje liczbę wierszy, nie wyzerowanych wektorów** — `crates/vestige-core/src/storage/sqlite/snapshot_restore.rs:130-135`: `UPDATE` dotyka każdego wiersza i zwraca rows-matched, więc liczba równa się liczbie żywych wspomnień nawet gdy nic nie zostało zresetowane; narzędzie `restore` pokazuje to użytkownikowi jako `embeddingsReset`.
+- **[medium] `intention check` duplikuje dopasowanie triggerów inline** — `crates/vestige-mcp/src/tools/intention_unified/check.rs:62-111` powtarza logikę matchera z rdzenia zamiast go wołać; rozjazd między nimi nie zostałby wykryty przez test (journey agenta E celowo drive'uje matcher rdzenia na trwałym payloadzie).
+- **[medium] Zdarzenia `MemoryCreated` niosą puste `contentPreview` dla zapisów przez narzędzia** — feed aktywności w dashboardzie pokazuje sam identyfikator; test e2e asertuje więc identyfikator, bo podglądu treści nie ma czego sprawdzić.
+- **[medium] Przestrzeń embeddingów v2 kontra fingerprint sidecara HNSW** — `embedding_space_fingerprint()`/`EMBEDDING_SPACE_VERSION = 2` weszły, ale sidecar waliduje tylko `(COUNT(*), MAX(created_at))`, więc binarka po aktualizacji wczyta sidecar z przestrzeni v1 i porówna wektory z różnych przestrzeni bez ostrzeżenia. Zlecone strumieniowi storage razem z ostrzeżeniem startowym i testami.
+- **[low→naprawione] Flaky test dashboardu** — `TemporalPage.test.tsx` padał ~1 na 3 pełne przebiegi („Unable to find role=button"), bo domyślny 1 s budżet `findBy*` to deadline, nie kontrakt. Naprawione globalnie (`asyncUtilTimeout: 5000` + `testTimeout: 15000`), 4/4 przebiegi zielone — commit `1fe2cd2`.
+- **[higiena] Nieignorowane katalogi buildowe w repo** — `target-fc/` (976 MB) i `.cargo-home/` (796 MB) powstały, bo równoległe buildy omijają blokadę `target/` i read-only `~/.cargo`; oba poza `.gitignore`, więc jedno `git add -A` wciągnęłoby gigabajt artefaktów. Naprawione: `6ca1974`, `05f5278`.
+- **[do weryfikacji] `cargo check -p vestige-mcp -p vestige-restore --no-default-features` nie kompiluje się** (job `check-minimal`) — brakuje `vestige_core::search`, `Reranker`, metody `hybrid_search` w handlerach dashboardu i pipeline; zgłoszone przez strumień dashboardu, weryfikacja w toku.
+
+---
+
+## 12. Korekty weryfikatorów, które nie zmieniły statusu
 
 Osiem znalezisk wysokich/krytycznych weryfikator potwierdził **częściowo** (żadnego nie obalił w całości). Korekty są wpięte przy odpowiednich pozycjach wyżej; zbiorczo:
 
@@ -275,7 +292,7 @@ Osiem znalezisk wysokich/krytycznych weryfikator potwierdził **częściowo** (�
 
 ---
 
-## 12. Czego nie da się zamknąć w tym repozytorium
+## 13. Czego nie da się zamknąć w tym repozytorium
 
 1. **Realny przebieg CI na macOS Intel** — `ci-release #8` (artefakt `x86_64-apple-darwin` z domyślnymi features) jest domknięty wyłącznie w definicji workflow; potwierdzenie wymaga uruchomienia `macos-15-intel` w GitHub Actions, czego z tego drzewa nie da się zrobić.
 2. **Pomiar ColBERT / late interaction** — `benchmarks/memconflict/RESULTS.md` odnotowuje, że w cache'u modeli nie ma checkpointu ONNX, więc `VESTIGE_LATE_INTERACTION` i `VESTIGE_COLBERT_MODEL_DIR` pozostają niemierzalne; bez modelu (pobranie ~GB) nie da się orzec, czy feature zostaje.
