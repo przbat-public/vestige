@@ -158,9 +158,9 @@ fn split_by_conjunctions(query: &str) -> Option<Vec<String>> {
     }
 
     // " and " — only split if both parts are substantial (avoids "bread and butter" false positives)
-    if let Some(pos) = query.to_lowercase().find(" and ") {
-        let left = query[..pos].trim();
-        let right = query[pos + 5..].trim();
+    if let Some((start, end)) = find_ascii_case_insensitive(query, " and ") {
+        let left = query[..start].trim();
+        let right = query[end..].trim();
 
         if is_substantial(left) && is_substantial(right) {
             return Some(vec![left.to_string(), right.to_string()]);
@@ -168,6 +168,29 @@ fn split_by_conjunctions(query: &str) -> Option<Vec<String>> {
     }
 
     None
+}
+
+/// Find an ASCII `needle` in `haystack` case-insensitively, returning a byte range
+/// **inside `haystack`**.
+///
+/// `haystack.to_lowercase().find(needle)` cannot be used to slice `haystack`:
+/// lowercasing may change byte lengths (U+212A KELVIN SIGN → `k`, U+0130 → `i̇`,
+/// U+1E9E → `ß`), so the offset can land inside a multi-byte character and
+/// `haystack[..pos]` panics — and with `panic = "abort"` in the release profile that
+/// kills the whole server process on a user query. Matching byte-wise against an ASCII
+/// needle is boundary-safe: every byte of a multi-byte UTF-8 character is >= 0x80, so
+/// it can never equal an ASCII needle byte, and a match therefore starts and ends on a
+/// character boundary.
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<(usize, usize)> {
+    let hay = haystack.as_bytes();
+    let ndl = needle.as_bytes();
+    if ndl.is_empty() || hay.len() < ndl.len() {
+        return None;
+    }
+
+    (0..=hay.len() - ndl.len())
+        .find(|&i| hay[i..i + ndl.len()].eq_ignore_ascii_case(ndl))
+        .map(|i| (i, i + ndl.len()))
 }
 
 fn is_substantial(text: &str) -> bool {
@@ -184,6 +207,38 @@ mod tests {
         assert!(!result.is_compound);
         assert_eq!(result.sub_queries.len(), 1);
         assert_eq!(result.sub_queries[0], "What is FSRS-6?");
+    }
+
+    #[test]
+    fn test_conjunction_split_survives_length_changing_lowercase() {
+        // Regression: the " and " branch searched `query.to_lowercase()` but sliced
+        // `query`. U+212A KELVIN SIGN lowercases to a 1-byte `k`, so the offset landed
+        // inside a multi-byte character and `query[..pos]` panicked — and with
+        // `panic = "abort"` in release that killed the MCP server process.
+        let result = decompose_query("the sensor reads 300 \u{212A} and the fan spins at 900 rpm");
+        assert!(result.is_compound, "expected a split, got {result:?}");
+        assert_eq!(result.sub_queries.len(), 2);
+        assert!(result.sub_queries[0].contains("300 \u{212A}"));
+        assert!(result.sub_queries[1].contains("fan spins"));
+
+        // Same class, different character (U+0130 lowercases to two chars).
+        let result = decompose_query(
+            "\u{0130}stanbul deployment pipeline and the search indexing subsystem",
+        );
+        assert!(result.is_compound, "expected a split, got {result:?}");
+        assert!(result.sub_queries[1].starts_with("the search indexing"));
+    }
+
+    #[test]
+    fn test_conjunction_split_is_case_insensitive() {
+        let result = decompose_query("the cache is cold AND the index is stale");
+        assert!(result.is_compound);
+        assert_eq!(result.sub_queries.len(), 2);
+        // Surrounding text keeps its original casing; only the search is case-insensitive.
+        let result = decompose_query("The Cache Is Cold And The Index Is Stale");
+        assert!(result.is_compound, "expected a split, got {result:?}");
+        assert_eq!(result.sub_queries[0], "The Cache Is Cold");
+        assert_eq!(result.sub_queries[1], "The Index Is Stale");
     }
 
     #[test]

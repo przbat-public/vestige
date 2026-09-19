@@ -82,14 +82,18 @@ pub struct NegationScope {
 /// Returns an empty vec if no triggers are found. Pure function — no
 /// allocations on the hot path beyond the result.
 pub fn find_negation_scopes(text: &str, language: Language) -> Vec<NegationScope> {
-    let lowered = text.to_lowercase();
     let triggers = triggers_for(language);
     let terminators = terminators_for(language);
 
     let mut scopes = Vec::new();
 
     // Tokenize on whitespace + punctuation, keeping byte offsets.
-    let words = tokenize_with_offsets(&lowered);
+    // Tokenize the ORIGINAL text so `trigger_start`/`scope_end` are offsets into `text`.
+    // Lowercasing the whole string first (the previous behaviour) moves offsets whenever a
+    // character changes byte length when lowercased (U+0130, U+212A, U+1E9E), so
+    // `text.get(scope_start..scope_end)` silently returned "" and the negation signal
+    // vanished. Comparison is case-insensitive per token instead.
+    let words = tokenize_with_offsets(text);
     if words.is_empty() {
         return scopes;
     }
@@ -99,9 +103,12 @@ pub fn find_negation_scopes(text: &str, language: Language) -> Vec<NegationScope
         let (word_start, word_end, word) = words[i];
 
         // Check single-token and bigram triggers.
-        let single_match = triggers.iter().any(|t| !t.contains(' ') && *t == word);
+        // Case-insensitive, apostrophe-normalised comparison: `don\u{2019}t` (U+2019) must
+        // match the `don't` trigger exactly like the ASCII spelling does.
+        let word_lc = normalize_token(word);
+        let single_match = triggers.iter().any(|t| !t.contains(' ') && *t == word_lc);
         let bigram_match = if i + 1 < words.len() {
-            let bigram = format!("{} {}", word, words[i + 1].2);
+            let bigram = format!("{} {}", word_lc, normalize_token(words[i + 1].2));
             triggers.iter().any(|t| t.contains(' ') && *t == bigram)
         } else {
             false
@@ -111,9 +118,13 @@ pub fn find_negation_scopes(text: &str, language: Language) -> Vec<NegationScope
             // Determine trigger span.
             let (trigger_start, trigger_end, trigger_token) = if bigram_match && !single_match {
                 let (_, end_2, _) = words[i + 1];
-                (word_start, end_2, format!("{} {}", word, words[i + 1].2))
+                (
+                    word_start,
+                    end_2,
+                    format!("{} {}", word_lc, normalize_token(words[i + 1].2)),
+                )
             } else {
-                (word_start, word_end, word.to_string())
+                (word_start, word_end, word_lc.clone())
             };
 
             // Walk forward, collecting up to MAX_SCOPE_WORDS or until a
@@ -129,7 +140,7 @@ pub fn find_negation_scopes(text: &str, language: Language) -> Vec<NegationScope
                 .take(MAX_SCOPE_WORDS)
             {
                 // Sentence-end punctuation between previous scope_end and current word.
-                if has_sentence_break(&lowered, scope_end, ws) {
+                if has_sentence_break(text, scope_end, ws) {
                     break;
                 }
                 // Clause-boundary token.
@@ -279,14 +290,22 @@ fn terminators_for(language: Language) -> &'static [&'static str] {
     }
 }
 
-/// Tokenize the lowered text, returning `(byte_start, byte_end, word)` per
-/// alphanumeric run. Punctuation is dropped.
+/// Lowercase a single token and fold the typographic apostrophe to ASCII, so trigger
+/// tables written with `'` keep matching text typed with U+2019.
+fn normalize_token(token: &str) -> String {
+    token.to_lowercase().replace('\u{2019}', "'")
+}
+
+/// Tokenize the **original** text, returning `(byte_start, byte_end, word)` per
+/// alphanumeric run (ASCII and typographic apostrophes count as word characters).
+/// Punctuation is dropped, and the offsets index `text` — never a lowercased copy of
+/// it, whose byte lengths can differ.
 fn tokenize_with_offsets(text: &str) -> Vec<(usize, usize, &str)> {
     let mut out = Vec::new();
     let mut start: Option<usize> = None;
 
     for (i, c) in text.char_indices() {
-        if c.is_alphanumeric() || c == '\'' {
+        if c.is_alphanumeric() || c == '\'' || c == '\u{2019}' {
             if start.is_none() {
                 start = Some(i);
             }
@@ -354,6 +373,48 @@ mod tests {
         let scopes = find_negation_scopes("Don't deploy on Friday.", Language::English);
         assert_eq!(scopes.len(), 1);
         assert_scope(&scopes[0], "don't", "deploy");
+    }
+
+    #[test]
+    fn scope_text_survives_length_changing_lowercase() {
+        // Regression: offsets were computed on `text.to_lowercase()` and then used to
+        // slice `text`, so any character that changes byte length when lowercased made
+        // `text.get(scope_start..scope_end)` return "" — the negation signal vanished
+        // and the contradiction detector scored the pair as agreeing.
+        // U+212A (3 bytes) lowercases to `k` (1 byte); U+0130 lowercases to two chars.
+        let scopes = find_negation_scopes(
+            "The sensor reports 300 \u{212A} and does not use the legacy protocol.",
+            Language::English,
+        );
+        assert_eq!(scopes.len(), 1, "negation trigger must still be found");
+        assert!(
+            !scopes[0].scope_text.is_empty(),
+            "scope_text must not silently become empty"
+        );
+        assert!(scopes[0].scope_text.contains("use the legacy protocol"));
+
+        let scopes = find_negation_scopes(
+            "\u{0130}stanbul rollout is not approved for production yet.",
+            Language::English,
+        );
+        assert_eq!(scopes.len(), 1);
+        assert!(scopes[0].scope_text.contains("approved for production"));
+    }
+
+    #[test]
+    fn typographic_apostrophe_matches_ascii_trigger() {
+        // `don't` typed with U+2019 must match the same trigger as the ASCII spelling.
+        let ascii = find_negation_scopes("Don't use the legacy API.", Language::English);
+        let typographic =
+            find_negation_scopes("Don\u{2019}t use the legacy API.", Language::English);
+        assert_eq!(ascii.len(), 1);
+        assert_eq!(
+            typographic.len(),
+            1,
+            "U+2019 apostrophe must not hide the trigger"
+        );
+        assert_eq!(typographic[0].trigger, ascii[0].trigger);
+        assert!(typographic[0].scope_text.contains("legacy API"));
     }
 
     #[test]
