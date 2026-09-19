@@ -1,11 +1,5 @@
 //! # Consolidation Workflow Journey Tests
 //!
-//! > **Scope: contract test, not a Storage end-to-end test.** This module
-//! > exercises real product code, but it never constructs `Storage` and never
-//! > touches SQLite. The persistence journey lives in
-//! > `tests/journeys/storage_persistence.rs`; see `journeys/mod.rs` for the
-//! > full breakdown of which files are real E2E and which are DTO contracts.
-//!
 //! Tests the sleep-inspired memory consolidation workflow that processes
 //! memories during idle periods to strengthen, decay, and organize them.
 //!
@@ -17,6 +11,16 @@
 //! 4. Important memories are strengthened
 //! 5. Weak/old memories are pruned
 //! 6. New connections between memories are discovered
+//!
+//! ## Scope: contract tests **and** a real storage journey
+//!
+//! The top-level tests are pure-function contract tests over
+//! `SleepConsolidation`, `ConnectionGraph`, `MemoryDreamer` and the scheduler —
+//! they never construct `Storage`. The real pipeline journey lives in
+//! [`storage_journeys`] at the bottom: two memories on a temp SQLite file,
+//! aged, run through `Storage::run_consolidation`, and checked through a cold
+//! restart for the decay, promotion, retention snapshots and history rows the
+//! cycle claims to persist.
 
 use chrono::{Duration, Utc};
 use vestige_core::{
@@ -450,4 +454,240 @@ fn test_retention_calculation() {
     // Both low
     let r4 = consolidation.calculate_retention(0.0, 0.0);
     assert!(r4 < 0.1, "Both low should mean low retention");
+}
+
+// ============================================================================
+// REAL STORAGE JOURNEY (the 17-step pipeline on SQLite)
+// ============================================================================
+//
+// The contract tests above call `SleepConsolidation` directly, so they cannot
+// fail if `Storage::run_consolidation` never writes a single row. This journey
+// runs the real pipeline and reads every asserted value back out of SQLite
+// through a fresh `Storage` — the state a restart has to rebuild.
+
+mod storage_journeys {
+    use std::path::Path;
+    use std::time::Duration as StdDuration;
+
+    use chrono::{Duration, Utc};
+    use rusqlite::Connection;
+    use tempfile::TempDir;
+    use vestige_core::Rating;
+    use vestige_core::memory::IngestInput;
+    use vestige_e2e_tests::harness::{TestDatabaseManager, enable_mock_embeddings};
+
+    fn memory(content: &str, tag: &str, sentiment_magnitude: f64) -> IngestInput {
+        IngestInput {
+            content: content.to_string(),
+            node_type: "fact".to_string(),
+            tags: vec![tag.to_string()],
+            sentiment_score: if sentiment_magnitude > 0.0 { 0.8 } else { 0.0 },
+            sentiment_magnitude,
+            ..Default::default()
+        }
+    }
+
+    fn reopen(db_path: &Path) -> TestDatabaseManager {
+        TestDatabaseManager::new_at_path(db_path.to_path_buf())
+    }
+
+    /// Age the two columns the FSRS decay pass reads. `Storage` has no
+    /// injectable clock, so this is the only deterministic way to age a memory;
+    /// every value *asserted* below is then computed by
+    /// `Storage::run_consolidation` and read back through `Storage::get_node`.
+    fn backdate(db_path: &Path, ids: &[String], days: i64) {
+        let conn = Connection::open(db_path).expect("test setup connection");
+        conn.busy_timeout(StdDuration::from_secs(5))
+            .expect("busy_timeout");
+        let old = (Utc::now() - Duration::days(days)).to_rfc3339();
+        for id in ids {
+            conn.execute(
+                "UPDATE knowledge_nodes SET last_accessed = ?1, created_at = ?1 WHERE id = ?2",
+                rusqlite::params![old, id],
+            )
+            .expect("test setup UPDATE must succeed");
+        }
+    }
+
+    /// Real consolidation: decay and emotional promotion must be observable in
+    /// the persisted rows (not just in the returned `ConsolidationResult`), the
+    /// retention snapshot and history rows must be durable, and nothing may be
+    /// deleted.
+    #[test]
+    fn test_journey_consolidation_persists_decay_promotion_and_snapshots() {
+        let _mock = enable_mock_embeddings();
+
+        let dir = TempDir::new().expect("temp dir");
+        let db_path = dir.path().join("consolidation.db");
+        let db = TestDatabaseManager::new_at_path(db_path.clone());
+
+        // Two memories with disjoint vocabularies (so the dedup step cannot
+        // merge them) that differ only in emotional magnitude.
+        let neutral = db
+            .storage
+            .ingest(memory("alpha bravo charlie delta echo", "neutral", 0.0))
+            .expect("ingest must succeed");
+        let emotional = db
+            .storage
+            .ingest(memory("foxtrot golf hotel india juliet", "emotional", 0.9))
+            .expect("ingest must succeed");
+
+        // One Good review each, so both start from the same FSRS state and the
+        // only remaining difference is the sentiment boost.
+        db.storage
+            .mark_reviewed(&neutral.id, Rating::Good)
+            .expect("mark_reviewed must succeed");
+        db.storage
+            .mark_reviewed(&emotional.id, Rating::Good)
+            .expect("mark_reviewed must succeed");
+        // Age both memories first, so the "before" snapshot below is the state
+        // the pipeline actually starts from.
+        backdate(&db_path, &[neutral.id.clone(), emotional.id.clone()], 30);
+
+        let neutral_before = db
+            .storage
+            .get_node(&neutral.id)
+            .expect("get_node must not error")
+            .expect("the neutral memory must exist");
+        let emotional_before = db
+            .storage
+            .get_node(&emotional.id)
+            .expect("get_node must not error")
+            .expect("the emotional memory must exist");
+        assert_eq!(
+            neutral_before.retention_strength, emotional_before.retention_strength,
+            "test setup: the two memories must start from the same retention"
+        );
+        assert!(
+            neutral_before.last_accessed < Utc::now() - Duration::days(29),
+            "test setup: the memories must be aged, got {}",
+            neutral_before.last_accessed
+        );
+        drop(db);
+
+        // ---- The act: the real 17-step pipeline -----------------------------
+        let db = reopen(&db_path);
+        let mut cycles = Vec::new();
+        // Three cycles, because `get_retention_trend` only reports a trend once
+        // three snapshots exist — running it three times also proves the
+        // snapshot row is written by every cycle, not just the first.
+        for _ in 0..3 {
+            let result = db
+                .storage
+                .run_consolidation()
+                .expect("run_consolidation must succeed");
+            assert_eq!(
+                result.nodes_pruned, 0,
+                "consolidation must never delete memories: {result:?}"
+            );
+            assert!(
+                result.decay_applied >= 2,
+                "both aged memories must be decayed: {result:?}"
+            );
+            cycles.push(result);
+        }
+        assert_eq!(
+            db.node_count(),
+            2,
+            "a consolidation cycle must not add or remove memories"
+        );
+
+        // ---- Persisted effects ----------------------------------------------
+        let neutral_after = db
+            .storage
+            .get_node(&neutral.id)
+            .expect("get_node must not error")
+            .expect("the neutral memory must survive consolidation");
+        let emotional_after = db
+            .storage
+            .get_node(&emotional.id)
+            .expect("get_node must not error")
+            .expect("the emotional memory must survive consolidation");
+
+        assert!(
+            neutral_after.retention_strength < neutral_before.retention_strength,
+            "FSRS decay must be persisted: retention {} -> {}",
+            neutral_before.retention_strength,
+            neutral_after.retention_strength
+        );
+        assert!(
+            emotional_after.retention_strength > neutral_after.retention_strength,
+            "the sentiment boost must slow decay (both memories share a stability, \
+             only the emotional one is boosted): emotional={} neutral={}",
+            emotional_after.retention_strength,
+            neutral_after.retention_strength
+        );
+        assert!(
+            emotional_after.storage_strength > emotional_before.storage_strength,
+            "emotional promotion must be persisted: storage {} -> {}",
+            emotional_before.storage_strength,
+            emotional_after.storage_strength
+        );
+        assert_eq!(
+            neutral_after.storage_strength, neutral_before.storage_strength,
+            "the neutral memory must not be promoted"
+        );
+        assert_eq!(
+            neutral_after.last_accessed, neutral_before.last_accessed,
+            "decay must not fabricate an access"
+        );
+
+        // ---- Persisted bookkeeping ------------------------------------------
+        let avg = db
+            .storage
+            .get_avg_retention()
+            .expect("get_avg_retention must succeed");
+        let expected_avg =
+            (neutral_after.retention_strength + emotional_after.retention_strength) / 2.0;
+        assert!(
+            (avg - expected_avg).abs() < 1e-6,
+            "the average retention must be computed from the persisted rows: {avg} vs {expected_avg}"
+        );
+        assert_ne!(
+            db.storage
+                .get_retention_trend()
+                .expect("get_retention_trend must succeed"),
+            "insufficient_data",
+            "every cycle must persist a retention snapshot (three cycles were run)"
+        );
+        let history = db
+            .storage
+            .get_consolidation_history(10)
+            .expect("get_consolidation_history must succeed");
+        assert_eq!(
+            history.len(),
+            3,
+            "each cycle must append exactly one consolidation_history row"
+        );
+        for record in &history {
+            assert_eq!(
+                record.memories_replayed, cycles[0].decay_applied as i32,
+                "the history row must record the decay count the cycle reported"
+            );
+        }
+
+        // ---- The rows are the only copy: read them back after a restart -----
+        let expected_neutral = neutral_after.retention_strength;
+        let expected_emotional = emotional_after.retention_strength;
+        drop(db);
+        let restarted = reopen(&db_path);
+        let neutral_reread = restarted
+            .storage
+            .get_node(&neutral.id)
+            .expect("get_node must not error")
+            .expect("the neutral memory must survive a restart");
+        let emotional_reread = restarted
+            .storage
+            .get_node(&emotional.id)
+            .expect("get_node must not error")
+            .expect("the emotional memory must survive a restart");
+        assert_eq!(
+            neutral_reread.retention_strength, expected_neutral,
+            "the decayed retention must be durable"
+        );
+        assert_eq!(
+            emotional_reread.retention_strength, expected_emotional,
+            "the promoted retention must be durable"
+        );
+    }
 }

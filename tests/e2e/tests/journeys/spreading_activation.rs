@@ -1,11 +1,5 @@
 //! # Spreading Activation Journey Tests
 //!
-//! > **Scope: contract test, not a Storage end-to-end test.** This module
-//! > exercises real product code, but it never constructs `Storage` and never
-//! > touches SQLite. The persistence journey lives in
-//! > `tests/journeys/storage_persistence.rs`; see `journeys/mod.rs` for the
-//! > full breakdown of which files are real E2E and which are DTO contracts.
-//!
 //! Tests the associative memory network that finds hidden connections
 //! between memories through spreading activation - a technique inspired
 //! by how neurons activate related memories in the brain.
@@ -17,6 +11,15 @@
 //! 3. System activates the source memory
 //! 4. Activation spreads to related memories via association links
 //! 5. User discovers hidden connections they didn't explicitly search for
+//!
+//! ## Scope: contract tests **and** a real storage journey
+//!
+//! The top-level tests build an `ActivationNetwork` in memory. That network is
+//! rebuilt from SQLite on every boot, so the graph that matters is the one in
+//! `memory_connections` — which those tests never touch. [`storage_journeys`]
+//! at the bottom persists a real graph, restarts, walks it with the storage
+//! BFS, rebuilds the in-memory network from the persisted edges, and then
+//! decays and prunes it through the same primitives consolidation uses.
 
 use std::collections::HashSet;
 use vestige_core::neuroscience::spreading_activation::{
@@ -560,4 +563,323 @@ fn test_convergent_paths() {
     // Total activation from convergent paths
     let total: f64 = target_results.iter().map(|r| r.activation).sum();
     assert!(total > 0.0, "Target should have positive activation");
+}
+
+// ============================================================================
+// REAL STORAGE JOURNEY (persisted graph, real BFS, decay and prune)
+// ============================================================================
+//
+// The contract tests above only ever see a network built by hand in memory.
+// The product rebuilds that network from `memory_connections` on every boot, so
+// this journey persists a graph through `Storage::save_connection`, restarts,
+// walks it with the storage BFS (`get_memory_subgraph`, `find_path_between`),
+// rebuilds the in-memory network from the persisted edges, and finally decays
+// and prunes the graph with the primitives consolidation runs.
+
+mod storage_journeys {
+    use std::path::Path;
+
+    use chrono::Utc;
+    use tempfile::TempDir;
+    use vestige_core::memory::IngestInput;
+    use vestige_core::neuroscience::spreading_activation::{
+        ActivatedMemory, ActivationNetwork, LinkType,
+    };
+    use vestige_core::{ConnectionRecord, Storage};
+    use vestige_e2e_tests::harness::{TestDatabaseManager, enable_mock_embeddings};
+
+    /// The canonical string the product writes into
+    /// `memory_connections.link_type`. Derived from the enum's own `serde`
+    /// representation rather than hard-coded here, because the dashboard and
+    /// dream traversal grep on these strings
+    /// (`crates/vestige-mcp/src/tools/smart_ingest/post_ingest.rs:245-263`).
+    fn label(link_type: LinkType) -> String {
+        serde_json::to_value(link_type)
+            .expect("LinkType must serialise")
+            .as_str()
+            .expect("LinkType serialises to a string")
+            .to_string()
+    }
+
+    fn edge(source: &str, target: &str, strength: f64, link_type: LinkType) -> ConnectionRecord {
+        let now = Utc::now();
+        ConnectionRecord {
+            source_id: source.to_string(),
+            target_id: target.to_string(),
+            strength,
+            link_type: label(link_type),
+            created_at: now,
+            last_activated: now,
+            activation_count: 1,
+        }
+    }
+
+    fn memory(content: &str, tag: &str) -> IngestInput {
+        IngestInput {
+            content: content.to_string(),
+            node_type: "concept".to_string(),
+            tags: vec![tag.to_string()],
+            ..Default::default()
+        }
+    }
+
+    fn reopen(db_path: &Path) -> TestDatabaseManager {
+        TestDatabaseManager::new_at_path(db_path.to_path_buf())
+    }
+
+    /// Rebuild the in-memory activation network from the persisted edges, the
+    /// way the server does at boot.
+    fn rebuild_network(storage: &Storage) -> ActivationNetwork {
+        let mut network = ActivationNetwork::new();
+        for conn in storage
+            .get_all_connections()
+            .expect("get_all_connections must succeed")
+        {
+            let link_type: LinkType =
+                serde_json::from_value(serde_json::Value::String(conn.link_type.clone()))
+                    .unwrap_or_else(|_| panic!("unknown persisted link_type: {}", conn.link_type));
+            network.add_edge(
+                conn.source_id.clone(),
+                conn.target_id.clone(),
+                link_type,
+                conn.strength,
+            );
+        }
+        network
+    }
+
+    /// The activation record for `id`, failing loudly when the traversal never
+    /// reached it.
+    fn activated<'a>(activation: &'a [ActivatedMemory], id: &str) -> &'a ActivatedMemory {
+        activation
+            .iter()
+            .find(|a| a.memory_id == id)
+            .unwrap_or_else(|| panic!("{id} must be activated from the hub: {activation:?}"))
+    }
+
+    /// Persist a graph → restart → traversal must reflect the persisted edges →
+    /// decay and prune must be visible on disk without deleting memories.
+    #[test]
+    fn test_journey_persisted_graph_drives_traversal_decay_and_prune() {
+        let _mock = enable_mock_embeddings();
+
+        let dir = TempDir::new().expect("temp dir");
+        let db_path = dir.path().join("graph.db");
+        let db = TestDatabaseManager::new_at_path(db_path.clone());
+
+        // Five memories with disjoint vocabularies, so nothing here depends on
+        // embedding similarity.
+        let hub = db
+            .storage
+            .ingest(memory("alpha bravo charlie delta echo", "hub"))
+            .expect("ingest must succeed");
+        let n1 = db
+            .storage
+            .ingest(memory("foxtrot golf hotel india juliet", "one"))
+            .expect("ingest must succeed");
+        let n2 = db
+            .storage
+            .ingest(memory("kilo lima mike november oscar", "two"))
+            .expect("ingest must succeed");
+        let n3 = db
+            .storage
+            .ingest(memory("papa quebec romeo sierra tango", "three"))
+            .expect("ingest must succeed");
+        let n4 = db
+            .storage
+            .ingest(memory("uniform victor whiskey xray yankee", "four"))
+            .expect("ingest must succeed");
+
+        // A star around `hub` (unique highest degree) plus one weak leaf edge.
+        for conn in [
+            edge(&hub.id, &n1.id, 0.9, LinkType::Semantic),
+            edge(&hub.id, &n2.id, 0.6, LinkType::Causal),
+            edge(&hub.id, &n3.id, 0.3, LinkType::Temporal),
+            edge(&n3.id, &n4.id, 0.15, LinkType::PartOf),
+        ] {
+            db.storage
+                .save_connection(&conn)
+                .expect("save_connection must succeed");
+        }
+        drop(db);
+
+        // ---- Cold start: the graph must come back off disk -------------------
+        let restarted = reopen(&db_path);
+        assert_eq!(
+            restarted
+                .storage
+                .get_all_connections()
+                .expect("get_all_connections must succeed")
+                .len(),
+            4,
+            "every persisted edge must survive a restart"
+        );
+
+        let hub_edges = restarted
+            .storage
+            .get_connections_for_memory(&hub.id)
+            .expect("get_connections_for_memory must succeed");
+        let strengths: Vec<f64> = hub_edges.iter().map(|c| c.strength).collect();
+        assert_eq!(
+            strengths,
+            vec![0.9, 0.6, 0.3],
+            "edges must come back ordered by strength with their weights intact"
+        );
+        assert_eq!(
+            hub_edges
+                .iter()
+                .find(|c| c.target_id == n2.id || c.source_id == n2.id)
+                .expect("the hub-n2 edge must exist")
+                .link_type,
+            label(LinkType::Causal),
+            "the link type must survive the round trip"
+        );
+
+        assert_eq!(
+            restarted
+                .storage
+                .get_most_connected_memory()
+                .expect("get_most_connected_memory must succeed")
+                .as_deref(),
+            Some(hub.id.as_str()),
+            "the hub has degree 3; the rest have degree 1 or 2"
+        );
+
+        // ---- Real BFS over the persisted graph ------------------------------
+        let (nodes, edges) = restarted
+            .storage
+            .get_memory_subgraph(&hub.id, 2, 50)
+            .expect("get_memory_subgraph must succeed");
+        assert_eq!(
+            nodes.len(),
+            5,
+            "2 hops from the hub must reach every memory in the component"
+        );
+        assert_eq!(edges.len(), 4, "the induced edge set must be complete");
+
+        let path = restarted
+            .storage
+            .find_path_between(&n1.id, &n4.id, 3)
+            .expect("find_path_between must succeed")
+            .expect("n4 is reachable from n1 in 3 hops");
+        assert_eq!(
+            path,
+            vec![n1.id.clone(), hub.id.clone(), n3.id.clone(), n4.id.clone()],
+            "the shortest chain must follow the persisted edges"
+        );
+        assert_eq!(
+            restarted
+                .storage
+                .find_path_between(&n1.id, &n4.id, 2)
+                .expect("find_path_between must succeed"),
+            None,
+            "the depth limit must be honoured"
+        );
+
+        // ---- The in-memory network rebuilt from those same edges -------------
+        let mut network = rebuild_network(&restarted.storage);
+        let activation = network.activate(&hub.id, 1.0);
+        assert!(
+            activated(&activation, &n3.id).activation > 0.0,
+            "the weakest direct neighbour must still clear the activation threshold"
+        );
+        assert!(
+            activated(&activation, &n1.id).activation > activated(&activation, &n2.id).activation
+                && activated(&activation, &n2.id).activation
+                    > activated(&activation, &n3.id).activation,
+            "propagated activation must follow the persisted edge strengths: {activation:?}"
+        );
+        assert_eq!(
+            activated(&activation, &n1.id).link_type,
+            LinkType::Semantic,
+            "the rebuilt network must recover the link type"
+        );
+
+        // ---- Decay and prune (the primitives consolidation step 12 runs) ----
+        assert_eq!(
+            restarted
+                .storage
+                .apply_connection_decay(0.5)
+                .expect("apply_connection_decay must succeed"),
+            4,
+            "decay must touch every edge"
+        );
+        drop(restarted);
+
+        let restarted = reopen(&db_path);
+        let decayed_hub_edges = restarted
+            .storage
+            .get_connections_for_memory(&hub.id)
+            .expect("get_connections_for_memory must succeed");
+        assert!(
+            (decayed_hub_edges[0].strength - 0.45).abs() < 1e-9,
+            "the decayed strength must be persisted, got {}",
+            decayed_hub_edges[0].strength
+        );
+        assert!(
+            (decayed_hub_edges[2].strength - 0.15).abs() < 1e-9,
+            "every edge must be decayed, got {}",
+            decayed_hub_edges[2].strength
+        );
+
+        // After the halving, 0.15 (hub-n3) and 0.075 (n3-n4) are both below the
+        // threshold; 0.45 (hub-n1) and 0.30 (hub-n2) are not.
+        assert_eq!(
+            restarted
+                .storage
+                .prune_weak_connections(0.2)
+                .expect("prune_weak_connections must succeed"),
+            2,
+            "both edges of the decayed weak branch are below the threshold"
+        );
+        drop(restarted);
+
+        // ---- Pruning edges must not delete the memories they pointed at ------
+        let restarted = reopen(&db_path);
+        for (label, id) in [("n3", &n3.id), ("n4", &n4.id)] {
+            assert!(
+                restarted
+                    .storage
+                    .get_node(id)
+                    .expect("get_node must not error")
+                    .is_some(),
+                "pruning an edge must never delete the memory ({label})"
+            );
+            assert_eq!(
+                restarted
+                    .storage
+                    .get_connections_for_memory(id)
+                    .expect("get_connections_for_memory must succeed")
+                    .len(),
+                0,
+                "the pruned edges must be gone for {label}"
+            );
+        }
+        assert_eq!(
+            restarted
+                .storage
+                .get_connections_for_memory(&n2.id)
+                .expect("get_connections_for_memory must succeed")
+                .len(),
+            1,
+            "an edge above the threshold must survive the prune"
+        );
+        assert_eq!(
+            restarted
+                .storage
+                .find_path_between(&hub.id, &n3.id, 3)
+                .expect("find_path_between must succeed"),
+            None,
+            "the pruned edge must break the chain to the weak branch"
+        );
+        let (nodes_after, edges_after) = restarted
+            .storage
+            .get_memory_subgraph(&hub.id, 2, 50)
+            .expect("get_memory_subgraph must succeed");
+        assert_eq!(
+            (nodes_after.len(), edges_after.len()),
+            (3, 2),
+            "the weak branch must drop out of the traversal while its memories stay in the store"
+        );
+    }
 }

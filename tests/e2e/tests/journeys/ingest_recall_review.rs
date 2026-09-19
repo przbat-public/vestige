@@ -1,11 +1,5 @@
 //! # Ingest-Recall-Review Journey Tests
 //!
-//! > **Scope: contract test, not a Storage end-to-end test.** This module
-//! > exercises real product code, but it never constructs `Storage` and never
-//! > touches SQLite. The persistence journey lives in
-//! > `tests/journeys/storage_persistence.rs`; see `journeys/mod.rs` for the
-//! > full breakdown of which files are real E2E and which are DTO contracts.
-//!
 //! Tests the complete memory lifecycle from creation to retrieval to review.
 //! This is the core user journey for any memory system.
 //!
@@ -16,6 +10,15 @@
 //! 3. User reviews memories to strengthen retention
 //! 4. System tracks memory strength and schedules reviews
 //! 5. User benefits from improved recall over time
+//!
+//! ## Scope: contract tests **and** real storage journeys
+//!
+//! The top-level tests are DTO / pure-function contract tests: they pin the
+//! `serde` shapes and the FSRS scheduler in isolation and never construct
+//! `Storage`. The real end-to-end journeys live in [`storage_journeys`] at the
+//! bottom of this file: a `Storage` on a temp SQLite file, the production
+//! prediction-error gate (`Storage::smart_ingest`), FTS5 + HNSW recall, FSRS
+//! review, and a cold restart in between.
 
 use vestige_core::{
     consolidation::SleepConsolidation,
@@ -357,4 +360,305 @@ fn test_fsrs_rating_effects() {
         good.interval,
         hard.interval
     );
+}
+
+// ============================================================================
+// REAL STORAGE JOURNEYS (SQLite, embeds, FSRS state, cold restart)
+// ============================================================================
+//
+// Everything above is a DTO / pure-function contract test. The tests below
+// drive the product: a `Storage` on a temp SQLite file, the prediction-error
+// gate inside `Storage::smart_ingest` (the same call the MCP `smart_ingest`
+// tool makes), FTS5 + HNSW recall through `Storage::recall`, FSRS review, and a
+// cold restart that rebuilds every index from disk.
+//
+// "Restart" means dropping the `Storage` and constructing a fresh one from the
+// same file: that re-runs the migrations and the vector-index bootstrap the
+// server runs at boot. The journey deliberately does not spawn the
+// `vestige-mcp` binary — CI's journey-tests job
+// (.github/workflows/test.yml:213-223) runs this target without building the
+// server, so a child-process test would skip there and report green while
+// covering nothing. Child-process coverage lives in the `mcp_protocol` target,
+// whose CI job builds the binary first.
+
+mod storage_journeys {
+    use std::path::Path;
+
+    use chrono::Utc;
+    use tempfile::TempDir;
+    use vestige_core::memory::{IngestInput, RecallInput, SearchMode};
+    use vestige_core::{KnowledgeNode, Rating, Storage};
+    use vestige_e2e_tests::harness::{TestDatabaseManager, enable_mock_embeddings};
+
+    /// Build an `IngestInput` (the struct carries defaults for every optional
+    /// field, so journeys only name what they exercise).
+    fn memory(content: &str, node_type: &str, tags: &[&str]) -> IngestInput {
+        IngestInput {
+            content: content.to_string(),
+            node_type: node_type.to_string(),
+            tags: tags.iter().map(|t| (*t).to_string()).collect(),
+            source: Some("journey".to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// Cold start over an existing file — the server's boot path.
+    fn reopen(db_path: &Path) -> TestDatabaseManager {
+        TestDatabaseManager::new_at_path(db_path.to_path_buf())
+    }
+
+    /// Recall through the real dispatcher (`Keyword` = FTS5, `Hybrid` =
+    /// FTS5 + embeddings + RRF), with `min_retention` disabled so the decayed
+    /// memories in the second journey stay eligible.
+    fn recall(storage: &Storage, query: &str, mode: SearchMode) -> Vec<KnowledgeNode> {
+        storage
+            .recall(RecallInput {
+                query: query.to_string(),
+                limit: 10,
+                min_retention: 0.0,
+                search_mode: mode,
+                ..Default::default()
+            })
+            .expect("recall must succeed")
+    }
+
+    fn ids(nodes: &[KnowledgeNode]) -> Vec<String> {
+        nodes.iter().map(|n| n.id.clone()).collect()
+    }
+
+    /// ingest (prediction-error gate) → recall (both modes) → review →
+    /// cold restart → every field, index and schedule is still there.
+    #[test]
+    fn test_journey_ingest_recall_review_survives_a_cold_restart() {
+        // Must be set before the first embed: without it the ingest path
+        // lazily initialises the real ONNX model (~547 MB on a cold cache).
+        let _mock = enable_mock_embeddings();
+
+        let dir = TempDir::new().expect("temp dir");
+        let db_path = dir.path().join("ingest_recall_review.db");
+        let db = TestDatabaseManager::new_at_path(db_path.clone());
+        assert!(db.is_empty(), "a fresh store must start empty");
+
+        // ---- 1. Write through the production path --------------------------
+        let fsrs_memory = "The FSRS-6 scheduler computes the next review date from retrievability.";
+        let created = db
+            .storage
+            .smart_ingest(memory(fsrs_memory, "fact", &["fsrs", "scheduling"]))
+            .expect("smart_ingest must succeed");
+        assert_eq!(
+            created.decision, "create",
+            "the first memory in an empty store must go through the Create branch, got {}: {}",
+            created.decision, created.reason
+        );
+        assert!(
+            created.node.has_embedding.unwrap_or(false),
+            "the create branch must persist a vector, not only return the node"
+        );
+        let id = created.node.id.clone();
+
+        let other = db
+            .storage
+            .ingest(memory(
+                "Sourdough starter hydration ratios for bread.",
+                "note",
+                &["baking"],
+            ))
+            .expect("ingest must succeed");
+        assert_eq!(db.node_count(), 2, "two writes must produce two rows");
+
+        // ---- 2. Recall through both retrieval paths ------------------------
+        let keyword = recall(&db.storage, "retrievability schedule", SearchMode::Keyword);
+        assert!(
+            keyword.iter().any(|n| n.id == id),
+            "FTS5 recall must find the FSRS memory, got {:?}",
+            ids(&keyword)
+        );
+        let hybrid = recall(
+            &db.storage,
+            "which memory schedules reviews from retrievability",
+            SearchMode::Hybrid,
+        );
+        assert!(
+            hybrid.iter().any(|n| n.id == id),
+            "hybrid recall must find the FSRS memory, got {:?}",
+            ids(&hybrid)
+        );
+        // Anti-vacuity: recall must discriminate, not return the whole store.
+        let unrelated = recall(&db.storage, "sourdough hydration", SearchMode::Keyword);
+        assert!(
+            !unrelated.iter().any(|n| n.id == id),
+            "an unrelated query must not return the FSRS memory"
+        );
+
+        // ---- 3. Review through the real FSRS path --------------------------
+        let before_review = db
+            .storage
+            .get_node(&id)
+            .expect("get_node must not error")
+            .expect("the memory must exist");
+        let reviewed = db
+            .storage
+            .mark_reviewed(&id, Rating::Good)
+            .expect("mark_reviewed must succeed");
+        assert_eq!(reviewed.reps, before_review.reps + 1);
+        assert!(
+            reviewed.storage_strength > before_review.storage_strength,
+            "a Good review must strengthen storage"
+        );
+        assert!(
+            reviewed.next_review.expect("scheduled") > Utc::now(),
+            "a reviewed memory must be scheduled into the future"
+        );
+
+        // ---- 4. Cold restart ------------------------------------------------
+        let expected = reviewed.clone();
+        drop(db);
+        let restarted = reopen(&db_path);
+
+        assert_eq!(
+            restarted.node_count(),
+            2,
+            "a restart must not lose or duplicate memories"
+        );
+        let stats = restarted
+            .storage
+            .get_stats()
+            .expect("get_stats must succeed");
+        assert_eq!(
+            stats.nodes_with_embeddings, 2,
+            "both vectors must be on disk, not only in the previous process"
+        );
+        let after = restarted
+            .storage
+            .get_node(&id)
+            .expect("get_node after restart must not error")
+            .expect("the reviewed memory must survive a restart");
+        assert_eq!(after.content, expected.content);
+        assert_eq!(after.node_type, expected.node_type);
+        assert_eq!(after.tags, expected.tags);
+        assert_eq!(after.source, expected.source);
+        assert_eq!(after.reps, expected.reps, "FSRS reps must be durable");
+        assert_eq!(
+            after.storage_strength, expected.storage_strength,
+            "FSRS storage strength must be durable"
+        );
+        assert_eq!(
+            after.next_review, expected.next_review,
+            "the review schedule must be durable"
+        );
+
+        // ---- 5. Both indexes must be usable after the cold start ------------
+        let keyword_after = recall(
+            &restarted.storage,
+            "retrievability schedule",
+            SearchMode::Keyword,
+        );
+        assert!(
+            keyword_after.iter().any(|n| n.id == id),
+            "the FTS5 index must survive a restart, got {:?}",
+            ids(&keyword_after)
+        );
+        let hybrid_after = recall(
+            &restarted.storage,
+            "bread baking hydration",
+            SearchMode::Hybrid,
+        );
+        assert!(
+            hybrid_after.iter().any(|n| n.id == other.id),
+            "the vector index must be rebuilt from SQLite on boot, got {:?}",
+            ids(&hybrid_after)
+        );
+    }
+
+    /// The Testing Effect (`recall` → `strengthen_batch_on_access`) must be a
+    /// durable write, not an in-memory score tweak.
+    ///
+    /// The memory is first downscaled through the real NREM3 primitive
+    /// (`Storage::downscale_retention_batch`, applied by the dream cycle):
+    /// without it the strengths sit at their ingest maximum of 1.0 and the
+    /// `MIN(1.0, x + 0.05)` boost inside `recall` would be invisible.
+    #[test]
+    fn test_journey_recall_strengthens_a_decayed_memory_on_disk() {
+        let _mock = enable_mock_embeddings();
+
+        let dir = TempDir::new().expect("temp dir");
+        let db_path = dir.path().join("testing_effect.db");
+        let db = TestDatabaseManager::new_at_path(db_path.clone());
+
+        let id = db
+            .storage
+            .ingest(memory(
+                "Spreading activation walks the knowledge graph from a seed memory.",
+                "concept",
+                &["graph"],
+            ))
+            .expect("ingest must succeed")
+            .id;
+
+        db.storage
+            .downscale_retention_batch(&[id.as_str()], 0.5)
+            .expect("downscale_retention_batch must succeed");
+        let decayed = db
+            .storage
+            .get_node(&id)
+            .expect("get_node must not error")
+            .expect("the memory must exist");
+        assert!(
+            decayed.retrieval_strength < 0.6 && decayed.retention_strength < 0.6,
+            "the downscale must be persisted before the recall: retrieval={} retention={}",
+            decayed.retrieval_strength,
+            decayed.retention_strength
+        );
+        assert_eq!(
+            decayed.times_retrieved.unwrap_or(0),
+            0,
+            "a never-recalled memory must start at zero retrievals"
+        );
+        drop(db);
+
+        // Recall in a *fresh* process on the decayed state, then restart again
+        // and check the boost the recall wrote is what we read back.
+        let restarted = reopen(&db_path);
+        let hits = recall(
+            &restarted.storage,
+            "spreading activation knowledge graph",
+            SearchMode::Keyword,
+        );
+        assert!(
+            hits.iter().any(|n| n.id == id),
+            "the decayed memory must stay recallable, got {:?}",
+            ids(&hits)
+        );
+        drop(restarted);
+
+        let restarted = reopen(&db_path);
+        let boosted = restarted
+            .storage
+            .get_node(&id)
+            .expect("get_node must not error")
+            .expect("the memory must exist");
+        assert!(
+            (boosted.retrieval_strength - (decayed.retrieval_strength + 0.05)).abs() < 1e-9,
+            "recall must add +0.05 retrieval strength on disk: {} -> {}",
+            decayed.retrieval_strength,
+            boosted.retrieval_strength
+        );
+        assert!(
+            (boosted.retention_strength - (decayed.retention_strength + 0.02)).abs() < 1e-9,
+            "recall must add +0.02 retention strength on disk: {} -> {}",
+            decayed.retention_strength,
+            boosted.retention_strength
+        );
+        assert_eq!(
+            boosted.times_retrieved.unwrap_or(0),
+            1,
+            "the retrieval counter must be persisted"
+        );
+        assert!(
+            boosted.last_accessed > decayed.last_accessed,
+            "recall must move last_accessed forward ({} -> {})",
+            decayed.last_accessed,
+            boosted.last_accessed
+        );
+    }
 }

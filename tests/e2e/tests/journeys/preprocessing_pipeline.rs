@@ -1,17 +1,20 @@
 //! # Content Intelligence Pipeline Integration Tests
 //!
-//! > **Scope: contract test, not a Storage end-to-end test.** This module
-//! > exercises real product code, but it never constructs `Storage` and never
-//! > touches SQLite. The persistence journey lives in
-//! > `tests/journeys/storage_persistence.rs`; see `journeys/mod.rs` for the
-//! > full breakdown of which files are real E2E and which are DTO contracts.
-//!
 //! Tests the full preprocessing → ingest → search lifecycle:
 //!
 //! 1. Content with entities, temporal expressions, and relations
 //!    goes through preprocessing enrichment
 //! 2. Enriched content gets stored with provenance metadata
 //! 3. Compound queries get decomposed and searched
+//!
+//! ## Scope: contract tests **and** a real storage journey
+//!
+//! [`preprocessing_tests`] exercises the pipeline as pure functions — it never
+//! constructs `Storage`, so it cannot fail if the derived metadata is dropped
+//! on the way to SQLite. [`storage_journeys`] at the bottom closes that gap: the
+//! pipeline output is ingested through `Storage::smart_ingest` and every piece
+//! of derived metadata (rewritten content, entity tags, temporal anchors,
+//! provenance) is read back from a cold-started store.
 
 mod preprocessing_tests {
     use vestige_core::preprocessing::{
@@ -374,6 +377,187 @@ mod preprocessing_tests {
         assert!(
             r4.entities.len() <= 20,
             "Should cap entities at MAX_ENTITIES"
+        );
+    }
+}
+
+// ============================================================================
+// REAL STORAGE JOURNEY (derived metadata must reach SQLite)
+// ============================================================================
+//
+// Content Intelligence is only useful if what it derives is *persisted* and
+// comes back on retrieval: the entity tags drive filtering, the temporal
+// anchors drive `temporal current/expired`, and the provenance block is what
+// `search` returns at `detail_level: "full"`. This journey composes the same
+// ingest the MCP `smart_ingest` tool performs
+// (`crates/vestige-mcp/src/tools/smart_ingest/execute.rs:104-158`) and then
+// asserts every derived field after a cold restart.
+
+mod storage_journeys {
+    use std::path::Path;
+
+    use chrono::Utc;
+    use tempfile::TempDir;
+    use vestige_core::memory::IngestInput;
+    use vestige_core::preprocessing::{self, PreprocessingConfig, provenance::ProvenanceMetadata};
+    use vestige_e2e_tests::harness::{TestDatabaseManager, enable_mock_embeddings};
+
+    fn reopen(db_path: &Path) -> TestDatabaseManager {
+        TestDatabaseManager::new_at_path(db_path.to_path_buf())
+    }
+
+    /// Preprocess → ingest → cold restart → the derived metadata is still there
+    /// and still drives retrieval.
+    #[test]
+    fn test_journey_preprocessing_metadata_is_persisted_and_retrievable() {
+        let _mock = enable_mock_embeddings();
+
+        let dir = TempDir::new().expect("temp dir");
+        let db_path = dir.path().join("preprocessing.db");
+        let db = TestDatabaseManager::new_at_path(db_path.clone());
+
+        // "due by next Friday" is the exact deadline phrasing pinned by the
+        // pipeline's own unit test (`preprocessing/temporal.rs:140-147`), so the
+        // temporal half of this journey cannot pass vacuously.
+        let content = "Alice manages the Auth Team at Acme Corp. She deployed the new \
+                       OAuth service at https://auth.acme.com and the rollout report is \
+                       due by next Friday. Contact alice@acme.com for the $50,000 budget.";
+        let config = PreprocessingConfig {
+            session_id: Some("journey-session-42".to_string()),
+            agent: Some("claude".to_string()),
+            existing_valid_from: None,
+            existing_valid_until: None,
+        };
+        let pp = preprocessing::preprocess(content, &config);
+
+        // Preconditions for the persistence assertions below.
+        assert!(
+            !pp.auto_tags.is_empty() && pp.auto_tags.iter().all(|t| t.starts_with("entity:")),
+            "the pipeline must derive entity tags for this content, got {:?}",
+            pp.auto_tags
+        );
+        let anchored_until = pp
+            .valid_until
+            .expect("the deadline phrase must be anchored to a concrete date");
+        assert!(
+            anchored_until > Utc::now(),
+            "the anchored deadline must be in the future, got {anchored_until}"
+        );
+        assert!(
+            pp.provenance
+                .auto_entities
+                .iter()
+                .any(|e| e.contains("Acme") || e.contains("Alice")),
+            "the pipeline must extract the named entities, got {:?}",
+            pp.provenance.auto_entities
+        );
+
+        // The ingest the MCP `smart_ingest` tool performs: rewritten content,
+        // auto-tags merged with the caller's, anchors as validity, provenance
+        // as JSON.
+        let stored_node = db
+            .storage
+            .smart_ingest(IngestInput {
+                content: pp.content.clone(),
+                node_type: "fact".to_string(),
+                source: Some("preprocessing-journey".to_string()),
+                tags: pp.auto_tags.clone(),
+                valid_from: pp.valid_from,
+                valid_until: pp.valid_until,
+                provenance: Some(pp.provenance.to_json()),
+                ..Default::default()
+            })
+            .expect("smart_ingest must succeed")
+            .node;
+        drop(db);
+
+        // ---- Everything below is read off disk after a cold start -----------
+        let restarted = reopen(&db_path);
+        let stored = restarted
+            .storage
+            .get_node(&stored_node.id)
+            .expect("get_node must not error")
+            .expect("the enriched memory must survive a restart");
+
+        assert_eq!(
+            stored.content, pp.content,
+            "the rewritten content must be what is stored (not the raw input)"
+        );
+        assert_eq!(stored.valid_from, pp.valid_from);
+        assert_eq!(
+            stored.valid_until,
+            Some(anchored_until),
+            "the anchored deadline must be persisted on the row"
+        );
+        for tag in &pp.auto_tags {
+            assert!(
+                stored.tags.contains(tag),
+                "the derived tag `{tag}` must be persisted; got {:?}",
+                stored.tags
+            );
+        }
+
+        // The provenance block, read back through the product's own parser.
+        let provenance_json = stored
+            .provenance
+            .clone()
+            .expect("the provenance column must be populated");
+        let persisted = ProvenanceMetadata::from_json(&provenance_json);
+        assert_eq!(persisted.session_id.as_deref(), Some("journey-session-42"));
+        assert_eq!(persisted.agent.as_deref(), Some("claude"));
+        assert_eq!(
+            persisted.coref_rewrites, pp.coref_rewrites,
+            "the coreference rewrite count must be persisted"
+        );
+        assert_eq!(
+            persisted.auto_entities, pp.provenance.auto_entities,
+            "the extracted entities must be persisted"
+        );
+        assert_eq!(
+            persisted.temporal_anchors_found, pp.provenance.temporal_anchors_found,
+            "the temporal anchors must be persisted"
+        );
+        assert_eq!(
+            persisted.relations_extracted, pp.provenance.relations_extracted,
+            "the extracted relations must be persisted"
+        );
+        if pp.coref_rewrites > 0 {
+            assert!(
+                stored.content.contains("Alice"),
+                "a rewritten pronoun must resolve to the stored entity name"
+            );
+        }
+
+        // ---- The derived metadata must also be usable for retrieval ---------
+        let by_entity = restarted
+            .storage
+            .keyword_search("acme", 5, 0.0)
+            .expect("keyword_search must succeed");
+        assert!(
+            by_entity.iter().any(|n| n.id == stored_node.id),
+            "the memory must be findable by an extracted entity name, got {:?}",
+            by_entity.iter().map(|n| &n.id).collect::<Vec<_>>()
+        );
+        let unrelated = restarted
+            .storage
+            .keyword_search("sourdough", 5, 0.0)
+            .expect("keyword_search must succeed");
+        assert!(
+            unrelated.is_empty(),
+            "an unrelated query must not match the stored memory"
+        );
+        let (kw, sem) = vestige_core::default_hybrid_weights();
+        let hybrid = restarted
+            .storage
+            .hybrid_search("who deployed the OAuth service", 5, kw, sem)
+            .expect("hybrid_search must succeed");
+        assert!(
+            hybrid.iter().any(|r| r.node.id == stored_node.id),
+            "the rewritten content must be embedded and retrievable, got {:?}",
+            hybrid
+                .iter()
+                .map(|r| (&r.node.id, r.combined_score))
+                .collect::<Vec<_>>()
         );
     }
 }

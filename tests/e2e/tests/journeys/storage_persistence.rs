@@ -1,9 +1,10 @@
 //! # Real Storage journeys (SQLite-backed)
 //!
-//! Unlike the sibling files in this directory — which are **DTO / pure-function
-//! contract tests** and never construct `Storage` — this file drives the real
-//! product end to end: a `Storage` instance on a temp SQLite file, the actual
-//! FTS5 + vector search paths, FSRS review state, and a full close/reopen cycle.
+//! This file holds the original persistence journeys: a `Storage` instance on a
+//! temp SQLite file, the actual FTS5 + vector search paths, FSRS review state,
+//! and a full close/reopen cycle. Its siblings in this directory have since
+//! gained their own real journeys (see `journeys/mod.rs` for the table); the
+//! DTO / pure-function contract tests live on inside those same files.
 //!
 //! Two journeys live here:
 //!
@@ -368,19 +369,15 @@ fn test_consolidation_never_deletes_low_retention_memories() {
 
     // ---- The act: a full consolidation cycle ------------------------------
     //
-    // KNOWN PRODUCT BUG (reported to the review lead; this change's file scope
-    // excludes `crates/vestige-core/src/storage/sqlite/helpers.rs`):
-    // `Storage::run_consolidation` currently aborts in step 1 — `apply_decay` →
-    // `helpers::begin_write_transaction`, which runs `BEGIN IMMEDIATE` and then
-    // calls `Connection::unchecked_transaction()`, a method that issues a
-    // *second* `BEGIN` and therefore always fails with "cannot start a
-    // transaction within a transaction".
-    //
-    // The invariant under test (consolidation never deletes) must hold either
-    // way, so that exact error is tolerated — loudly — while any other failure
-    // fails the test. Once the helper is fixed the `Ok` arm additionally
-    // asserts the prune counter and the retention-snapshot path, which is
-    // unreachable until then.
+    // The pipeline used to abort in step 1 — `apply_decay` →
+    // `helpers::begin_write_transaction`, which ran `BEGIN IMMEDIATE` and then
+    // called `Connection::unchecked_transaction()`, issuing a *second* `BEGIN`
+    // and failing with "cannot start a transaction within a transaction". That
+    // is fixed (`helpers.rs:311-313` now uses `transaction_with_behavior`), so
+    // the `Ok` arm is the live path and the assertions inside it run. The arm
+    // that tolerates that exact message is kept as a regression guard: the
+    // invariant under test (consolidation never deletes) must hold either way,
+    // but any *other* failure fails the test.
     let cycle_completed = match db.storage.run_consolidation() {
         Ok(result) => {
             assert_eq!(
@@ -396,9 +393,9 @@ fn test_consolidation_never_deletes_low_retention_memories() {
                 "run_consolidation failed with an unexpected error: {message}"
             );
             eprintln!(
-                "[KNOWN BUG] run_consolidation aborted before reaching the retention block \
-                 (helpers::begin_write_transaction issues a second BEGIN): {message}\n\
-                 [KNOWN BUG] the node-deletion invariant is still asserted below."
+                "[REGRESSION] run_consolidation aborted before reaching the retention block \
+                 (helpers::begin_write_transaction issued a second BEGIN again): {message}\n\
+                 [REGRESSION] the node-deletion invariant is still asserted below."
             );
             false
         }
