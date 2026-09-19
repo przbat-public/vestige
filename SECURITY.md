@@ -36,7 +36,7 @@ Vestige is a **local MCP server** designed to run on your machine with your user
 ### What Vestige Does NOT Do
 
 - ❌ Send your memories anywhere. The only outbound requests are first-use model downloads from Hugging Face performed by `fastembed`/`hf-hub` (Nomic Embed v1.5 for `embeddings`, Jina Reranker v2 for the cross-encoder); they land in the local model cache (`FASTEMBED_CACHE_PATH` or the platform cache dir), and `VESTIGE_TEST_MOCK_EMBEDDINGS=1` removes even that. After the download the binary is offline. The `telemetry` cargo feature would add an OTLP exporter, but it ships no exporter today — `telemetry::init` reports `FeatureDisabled` without the feature and `Disabled` with it — and it is off by default.
-- ❌ Execute shell commands. There is no `std::process::Command` anywhere in the workspace; the single process spawn is `open::that` for the dashboard's `--open` flag, which hands a loopback URL to your platform opener and is never built from tool input.
+- ❌ Execute shell commands. There is no `std::process::Command` anywhere in the workspace; the single process spawn is `open::that`, which the `vestige dashboard` command uses to hand `http://127.0.0.1:<port>` to your platform opener (opt out with `--no-open`). It is never built from tool input.
 - ❌ Send telemetry or analytics.
 - ❌ Phone home to any server.
 
@@ -81,7 +81,8 @@ The policy is resolved once per open (`Storage::encryption_config` in `crates/ve
 | `VESTIGE_ENCRYPTION_KEY` set to a non-empty value | The key is applied as the first statement on every connection. On a build *without* the `encryption` feature the process refuses to start rather than open a plaintext database. A whitespace-only value counts as unset. |
 | `VESTIGE_REQUIRE_ENCRYPTION` truthy (`1`/`true`/`yes`/`on`) with no key | Refuses to start. This is how a unit file states "encrypted or nothing" without embedding key material. |
 | Neither set | Plaintext, with a one-time warning per process naming both variables. This is the default. |
-| A key is supplied but the file cannot be decrypted | Refuses to start and says the passphrase is wrong or the file is not a SQLCipher database — it never treats `SQLITE_NOTADB` as "corrupt, carry on", because that would create a fresh plaintext database beside the encrypted one. |
+| A key is supplied but the file cannot be decrypted | Refuses to start and says the passphrase is wrong or the file is not a SQLCipher database. |
+| No key is supplied but the file is not readable plaintext SQLite | Refuses to start too: `SQLITE_NOTADB` is reported as "encrypted (set `VESTIGE_ENCRYPTION_KEY`) or corrupt" rather than treated as "corrupt, carry on", because carrying on would create a fresh plaintext database beside the encrypted one. |
 
 SQLCipher encrypts every database file including the WAL journal. As a simpler alternative, use OS-level encryption (FileVault, BitLocker, LUKS).
 
