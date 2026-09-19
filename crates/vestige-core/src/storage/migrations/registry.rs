@@ -75,4 +75,9 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "v3.6.0 PRAGMA auto_vacuum=INCREMENTAL (page reclamation without full VACUUM)",
         up: MIGRATION_V14_UP,
     },
+    Migration {
+        version: 15,
+        description: "FTS5 tokenizer: porter unicode61 remove_diacritics 2 (accent folding, non-ASCII tokens)",
+        up: MIGRATION_V15_UP,
+    },
 ];

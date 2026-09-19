@@ -53,7 +53,7 @@ vestige/
 │   │       │                  # intentions, maintenance, embeddings, fsrs_personalization,
 │   │       │                  # review, consolidation, search, graph, gdpr, temporal,
 │   │       │                  # smart_ingest, insights, records, stats),
-│   │       │                  # migrations v1–v14, WAL, FTS5
+│   │       │                  # migrations v1–v15, WAL, FTS5
 │   │       ├── memory/        # Node types, FSRS strength, temporal, typed-memory MemoryKind
 │   │       ├── fsrs/          # Algorithm, scheduler, optimizer
 │   │       ├── embeddings/    # Nomic v1.5 local ONNX, hybrid, code embeddings

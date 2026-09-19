@@ -688,3 +688,51 @@ pub(super) const MIGRATION_V14_UP: &str = r#"
 -- case: `PRAGMA auto_vacuum=2; VACUUM; UPDATE schema_version ...`.
 SELECT 1;
 "#;
+
+/// V15: FTS5 tokenizer upgrade — `porter unicode61 remove_diacritics 2`.
+///
+/// V7 rebuilt the index with `tokenize='porter ascii'`, which is ASCII-only: every
+/// byte outside ASCII (Polish `ł`/`ż`/`ę`, em-dashes, typographic apostrophes) broke
+/// the token, so `wdrożenie` and words joined by an em-dash either vanished or glued
+/// themselves to a neighbour, and accented forms never folded to their base letter.
+/// `unicode61 remove_diacritics 2` folds accents and keeps the stemming.
+///
+/// The rebuild is a single index pass over `knowledge_nodes` on the first open after
+/// the upgrade; the external-content FTS table needs no copy of the row text.
+pub(super) const MIGRATION_V15_UP: &str = r#"
+-- Drop the sync triggers before the table they reference.
+DROP TRIGGER IF EXISTS knowledge_ai;
+DROP TRIGGER IF EXISTS knowledge_ad;
+DROP TRIGGER IF EXISTS knowledge_au;
+DROP TABLE IF EXISTS knowledge_fts;
+
+CREATE VIRTUAL TABLE knowledge_fts USING fts5(
+    id, content, tags,
+    content='knowledge_nodes',
+    content_rowid='rowid',
+    tokenize='porter unicode61 remove_diacritics 2'
+);
+
+-- Rebuild the index from existing rows with the new tokenizer.
+INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild');
+
+-- Re-create sync triggers (same shape as V7).
+CREATE TRIGGER knowledge_ai AFTER INSERT ON knowledge_nodes BEGIN
+    INSERT INTO knowledge_fts(rowid, id, content, tags)
+    VALUES (NEW.rowid, NEW.id, NEW.content, NEW.tags);
+END;
+
+CREATE TRIGGER knowledge_ad AFTER DELETE ON knowledge_nodes BEGIN
+    INSERT INTO knowledge_fts(knowledge_fts, rowid, id, content, tags)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.content, OLD.tags);
+END;
+
+CREATE TRIGGER knowledge_au AFTER UPDATE ON knowledge_nodes BEGIN
+    INSERT INTO knowledge_fts(knowledge_fts, rowid, id, content, tags)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.content, OLD.tags);
+    INSERT INTO knowledge_fts(rowid, id, content, tags)
+    VALUES (NEW.rowid, NEW.id, NEW.content, NEW.tags);
+END;
+
+UPDATE schema_version SET version = 15, applied_at = datetime('now');
+"#;
