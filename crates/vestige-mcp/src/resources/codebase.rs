@@ -6,8 +6,13 @@ use std::sync::Arc;
 
 use vestige_core::{RecallInput, SearchMode, Storage};
 
+use super::ResourceError;
+
 /// Read a codebase:// resource
-pub async fn read(storage: &Arc<Storage>, uri: &str) -> Result<String, String> {
+///
+/// Same error split as [`super::memory::read`]: an unpublished path is
+/// `-32002 Resource not found`, a failure while serving a known path is `-32603`.
+pub async fn read(storage: &Arc<Storage>, uri: &str) -> Result<String, ResourceError> {
     let path = uri.strip_prefix("codebase://").unwrap_or("");
 
     // Parse query parameters if present
@@ -16,12 +21,14 @@ pub async fn read(storage: &Arc<Storage>, uri: &str) -> Result<String, String> {
         None => (path, None),
     };
 
-    match path {
+    let body = match path {
         "structure" => read_structure(storage).await,
         "patterns" => read_patterns(storage, query).await,
         "decisions" => read_decisions(storage, query).await,
-        _ => Err(format!("Unknown codebase resource: {}", path)),
-    }
+        _ => return Err(ResourceError::NotFound(uri.to_string())),
+    };
+
+    body.map_err(ResourceError::Internal)
 }
 
 fn parse_codebase_param(query: Option<&str>) -> Option<String> {

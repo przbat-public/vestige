@@ -54,7 +54,9 @@ pub(super) async fn execute_list(
     .await
     .map_err(|e| format!("list intentions task panicked: {}", e))??;
 
-    let limit = args.limit.unwrap_or(20) as usize;
+    // Clamp before casting: `limit: -1` used to become a usize of ~1.8e19 via
+    // `as usize`, silently disabling the cap the caller thought they had set.
+    let limit = args.limit.unwrap_or(20).clamp(1, 100) as usize;
     let now = Utc::now();
 
     let items: Vec<Value> = intentions

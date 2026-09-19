@@ -29,7 +29,7 @@ pub fn export_schema() -> Value {
             },
             "path": {
                 "type": "string",
-                "description": "Custom filename (not path). File is saved in ~/.vestige/exports/. Default: memories-{timestamp}.{format}"
+                "description": "Custom filename (not a path). The file is written to the exports directory inside the Vestige data directory (owner-only permissions). Default: memories-{timestamp}.{format}"
             }
         }
     })
@@ -126,16 +126,11 @@ pub async fn execute_export(storage: &Arc<Storage>, args: Option<Value>) -> Resu
         })
         .collect();
 
-    // Determine export path — always constrained to vestige exports directory
-    let vestige_dir = directories::ProjectDirs::from("com", "vestige", "core")
-        .ok_or("Could not determine data directory")?;
-    let export_dir = vestige_dir
-        .data_dir()
-        .parent()
-        .unwrap_or(vestige_dir.data_dir())
-        .join("exports");
-    std::fs::create_dir_all(&export_dir)
-        .map_err(|e| format!("Failed to create export directory: {}", e))?;
+    // Determine export path — always constrained to the exports directory inside
+    // the Vestige data directory (0700). It used to be the data directory's
+    // *parent*, shared with every other application and outside the data-dir
+    // hardening, which put a full plaintext dump of the memory store one `ls` away.
+    let export_dir = super::artifact_dir("exports")?;
 
     let export_path = match args.path {
         Some(ref p) => {
@@ -155,8 +150,8 @@ pub async fn execute_export(storage: &Arc<Storage>, args: Option<Value>) -> Resu
         }
     };
 
-    // Write export
-    let file = std::fs::File::create(&export_path)
+    // Write export — 0600 from the first byte, not the umask default (0644).
+    let file = super::create_private_file(&export_path)
         .map_err(|e| format!("Failed to create export file: {}", e))?;
     let mut writer = std::io::BufWriter::new(file);
 

@@ -83,8 +83,6 @@ impl McpServer {
                 .await
             }
 
-            "mark_reviewed" => tools::review::execute(&self.storage, effective_args).await,
-
             // ---- Temporal browsing (v1.2+) ---------------------------------
             "memory_timeline" => tools::timeline::execute(&self.storage, effective_args).await,
             "memory_changelog" => tools::changelog::execute(&self.storage, effective_args).await,
@@ -165,7 +163,16 @@ impl McpServer {
             }
 
             unknown => {
-                return Err(JsonRpcError::method_not_found_with_message(&format!(
+                // `-32602 Invalid params`, not `-32601 Method not found`: the method
+                // (`tools/call`) was found and is supported — it is the tool *name* in
+                // the params that the server does not know. MCP `server/tools.md`
+                // (Error Handling) uses exactly this example, and the distinction is
+                // what lets an agent self-correct ("fix the name") instead of
+                // concluding the server is too old to expose tools at all.
+                //
+                // `-32601` stays reserved for an unknown JSON-RPC *method*
+                // (see `McpServer::handle_request`); do not collapse the two.
+                return Err(JsonRpcError::invalid_params(&format!(
                     "Unknown tool: {}",
                     unknown
                 )));
@@ -182,23 +189,32 @@ impl McpServer {
 
         let response = match result {
             Ok(content) => {
+                // Emit the payload twice on purpose: `structuredContent` is the object
+                // form a client can validate/consume directly, `content[0].text` keeps
+                // JSON-as-string for clients that predate `2025-06-18`. Both carry
+                // *compact* JSON — the pretty form's indentation and newlines are
+                // re-escaped inside the text block, inflating every response's token
+                // count for no readability gain (the client re-renders anyway).
+                let text = serde_json::to_string(&content).unwrap_or_else(|_| content.to_string());
                 let call_result = CallToolResult {
                     content: vec![crate::protocol::messages::ToolResultContent {
                         content_type: "text".to_string(),
-                        text: serde_json::to_string_pretty(&content)
-                            .unwrap_or_else(|_| content.to_string()),
+                        text,
                     }],
+                    structured_content: content.is_object().then_some(content),
                     is_error: Some(false),
                 };
                 serde_json::to_value(call_result)
                     .map_err(|e| JsonRpcError::internal_error(&e.to_string()))
             }
             Err(e) => {
+                let payload = serde_json::json!({ "error": e });
                 let call_result = CallToolResult {
                     content: vec![crate::protocol::messages::ToolResultContent {
                         content_type: "text".to_string(),
-                        text: serde_json::json!({ "error": e }).to_string(),
+                        text: payload.to_string(),
                     }],
+                    structured_content: Some(payload),
                     is_error: Some(true),
                 };
                 serde_json::to_value(call_result)

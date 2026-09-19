@@ -114,7 +114,11 @@ pub(super) fn run_serve(
             bind,
             port
         );
-        println!("  {} Auth token: {}...", ">".cyan(), &token[..8]);
+        println!(
+            "  {} Auth token: {}...",
+            ">".cyan(),
+            vestige_mcp::protocol::auth::token_display_prefix(&token)
+        );
         println!();
         println!("{}", "Press Ctrl+C to stop.".dimmed());
 

@@ -53,7 +53,9 @@ pub async fn maintenance_gc(
         .map_err(maintenance_err("gc"))
 }
 
-/// `POST /api/maintenance/backup` — write a SQLite snapshot to ~/.vestige/backups.
+/// `POST /api/maintenance/backup` — write a SQLite snapshot into the Vestige data
+/// directory (`…/com.vestige.core/backups`, owner-only permissions). The snapshot
+/// path is returned in the response body.
 pub async fn maintenance_backup(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
     crate::tools::maintenance::execute_backup(&state.storage, None)
         .await

@@ -85,8 +85,17 @@ impl McpServer {
     }
 
     /// Handle an incoming JSON-RPC request
+    ///
+    /// Returns `None` when the frame was a **notification** — a request without an
+    /// `id` member. JSON-RPC 2.0 §5 and every MCP revision are explicit that the
+    /// receiver of a notification MUST NOT reply, not even with an error: there is
+    /// no `id` to correlate the reply with, and emitting one desynchronises the
+    /// stream for strict clients. This covers unknown notification methods and
+    /// notifications that arrive before `initialize`; both are logged and dropped.
     pub async fn handle_request(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
         debug!("Handling request: {}", request.method);
+
+        let is_notification = request.id.is_none();
 
         // Check initialization for non-initialize requests
         if !self.initialized
@@ -97,6 +106,9 @@ impl McpServer {
                 "Rejecting request '{}': server not initialized",
                 request.method
             );
+            if is_notification {
+                return None;
+            }
             return Some(JsonRpcResponse::error(
                 request.id,
                 JsonRpcError::server_not_initialized(),
@@ -119,6 +131,17 @@ impl McpServer {
                 Err(JsonRpcError::method_not_found())
             }
         };
+
+        if is_notification {
+            // Side effects already happened; the outcome is deliberately not sent.
+            if let Err(error) = &result {
+                debug!(
+                    "Notification '{}' produced an error that is not reported: {}",
+                    request.method, error
+                );
+            }
+            return None;
+        }
 
         Some(match result {
             Ok(result) => JsonRpcResponse::success(request.id, result),
@@ -230,7 +253,7 @@ impl McpServer {
         } else if normalized_uri.starts_with("codebase://") {
             resources::codebase::read(&self.storage, normalized_uri).await
         } else {
-            Err(format!("Unknown resource scheme: {}", uri))
+            Err(resources::ResourceError::NotFound(uri.clone()))
         };
 
         match content {
@@ -246,7 +269,14 @@ impl McpServer {
                 serde_json::to_value(result)
                     .map_err(|e| JsonRpcError::internal_error(&e.to_string()))
             }
-            Err(e) => Err(JsonRpcError::internal_error(&e)),
+            // -32002 vs -32603 is part of the contract: a client must be able to tell
+            // "this server does not serve that URI" from "the server broke".
+            Err(resources::ResourceError::NotFound(uri)) => {
+                Err(JsonRpcError::resource_not_found(&uri))
+            }
+            Err(resources::ResourceError::Internal(message)) => {
+                Err(JsonRpcError::internal_error(&message))
+            }
         }
     }
 }

@@ -14,13 +14,16 @@
 //! (`destructiveHint=true, openWorldHint=true`), so silence here would
 //! prompt the user before every search.
 //!
-//! We deliberately do NOT publish `outputSchema` yet. The MCP `2025-06-18`
-//! revision pairs `outputSchema` with `structuredContent`, but every Vestige
-//! tool currently returns plain `text` content (Markdown reports, JSON
-//! strings, etc.). Declaring an output schema while still emitting text
-//! would advertise a contract we do not honor and break strict clients.
-//! Migrating the tools to dual-format responses (text + structuredContent)
-//! is tracked separately.
+//! We do NOT publish `outputSchema` yet. Vestige tools return a JSON object, and
+//! since the `2025-06-18` revision that object is emitted as `structuredContent`
+//! alongside the legacy `content[0].text` string (see `server::dispatch`). What is
+//! still missing is a schema *per tool*: publishing an `outputSchema` that does not
+//! exactly match what each handler produces would be a contract we break on every
+//! call — worse than the current honest "here is an object, with no promises about
+//! its keys". Deriving those schemas from the `dashboard::wire` DTOs is tracked
+//! separately. The `-32602` / `-32601` split in `server::dispatch` is intentional:
+//! an unknown tool name is invalid *params*, only an unknown JSON-RPC method is
+//! `-32601`.
 //!
 //! v3.3.0: 28 tools advertised in tools/list. Categories:
 //!   - 4 unified  : search, memory, codebase, intention

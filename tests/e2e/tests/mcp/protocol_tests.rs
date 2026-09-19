@@ -271,8 +271,8 @@ fn test_jsonrpc_error_codes_are_returned_by_the_server() {
         .expect("server must answer unknown tools");
     assert_eq!(
         error_code(&unknown_tool),
-        -32601,
-        "unknown tool must be reported as Method not found: {unknown_tool}"
+        -32602,
+        "unknown tool is invalid params, not an unknown method: {unknown_tool}"
     );
     assert!(
         unknown_tool["error"]["message"]
@@ -396,7 +396,7 @@ fn test_resources_are_served_from_the_live_database() {
         .expect("server must answer unknown resource URIs");
     assert_eq!(
         error_code(&unknown),
-        -32603,
-        "unknown resource must be an internal error: {unknown}"
+        -32002,
+        "unknown resource must be ResourceNotFound: {unknown}"
     );
 }

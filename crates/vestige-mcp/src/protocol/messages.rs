@@ -93,10 +93,10 @@ pub struct ServerCapabilities {
 ///
 /// Mirrors the `Tool` shape from the MCP `2025-11-25` schema. `title`
 /// (display name) and `annotations` (behavior hints) are optional and were
-/// added by the spec in `2025-03-26`. We omit `outputSchema` for now — every
-/// Vestige tool returns text content rather than a structured payload, so
-/// declaring an `outputSchema` would advertise a contract we do not honor
-/// at the protocol level. See `b15` notes in `server/catalog.rs`.
+/// added by the spec in `2025-03-26`. `outputSchema` is still omitted: our tools
+/// return a JSON *object* in `structuredContent`, but none of them publishes a
+/// schema for it yet, and a wrong schema is worse than none. See `b15` notes in
+/// `server/catalog.rs`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDescription {
@@ -173,7 +173,18 @@ pub struct CallToolRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallToolResult {
+    /// Human/model-readable rendering. Always present — clients that predate
+    /// `structuredContent` (`2025-06-18`) still read the payload from here.
     pub content: Vec<ToolResultContent>,
+    /// The same payload as a real JSON object rather than a JSON string.
+    ///
+    /// The spec's compatibility recipe is to emit both: `structuredContent` for
+    /// clients that can consume objects, `content[0].text` for everything older.
+    /// `None` when the tool's payload is not a JSON object, because
+    /// `structuredContent` is defined as an object and a bare array/scalar there
+    /// would be a schema violation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structured_content: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
 }

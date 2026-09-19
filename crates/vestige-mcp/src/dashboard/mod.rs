@@ -102,7 +102,9 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
             axum::http::header::AUTHORIZATION,
         ]);
 
-    // Security: restrict WebSocket connections to localhost only (prevents cross-site WS hijacking)
+    // Security: the OriginGuard layer below pins WebSocket upgrades to the exact
+    // dashboard origins (prevents cross-site WS hijacking). The handler itself
+    // carries no second, weaker copy of that policy.
     let csp_value = format!(
         "default-src 'self'; \
          script-src 'self' 'unsafe-inline'; \
@@ -404,5 +406,49 @@ mod origin_guard_wiring_tests {
             .unwrap()
             .status();
         assert_ne!(status, StatusCode::FORBIDDEN);
+    }
+
+    fn ws_upgrade(host: &str, origin: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method(Method::GET)
+            .uri("/ws")
+            .header(header::HOST, host)
+            .header(header::CONNECTION, "Upgrade")
+            .header(header::UPGRADE, "websocket")
+            .header("sec-websocket-version", "13")
+            .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==");
+        if let Some(origin) = origin {
+            builder = builder.header(header::ORIGIN, origin);
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    /// The event stream carries memory content, so a page served from *any other
+    /// loopback port* must not be able to subscribe to it. The handler used to
+    /// accept any `http://127.0.0.1:*` by prefix match — the guard pins the exact
+    /// origin instead.
+    #[tokio::test]
+    async fn websocket_upgrade_from_another_loopback_port_is_refused() {
+        let status = router()
+            .oneshot(ws_upgrade("127.0.0.1:3927", Some("http://127.0.0.1:9999")))
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    /// …while the dashboard's own origin still gets through to the upgrade.
+    #[tokio::test]
+    async fn websocket_upgrade_from_the_dashboard_origin_is_not_refused() {
+        let status = router()
+            .oneshot(ws_upgrade("127.0.0.1:3927", Some("http://127.0.0.1:3927")))
+            .await
+            .unwrap()
+            .status();
+        assert_ne!(
+            status,
+            StatusCode::FORBIDDEN,
+            "the dashboard must be able to open its own event stream"
+        );
     }
 }

@@ -459,3 +459,77 @@ async fn test_split_memories_confirmed_call_is_allowed() {
         result.err()
     );
 }
+
+// ========================================================================
+// ARTIFACT LOCATION AND PERMISSIONS
+//
+// Backups and exports used to be written to `data_dir().parent()` — a directory
+// shared with every other application on the machine and outside the 0700/0600
+// hardening of the data directory.
+// ========================================================================
+
+#[cfg(unix)]
+#[test]
+fn private_files_are_owner_only_from_creation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("memories.json");
+    {
+        let mut file = super::create_private_file(&path).expect("create");
+        use std::io::Write;
+        file.write_all(b"[]").expect("write");
+    }
+
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "an export holds every memory in plaintext; it must not be world-readable"
+    );
+
+    // Tightening an existing file (the VACUUM INTO case) is idempotent.
+    super::restrict_to_owner(&path);
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn artifacts_are_located_inside_the_data_directory() {
+    // The invariant the fix restores: artifacts live *under* the hardened data
+    // directory, never in its shared parent (`~/Library/Application Support`,
+    // `~/.local/share`). Path-only assertion — creating the real directory in a
+    // unit test would write into the developer's data dir.
+    let data_dir = directories::ProjectDirs::from("com", "vestige", "core")
+        .expect("project dirs")
+        .data_dir()
+        .to_path_buf();
+
+    for name in ["backups", "exports"] {
+        let path = super::artifact_path(name).expect("artifact path");
+        assert!(
+            path.starts_with(&data_dir),
+            "{name} must live under {}, got {}",
+            data_dir.display(),
+            path.display()
+        );
+        assert_ne!(
+            path.parent(),
+            data_dir.parent(),
+            "{name} must not be a sibling of the data directory"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn artifact_directories_are_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    super::restrict_dir_to_owner(dir.path());
+    let mode = std::fs::metadata(dir.path()).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o700,
+        "a directory holding plaintext snapshots is owner-only"
+    );
+}

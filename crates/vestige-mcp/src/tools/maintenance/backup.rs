@@ -15,17 +15,11 @@ pub fn backup_schema() -> Value {
 }
 
 pub async fn execute_backup(storage: &Arc<Storage>, _args: Option<Value>) -> Result<Value, String> {
-    // Determine backup path
-    let vestige_dir = directories::ProjectDirs::from("com", "vestige", "core")
-        .ok_or("Could not determine data directory")?;
-    let backup_dir = vestige_dir
-        .data_dir()
-        .parent()
-        .unwrap_or(vestige_dir.data_dir())
-        .join("backups");
-
-    std::fs::create_dir_all(&backup_dir)
-        .map_err(|e| format!("Failed to create backup directory: {}", e))?;
+    // Backup path — inside the Vestige data directory (`…/com.vestige.core/backups`),
+    // created 0700. It used to be the data directory's *parent*: a directory shared
+    // with every other application on the machine, outside the 0600/0700 hardening
+    // that protects the live database.
+    let backup_dir = super::artifact_dir("backups")?;
 
     let timestamp = Utc::now().format("%Y%m%d-%H%M%S");
     let backup_path = backup_dir.join(format!("vestige-{}.db", timestamp));
@@ -42,6 +36,11 @@ pub async fn execute_backup(storage: &Arc<Storage>, _args: Option<Value>) -> Res
             .map_err(|e| format!("Backup task panicked: {}", e))?
             .map_err(|e| format!("Failed to create backup: {}", e))?;
     }
+
+    // `VACUUM INTO` creates the file itself, so the mode cannot be passed at
+    // creation time; tighten it now that it exists. The 0700 parent directory
+    // already bounds the exposure window.
+    super::restrict_to_owner(&backup_path);
 
     let file_size = std::fs::metadata(&backup_path)
         .map(|m| m.len())

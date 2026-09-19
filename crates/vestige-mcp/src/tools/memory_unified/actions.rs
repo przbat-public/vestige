@@ -129,7 +129,23 @@ pub(super) async fn execute_get_batch(
 }
 
 /// Delete a memory and return success status
-pub(super) async fn execute_delete(storage: &Arc<Storage>, id: &str) -> Result<Value, String> {
+///
+/// Permanent and irreversible: the row, its FSRS state, embeddings and graph
+/// edges all go. Per `tools::common` every destructive path needs an explicit
+/// `confirmed: true` — `memory(action="delete")` used to be the exception, which
+/// made it the cheapest way for an agent (or injected text) to destroy data.
+pub(super) async fn execute_delete(
+    storage: &Arc<Storage>,
+    id: &str,
+    confirmed: bool,
+) -> Result<Value, String> {
+    if !confirmed {
+        return Err(crate::tools::common::missing_confirmation_error(
+            "memory.delete",
+            "Deleting a memory is permanent: the content, its FSRS state, embedding and graph edges are removed.",
+        ));
+    }
+
     let storage_clone = storage.clone();
     let id_owned = id.to_string();
     let deleted = tokio::task::spawn_blocking(move || storage_clone.delete_node(&id_owned))
@@ -143,6 +159,25 @@ pub(super) async fn execute_delete(storage: &Arc<Storage>, id: &str) -> Result<V
         "nodeId": id,
         "message": if deleted { "Memory deleted successfully" } else { "Memory not found" },
     }))
+}
+
+/// Record an FSRS review of a memory (`action = "review"`).
+///
+/// Delegates to [`crate::tools::review::execute`] so the rating semantics and the
+/// FSRS response shape live in exactly one place. This action exists because the
+/// `memory://due` resource instructs the model to complete reviews, and the tool
+/// it used to name (`mark_reviewed`) was never advertised in `tools/list` — a
+/// host that validates tool names against the catalog rejected the call outright.
+pub(super) async fn execute_review(
+    storage: &Arc<Storage>,
+    id: &str,
+    rating: Option<i32>,
+) -> Result<Value, String> {
+    let mut args = serde_json::json!({ "id": id });
+    if let Some(rating) = rating {
+        args["rating"] = serde_json::json!(rating);
+    }
+    crate::tools::review::execute(storage, Some(args)).await
 }
 
 /// Get accessibility state of a memory (Active/Dormant/Silent/Unavailable)

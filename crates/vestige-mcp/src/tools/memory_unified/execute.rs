@@ -1,4 +1,4 @@
-//! Action dispatcher routing to get/get_batch/delete/state/promote/demote/edit.
+//! Action dispatcher routing to get/get_batch/delete/state/promote/demote/edit/review.
 
 use std::sync::Arc;
 
@@ -11,15 +11,23 @@ use crate::cognitive::CognitiveEngine;
 
 use super::actions::{
     execute_delete, execute_demote, execute_edit, execute_get, execute_get_batch, execute_promote,
-    execute_state,
+    execute_review, execute_state,
 };
 use super::args::MemoryArgs;
+
+/// Every action this tool accepts, in one place so the error message and the
+/// schema cannot drift apart silently.
+const ACTIONS: &str = "get, get_batch, delete, state, promote, demote, edit, review";
 
 pub async fn execute(
     storage: &Arc<Storage>,
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     args: Option<Value>,
 ) -> Result<Value, String> {
+    // Keep the raw object: the confirmation gate has to see the flag before
+    // deserialization narrows the payload to known fields.
+    let raw = args.clone().unwrap_or_else(|| serde_json::json!({}));
+
     let args: MemoryArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => return Err("Missing arguments".to_string()),
@@ -45,14 +53,36 @@ pub async fn execute(
 
     match args.action.as_str() {
         "get" => execute_get(storage, &id).await,
-        "delete" => execute_delete(storage, &id).await,
+        // The gate itself lives in `execute_delete` so the rule travels with the
+        // destructor, not with this dispatcher.
+        "delete" => execute_delete(storage, &id, crate::tools::common::is_confirmed(&raw)).await,
         "state" => execute_state(storage, &id).await,
         "promote" => execute_promote(storage, cognitive, &id, args.reason).await,
         "demote" => execute_demote(storage, cognitive, &id, args.reason).await,
         "edit" => execute_edit(storage, &id, args.content).await,
+        "review" => execute_review(storage, &id, args.rating).await,
         _ => Err(format!(
-            "Invalid action '{}'. Must be one of: get, get_batch, delete, state, promote, demote, edit",
-            args.action
+            "Invalid action '{}'. Must be one of: {}",
+            args.action, ACTIONS
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The action list in the error message must match the schema enum — a model
+    /// that is told "must be one of …" without `review` will never call it.
+    #[test]
+    fn advertised_actions_cover_the_schema_enum() {
+        let schema = super::super::schema::schema();
+        for action in schema["properties"]["action"]["enum"].as_array().unwrap() {
+            let action = action.as_str().unwrap();
+            assert!(
+                ACTIONS.contains(action),
+                "schema advertises '{action}' but the dispatcher error omits it: {ACTIONS}"
+            );
+        }
     }
 }

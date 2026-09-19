@@ -13,17 +13,29 @@
 //! a transport refactor.
 //!
 //! Until that lands we approximate elicitation by requiring destructive
-//! tools to take an **explicit `confirmed: true` argument**. The error
-//! path returned when the flag is missing is shaped so MCP clients can
-//! translate it into a UI prompt:
+//! tools to take an **explicit `confirmed: true` argument**.
 //!
-//! - `code: -32002` (MCP `RequestDenied`) — clients already render this
-//!   as a permission failure rather than a server bug,
-//! - a structured `data.requestedSchema` block mirroring what `elicitation/
-//!   create` will eventually publish so client implementations can be
-//!   written ONCE,
-//! - a `data.confirm_arg` literal hint so the agent knows the exact flag
-//!   it needs to set on retry.
+//! ## What the caller actually receives
+//!
+//! The gate returns `Err(String)`, which `server::dispatch` turns into a normal
+//! tool result with `isError: true` — **not** a JSON-RPC protocol error. That is
+//! deliberate (SEP-1303): a missing confirmation is an execution outcome the model
+//! is meant to read and act on, not a transport-level failure.
+//!
+//! The message is one human-readable line plus a JSON tail:
+//!
+//! - prose naming the operation and the impact, so stdout-only clients still
+//!   surface something actionable,
+//! - `requestedSchema: {...}` — the elicitation schema a client will eventually
+//!   render, embedded as *text* because a `CallToolResult` text block is the only
+//!   channel this transport has today.
+//!
+//! Two things this comment used to claim are worth calling out because they were
+//! never true: the refusal does not carry `code: -32002` (that code means
+//! `ResourceNotFound` in MCP `server/resources.md`, and the dead
+//! `REQUEST_DENIED_CODE` constant asserting otherwise has been removed), and it
+//! does not carry a structured `data.requestedSchema` member — a tool result has
+//! no `data` field.
 //!
 //! Once we wire bidirectional JSON-RPC the same helper will dispatch to
 //! `elicitation/create` for clients advertising the capability and keep
@@ -38,12 +50,6 @@
 //!   2. they pass `confirmed: true`.
 
 use serde_json::Value;
-
-/// JSON-RPC error code that maps to MCP "request denied". Clients render
-/// this differently from `-32603 internal error` (which would imply a
-/// server bug). Keeping the constant alongside the helper means the gate
-/// stays in one place.
-pub const REQUEST_DENIED_CODE: i64 = -32002;
 
 /// Reads `confirmed` (snake_case) or `acknowledgeDestruction` (camelCase
 /// future-proofing) from the args object. Returns `true` ONLY when the
@@ -131,6 +137,23 @@ mod tests {
         assert!(
             msg.contains("permanently delete 42 memories"),
             "must echo the human summary: {msg}",
+        );
+    }
+
+    #[test]
+    fn refusal_is_a_tool_error_not_a_fabricated_protocol_code() {
+        // The refusal travels as `CallToolResult { isError: true, content: [text] }`.
+        // It must not advertise a JSON-RPC code: -32002 means ResourceNotFound in
+        // MCP `server/resources.md`, and this result is not a protocol error at all.
+        // (A `REQUEST_DENIED_CODE` constant used to claim otherwise and was dead.)
+        let msg = missing_confirmation_error("gc", "Deletes data.");
+        assert!(
+            !msg.contains("-32002"),
+            "the gate must not impersonate ResourceNotFound: {msg}"
+        );
+        assert!(
+            !msg.contains("\"code\""),
+            "a tool result carries no JSON-RPC error code: {msg}"
         );
     }
 }

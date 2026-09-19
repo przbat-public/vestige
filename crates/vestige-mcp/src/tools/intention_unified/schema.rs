@@ -116,8 +116,10 @@ pub fn schema() -> Value {
             },
             "limit": {
                 "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
                 "default": 20,
-                "description": "[list] Maximum number to return"
+                "description": "[list] Maximum number to return (1-100; values outside the range are clamped)"
             }
         },
         "required": ["action"]

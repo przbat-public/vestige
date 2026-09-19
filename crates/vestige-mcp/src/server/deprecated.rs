@@ -60,6 +60,12 @@ pub fn rewrite_deprecated(name: &str, args: Option<Value>) -> Rewrite {
         "get_knowledge" => warn_and_action_with_id(name, "memory", "get", "id", args),
         "delete_knowledge" => warn_and_action_with_id(name, "memory", "delete", "id", args),
         "get_memory_state" => warn_and_action_with_id(name, "memory", "state", "memory_id", args),
+        // `mark_reviewed` used to be dispatch-only: callable, but absent from both
+        // `tools/list` and this table, so it mutated FSRS state as an invisible,
+        // unannotated tool that `memory://due` nonetheless told the model to call.
+        // It now rewrites onto the advertised `memory(action="review")` like every
+        // other legacy name.
+        "mark_reviewed" => warn_and_inject_action(name, "memory", "review", args),
         "complete_intention" => {
             warn!(
                 "Tool 'complete_intention' is deprecated. Use 'intention' with action='update', status='complete' instead."

@@ -102,3 +102,47 @@ pub fn get_or_create_auth_token() -> Result<String, Box<dyn std::error::Error>> 
     info!("Generated new auth token at {}", path.display());
     Ok(token)
 }
+
+/// First up-to-8 **characters** of a token, for display in startup banners.
+///
+/// Slicing a `&str` by byte offset — `&token[..8]` — panics when the token is
+/// shorter than 8 bytes or when byte 8 lands inside a multi-byte UTF-8 character.
+/// `VESTIGE_AUTH_TOKEN` accepts any non-empty string (it only warns below 32
+/// chars), so both are reachable from a documented configuration, and the panic
+/// used to take the whole server down before the transport even started.
+pub fn token_display_prefix(token: &str) -> String {
+    token.chars().take(8).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_prefix_truncates_instead_of_panicking() {
+        // The first two panicked with `&token[..8]`; the third is fine either way
+        // and pins the familiar 8-character hint.
+        assert_eq!(token_display_prefix("abc"), "abc");
+        assert_eq!(token_display_prefix(""), "");
+        assert_eq!(
+            token_display_prefix("0123456789abcdef0123456789abcdef"),
+            "01234567"
+        );
+    }
+
+    #[test]
+    fn token_prefix_never_splits_a_multibyte_character() {
+        // U+017C (LATIN SMALL LETTER Z WITH DOT ABOVE) is two bytes in UTF-8, so a
+        // token of eight of them is 16 bytes and byte offset 8 falls inside the 5th
+        // character — `&token[..8]` panicked here. Written with escapes so the test
+        // cannot be broken by an encoding mishap.
+        let token = "\u{17C}\u{17C}\u{17C}\u{17C}\u{17C}\u{17C}\u{17C}\u{17C}";
+        let prefix = token_display_prefix(token);
+        assert_eq!(prefix.chars().count(), 8);
+        assert_eq!(prefix, token);
+
+        // Nine of them: the 9th character must be dropped, not half of it kept.
+        let longer = format!("{token}\u{17C}");
+        assert_eq!(token_display_prefix(&longer), token);
+    }
+}

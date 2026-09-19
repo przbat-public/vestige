@@ -27,7 +27,7 @@ use tracing::{info, warn};
 use crate::cognitive::CognitiveEngine;
 use crate::dashboard::events::VestigeEvent;
 use crate::protocol::timeout::with_timeout;
-use crate::protocol::types::JsonRpcRequest;
+use crate::protocol::types::{JsonRpcRequest, JsonRpcResponse};
 use crate::server::McpServer;
 use vestige_core::Storage;
 
@@ -139,6 +139,53 @@ async fn guard_origin_and_host(
     }
 }
 
+/// Reject requests that declare an MCP protocol revision this server cannot speak.
+///
+/// Since `2025-06-18` clients MUST send `MCP-Protocol-Version` on every request
+/// after `initialize`, and a server that receives an unsupported value MUST answer
+/// `400 Bad Request` (the `2026-07-28` revision names the error
+/// `-32020 HeaderMismatch`; for the revisions this server negotiates, the
+/// JSON-RPC body carries `-32600 Invalid Request`).
+///
+/// A **missing** header is allowed on purpose: clients from before `2025-06-18`
+/// never send it, and the spec says to assume the previous revision in that case.
+/// Rejecting the absent case would break every such client — including the
+/// loopback tooling this transport is mostly used from.
+async fn guard_protocol_version(request: Request, next: Next) -> Response {
+    let declared = request
+        .headers()
+        .get("mcp-protocol-version")
+        .and_then(|value| value.to_str().ok());
+
+    match declared {
+        None => next.run(request).await,
+        Some(version) if crate::protocol::types::SUPPORTED_PROTOCOL_VERSIONS.contains(&version) => {
+            next.run(request).await
+        }
+        Some(version) => {
+            warn!(
+                version,
+                "Rejected request: unsupported MCP-Protocol-Version header"
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": null,
+                    "error": {
+                        "code": -32600,
+                        "message": format!(
+                            "Unsupported MCP-Protocol-Version: {version}. Supported: {}",
+                            crate::protocol::types::SUPPORTED_PROTOCOL_VERSIONS.join(", ")
+                        ),
+                    }
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
 /// Build the transport router.
 ///
 /// Extracted from [`start_http_transport`] so tests can drive it directly
@@ -177,14 +224,26 @@ fn build_router(state: HttpTransportState) -> Router {
                         .allow_headers([
                             axum::http::header::CONTENT_TYPE,
                             axum::http::header::AUTHORIZATION,
-                        ]),
+                            // Neither of these is a CORS-safelisted request header, so a
+                            // browser client cannot send them at all unless they are
+                            // listed here: the preflight fails before the request is made.
+                            header::HeaderName::from_static("mcp-session-id"),
+                            header::HeaderName::from_static("mcp-protocol-version"),
+                        ])
+                        // …and a browser cannot *read* a response header either unless it
+                        // is exposed. Without this the client never learns its session id,
+                        // even though the server sends it.
+                        .expose_headers([header::HeaderName::from_static("mcp-session-id")]),
                 )
                 // Outermost of the small stack: a request from an origin we do not answer
                 // to is refused before it reaches the session machinery.
                 .layer(middleware::from_fn_with_state(
                     state.clone(),
                     guard_origin_and_host,
-                )),
+                ))
+                // Next-outermost: a request that declares a protocol revision we do not
+                // speak is refused before it touches a session.
+                .layer(middleware::from_fn(guard_protocol_version)),
         )
         .with_state(state)
 }
@@ -321,10 +380,58 @@ async fn post_mcp(
     let budget = request_timeout();
 
     if is_initialize {
-        // ── New session ──
+        // ── Session for this initialize ──
         // Take write lock immediately to avoid TOCTOU race on MAX_SESSIONS check.
         let mut sessions = state.sessions.write().await;
+
+        // Re-initialize an existing session when the client still presents its id.
+        // Clients re-`initialize` far more often than the 30-minute idle timeout
+        // (IDE restart, reconnect, a test loop), and minting a fresh session for
+        // each one used to exhaust the cap and then answer 503 to *every* client
+        // on the machine until the reaper caught up.
+        if let Some(existing_id) = session_id_from_headers(&headers)
+            && let Some(session) = sessions.get(&existing_id).cloned()
+        {
+            info!(
+                session_prefix = %&existing_id[..8],
+                "Re-initializing an existing session instead of allocating a new one"
+            );
+            drop(sessions);
+            return run_in_session(&session, request, &existing_id, budget, &method_for_logging)
+                .await;
+        }
+
         if sessions.len() >= MAX_SESSIONS {
+            // The reaper only runs every REAPER_INTERVAL, so a burst of reconnects
+            // can reach the cap while most sessions are long dead. Clean first…
+            let reaped = reap_idle(&mut sessions);
+            if reaped > 0 {
+                info!(
+                    "Evicted {} idle session(s) to make room for a new initialize ({} left)",
+                    reaped,
+                    sessions.len()
+                );
+            }
+        }
+
+        if sessions.len() >= MAX_SESSIONS {
+            // …then drop the least recently used idle session. Refusing everyone
+            // because one client leaked sessions is a global outage; evicting the
+            // coldest one costs at most that single client a re-initialize.
+            if evict_least_recent(&mut sessions) {
+                warn!(
+                    "Session cap ({}) reached — evicted the least recently active session",
+                    MAX_SESSIONS
+                );
+            }
+        }
+
+        if sessions.len() >= MAX_SESSIONS {
+            // Every remaining session is in-flight; there is genuinely no room.
+            warn!(
+                "Refusing initialize: all {} sessions are in use",
+                MAX_SESSIONS
+            );
             return (StatusCode::SERVICE_UNAVAILABLE, "Too many active sessions").into_response();
         }
 
@@ -374,29 +481,7 @@ async fn post_mcp(
         sessions.insert(session_id.clone(), session);
         drop(sessions);
 
-        let session_header = match session_id.parse() {
-            Ok(v) => v,
-            Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to encode session ID",
-                )
-                    .into_response();
-            }
-        };
-
-        match response {
-            Some(resp) => {
-                let mut resp_headers = HeaderMap::new();
-                resp_headers.insert("mcp-session-id", session_header);
-                (StatusCode::OK, resp_headers, Json(resp)).into_response()
-            }
-            None => {
-                let mut resp_headers = HeaderMap::new();
-                resp_headers.insert("mcp-session-id", session_header);
-                (StatusCode::ACCEPTED, resp_headers).into_response()
-            }
-        }
+        respond_with_session(response, &session_id)
     } else {
         // ── Existing session ──
         let session_id = match session_id_from_headers(&headers) {
@@ -422,52 +507,101 @@ async fn post_mcp(
             }
         };
 
-        let response = match with_timeout(budget, async {
-            let mut sess = session.lock().await;
-            sess.last_active = Instant::now();
-            sess.server.handle_request(request).await
-        })
-        .await
-        {
-            Ok(r) => r,
-            Err(_elapsed) => {
-                warn!(
-                    method = %method_for_logging,
-                    budget_secs = budget.as_secs(),
-                    session_prefix = %&session_id[..8],
-                    "Request exceeded budget — returning 504"
-                );
-                return (
-                    StatusCode::GATEWAY_TIMEOUT,
-                    HeaderMap::new(),
-                    format!(
-                        "Request '{}' exceeded {}s budget",
-                        method_for_logging,
-                        budget.as_secs()
-                    ),
-                )
-                    .into_response();
-            }
-        };
+        run_in_session(&session, request, &session_id, budget, &method_for_logging).await
+    }
+}
 
-        let session_header = match session_id.parse() {
-            Ok(v) => v,
-            Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to encode session ID",
-                )
-                    .into_response();
-            }
-        };
-
-        let mut resp_headers = HeaderMap::new();
-        resp_headers.insert("mcp-session-id", session_header);
-
-        match response {
-            Some(resp) => (StatusCode::OK, resp_headers, Json(resp)).into_response(),
-            None => (StatusCode::ACCEPTED, resp_headers).into_response(),
+/// Run one request against a session and build the HTTP response, always echoing
+/// the session id back so a browser can read it (`Access-Control-Expose-Headers`).
+async fn run_in_session(
+    session: &Arc<Mutex<Session>>,
+    request: JsonRpcRequest,
+    session_id: &str,
+    budget: Duration,
+    method_for_logging: &str,
+) -> Response {
+    let response = match with_timeout(budget, async {
+        let mut sess = session.lock().await;
+        sess.last_active = Instant::now();
+        sess.server.handle_request(request).await
+    })
+    .await
+    {
+        Ok(r) => r,
+        Err(_elapsed) => {
+            warn!(
+                method = %method_for_logging,
+                budget_secs = budget.as_secs(),
+                session_prefix = %session_id.get(..8).unwrap_or(session_id),
+                "Request exceeded budget — returning 504"
+            );
+            return (
+                StatusCode::GATEWAY_TIMEOUT,
+                HeaderMap::new(),
+                format!(
+                    "Request '{}' exceeded {}s budget",
+                    method_for_logging,
+                    budget.as_secs()
+                ),
+            )
+                .into_response();
         }
+    };
+
+    respond_with_session(response, session_id)
+}
+
+/// `200` with the JSON-RPC body, or `202` for a notification (no body) — either
+/// way with the `Mcp-Session-Id` response header set.
+fn respond_with_session(response: Option<JsonRpcResponse>, session_id: &str) -> Response {
+    let session_header = match session_id.parse::<axum::http::HeaderValue>() {
+        Ok(v) => v,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to encode session ID",
+            )
+                .into_response();
+        }
+    };
+
+    let mut resp_headers = HeaderMap::new();
+    resp_headers.insert("mcp-session-id", session_header);
+
+    match response {
+        Some(resp) => (StatusCode::OK, resp_headers, Json(resp)).into_response(),
+        None => (StatusCode::ACCEPTED, resp_headers).into_response(),
+    }
+}
+
+/// Remove sessions idle for longer than [`SESSION_TIMEOUT`]; returns how many.
+///
+/// Sessions with a request in flight (`try_lock` fails) are kept — they are by
+/// definition active.
+fn reap_idle(sessions: &mut HashMap<String, Arc<Mutex<Session>>>) -> usize {
+    let before = sessions.len();
+    sessions.retain(|_id, session| match session.try_lock() {
+        Ok(s) => s.last_active.elapsed() < SESSION_TIMEOUT,
+        Err(_) => true,
+    });
+    before - sessions.len()
+}
+
+/// Drop the single least-recently-active idle session. Returns `false` when every
+/// session is currently in flight (nothing safe to evict).
+fn evict_least_recent(sessions: &mut HashMap<String, Arc<Mutex<Session>>>) -> bool {
+    let victim = sessions
+        .iter()
+        .filter_map(|(id, session)| match session.try_lock() {
+            Ok(s) => Some((id.clone(), s.last_active)),
+            Err(_) => None,
+        })
+        .min_by_key(|(_, last_active)| *last_active)
+        .map(|(id, _)| id);
+
+    match victim {
+        Some(id) => sessions.remove(&id).is_some(),
+        None => false,
     }
 }
 
@@ -563,6 +697,39 @@ mod tests {
             .status()
     }
 
+    fn initialize_request(host: &str, session_id: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri("/mcp")
+            .header(header::HOST, host)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"));
+
+        if let Some(id) = session_id {
+            builder = builder.header("mcp-session-id", id);
+        }
+
+        builder
+            .body(Body::from(
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": crate::protocol::types::MCP_VERSION,
+                        "capabilities": {},
+                        "clientInfo": { "name": "browser", "version": "1.0" }
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap()
+    }
+
+    async fn response_of(state: HttpTransportState, request: Request<Body>) -> Response {
+        build_router(state).oneshot(request).await.unwrap()
+    }
+
     #[tokio::test]
     async fn foreign_origin_is_rejected_with_403() {
         // The transport spec makes this a MUST: a browser that has been tricked into
@@ -651,6 +818,246 @@ mod tests {
             Code::BAD_REQUEST,
             "a malformed session id must be rejected before it is used as a map key"
         );
+    }
+
+    // ── CORS: browser clients ───────────────────────────────────────────────
+    //
+    // `Mcp-Session-Id` is not a CORS-safelisted header. Without it in
+    // `Access-Control-Allow-Headers` the preflight fails and a browser-based
+    // client never gets to send a second request; without it in
+    // `Access-Control-Expose-Headers` the client cannot read the id it was given.
+
+    #[tokio::test]
+    async fn preflight_allows_the_session_and_version_headers() {
+        let request = Request::builder()
+            .method(Method::OPTIONS)
+            .uri("/mcp")
+            .header(header::HOST, "127.0.0.1:3928")
+            .header(header::ORIGIN, "http://127.0.0.1:3928")
+            .header("access-control-request-method", "POST")
+            .header(
+                "access-control-request-headers",
+                "content-type,mcp-session-id,mcp-protocol-version",
+            )
+            .body(Body::empty())
+            .unwrap();
+
+        let response = response_of(test_state(3928), request).await;
+        assert!(
+            response.status().is_success(),
+            "preflight must succeed, got {}",
+            response.status()
+        );
+
+        let allowed = response
+            .headers()
+            .get("access-control-allow-headers")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(
+            allowed.contains("mcp-session-id"),
+            "preflight must allow Mcp-Session-Id: {allowed}"
+        );
+        assert!(
+            allowed.contains("mcp-protocol-version"),
+            "preflight must allow MCP-Protocol-Version: {allowed}"
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_expose_the_session_id_header() {
+        let request = initialize_request("127.0.0.1:3928", None);
+        // Re-add the Origin so the CORS layer treats this as a cross-origin call.
+        let (mut parts, body) = request.into_parts();
+        parts.headers.insert(
+            header::ORIGIN,
+            "http://127.0.0.1:3928".parse().expect("valid origin"),
+        );
+        let request = Request::from_parts(parts, body);
+
+        let response = response_of(test_state(3928), request).await;
+        let exposed = response
+            .headers()
+            .get("access-control-expose-headers")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        assert!(
+            exposed.contains("mcp-session-id"),
+            "a browser must be able to read the session id: {exposed:?}"
+        );
+    }
+
+    // ── MCP-Protocol-Version ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn unsupported_protocol_version_is_rejected_with_400() {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/mcp")
+            .header(header::HOST, "127.0.0.1:3928")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+            .header("mcp-protocol-version", "1999-01-01")
+            .body(Body::from(
+                serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })
+                    .to_string(),
+            ))
+            .unwrap();
+
+        let response = response_of(test_state(3928), request).await;
+        assert_eq!(
+            response.status(),
+            Code::BAD_REQUEST,
+            "an unsupported protocol revision must be refused, not silently handled"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["code"], -32600);
+        assert_eq!(json["id"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn supported_protocol_version_passes_the_guard() {
+        let mut builder = initialize_request("127.0.0.1:3928", None);
+        builder
+            .headers_mut()
+            .insert("mcp-protocol-version", "2025-06-18".parse().unwrap());
+
+        let response = response_of(test_state(3928), builder).await;
+        // Reaches the handler: a successful initialize, not a 400 from the guard.
+        assert_eq!(response.status(), Code::OK);
+        assert!(
+            response.headers().contains_key("mcp-session-id"),
+            "a supported version must be served normally"
+        );
+    }
+
+    #[tokio::test]
+    async fn absent_protocol_version_is_still_accepted() {
+        // Clients older than 2025-06-18 never send the header; the spec says to
+        // assume the previous revision rather than refuse the request.
+        let response =
+            response_of(test_state(3928), initialize_request("127.0.0.1:3928", None)).await;
+        assert_eq!(response.status(), Code::OK);
+    }
+
+    // ── Session lifecycle ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn re_initialize_reuses_the_session_instead_of_minting_a_new_one() {
+        let state = test_state(3928);
+        let first = response_of(state.clone(), initialize_request("127.0.0.1:3928", None)).await;
+        assert_eq!(first.status(), Code::OK);
+        let first_id = first
+            .headers()
+            .get("mcp-session-id")
+            .expect("initialize returns a session id")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let second = response_of(
+            state.clone(),
+            initialize_request("127.0.0.1:3928", Some(&first_id)),
+        )
+        .await;
+
+        assert_eq!(second.status(), Code::OK);
+        assert_eq!(
+            second
+                .headers()
+                .get("mcp-session-id")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            first_id,
+            "a client that still presents its id must keep it"
+        );
+        assert_eq!(
+            state.sessions.read().await.len(),
+            1,
+            "re-initialize must not leak a second session"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_cap_evicts_an_idle_session_instead_of_refusing_everyone() {
+        // Filling the transport to the cap and then answering 503 to every client
+        // on the machine — which is what the old code did until the 5-minute
+        // reaper ran — turns normal reconnect churn into a global outage.
+        let state = test_state(3928);
+        for _ in 0..MAX_SESSIONS {
+            let response =
+                response_of(state.clone(), initialize_request("127.0.0.1:3928", None)).await;
+            assert_eq!(response.status(), Code::OK);
+        }
+        assert_eq!(state.sessions.read().await.len(), MAX_SESSIONS);
+
+        let response = response_of(state.clone(), initialize_request("127.0.0.1:3928", None)).await;
+
+        assert_eq!(
+            response.status(),
+            Code::OK,
+            "a full session table with idle sessions must evict, not refuse"
+        );
+        assert_eq!(
+            state.sessions.read().await.len(),
+            MAX_SESSIONS,
+            "the table stays at the cap — one in, one out"
+        );
+    }
+
+    #[test]
+    fn session_cap_helpers_never_evict_an_in_flight_session() {
+        let (event_tx, _) = broadcast::channel(2);
+        let dir = tempfile::TempDir::new().unwrap();
+        let storage = Arc::new(Storage::new(Some(dir.path().join("cap.db"))).unwrap());
+
+        let make = || {
+            Arc::new(Mutex::new(Session {
+                server: McpServer::new_with_events(
+                    Arc::clone(&storage),
+                    Arc::new(Mutex::new(CognitiveEngine::new())),
+                    event_tx.clone(),
+                ),
+                last_active: Instant::now(),
+            }))
+        };
+
+        let mut sessions: HashMap<String, Arc<Mutex<Session>>> = HashMap::new();
+        sessions.insert("a".to_string(), make());
+        sessions.insert("b".to_string(), make());
+
+        // An in-flight request holds the session lock.
+        let in_flight = sessions["a"].clone();
+        let guard = in_flight.clone().try_lock_owned().expect("uncontended");
+
+        assert_eq!(reap_idle(&mut sessions), 0, "fresh sessions are not idle");
+
+        // The only idle session is "b", so that is the one that goes — never "a".
+        assert!(evict_least_recent(&mut sessions));
+        assert!(
+            sessions.contains_key("a"),
+            "an in-flight session must never be evicted"
+        );
+        assert!(!sessions.contains_key("b"));
+
+        // Now only the locked session is left: nothing safe to evict.
+        assert!(
+            !evict_least_recent(&mut sessions),
+            "nothing may be evicted while the only session is in flight"
+        );
+
+        // With the lock released it becomes evictable again.
+        drop(guard);
+        assert!(evict_least_recent(&mut sessions));
+        assert!(sessions.is_empty());
     }
 
     #[test]

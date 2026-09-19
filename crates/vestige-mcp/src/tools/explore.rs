@@ -26,16 +26,29 @@ pub fn schema() -> serde_json::Value {
             },
             "limit": {
                 "type": "integer",
-                "description": "Maximum results (default: 10)",
+                "minimum": 1,
+                "maximum": 100,
+                "description": "Maximum results (default: 10, max: 100)",
                 "default": 10
             },
             "depth": {
                 "type": "integer",
-                "description": "Max BFS depth for 'causal_chain' (default: 3, max: 6). Higher values may surface noisier links.",
+                "minimum": 1,
+                "maximum": 6,
+                "description": "Max BFS depth for 'causal_chain' (default: 3, max: 6 — values above 6 are clamped). Higher values may surface noisier links.",
                 "default": 3
             }
         },
-        "required": ["action", "from"]
+        "required": ["action", "from"],
+        // `to` was required for chain/bridges only in prose, so a model could emit a
+        // call that the JSON Schema accepted and the handler rejected. Stated here it
+        // is rejected before the round-trip.
+        "allOf": [
+            {
+                "if": { "properties": { "action": { "enum": ["chain", "bridges"] } }, "required": ["action"] },
+                "then": { "required": ["to"] }
+            }
+        ]
     })
 }
 
@@ -377,6 +390,26 @@ mod tests {
     use super::*;
     use crate::cognitive::CognitiveEngine;
     use tempfile::TempDir;
+
+    #[test]
+    fn schema_requires_to_for_chain_and_bridges() {
+        // Both are documented as needing `to`; only the prose said so before.
+        let schema = schema();
+        let conditional = &schema["allOf"][0];
+        assert_eq!(
+            conditional["if"]["properties"]["action"]["enum"],
+            serde_json::json!(["chain", "bridges"])
+        );
+        assert_eq!(conditional["then"]["required"], serde_json::json!(["to"]));
+    }
+
+    #[test]
+    fn schema_bounds_match_the_runtime_clamps() {
+        let schema = schema();
+        assert_eq!(schema["properties"]["depth"]["maximum"], 6);
+        assert_eq!(schema["properties"]["limit"]["maximum"], 100);
+        assert_eq!(schema["properties"]["limit"]["minimum"], 1);
+    }
 
     fn test_cognitive() -> Arc<Mutex<CognitiveEngine>> {
         Arc::new(Mutex::new(CognitiveEngine::new()))

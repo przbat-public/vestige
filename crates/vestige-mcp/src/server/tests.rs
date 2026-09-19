@@ -36,6 +36,20 @@ fn make_request(method: &str, params: Option<serde_json::Value>) -> JsonRpcReque
     }
 }
 
+/// Create a JSON-RPC **notification** — a frame with no `id` member.
+///
+/// Kept separate from [`make_request`] on purpose: that helper always injects
+/// `id: Some(1)`, so every "notification" test built on it was really testing a
+/// request, and the no-reply rule went unverified.
+fn make_notification(method: &str, params: Option<serde_json::Value>) -> JsonRpcRequest {
+    JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: None,
+        method: method.to_string(),
+        params,
+    }
+}
+
 // ========================================================================
 // INITIALIZATION TESTS
 // ========================================================================
@@ -137,11 +151,93 @@ async fn test_initialized_notification_returns_none() {
     server.handle_request(init_request).await;
 
     // Send initialized notification
-    let notification = make_request("notifications/initialized", None);
+    let notification = make_notification("notifications/initialized", None);
     let response = server.handle_request(notification).await;
 
     // Notifications should return None
     assert!(response.is_none());
+}
+
+#[tokio::test]
+async fn test_unknown_notification_gets_no_response() {
+    // JSON-RPC 2.0 §5: the receiver of a notification MUST NOT reply — not even
+    // with an error. Answering `notifications/cancelled` or a notification from a
+    // newer revision used to produce an `id`-less error frame that conforming
+    // clients reject outright.
+    let (mut server, _dir) = test_server().await;
+    server
+        .handle_request(make_request("initialize", None))
+        .await;
+
+    let response = server
+        .handle_request(make_notification("notifications/cancelled", None))
+        .await;
+    assert!(response.is_none(), "unknown notification must be dropped");
+
+    let response = server
+        .handle_request(make_notification("notifications/roots/list_changed", None))
+        .await;
+    assert!(response.is_none(), "unknown notification must be dropped");
+}
+
+#[tokio::test]
+async fn test_notification_before_initialize_gets_no_response() {
+    // The not-initialized gate used to answer every method, including frames with
+    // no `id`. A notification is still a notification.
+    let (mut server, _dir) = test_server().await;
+
+    let response = server
+        .handle_request(make_notification("tools/call", None))
+        .await;
+    assert!(
+        response.is_none(),
+        "a notification before initialize must not be answered"
+    );
+}
+
+#[tokio::test]
+async fn test_notification_does_not_poison_the_next_request() {
+    // Dropping notifications must be side-effect free for the request stream: the
+    // next request with an `id` still gets its own correlation id back.
+    let (mut server, _dir) = test_server().await;
+
+    server
+        .handle_request(make_request("initialize", None))
+        .await;
+    server
+        .handle_request(make_notification("notifications/initialized", None))
+        .await;
+    server
+        .handle_request(make_notification("totally/unknown", None))
+        .await;
+
+    let response = server
+        .handle_request(make_request("ping", None))
+        .await
+        .expect("a request must still be answered after notifications");
+    assert_eq!(response.id, Some(serde_json::json!(1)));
+    assert_eq!(response.result, Some(serde_json::json!({})));
+    assert!(response.error.is_none());
+}
+
+#[tokio::test]
+async fn test_answered_error_always_carries_an_id_member() {
+    // Error frames are where the missing `id` used to be invisible: the struct
+    // field was `None` and `skip_serializing_if` removed the member entirely.
+    let (mut server, _dir) = test_server().await;
+
+    let response = server
+        .handle_request(make_request("tools/list", None))
+        .await
+        .expect("a request is always answered");
+    let json = serde_json::to_value(&response).unwrap();
+
+    assert_eq!(json["error"]["code"], -32003);
+    assert!(
+        json.as_object().unwrap().contains_key("id"),
+        "protocol errors must carry `id` (null when unknown): {json}"
+    );
+    assert_eq!(json["id"], serde_json::json!(1));
 }
 
 // ========================================================================
@@ -346,11 +442,15 @@ async fn test_unknown_method_returns_error() {
     assert!(response.result.is_none());
     assert!(response.error.is_some());
     let error = response.error.unwrap();
+    // -32601 is for an unknown JSON-RPC *method*. An unknown tool *name* is a
+    // different failure and uses -32602 (see the test below) — do not "unify" the
+    // two codes; clients rely on the distinction to know whether to fix the
+    // method or the tool name.
     assert_eq!(error.code, -32601); // MethodNotFound
 }
 
 #[tokio::test]
-async fn test_unknown_tool_returns_error() {
+async fn test_unknown_tool_returns_invalid_params() {
     let (mut server, _dir) = test_server().await;
 
     let init_request = make_request("initialize", None);
@@ -366,7 +466,93 @@ async fn test_unknown_tool_returns_error() {
 
     let response = server.handle_request(request).await.unwrap();
     assert!(response.error.is_some());
-    assert_eq!(response.error.unwrap().code, -32601);
+    let error = response.error.unwrap();
+    // Frozen contract (MCP `server/tools.md`, Error Handling): the *method*
+    // `tools/call` exists, so the failure is invalid params — the tool name in the
+    // params is what the server does not know. -32601 here would tell an agent the
+    // server has no tool support at all.
+    assert_eq!(error.code, -32602);
+    assert!(
+        error.message.contains("nonexistent_tool"),
+        "the error must name the unknown tool so the caller can self-correct: {}",
+        error.message
+    );
+}
+
+// ========================================================================
+// RESOURCES/READ TESTS
+// ========================================================================
+
+#[tokio::test]
+async fn test_resources_read_unknown_uri_returns_resource_not_found() {
+    // MCP `server/resources.md` (Error Handling): -32002 is "resource not found";
+    // -32603 is for an internal error. A client must be able to tell "you do not
+    // serve that URI" from "the server broke" — they used to be the same frame.
+    let (mut server, _dir) = test_server().await;
+    server
+        .handle_request(make_request("initialize", None))
+        .await;
+
+    for uri in ["memory://definitely-not-a-resource", "codebase://nope"] {
+        let response = server
+            .handle_request(make_request(
+                "resources/read",
+                Some(serde_json::json!({ "uri": uri })),
+            ))
+            .await
+            .unwrap();
+
+        let error = response.error.expect("unknown URI must be an error");
+        assert_eq!(
+            error.code, -32002,
+            "unknown URI {uri} must map to ResourceNotFound, got {}: {}",
+            error.code, error.message
+        );
+        assert!(
+            error.message.contains(uri),
+            "the error must name the URI it could not find: {}",
+            error.message
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_resources_read_unknown_scheme_returns_resource_not_found() {
+    let (mut server, _dir) = test_server().await;
+    server
+        .handle_request(make_request("initialize", None))
+        .await;
+
+    let response = server
+        .handle_request(make_request(
+            "resources/read",
+            Some(serde_json::json!({ "uri": "totally://unknown" })),
+        ))
+        .await
+        .unwrap();
+
+    let error = response.error.expect("unknown scheme must be an error");
+    assert_eq!(error.code, -32002);
+}
+
+#[tokio::test]
+async fn test_resources_read_known_uri_still_succeeds() {
+    // Guard against "fixed by making everything NotFound".
+    let (mut server, _dir) = test_server().await;
+    server
+        .handle_request(make_request("initialize", None))
+        .await;
+
+    let response = server
+        .handle_request(make_request(
+            "resources/read",
+            Some(serde_json::json!({ "uri": "memory://stats" })),
+        ))
+        .await
+        .unwrap();
+
+    assert!(response.error.is_none(), "{:?}", response.error);
+    assert!(response.result.is_some());
 }
 
 // ========================================================================
@@ -423,4 +609,77 @@ async fn test_tools_call_invalid_params_returns_error() {
     let response = server.handle_request(request).await.unwrap();
     assert!(response.error.is_some());
     assert_eq!(response.error.unwrap().code, -32602);
+}
+
+#[tokio::test]
+async fn test_tool_result_carries_structured_content_and_compact_text() {
+    // The payload is emitted twice on purpose: `structuredContent` as a real JSON
+    // object (MCP 2025-06-18) and `content[0].text` as JSON-as-string for older
+    // clients. The text is compact — pretty-printing only added escaped
+    // indentation to every response's token count.
+    let (mut server, _dir) = test_server().await;
+    server
+        .handle_request(make_request("initialize", None))
+        .await;
+
+    let response = server
+        .handle_request(make_request(
+            "tools/call",
+            Some(serde_json::json!({ "name": "system_status", "arguments": {} })),
+        ))
+        .await
+        .expect("tools/call is answered");
+    let result = response.result.expect("system_status must not fail");
+
+    let structured = &result["structuredContent"];
+    assert!(
+        structured.is_object(),
+        "structuredContent must be a JSON object: {result}"
+    );
+
+    let text = result["content"][0]["text"]
+        .as_str()
+        .expect("the legacy text block must still be there");
+    let parsed: serde_json::Value =
+        serde_json::from_str(text).expect("the text block must be valid JSON");
+    assert_eq!(
+        &parsed, structured,
+        "both encodings must carry the same payload"
+    );
+    assert!(
+        !text.contains("\n  "),
+        "the text block must not be pretty-printed: escaped indentation is pure overhead"
+    );
+}
+
+#[tokio::test]
+async fn test_tool_error_result_is_structured_too() {
+    // Execution errors travel as `isError: true` tool results (SEP-1303), so they
+    // must be parseable the same way — not as a protocol error frame.
+    let (mut server, _dir) = test_server().await;
+    server
+        .handle_request(make_request("initialize", None))
+        .await;
+
+    let response = server
+        .handle_request(make_request(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "memory",
+                "arguments": { "action": "get", "id": "not-a-uuid" }
+            })),
+        ))
+        .await
+        .expect("tools/call is answered");
+
+    assert!(
+        response.error.is_none(),
+        "execution errors are not protocol errors"
+    );
+    let result = response.result.expect("tool result");
+    assert_eq!(result["isError"], true);
+    assert!(
+        result["structuredContent"]["error"].is_string(),
+        "the error must be readable without parsing the text block: {result}"
+    );
 }

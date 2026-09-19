@@ -66,13 +66,14 @@ fn test_schema_structure() {
     assert!(schema["properties"]["id"].is_object());
     assert!(schema["properties"]["reason"].is_object());
     assert_eq!(schema["required"], serde_json::json!(["action"]));
-    // Verify all 7 actions are in enum
+    // Verify all 8 actions are in enum
     let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
-    assert_eq!(actions.len(), 7);
+    assert_eq!(actions.len(), 8);
     assert!(actions.contains(&serde_json::json!("get_batch")));
     assert!(actions.contains(&serde_json::json!("edit")));
     assert!(actions.contains(&serde_json::json!("promote")));
     assert!(actions.contains(&serde_json::json!("demote")));
+    assert!(actions.contains(&serde_json::json!("review")));
 }
 
 // === INTEGRATION TESTS ===
@@ -151,15 +152,96 @@ async fn test_get_nonexistent_memory() {
 }
 
 #[tokio::test]
+async fn test_delete_requires_confirmation() {
+    // `tools::common` policy: every destructive path requires `confirmed: true`.
+    // `memory(action="delete")` was the exception, which made it the cheapest way
+    // for an agent — or text injected into a memory — to destroy data.
+    let (storage, _dir) = test_storage().await;
+    let id = ingest_memory(&storage).await;
+
+    let args = serde_json::json!({ "action": "delete", "id": id });
+    let error = execute(&storage, &test_cognitive(), Some(args))
+        .await
+        .expect_err("delete without `confirmed` must be refused");
+    assert!(
+        error.contains("confirmed: true"),
+        "the refusal must tell the caller how to proceed: {error}"
+    );
+    assert!(
+        error.contains("memory.delete"),
+        "the refusal must name the operation: {error}"
+    );
+
+    // Nothing may have been removed by the refused call.
+    let still_there = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({ "action": "get", "id": id })),
+    )
+    .await
+    .unwrap();
+    assert_eq!(still_there["found"], true, "refused delete must not delete");
+}
+
+#[tokio::test]
+async fn test_delete_rejects_stringly_typed_confirmation() {
+    let (storage, _dir) = test_storage().await;
+    let id = ingest_memory(&storage).await;
+
+    let args = serde_json::json!({ "action": "delete", "id": id, "confirmed": "true" });
+    assert!(
+        execute(&storage, &test_cognitive(), Some(args))
+            .await
+            .is_err(),
+        "only a literal boolean true may authorise deletion"
+    );
+}
+
+#[tokio::test]
 async fn test_delete_existing_memory() {
     let (storage, _dir) = test_storage().await;
     let id = ingest_memory(&storage).await;
-    let args = serde_json::json!({ "action": "delete", "id": id });
+    let args = serde_json::json!({ "action": "delete", "id": id, "confirmed": true });
     let result = execute(&storage, &test_cognitive(), Some(args)).await;
     assert!(result.is_ok());
     let value = result.unwrap();
     assert_eq!(value["action"], "delete");
     assert_eq!(value["success"], true);
+}
+
+#[tokio::test]
+async fn test_review_action_records_fsrs_review() {
+    // `memory://due` tells the model to complete reviews through this action; it
+    // used to name `mark_reviewed`, which `tools/list` never advertised.
+    let (storage, _dir) = test_storage().await;
+    let id = ingest_memory(&storage).await;
+
+    let args = serde_json::json!({ "action": "review", "id": id, "rating": 4 });
+    let value = execute(&storage, &test_cognitive(), Some(args))
+        .await
+        .unwrap();
+
+    assert_eq!(value["success"], true);
+    assert_eq!(value["rating"], "Easy");
+    assert_eq!(value["fsrs"]["reps"], 1);
+}
+
+#[tokio::test]
+async fn test_review_action_defaults_to_good_and_validates_rating() {
+    let (storage, _dir) = test_storage().await;
+    let id = ingest_memory(&storage).await;
+
+    let args = serde_json::json!({ "action": "review", "id": id });
+    let value = execute(&storage, &test_cognitive(), Some(args))
+        .await
+        .unwrap();
+    assert_eq!(value["rating"], "Good");
+
+    let args = serde_json::json!({ "action": "review", "id": id, "rating": 9 });
+    let error = execute(&storage, &test_cognitive(), Some(args))
+        .await
+        .expect_err("out-of-range rating must be refused");
+    assert!(error.contains("between 1 and 4"), "{error}");
 }
 
 #[tokio::test]
@@ -175,8 +257,11 @@ async fn test_delete_nonexistent_memory() {
         .unwrap()
         .id;
     let _ = storage.delete_node(&warmup_id);
-    let args =
-        serde_json::json!({ "action": "delete", "id": "00000000-0000-0000-0000-000000000000" });
+    let args = serde_json::json!({
+        "action": "delete",
+        "id": "00000000-0000-0000-0000-000000000000",
+        "confirmed": true
+    });
     let result = execute(&storage, &test_cognitive(), Some(args)).await;
     assert!(result.is_ok());
     let value = result.unwrap();
@@ -188,7 +273,7 @@ async fn test_delete_nonexistent_memory() {
 async fn test_delete_then_get_returns_not_found() {
     let (storage, _dir) = test_storage().await;
     let id = ingest_memory(&storage).await;
-    let del_args = serde_json::json!({ "action": "delete", "id": id });
+    let del_args = serde_json::json!({ "action": "delete", "id": id, "confirmed": true });
     execute(&storage, &test_cognitive(), Some(del_args))
         .await
         .unwrap();

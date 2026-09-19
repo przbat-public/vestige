@@ -6,8 +6,14 @@ use std::sync::Arc;
 
 use vestige_core::Storage;
 
+use super::ResourceError;
+
 /// Read a memory:// resource
-pub async fn read(storage: &Arc<Storage>, uri: &str) -> Result<String, String> {
+///
+/// Returns [`ResourceError::NotFound`] for a path this server does not publish
+/// (mapped to `-32002` on the wire) and [`ResourceError::Internal`] for a failure
+/// while serving a path that does exist (mapped to `-32603`).
+pub async fn read(storage: &Arc<Storage>, uri: &str) -> Result<String, ResourceError> {
     let path = uri.strip_prefix("memory://").unwrap_or("");
 
     // Parse query parameters if present
@@ -16,7 +22,7 @@ pub async fn read(storage: &Arc<Storage>, uri: &str) -> Result<String, String> {
         None => (path, None),
     };
 
-    match path {
+    let body = match path {
         "stats" => read_stats(storage).await,
         "recent" => {
             let n = parse_query_param(query, "n", 10);
@@ -28,8 +34,25 @@ pub async fn read(storage: &Arc<Storage>, uri: &str) -> Result<String, String> {
         "intentions/due" => read_triggered_intentions(storage).await,
         "insights" => read_insights(storage).await,
         "consolidation-log" => read_consolidation_log(storage).await,
-        _ => Err(format!("Unknown memory resource: {}", path)),
+        _ => return Err(ResourceError::NotFound(uri.to_string())),
+    };
+
+    body.map_err(ResourceError::Internal)
+}
+
+/// Truncate content for a summary field, counting *characters*.
+///
+/// The previous `&content[..200]` sliced by byte offset and panicked whenever
+/// byte 200 landed inside a multi-byte UTF-8 character — which is most memories
+/// containing any non-ASCII text near the cut-off, i.e. any Polish or accented
+/// content longer than 200 bytes. A panic here aborts the whole `resources/read`.
+fn truncate_for_display(content: &str, max_chars: usize) -> String {
+    if content.chars().count() <= max_chars {
+        return content.to_string();
     }
+    let mut truncated: String = content.chars().take(max_chars).collect();
+    truncated.push_str("...");
+    truncated
 }
 
 fn parse_query_param(query: Option<&str>, key: &str, default: i32) -> i32 {
@@ -102,11 +125,7 @@ async fn read_recent(storage: &Arc<Storage>, limit: i32) -> Result<String, Strin
         .map(|n| {
             serde_json::json!({
                 "id": n.id,
-                "summary": if n.content.len() > 200 {
-                    format!("{}...", &n.content[..200])
-                } else {
-                    n.content.clone()
-                },
+                "summary": truncate_for_display(&n.content, 200),
                 "nodeType": n.node_type,
                 "tags": n.tags,
                 "createdAt": n.created_at.to_rfc3339(),
@@ -150,11 +169,7 @@ async fn read_decaying(storage: &Arc<Storage>) -> Result<String, String> {
             let days_since_access = (chrono::Utc::now() - n.last_accessed).num_days();
             serde_json::json!({
                 "id": n.id,
-                "summary": if n.content.len() > 200 {
-                    format!("{}...", &n.content[..200])
-                } else {
-                    n.content.clone()
-                },
+                "summary": truncate_for_display(&n.content, 200),
                 "retentionStrength": n.retention_strength,
                 "daysSinceAccess": days_since_access,
                 "lastAccessed": n.last_accessed.to_rfc3339(),
@@ -195,11 +210,7 @@ async fn read_due(storage: &Arc<Storage>) -> Result<String, String> {
         .map(|n| {
             serde_json::json!({
                 "id": n.id,
-                "summary": if n.content.len() > 200 {
-                    format!("{}...", &n.content[..200])
-                } else {
-                    n.content.clone()
-                },
+                "summary": truncate_for_display(&n.content, 200),
                 "nodeType": n.node_type,
                 "retentionStrength": n.retention_strength,
                 "difficulty": n.difficulty,
@@ -212,7 +223,10 @@ async fn read_due(storage: &Arc<Storage>) -> Result<String, String> {
     let result = serde_json::json!({
         "total": nodes.len(),
         "items": items,
-        "instruction": "Use mark_reviewed with rating 1-4 to complete review",
+        // Must name a tool that `tools/list` actually advertises — this used to say
+        // `mark_reviewed`, which was dispatch-only, so hosts that validate tool
+        // names against the catalog rejected the call the instruction asked for.
+        "instruction": "Use memory(action=\"review\", id=<id>, rating=1-4) to complete a review",
     });
 
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
@@ -387,4 +401,24 @@ async fn read_consolidation_log(storage: &Arc<Storage>) -> Result<String, String
     });
 
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_for_display_counts_characters_not_bytes() {
+        // U+017C is two bytes; 250 of them is 500 bytes, so a byte slice at 200
+        // used to panic inside the middle of a character. Written with escapes so
+        // an encoding mishap cannot silently weaken the test.
+        let long: String = std::iter::repeat_n("\u{17C}", 250).collect();
+        let summary = truncate_for_display(&long, 200);
+        assert_eq!(summary.chars().count(), 203, "200 chars + the ellipsis");
+        assert!(summary.ends_with("..."));
+
+        // Short content is returned untouched, with no ellipsis.
+        assert_eq!(truncate_for_display("krotko", 200), "krotko");
+        assert_eq!(truncate_for_display(&long, 250), long);
+    }
 }

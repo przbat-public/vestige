@@ -8,6 +8,15 @@ use serde_json::Value;
 /// MCP Protocol Version
 pub const MCP_VERSION: &str = "2025-11-25";
 
+/// Protocol revisions this server can speak, oldest first.
+///
+/// Used to validate the `MCP-Protocol-Version` header on the HTTP transport.
+/// `initialize` negotiation accepts any *older* version string than
+/// [`MCP_VERSION`]; this list is the stricter set of revisions whose wire format
+/// we actually implement, so a client cannot pin us to an invented revision.
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
+    &["2024-11-05", "2025-03-26", "2025-06-18", MCP_VERSION];
+
 /// JSON-RPC version
 pub const JSONRPC_VERSION: &str = "2.0";
 
@@ -26,10 +35,16 @@ pub struct JsonRpcRequest {
 }
 
 /// JSON-RPC Response
+///
+/// `id` is deliberately **always** serialized. JSON-RPC 2.0 §5 requires every
+/// response object to carry the member, and requires `null` when the id could not
+/// be determined (parse error, invalid request). Omitting it — which
+/// `skip_serializing_if` used to do — produces a frame no conforming client can
+/// correlate, and strict clients (e.g. the TS SDK's `JSONRPCErrorSchema`) reject it
+/// outright.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
@@ -110,10 +125,6 @@ impl JsonRpcError {
         Self::new(ErrorCode::MethodNotFound, "Method not found")
     }
 
-    pub fn method_not_found_with_message(message: &str) -> Self {
-        Self::new(ErrorCode::MethodNotFound, message)
-    }
-
     pub fn invalid_params(message: &str) -> Self {
         Self::new(ErrorCode::InvalidParams, message)
     }
@@ -126,7 +137,10 @@ impl JsonRpcError {
         Self::new(ErrorCode::ServerNotInitialized, "Server not initialized")
     }
 
-    #[allow(dead_code)] // Reserved for future resource handling
+    /// `-32002 Resource not found`, per MCP `server/resources.md` Error Handling.
+    ///
+    /// Used by `resources/read` for a URI this server does not serve — a case the
+    /// client must be able to tell apart from a server-side failure (`-32603`).
     pub fn resource_not_found(uri: &str) -> Self {
         Self::new(
             ErrorCode::ResourceNotFound,
@@ -134,7 +148,6 @@ impl JsonRpcError {
         )
     }
 }
-
 impl std::fmt::Display for JsonRpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}] {}", self.code, self.message)
@@ -200,5 +213,36 @@ mod tests {
         assert!(response.result.is_none());
         assert!(response.error.is_some());
         assert_eq!(response.error.unwrap().code, -32601);
+    }
+
+    #[test]
+    fn error_without_id_serializes_id_as_null() {
+        // JSON-RPC 2.0 §5: the `id` member MUST be present on every response and
+        // MUST be `null` when it could not be determined. An omitted member is a
+        // protocol violation that strict clients reject.
+        let response = JsonRpcResponse::error(None, JsonRpcError::parse_error());
+        let json = serde_json::to_value(&response).unwrap();
+
+        assert!(
+            json.as_object().unwrap().contains_key("id"),
+            "`id` must be serialized even when unknown: {json}"
+        );
+        assert_eq!(json["id"], Value::Null);
+        assert_eq!(json["error"]["code"], -32700);
+    }
+
+    #[test]
+    fn error_codes_match_the_spec() {
+        assert_eq!(JsonRpcError::method_not_found().code, -32601);
+        assert_eq!(JsonRpcError::invalid_params("x").code, -32602);
+        assert_eq!(JsonRpcError::internal_error("x").code, -32603);
+        assert_eq!(
+            JsonRpcError::resource_not_found("memory://nope").code,
+            -32002
+        );
+        assert_eq!(
+            JsonRpcError::resource_not_found("memory://nope").message,
+            "Resource not found: memory://nope"
+        );
     }
 }
