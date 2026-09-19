@@ -12,6 +12,7 @@
 //! Stage 5F  — Proactive interference resolution (downrank older of a contradiction pair).
 //! Stage 5G  — Score-adaptive pruning (drop results below 30% of top score).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -19,13 +20,13 @@ use tokio::sync::Mutex;
 
 use vestige_core::{
     CompetitionCandidate, EncodingContext, MemoryLifecycle, MemoryState, SearchResult, Storage,
-    TopicalContext,
+    TopicalContext, memory::FreshnessKey,
 };
 
 use crate::cognitive::CognitiveEngine;
 
 use super::super::args::SearchArgs;
-use super::super::helpers::tag_jaccard;
+use super::super::helpers::looks_like_conflicting_versions;
 use super::{PipelineConfig, ScoringOutput};
 
 pub(in crate::tools::search_unified) async fn run(
@@ -35,26 +36,33 @@ pub(in crate::tools::search_unified) async fn run(
     config: &PipelineConfig,
     mut filtered_results: Vec<SearchResult>,
 ) -> Result<ScoringOutput, String> {
-    apply_temporal_boost(cognitive, &mut filtered_results);
-    apply_freshness_boost(&mut filtered_results);
-    apply_state_accessibility(cognitive, &mut filtered_results);
-    let reinstatement_info = apply_context_matching(cognitive, args, &mut filtered_results);
+    apply_temporal_boost(cognitive, &mut filtered_results).await;
+    apply_state_accessibility(cognitive, &mut filtered_results).await;
+    let reinstatement_info = apply_context_matching(cognitive, args, &mut filtered_results).await;
     let suppressed_count =
         apply_retrieval_competition(storage, cognitive, config, &mut filtered_results).await?;
     apply_utility_boost(&mut filtered_results);
-    apply_emotional_boost(cognitive, args, &mut filtered_results);
+    apply_emotional_boost(cognitive, args, &mut filtered_results).await;
     apply_memory_tier_adjustment(&mut filtered_results);
     apply_bayesian_confidence(&mut filtered_results);
-    apply_proactive_interference(storage, &mut filtered_results).await?;
+    let contradiction_pairs = apply_proactive_interference(storage, &mut filtered_results).await?;
 
-    // Re-sort once after every score modification settled.
-    filtered_results.sort_by(|a, b| {
-        b.combined_score
-            .partial_cmp(&a.combined_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Every conflicting pair the read path could see is now known — from the
+    // contradiction edges and from the content gate. The fresher member of each is
+    // ordered first *before* the sort, so the emitted order and the emitted
+    // `combined_score` agree.
+    let conflict_pairs = apply_freshness_ordering(&mut filtered_results, &contradiction_pairs);
+    sort_by_score_then_freshness(&mut filtered_results);
 
-    let prune_removed = apply_adaptive_pruning(&mut filtered_results);
+    // Pruning must not be what resolves a conflict. A capped superseded statement
+    // can drop below the 30%-of-top cut, and when the cap lowered the top the
+    // correction fell out with it — measured on FactConsolidation, that emptied one
+    // conflict group. Recognised conflicts are exempt from the cut; the freshness
+    // rule, not the score threshold, decides which version is read first.
+    let protected: std::collections::HashSet<usize> =
+        conflict_pairs.iter().flat_map(|&(a, b)| [a, b]).collect();
+    let prune_removed = apply_adaptive_pruning(&mut filtered_results, &protected);
+    sort_by_score_then_freshness(&mut filtered_results);
 
     Ok(ScoringOutput {
         results: filtered_results,
@@ -68,78 +76,179 @@ pub(in crate::tools::search_unified) async fn run(
 }
 
 // ---------------------------------------------------------------------------
+// ORDERING — the pipeline's single ordering rule
+// ---------------------------------------------------------------------------
+
+/// Order results by score, then by `FreshnessKey`.
+///
+/// The score is the primary key and stays descending, so the emitted vector is
+/// monotonic in the score it reports. Equal scores — which the multiplicative
+/// boosts above produce routinely — fall back to the identity rule from
+/// `vestige_core::memory`: the greater timestamp wins, and an exact tie is decided
+/// by the memory id. Without that fallback the surviving order was the order the
+/// candidates happened to arrive in, i.e. hash order upstream.
+pub(in crate::tools::search_unified) fn sort_by_score_then_freshness(
+    results: &mut Vec<SearchResult>,
+) {
+    let mut keyed: Vec<(f32, FreshnessKey, SearchResult)> = results
+        .drain(..)
+        .map(|r| {
+            let key = FreshnessKey::from_node(&r.node);
+            (r.combined_score, key, r)
+        })
+        .collect();
+    keyed.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.1.compare(&a.1))
+    });
+    *results = keyed.into_iter().map(|(_, _, r)| r).collect();
+}
+
+/// One part in a thousand below `score`: enough to separate two f32 values at any
+/// magnitude the pipeline produces, small enough that the reported score still
+/// reads as the same number.
+fn just_below(score: f32) -> f32 {
+    if score > 0.0 {
+        score * (1.0 - 1e-3)
+    } else {
+        score - 1e-6
+    }
+}
+
+/// Resolve conflicting memories by the core freshness rule, as an ordering
+/// constraint rather than a score nudge.
+///
+/// Two retrieved memories that state the same fact with different values are a
+/// conflict, and the correction is worthless to the reader if the version it
+/// replaces is read first. The read path used to express this as a +10% boost
+/// gated on tag overlap and a score gap under 15%: tagless memories have a
+/// Jaccard of 0.0, so the stage never fired for them, and a 10% multiplier cannot
+/// overcome a larger score gap anyway (FactConsolidation measured the superseded
+/// statement first in 74.6% of conflicts). Here the *superseded* member is capped
+/// just below its correction instead, which is exactly an ordering constraint.
+///
+/// Capping and not reordering: the pipeline's last word is `sort_by_score_then_freshness`
+/// (and `apply_adaptive_pruning` reads the same order), so the constraint has to be
+/// expressible in the score. It only ever lowers a score and is idempotent, so
+/// re-applying it after a later boost cannot oscillate.
+///
+/// `known_conflicts` are index pairs already established by a contradiction edge;
+/// the rest are found by the cheap content gate in `helpers`.
+///
+/// Returns every pair it ordered, so the caller can keep them out of pruning.
+pub(in crate::tools::search_unified) fn apply_freshness_ordering(
+    results: &mut [SearchResult],
+    known_conflicts: &[(usize, usize)],
+) -> Vec<(usize, usize)> {
+    let n = results.len();
+    if n <= 1 {
+        return Vec::new();
+    }
+
+    let mut pairs: Vec<(usize, usize)> = known_conflicts
+        .iter()
+        .copied()
+        .filter(|&(a, b)| a < n && b < n && a != b)
+        .collect();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if looks_like_conflicting_versions(&results[i].node.content, &results[j].node.content) {
+                pairs.push((i, j));
+            }
+        }
+    }
+    if pairs.is_empty() {
+        return Vec::new();
+    }
+
+    // Conflicting statements form groups (a fact can be superseded more than
+    // once). Union-find keeps a chain A→B→C in one group, where ordering the
+    // pairs independently would leave a transitive violation behind.
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    for &(a, b) in &pairs {
+        let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
+        if ra != rb {
+            parent[ra] = rb;
+        }
+    }
+
+    let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        groups.entry(root).or_default().push(i);
+    }
+
+    for members in groups.values() {
+        if members.len() < 2 {
+            continue;
+        }
+        // Freshest first; `FreshnessKey::compare` is a total order, so this is
+        // deterministic and cannot cycle however the members were retrieved.
+        let mut by_freshness: Vec<(FreshnessKey, usize)> = members
+            .iter()
+            .map(|&i| (FreshnessKey::from_node(&results[i].node), i))
+            .collect();
+        by_freshness.sort_by(|a, b| b.0.compare(&a.0));
+
+        // Walk down the chain capping each older member below the one above it;
+        // the cap of the member above was itself capped, so the whole group ends
+        // up strictly ordered by freshness.
+        for pair in by_freshness.windows(2) {
+            let (fresher, older) = (pair[0].1, pair[1].1);
+            let cap = just_below(results[fresher].combined_score);
+            if results[older].combined_score > cap {
+                results[older].combined_score = cap;
+            }
+        }
+    }
+    pairs
+}
+
+// ---------------------------------------------------------------------------
 // STAGE 3 — temporal boost
 // ---------------------------------------------------------------------------
-fn apply_temporal_boost(
+async fn apply_temporal_boost(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     filtered_results: &mut [SearchResult],
 ) {
-    let Ok(cog) = cognitive.try_lock() else {
-        crate::cognitive::try_lock_metrics::record_miss("search_scoring_temporal");
-        return;
-    };
+    // Blocking, not `try_lock`: a stage that skips itself when the engine is busy
+    // makes the ranking depend on who else happened to hold the lock, so the same
+    // query returns different orders on different runs. Waiting costs latency and
+    // buys determinism.
+    let cog = cognitive.lock().await;
     for result in filtered_results.iter_mut() {
-        let recency = cog.temporal_searcher.recency_boost(result.node.created_at);
-        let validity = cog.temporal_searcher.validity_boost(
+        // `CognitiveEngine::temporal_factor` folds recency × validity and
+        // reports the neutral 1.0 in builds without `vector-search`, where
+        // `TemporalSearcher` is not compiled in. The blend below then reduces
+        // to the identity, which is what we want: no boost is better than a
+        // boost computed from parameters this build does not have.
+        let temporal_factor = cog.temporal_factor(
+            result.node.created_at,
             result.node.valid_from,
             result.node.valid_until,
-            None,
         );
         // Blend: 85% relevance + 15% temporal signal.
-        let temporal_factor = recency * validity;
         result.combined_score =
             result.combined_score * 0.85 + (result.combined_score * temporal_factor as f32) * 0.15;
     }
 }
 
 // ---------------------------------------------------------------------------
-// STAGE 3B — freshness-aware ranking
-// ---------------------------------------------------------------------------
-fn apply_freshness_boost(filtered_results: &mut [SearchResult]) {
-    if filtered_results.len() <= 1 {
-        return;
-    }
-    for i in 0..filtered_results.len() {
-        for j in (i + 1)..filtered_results.len() {
-            let score_i = filtered_results[i].combined_score;
-            let score_j = filtered_results[j].combined_score;
-            let max_score = score_i.max(score_j);
-            if max_score <= 0.0 {
-                continue;
-            }
-            let score_gap = (score_i - score_j).abs() / max_score;
-            if score_gap > 0.15 {
-                continue;
-            }
-            let tag_overlap = tag_jaccard(
-                &filtered_results[i].node.tags,
-                &filtered_results[j].node.tags,
-            );
-            if tag_overlap < 0.5 {
-                continue;
-            }
-            let newer_idx =
-                if filtered_results[i].node.created_at > filtered_results[j].node.created_at {
-                    i
-                } else {
-                    j
-                };
-            filtered_results[newer_idx].combined_score *= 1.0 + (tag_overlap as f32 * 0.10);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // STAGE 4 — memory state accessibility
 // ---------------------------------------------------------------------------
-fn apply_state_accessibility(
+async fn apply_state_accessibility(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     filtered_results: &mut [SearchResult],
 ) {
-    let Ok(cog) = cognitive.try_lock() else {
-        crate::cognitive::try_lock_metrics::record_miss("search_scoring_state");
-        return;
-    };
+    let cog = cognitive.lock().await;
     for result in filtered_results.iter_mut() {
         let mut lifecycle = MemoryLifecycle::new();
         lifecycle.last_access = result.node.last_accessed;
@@ -164,7 +273,7 @@ fn apply_state_accessibility(
 // ---------------------------------------------------------------------------
 // STAGE 5 — context matching + reinstatement
 // ---------------------------------------------------------------------------
-fn apply_context_matching(
+async fn apply_context_matching(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     args: &SearchArgs,
     filtered_results: &mut [SearchResult],
@@ -174,48 +283,38 @@ fn apply_context_matching(
     {
         let retrieval_ctx =
             EncodingContext::new().with_topical(TopicalContext::with_topics(topics.clone()));
-        match cognitive.try_lock() {
-            Ok(cog) => {
-                for result in filtered_results.iter_mut() {
-                    let encoding_ctx = EncodingContext::new()
-                        .with_topical(TopicalContext::with_topics(result.node.tags.clone()));
-                    let context_score = cog
-                        .context_matcher
-                        .match_contexts(&encoding_ctx, &retrieval_ctx);
-                    // Blend: context match boosts relevance up to +30%.
-                    result.combined_score *= 1.0 + (context_score as f32 * 0.3);
-                }
-            }
-            Err(_) => {
-                crate::cognitive::try_lock_metrics::record_miss("search_scoring_context_match");
-            }
+        let cog = cognitive.lock().await;
+        for result in filtered_results.iter_mut() {
+            let encoding_ctx = EncodingContext::new()
+                .with_topical(TopicalContext::with_topics(result.node.tags.clone()));
+            let context_score = cog
+                .context_matcher
+                .match_contexts(&encoding_ctx, &retrieval_ctx);
+            // Blend: context match boosts relevance up to +30%.
+            result.combined_score *= 1.0 + (context_score as f32 * 0.3);
         }
     }
 
     // Reinstatement for the top result helps the agent see WHY this
     // memory matched — temporal/topical/session hints + related ids.
-    match cognitive.try_lock() {
-        Ok(cog) => {
-            if let Some(first) = filtered_results.first() {
-                let current_ctx = if let Some(ref topics) = args.context_topics {
-                    EncodingContext::new().with_topical(TopicalContext::with_topics(topics.clone()))
-                } else {
-                    EncodingContext::new()
-                };
-                let reinstatement = cog
-                    .context_matcher
-                    .reinstate_context(&first.node.id, &current_ctx);
-                return Some(serde_json::json!({
-                    "memoryId": reinstatement.memory_id,
-                    "temporalHint": reinstatement.temporal_hint,
-                    "topicalHint": reinstatement.topical_hint,
-                    "sessionHint": reinstatement.session_hint,
-                    "relatedMemories": reinstatement.related_memories,
-                }));
-            }
-        }
-        Err(_) => {
-            crate::cognitive::try_lock_metrics::record_miss("search_scoring_context_reinstate");
+    {
+        let cog = cognitive.lock().await;
+        if let Some(first) = filtered_results.first() {
+            let current_ctx = if let Some(ref topics) = args.context_topics {
+                EncodingContext::new().with_topical(TopicalContext::with_topics(topics.clone()))
+            } else {
+                EncodingContext::new()
+            };
+            let reinstatement = cog
+                .context_matcher
+                .reinstate_context(&first.node.id, &current_ctx);
+            return Some(serde_json::json!({
+                "memoryId": reinstatement.memory_id,
+                "temporalHint": reinstatement.temporal_hint,
+                "topicalHint": reinstatement.topical_hint,
+                "sessionHint": reinstatement.session_hint,
+                "relatedMemories": reinstatement.related_memories,
+            }));
         }
     }
     None
@@ -255,10 +354,7 @@ async fn apply_retrieval_competition(
         vec![None; filtered_results.len()]
     };
 
-    let Ok(mut cog) = cognitive.try_lock() else {
-        crate::cognitive::try_lock_metrics::record_miss("search_scoring_competition");
-        return Ok(suppressed_count);
-    };
+    let mut cog = cognitive.lock().await;
     let candidates: Vec<CompetitionCandidate> = filtered_results
         .iter()
         .zip(embeddings)
@@ -270,14 +366,23 @@ async fn apply_retrieval_competition(
         })
         .collect();
     if let Some(result) = cog.competition_mgr.run_competition(&candidates, 0.7) {
-        for suppressed_id in &result.suppressed_ids {
-            if let Some(r) = filtered_results
-                .iter_mut()
-                .find(|r| &r.node.id == suppressed_id)
-            {
-                r.combined_score *= 0.85;
-                suppressed_count += 1;
-            }
+        // Collect first, mutate after: the lookup borrows `filtered_results`, and
+        // the map must be dropped before the scores it points into are written.
+        let suppressed_positions: Vec<usize> = {
+            let position_of: std::collections::HashMap<&str, usize> = filtered_results
+                .iter()
+                .enumerate()
+                .map(|(i, r)| (r.node.id.as_str(), i))
+                .collect();
+            result
+                .suppressed_ids
+                .iter()
+                .filter_map(|id| position_of.get(id.as_str()).copied())
+                .collect()
+        };
+        for i in suppressed_positions {
+            filtered_results[i].combined_score *= 0.85;
+            suppressed_count += 1;
         }
     }
     Ok(suppressed_count)
@@ -299,15 +404,12 @@ fn apply_utility_boost(filtered_results: &mut [SearchResult]) {
 // ---------------------------------------------------------------------------
 // STAGE 5D — emotional valence + mood congruence
 // ---------------------------------------------------------------------------
-fn apply_emotional_boost(
+async fn apply_emotional_boost(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     args: &SearchArgs,
     filtered_results: &mut [SearchResult],
 ) {
-    let Ok(mut cog) = cognitive.try_lock() else {
-        crate::cognitive::try_lock_metrics::record_miss("search_scoring_emotional");
-        return;
-    };
+    let mut cog = cognitive.lock().await;
     cog.emotional_memory.evaluate_content(&args.query);
 
     for result in filtered_results.iter_mut() {
@@ -364,70 +466,92 @@ fn apply_bayesian_confidence(filtered_results: &mut [SearchResult]) {
 async fn apply_proactive_interference(
     storage: &Arc<Storage>,
     filtered_results: &mut [SearchResult],
-) -> Result<(), String> {
-    let result_ids: Vec<String> = filtered_results.iter().map(|r| r.node.id.clone()).collect();
-    let storage_pi = storage.clone();
-    let ids_for_task = result_ids.clone();
-    let connections_per_id: Vec<Vec<vestige_core::ConnectionRecord>> =
-        tokio::task::spawn_blocking(move || {
-            ids_for_task
-                .into_iter()
-                .map(|id| {
-                    storage_pi
-                        .get_connections_for_memory(&id)
-                        .unwrap_or_default()
-                })
-                .collect()
-        })
-        .await
-        .map_err(|e| format!("search_unified contradiction task panicked: {}", e))?;
-
-    let mut penalties: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
-    for (id, connections) in result_ids.iter().zip(connections_per_id) {
-        for conn in &connections {
-            if conn.link_type == "contradiction" {
-                let other = if conn.source_id == *id {
-                    &conn.target_id
-                } else {
-                    &conn.source_id
-                };
-                if result_ids.contains(other) {
-                    let id_time = filtered_results
-                        .iter()
-                        .find(|r| r.node.id == *id)
-                        .map(|r| r.node.created_at);
-                    let other_time = filtered_results
-                        .iter()
-                        .find(|r| r.node.id == *other)
-                        .map(|r| r.node.created_at);
-                    if let (Some(t1), Some(t2)) = (id_time, other_time) {
-                        let older = if t1 < t2 { id } else { other };
-                        penalties.entry(older.clone()).or_insert(0.20);
-                    }
-                }
-            }
-        }
+) -> Result<Vec<(usize, usize)>, String> {
+    let n = filtered_results.len();
+    if n <= 1 {
+        return Ok(Vec::new());
     }
 
-    for result in filtered_results.iter_mut() {
-        if let Some(penalty) = penalties.get(&result.node.id) {
+    // One query for the whole candidate set. The stage used to call
+    // `get_connections_for_memory` once per result — N+1 round-trips through the
+    // same connection — to look for at most a handful of contradiction edges.
+    // `get_all_connections` is the existing bulk read (it is what the activation
+    // network is built from), so the search path goes from 1 + N queries to 1.
+    let storage_pi = storage.clone();
+    let connections = tokio::task::spawn_blocking(move || storage_pi.get_all_connections())
+        .await
+        .map_err(|e| format!("search_unified contradiction task panicked: {}", e))?
+        .unwrap_or_default();
+
+    // id -> position, built once: the pairwise `Vec::contains` and the two
+    // `iter().find()` scans per contradiction edge made this stage O(n²) in the
+    // number of results.
+    let position_of: std::collections::HashMap<&str, usize> = filtered_results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.node.id.as_str(), i))
+        .collect();
+
+    let mut penalties = vec![0.0_f32; n];
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
+    let mut seen: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    for conn in &connections {
+        if conn.link_type != "contradiction" {
+            continue;
+        }
+        let (Some(&a), Some(&b)) = (
+            position_of.get(conn.source_id.as_str()),
+            position_of.get(conn.target_id.as_str()),
+        ) else {
+            continue;
+        };
+        let (a, b) = (a.min(b), a.max(b));
+        if !seen.insert((a, b)) {
+            continue;
+        }
+
+        // The core rule decides which side is current: `created_at` alone missed
+        // valid time, so a memory anchored earlier but recorded later looked
+        // older than it is.
+        let ordering = FreshnessKey::from_node(&filtered_results[a].node)
+            .compare(&FreshnessKey::from_node(&filtered_results[b].node));
+        let (older, newer) = if ordering == std::cmp::Ordering::Greater {
+            (b, a)
+        } else {
+            (a, b)
+        };
+        penalties[older] = penalties[older].max(0.20);
+        pairs.push((older, newer));
+    }
+
+    for (result, penalty) in filtered_results.iter_mut().zip(penalties) {
+        if penalty > 0.0 {
             result.combined_score *= 1.0 - penalty;
         }
     }
-    Ok(())
+    Ok(pairs)
 }
 
 // ---------------------------------------------------------------------------
 // STAGE 5G — score-adaptive pruning
 // ---------------------------------------------------------------------------
-fn apply_adaptive_pruning(filtered_results: &mut Vec<SearchResult>) -> usize {
+fn apply_adaptive_pruning(
+    filtered_results: &mut Vec<SearchResult>,
+    protected: &std::collections::HashSet<usize>,
+) -> usize {
     let pre_prune_count = filtered_results.len();
     if filtered_results.len() >= 3
         && let Some(top_score) = filtered_results.first().map(|r| r.combined_score)
         && top_score > 0.0
     {
         let threshold = top_score * 0.30;
-        filtered_results.retain(|r| r.combined_score >= threshold);
+        let mut kept = Vec::with_capacity(filtered_results.len());
+        for (i, result) in filtered_results.drain(..).enumerate() {
+            if result.combined_score >= threshold || protected.contains(&i) {
+                kept.push(result);
+            }
+        }
+        *filtered_results = kept;
     }
     pre_prune_count - filtered_results.len()
 }

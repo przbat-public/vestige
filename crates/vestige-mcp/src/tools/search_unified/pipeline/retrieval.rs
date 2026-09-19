@@ -103,7 +103,18 @@ pub(in crate::tools::search_unified) async fn run(
 
     // ====================================================================
     // STAGE 2: Cross-encoder reranker
+    //
+    // Both rerankers live in `vestige_core::search` (gated by `vector-search`)
+    // and reorder a hybrid candidate pool, so a keyword-only build has neither
+    // the types nor the pool. It keeps the FTS5 order and truncates, which is
+    // the same fallback the full build takes when no cross-encoder model has
+    // been loaded — not a new failure mode.
     // ====================================================================
+    #[cfg(not(feature = "vector-search"))]
+    filtered_results.truncate(keep_limit);
+    #[cfg(not(feature = "vector-search"))]
+    let _ = cognitive; // used only by the gated reranker stage below
+    #[cfg(feature = "vector-search")]
     if let Ok(mut cog) = cognitive.try_lock() {
         let candidates: Vec<_> = filtered_results
             .iter()
@@ -189,7 +200,24 @@ pub(in crate::tools::search_unified) async fn run(
     //
     // Opt-in + tunable so it can be A/B'd against the plain ranking:
     //   VESTIGE_MMR=on, VESTIGE_MMR_LAMBDA ∈ [0,1] (default 0.7).
+    //
+    // `mmr_select` lives in `vestige_core::search`, gated by `vector-search`
+    // even though MMR is pure set selection. Without it the pool is truncated
+    // instead — and because that silently ignores an explicit `VESTIGE_MMR=on`,
+    // the operator is told once at startup (see `main`).
     // ====================================================================
+    #[cfg(not(feature = "vector-search"))]
+    {
+        if mmr_on {
+            tracing::debug!(
+                "VESTIGE_MMR is set but this build has no `vector-search`; MMR skipped"
+            );
+        }
+        if filtered_results.len() > final_limit {
+            filtered_results.truncate(final_limit);
+        }
+    }
+    #[cfg(feature = "vector-search")]
     if mmr_on && filtered_results.len() > 2 {
         let lambda = mmr_lambda();
         let scored: Vec<(SearchResult, f32)> = filtered_results
@@ -226,6 +254,7 @@ pub(in crate::tools::search_unified) async fn run(
 /// rr.item)`), which meant the surviving order was the hybrid one from before the rerank
 /// and the cross-encoder was decorative. Normalising keeps the batch's relative order
 /// while staying on the same 0..1 scale the rest of the pipeline manipulates.
+#[cfg(feature = "vector-search")]
 fn carry_rerank_scores(
     reranked: Vec<vestige_core::search::RerankedResult<SearchResult>>,
 ) -> Vec<SearchResult> {
@@ -271,6 +300,7 @@ fn mmr_enabled() -> bool {
 
 /// MMR relevance/diversity trade-off `λ` from `VESTIGE_MMR_LAMBDA` (default
 /// 0.7 — relevance-leaning). Clamped to `[0,1]`; bad values fall back.
+#[cfg(feature = "vector-search")]
 fn mmr_lambda() -> f32 {
     use std::sync::OnceLock;
     static L: OnceLock<f32> = OnceLock::new();
@@ -283,7 +313,14 @@ fn mmr_lambda() -> f32 {
     })
 }
 
-/// Issue the hybrid search, decomposing compound queries when supported.
+/// Issue the retrieval, decomposing compound queries when supported.
+///
+/// Retrieval goes through [`crate::retrieval::hybrid_search`] rather than
+/// `Storage::hybrid_search` directly: that facade is the one place that knows
+/// the no-embeddings build falls back to FTS5 keyword search (and, because
+/// `decompose_query` is also gated behind `vector-search`, skips compound
+/// decomposition). Calling the storage method here is what made
+/// `--no-default-features` uncompilable.
 async fn hybrid_with_decompose(
     storage: &Arc<Storage>,
     query: &str,
@@ -301,7 +338,8 @@ async fn hybrid_with_decompose(
                 let storage_clone = Arc::clone(storage);
                 let sq = sub_query.clone();
                 let sub_results = tokio::task::spawn_blocking(move || {
-                    storage_clone.hybrid_search(
+                    crate::retrieval::hybrid_search(
+                        &storage_clone,
                         &sq,
                         overfetch_limit,
                         keyword_weight,
@@ -342,7 +380,8 @@ async fn hybrid_with_decompose(
     let storage_clone = Arc::clone(storage);
     let query_clone = query.to_string();
     tokio::task::spawn_blocking(move || {
-        storage_clone.hybrid_search(
+        crate::retrieval::hybrid_search(
+            &storage_clone,
             &query_clone,
             overfetch_limit,
             keyword_weight,

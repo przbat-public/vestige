@@ -12,9 +12,10 @@
 //! ```
 //!
 //! Splitting the original 886-line `execute.rs` into three phase modules
-//! keeps each file under 400 LOC and lets each phase reuse `try_lock()`
-//! patterns independently — short-lived locks remain confined to a single
-//! phase boundary, which made the previous monolith hard to reason about.
+//! keeps each file under 400 LOC. The engine lock is taken by *waiting*
+//! (`lock().await`) in every stage: a stage that skipped itself on a busy lock
+//! made the ranking depend on lock timing, so the same query could return two
+//! different orders.
 
 use serde_json::Value;
 

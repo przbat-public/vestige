@@ -14,7 +14,7 @@ use chrono::Utc;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
-use vestige_core::{MemorySnapshot, Storage};
+use vestige_core::{MemorySnapshot, SearchResult, Storage};
 
 use crate::cognitive::CognitiveEngine;
 
@@ -34,7 +34,7 @@ pub(in crate::tools::search_unified) async fn run(
     mut scoring: ScoringOutput,
     dedup_removed: usize,
 ) -> Result<Value, String> {
-    apply_spreading_activation(cognitive, config, &mut scoring);
+    apply_spreading_activation(cognitive, config, &mut scoring).await;
     strengthen_on_access(storage, &scoring).await;
     record_side_effects(storage, cognitive, args, &scoring).await;
 
@@ -47,13 +47,7 @@ pub(in crate::tools::search_unified) async fn run(
     let (formatted, budget_expandable, budget_tokens_used) =
         enforce_token_budget(formatted, args, config.detail_level);
 
-    let learning_mode = match cognitive.try_lock() {
-        Ok(cog) => cog.attention_signal.is_learning_mode(),
-        Err(_) => {
-            crate::cognitive::try_lock_metrics::record_miss("search_finalize");
-            false
-        }
-    };
+    let learning_mode = cognitive.lock().await.attention_signal.is_learning_mode();
 
     let mut response = serde_json::json!({
         "query": args.query,
@@ -97,7 +91,7 @@ pub(in crate::tools::search_unified) async fn run(
         response["tokensUsed"] = serde_json::json!(used);
     }
 
-    record_metacognition(cognitive, args, &scoring.results, &mut response);
+    record_metacognition(cognitive, args, &scoring.results, &mut response).await;
 
     Ok(response)
 }
@@ -105,7 +99,7 @@ pub(in crate::tools::search_unified) async fn run(
 // ---------------------------------------------------------------------------
 // STAGE 6 — spreading activation
 // ---------------------------------------------------------------------------
-fn apply_spreading_activation(
+async fn apply_spreading_activation(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     config: &PipelineConfig,
     scoring: &mut ScoringOutput,
@@ -121,53 +115,23 @@ fn apply_spreading_activation(
     // Clone the activation-network Arc out of the engine and drop the
     // engine lock immediately. Spreading activation then runs holding only
     // its own write lock — other tools can grab the engine concurrently.
+    // Both locks are taken by waiting: a `try_lock` here used to skip the
+    // stage silently, which made the final order depend on lock timing.
     let net = {
-        let Ok(cog) = cognitive.try_lock() else {
-            crate::cognitive::try_lock_metrics::record_miss("search_finalize");
-            return;
-        };
+        let cog = cognitive.lock().await;
         Arc::clone(&cog.activation_network)
     };
     let Some(first) = scoring.results.first() else {
         return;
     };
 
-    let activated = match net.try_write() {
-        Ok(mut n) => n.activate(&first.node.id, 1.0),
-        Err(_) => {
-            crate::cognitive::try_lock_metrics::record_miss("search_finalize");
-            return;
-        }
-    };
+    let activated = net.write().await.activate(&first.node.id, 1.0);
     let activation_map: std::collections::HashMap<&str, f64> = activated
         .iter()
         .map(|a| (a.memory_id.as_str(), a.activation))
         .collect();
 
-    // ACT-R-flavoured boost. The activation network propagates from the
-    // top result outward in the Collins & Loftus model — neighbours with
-    // strong, fresh edges to the anchor get a multiplicative bump on the
-    // final search score. The 20 % ceiling is deliberately conservative:
-    //
-    //   * Anderson's ACT-R activation can dominate retrieval probability,
-    //     but that's *recall* probability, not a post-rank score scalar.
-    //     A 20 % bump on `combined_score` is loud enough to re-order
-    //     ties without overpowering the FTS/semantic ranking signal.
-    //   * Activation is normalised to `[0, 1.0]` by the network; values
-    //     above 1.0 occasionally appear at the anchor's direct
-    //     neighbours when multiple high-weight edges converge — the
-    //     `min(0.20)` clamp guarantees the bump is a re-rank, not a
-    //     re-rewrite, even in those cases.
-    //
-    // If you want to tune this, prefer changing the activation network's
-    // decay (in `ActivationNetwork::activate`) rather than this knob —
-    // it propagates the effect end-to-end and stays consistent with the
-    // dream / metacognition pipelines that also read activation.
-    for result in scoring.results.iter_mut().skip(1) {
-        if let Some(&act) = activation_map.get(result.node.id.as_str()) {
-            result.combined_score *= 1.0 + (act as f32 * 0.20).min(0.20);
-        }
-    }
+    apply_activation_boost(&mut scoring.results, &activation_map);
 
     scoring.associations = activated
         .iter()
@@ -180,6 +144,46 @@ fn apply_spreading_activation(
             })
         })
         .collect();
+}
+
+/// Apply the ACT-R activation bump, then restore the reported order.
+///
+/// The bump is multiplicative and lands *after* the scoring phase's sort, so it
+/// can move a result past its neighbour — and, when the neighbour is the
+/// correction that supersedes it, past the freshness constraint too. The order is
+/// therefore rebuilt here, in the same two steps the scoring phase uses, instead
+/// of leaving the response with a `combinedScore` column that does not match the
+/// row order. Split out as a pure function so that contract is testable without a
+/// live activation network.
+///
+/// The 20 % ceiling is deliberately conservative:
+///
+///   * Anderson's ACT-R activation can dominate retrieval probability,
+///     but that's *recall* probability, not a post-rank score scalar.
+///     A 20 % bump on `combined_score` is loud enough to re-order
+///     ties without overpowering the FTS/semantic ranking signal.
+///   * Activation is normalised to `[0, 1.0]` by the network; values
+///     above 1.0 occasionally appear at the anchor's direct
+///     neighbours when multiple high-weight edges converge — the
+///     `min(0.20)` clamp guarantees the bump is a re-rank, not a
+///     re-rewrite, even in those cases.
+///
+/// If you want to tune this, prefer changing the activation network's
+/// decay (in `ActivationNetwork::activate`) rather than this knob —
+/// it propagates the effect end-to-end and stays consistent with the
+/// dream / metacognition pipelines that also read activation.
+pub(in crate::tools::search_unified) fn apply_activation_boost(
+    results: &mut Vec<SearchResult>,
+    activation_map: &std::collections::HashMap<&str, f64>,
+) {
+    // `skip(1)`: the anchor is the source of the activation, not a neighbour.
+    for result in results.iter_mut().skip(1) {
+        if let Some(&act) = activation_map.get(result.node.id.as_str()) {
+            result.combined_score *= 1.0 + (act as f32 * 0.20).min(0.20);
+        }
+    }
+    super::scoring::apply_freshness_ordering(results, &[]);
+    super::scoring::sort_by_score_then_freshness(results);
 }
 
 // ---------------------------------------------------------------------------
@@ -215,10 +219,7 @@ async fn record_side_effects(
     })
     .await;
 
-    let Ok(mut cog) = cognitive.try_lock() else {
-        crate::cognitive::try_lock_metrics::record_miss("search_finalize_side_effects");
-        return;
-    };
+    let mut cog = cognitive.lock().await;
     let _ = cog.predictive_memory.record_query(&args.query, &[]);
 
     for result in &scoring.results {
@@ -305,16 +306,13 @@ fn enforce_token_budget(
 // ---------------------------------------------------------------------------
 // Metacognition (hit rate, confidence, knowledge gaps)
 // ---------------------------------------------------------------------------
-fn record_metacognition(
+async fn record_metacognition(
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     args: &SearchArgs,
     results: &[vestige_core::SearchResult],
     response: &mut Value,
 ) {
-    let Ok(mut cog) = cognitive.try_lock() else {
-        crate::cognitive::try_lock_metrics::record_miss("search_finalize");
-        return;
-    };
+    let mut cog = cognitive.lock().await;
     let avg_conf = if results.is_empty() {
         0.0
     } else {
