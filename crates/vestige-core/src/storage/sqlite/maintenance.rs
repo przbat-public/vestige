@@ -68,21 +68,34 @@ impl Storage {
     ///
     /// This primitive is for *explicit* garbage collection only, where the caller has
     /// shown the user the candidates first (the `gc` MCP tool and the dashboard panel
-    /// both default to a dry run). It must never be called from an automatic path:
-    /// consolidation used to call it on every cycle and silently deleted user
-    /// memories, which is why that call site is gone (see
+    /// both default to a dry run, which never reaches this method). It must never be
+    /// called from an automatic path: consolidation used to call it on every cycle
+    /// and silently deleted user memories, which is why that call site is gone (see
     /// `consolidation.rs`, step 16).
+    ///
+    /// The pass leaves the vector index in the state `delete_node` leaves it:
+    /// eviction failures are reported, and the sidecar is rewritten so the ids this
+    /// pass collected cannot come back from `vestige.hnsw` on the next boot.
     pub fn gc_below_retention(&self, threshold: f64, min_age_days: i64) -> Result<i64> {
         let cutoff = (Utc::now() - Duration::days(min_age_days)).to_rfc3339();
 
-        // Collect IDs first for vector index cleanup
+        // The candidate set and the DELETE have to be one atomic step. Read
+        // through the reader and deleted through the writer, the predicate was
+        // evaluated twice: a row that crossed the threshold in between was
+        // deleted without ever being collected (its vector stayed in HNSW),
+        // and a collected row could survive the DELETE while its vector was
+        // still evicted — a live memory silently dropped out of semantic
+        // search. `BEGIN IMMEDIATE` holds the write lock across both
+        // statements, so the cleanup below acts on exactly the rows removed.
+        let mut writer = self
+            .writer
+            .lock()
+            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+        let tx = super::helpers::begin_write_transaction(&mut writer)?;
+
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
         let doomed_ids: Vec<String> = {
-            let reader = self
-                .reader
-                .lock()
-                .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
-            let mut stmt = reader.prepare(
+            let mut stmt = tx.prepare(
                 "SELECT id FROM knowledge_nodes WHERE retention_strength < ?1 AND created_at < ?2",
             )?;
             stmt.query_map(params![threshold, cutoff], |row| row.get(0))?
@@ -90,23 +103,42 @@ impl Storage {
                 .collect()
         };
 
-        let writer = self
-            .writer
-            .lock()
-            .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-        let deleted = writer.execute(
+        let deleted = tx.execute(
             "DELETE FROM knowledge_nodes WHERE retention_strength < ?1 AND created_at < ?2",
             params![threshold, cutoff],
         )? as i64;
+        tx.commit()?;
         drop(writer);
 
-        // Clean up vector index
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
-        if deleted > 0
-            && let Ok(mut index) = self.vector_index.lock()
-        {
-            for id in &doomed_ids {
-                let _ = index.remove(id);
+        if deleted > 0 {
+            match self.vector_index.lock() {
+                Ok(mut index) => {
+                    for id in &doomed_ids {
+                        if let Err(e) = index.remove(id) {
+                            tracing::warn!(
+                                node_id = %id,
+                                error = %e,
+                                "vector index eviction failed during GC — the collected memory \
+                                 can still be returned by semantic search until the index is rebuilt"
+                            );
+                        }
+                    }
+                }
+                Err(_) => tracing::warn!(
+                    collected = doomed_ids.len(),
+                    "vector index lock poisoned — the memories collected by GC were not evicted"
+                ),
+            }
+
+            // Persist immediately, like `delete_node`: leaving the rewrite to a
+            // later pass is what let collected ids survive in the sidecar.
+            if let Err(e) = self.persist_vector_index() {
+                tracing::warn!(
+                    error = %e,
+                    "could not rewrite the vector index sidecar after GC — \
+                     next startup rebuilds from SQLite instead of the sidecar"
+                );
             }
         }
 

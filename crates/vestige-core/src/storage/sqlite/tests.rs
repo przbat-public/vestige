@@ -1713,3 +1713,128 @@ fn vectors_from_an_older_embedding_space_produce_an_actionable_warning() {
         "the current space must be named so the user can tell what is old: {message}"
     );
 }
+
+// ============================================================================
+// Retention-floor GC — index consistency (gc-sidecar)
+//
+// `gc_below_retention` repeated the pattern `delete_node` had: the vector
+// eviction result was discarded and the sidecar was never rewritten, so a pass
+// could leave collected ids inside `vestige.hnsw` for a later boot to load.
+// ============================================================================
+
+/// Pin a node's retention so the pass is decided by the threshold under test,
+/// not by whatever FSRS scheduled at ingest.
+fn set_retention(storage: &Storage, id: &str, retention: f64) {
+    storage
+        .writer
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE knowledge_nodes SET retention_strength = ?1 WHERE id = ?2",
+            rusqlite::params![retention, id],
+        )
+        .unwrap();
+}
+
+#[test]
+fn gc_pass_rewrites_the_index_sidecar_without_the_collected_ids() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("gc.db");
+
+    let (doomed_id, survivor_id) = {
+        let storage = Storage::new(Some(db_path.clone())).unwrap();
+        let doomed = storage
+            .ingest(IngestInput {
+                content: "memory the collector takes".to_string(),
+                node_type: "fact".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        let survivor = storage
+            .ingest(IngestInput {
+                content: "memory the collector keeps".to_string(),
+                node_type: "fact".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        set_retention(&storage, &doomed.id, 0.05);
+        set_retention(&storage, &survivor.id, 0.95);
+
+        storage.persist_vector_index().unwrap();
+        assert_eq!(
+            storage.gc_below_retention(0.5, 0).unwrap(),
+            1,
+            "exactly the low-retention memory must be collected"
+        );
+        (doomed.id, survivor.id)
+    };
+
+    let reloaded = Storage::new(Some(db_path)).unwrap();
+    assert_eq!(
+        reloaded.vector_index_source(),
+        VectorIndexSource::Loaded,
+        "the GC pass must leave a sidecar that is valid, not one that every later boot rejects"
+    );
+    let index = reloaded.vector_index.lock().unwrap();
+    assert!(
+        !index.contains(&doomed_id),
+        "a collected id came back from the persisted sidecar"
+    );
+    assert!(
+        index.contains(&survivor_id),
+        "the survivor must still be indexed"
+    );
+}
+
+/// `gc { dry_run: true }` is a read-only listing: it must not touch a byte of
+/// the database or the index cache, otherwise the "dry" pass would already have
+/// invalidated the state the destructive pass depends on.
+#[test]
+fn gc_dry_run_listing_changes_nothing_on_disk() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("gc-dry.db");
+
+    let storage = Storage::new(Some(db_path.clone())).unwrap();
+    let doomed = storage
+        .ingest(IngestInput {
+            content: "candidate the dry run only reports".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+    set_retention(&storage, &doomed.id, 0.05);
+    storage.persist_vector_index().unwrap();
+
+    let sidecar = storage.vector_index_path();
+    let meta = storage.vector_index_meta_path();
+    let snapshot = |path: &std::path::Path| std::fs::read(path).unwrap_or_default();
+    let before = (snapshot(&db_path), snapshot(&sidecar), snapshot(&meta));
+
+    // What the tool's dry run does: list, filter, report.
+    let candidates: Vec<String> = storage
+        .get_all_nodes(500, 0)
+        .unwrap()
+        .into_iter()
+        .filter(|node| node.retention_strength < 0.5)
+        .map(|node| node.id)
+        .collect();
+    assert_eq!(
+        candidates,
+        vec![doomed.id.clone()],
+        "the dry run must see the candidate it would delete"
+    );
+
+    assert_eq!(
+        (snapshot(&db_path), snapshot(&sidecar), snapshot(&meta)),
+        before,
+        "a dry run must leave the database and the index sidecar untouched"
+    );
+    assert!(
+        storage.get_node(&doomed.id).unwrap().is_some(),
+        "a dry run must not delete anything"
+    );
+    assert!(
+        storage.vector_index.lock().unwrap().contains(&doomed.id),
+        "a dry run must not evict anything from the index"
+    );
+}
