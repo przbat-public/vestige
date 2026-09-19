@@ -96,48 +96,6 @@ pub struct HttpTransportState {
     allowed_hosts: Arc<Vec<String>>,
 }
 
-/// Origins permitted to call the transport from a browser.
-///
-/// `VESTIGE_CORS_ORIGINS` extends the loopback defaults (comma-separated).
-fn allowed_origins(port: u16) -> Vec<String> {
-    let mut origins = vec![
-        format!("http://127.0.0.1:{port}"),
-        format!("http://localhost:{port}"),
-        format!("http://[::1]:{port}"),
-    ];
-    if let Ok(extra) = std::env::var("VESTIGE_CORS_ORIGINS") {
-        origins.extend(
-            extra
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty()),
-        );
-    }
-    origins
-}
-
-/// `Host` values permitted to address the transport.
-///
-/// Loopback plus whatever `VESTIGE_ALLOWED_HOSTS` names. A request whose `Host` is
-/// neither is the DNS-rebinding shape: the browser was tricked into resolving an
-/// attacker-controlled name to 127.0.0.1, so the name in the header is not ours.
-fn allowed_hosts(port: u16) -> Vec<String> {
-    let mut hosts = vec![
-        format!("127.0.0.1:{port}"),
-        format!("localhost:{port}"),
-        format!("[::1]:{port}"),
-    ];
-    if let Ok(extra) = std::env::var("VESTIGE_ALLOWED_HOSTS") {
-        hosts.extend(
-            extra
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty()),
-        );
-    }
-    hosts
-}
-
 /// Reject requests a browser should never be able to make against a local memory store.
 ///
 /// MCP's transport spec makes this a MUST: "Servers MUST validate the Origin header on
@@ -156,57 +114,29 @@ async fn guard_origin_and_host(
     request: Request,
     next: Next,
 ) -> Response {
-    let host = request
-        .headers()
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok());
-
-    let host_allowed = host
-        .map(|h| {
-            state
-                .allowed_hosts
-                .iter()
-                .any(|allowed| allowed.eq_ignore_ascii_case(h))
-        })
-        .unwrap_or(false);
-
-    if !host_allowed {
-        warn!(
-            host = host.unwrap_or("<missing>"),
-            "Rejected request: Host header is not one this transport answers to"
-        );
-        return forbidden("Host header is missing or not allowed");
-    }
-
-    if let Some(origin) = request
-        .headers()
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
-    {
-        let origin_allowed = state
-            .allowed_origins
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(origin));
-        if !origin_allowed {
-            warn!(origin, "Rejected request: Origin header is not allowed");
-            return forbidden("Origin header is not allowed");
+    match crate::protocol::origin_guard::evaluate(
+        &state.allowed_origins,
+        &state.allowed_hosts,
+        request.headers(),
+    ) {
+        crate::protocol::origin_guard::Decision::Allow => next.run(request).await,
+        crate::protocol::origin_guard::Decision::Reject(reason) => {
+            warn!(
+                host = request
+                    .headers()
+                    .get(header::HOST)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("<missing>"),
+                origin = request
+                    .headers()
+                    .get(header::ORIGIN)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("<none>"),
+                "Rejected request: {reason}"
+            );
+            crate::protocol::origin_guard::forbidden(reason)
         }
     }
-
-    next.run(request).await
-}
-
-/// 403 with a JSON-RPC error body, as the transport spec prescribes for a rejected
-/// Origin. The body carries no `id`: the request was refused before it was parsed.
-fn forbidden(message: &str) -> Response {
-    (
-        StatusCode::FORBIDDEN,
-        Json(serde_json::json!({
-            "jsonrpc": "2.0",
-            "error": { "code": -32600, "message": message },
-        })),
-    )
-        .into_response()
 }
 
 /// Build the transport router.
@@ -275,8 +205,8 @@ pub async fn start_http_transport(
         cognitive,
         event_tx,
         auth_token,
-        allowed_origins: Arc::new(allowed_origins(port)),
-        allowed_hosts: Arc::new(allowed_hosts(port)),
+        allowed_origins: Arc::new(crate::protocol::origin_guard::allowed_origins(port, &[])),
+        allowed_hosts: Arc::new(crate::protocol::origin_guard::allowed_hosts(port)),
     };
 
     // Spawn session reaper
@@ -593,8 +523,8 @@ mod tests {
             cognitive: Arc::new(Mutex::new(CognitiveEngine::new())),
             event_tx,
             auth_token: TOKEN.to_string(),
-            allowed_origins: Arc::new(allowed_origins(port)),
-            allowed_hosts: Arc::new(allowed_hosts(port)),
+            allowed_origins: Arc::new(crate::protocol::origin_guard::allowed_origins(port, &[])),
+            allowed_hosts: Arc::new(crate::protocol::origin_guard::allowed_hosts(port)),
         }
     }
 
@@ -725,7 +655,7 @@ mod tests {
 
     #[test]
     fn defaults_cover_loopback_only() {
-        let origins = allowed_origins(3928);
+        let origins = crate::protocol::origin_guard::allowed_origins(3928, &[]);
         assert!(origins.iter().any(|o| o == "http://127.0.0.1:3928"));
         assert!(origins.iter().any(|o| o == "http://localhost:3928"));
         assert!(
@@ -733,7 +663,7 @@ mod tests {
             "no wildcard, no remote origin by default"
         );
 
-        let hosts = allowed_hosts(3928);
+        let hosts = crate::protocol::origin_guard::allowed_hosts(3928);
         assert!(hosts.iter().any(|h| h == "127.0.0.1:3928"));
         assert!(hosts.iter().any(|h| h == "localhost:3928"));
         assert_eq!(

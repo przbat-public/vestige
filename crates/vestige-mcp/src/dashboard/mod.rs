@@ -13,6 +13,7 @@ pub mod websocket;
 pub mod wire;
 
 use axum::Router;
+use axum::middleware;
 use axum::routing::{delete, get, patch, post};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -45,6 +46,21 @@ pub fn build_router_with_event_tx(
 ) -> (Router, AppState) {
     let state = AppState::with_event_tx(storage, cognitive, event_tx);
     build_router_inner(state, port)
+}
+
+/// Origins the Vite dev server uses (debug builds only).
+fn dashboard_dev_origins() -> Vec<String> {
+    #[cfg(debug_assertions)]
+    {
+        vec![
+            "http://localhost:5173".to_string(),
+            "http://127.0.0.1:5173".to_string(),
+        ]
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        Vec::new()
+    }
 }
 
 fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
@@ -119,6 +135,15 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
     let permissions_policy = SetResponseHeaderLayer::overriding(
         axum::http::HeaderName::from_static("permissions-policy"),
         axum::http::HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+    );
+
+    // Same policy as the MCP transport. CORS below only tells a browser what it may read;
+    // without this, a page on any website could POST/PATCH/DELETE memories through the
+    // loopback dashboard and the request would run — it just could not read the reply.
+    let origin_guard = crate::protocol::origin_guard::OriginGuard::for_port(
+        "dashboard",
+        port,
+        &dashboard_dev_origins(),
     );
 
     let router = Router::new()
@@ -219,6 +244,12 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
                 .layer(referrer_policy)
                 .layer(permissions_policy),
         )
+        // Outermost: a request from an origin this dashboard does not answer to is refused
+        // before it reaches a handler or the WebSocket upgrade.
+        .layer(middleware::from_fn_with_state(
+            origin_guard,
+            crate::protocol::origin_guard::OriginGuard::check,
+        ))
         .with_state(state.clone());
 
     (router, state)
@@ -302,4 +333,76 @@ async fn start_background_inner(
     });
 
     Ok(state)
+}
+
+#[cfg(test)]
+mod origin_guard_wiring_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode, header};
+    use tower::ServiceExt;
+
+    const PORT: u16 = 3927;
+
+    fn router() -> Router {
+        let dir = tempfile::TempDir::new().unwrap();
+        let storage = Arc::new(Storage::new(Some(dir.path().join("guard.db"))).unwrap());
+        std::mem::forget(dir);
+        build_router(storage, None, PORT).0
+    }
+
+    fn get(host: &str, origin: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method(Method::GET)
+            .uri("/api/stats")
+            .header(header::HOST, host);
+        if let Some(origin) = origin {
+            builder = builder.header(header::ORIGIN, origin);
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    /// The dashboard can read, edit and delete every memory, so a page on another site must
+    /// not be able to drive it through loopback. CORS alone only hides the response.
+    #[tokio::test]
+    async fn foreign_origin_is_refused() {
+        let status = router()
+            .oneshot(get("127.0.0.1:3927", Some("https://evil.example")))
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn foreign_host_is_refused() {
+        let status = router()
+            .oneshot(get("attacker.example:3927", None))
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    /// A same-origin request passes the guard — whatever the handler answers, it is not 403.
+    #[tokio::test]
+    async fn loopback_origin_reaches_the_handler() {
+        let status = router()
+            .oneshot(get("127.0.0.1:3927", Some("http://127.0.0.1:3927")))
+            .await
+            .unwrap()
+            .status();
+        assert_ne!(status, StatusCode::FORBIDDEN);
+    }
+
+    /// Non-browser clients (the CLI, curl, an editor plugin) send no Origin.
+    #[tokio::test]
+    async fn request_without_origin_reaches_the_handler() {
+        let status = router()
+            .oneshot(get("localhost:3927", None))
+            .await
+            .unwrap()
+            .status();
+        assert_ne!(status, StatusCode::FORBIDDEN);
+    }
 }
