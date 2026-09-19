@@ -1,5 +1,11 @@
 //! # Intentions Workflow Journey Tests
 //!
+//! > **Scope: contract test, not a Storage end-to-end test.** This module
+//! > exercises real product code, but it never constructs `Storage` and never
+//! > touches SQLite. The persistence journey lives in
+//! > `tests/journeys/storage_persistence.rs`; see `journeys/mod.rs` for the
+//! > full breakdown of which files are real E2E and which are DTO contracts.
+//!
 //! Tests the intent detection system that understands WHY users are doing
 //! something, not just WHAT they're doing. This enables proactive memory
 //! retrieval based on detected intent.

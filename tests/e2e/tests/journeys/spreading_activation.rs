@@ -1,5 +1,11 @@
 //! # Spreading Activation Journey Tests
 //!
+//! > **Scope: contract test, not a Storage end-to-end test.** This module
+//! > exercises real product code, but it never constructs `Storage` and never
+//! > touches SQLite. The persistence journey lives in
+//! > `tests/journeys/storage_persistence.rs`; see `journeys/mod.rs` for the
+//! > full breakdown of which files are real E2E and which are DTO contracts.
+//!
 //! Tests the associative memory network that finds hidden connections
 //! between memories through spreading activation - a technique inspired
 //! by how neurons activate related memories in the brain.

@@ -36,6 +36,22 @@ fn make_ingest_input(
     }
 }
 
+/// Every file SQLite keeps for a database at `db_path`: the database itself
+/// plus the `-wal` and `-shm` sidecars created by WAL mode.
+///
+/// Deleting only the main file leaves the sidecars pointing at an unlinked
+/// inode, and the next connection fails with `SQLITE_IOERR_SHORT_READ`
+/// ("disk I/O error") while recovering that stale WAL.
+fn sqlite_files(db_path: &std::path::Path) -> [PathBuf; 3] {
+    let mut files = [PathBuf::new(), PathBuf::new(), PathBuf::new()];
+    for (slot, suffix) in files.iter_mut().zip(["", "-wal", "-shm"]) {
+        let mut name = db_path.as_os_str().to_os_string();
+        name.push(suffix);
+        *slot = PathBuf::from(name);
+    }
+    files
+}
+
 /// Manager for test databases
 ///
 /// Creates isolated database instances for each test to prevent interference.
@@ -266,9 +282,16 @@ impl TestDatabaseManager {
     /// IDs will NOT be preserved (new UUIDs are generated).
     pub fn restore_snapshot(&mut self) -> bool {
         if let Some(nodes) = self.snapshot.take() {
-            // Clear current data by recreating storage
-            // Delete the database file first
-            let _ = std::fs::remove_file(&self.db_path);
+            // Clear current data by recreating storage.
+            //
+            // The WAL sidecars have to go with the database file: leaving a
+            // `-wal` behind means the next connection tries to recover a WAL
+            // that belongs to the (now unlinked) previous database and fails
+            // with `SQLITE_IOERR_SHORT_READ` ("disk I/O error") instead of
+            // opening a fresh store.
+            for path in sqlite_files(&self.db_path) {
+                let _ = std::fs::remove_file(path);
+            }
             self.storage = Storage::new(Some(self.db_path.clone()))
                 .expect("Failed to recreate storage for restore");
 

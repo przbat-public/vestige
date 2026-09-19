@@ -1,626 +1,311 @@
-//! # MCP Tool Tests
+//! # MCP Tool Tests — executed against the real server
 //!
-//! Comprehensive tests for all MCP tools provided by Vestige.
-//! Tests cover input validation, execution, and response formats.
+//! Each test spawns the actual `vestige-mcp` binary, completes the MCP
+//! handshake and then calls tools over stdio against a TempDir database (see
+//! [`vestige_e2e_tests::harness::McpServerProcess`]). The assertions below are
+//! about what the product *did* — a memory row that exists, is findable, is
+//! still there after a server restart — not about JSON the test wrote itself.
+//!
+//! History: this file used to build `json!({...})` literals, run
+//! `validate_tool_response` over them and assert on them. Nothing from the
+//! `vestige` crates was imported at all, so the CI job could not fail for any
+//! product reason. Those literals are gone; the shapes they documented are now
+//! asserted on real responses (including the error envelopes, which the
+//! literals never exercised).
+//!
+//! Prerequisite: a built `vestige-mcp` binary — see the module docs of
+//! `protocol_tests.rs`; `$VESTIGE_MCP_BIN` overrides discovery.
 
-use serde_json::{Value, json};
+use serde_json::json;
+use vestige_e2e_tests::harness::McpServerProcess;
+
+/// Content whose first sentence is distinctive enough to prove the search
+/// pipeline (FTS5 + mock embedding + RRF) really returned *this* memory.
+const E2E_CONTENT: &str =
+    "Vestige E2E marker quantum-walrus-42 recorded that consolidation never deletes memories.";
+
+const E2E_QUERY: &str = "quantum-walrus-42 consolidation deletes memories";
 
 // ============================================================================
-// HELPER FUNCTIONS
+// FULL ROUND TRIP: ingest → search → get → restart → get
 // ============================================================================
 
-/// Validate a tool call response structure
-fn validate_tool_response(response: &Value) {
+/// One memory, pushed through the real server end to end:
+///
+/// 1. `smart_ingest` (forceCreate) creates it and returns a UUID,
+/// 2. `search` finds it by a query that is not a literal copy of the content,
+/// 3. `memory(action="get")` returns exactly the stored content and metadata,
+/// 4. after a **server restart** on the same database, the memory is still
+///    there — the write reached SQLite instead of staying in process memory.
+#[test]
+fn test_ingest_search_get_survives_server_restart() {
+    let Some(mut server) =
+        McpServerProcess::spawn_or_skip("test_ingest_search_get_survives_server_restart")
+    else {
+        return;
+    };
+    server.initialize().expect("initialize must succeed");
+
+    // ---- 1. ingest --------------------------------------------------------
+    let ingest = server
+        .call_tool(
+            "smart_ingest",
+            json!({
+                "content": E2E_CONTENT,
+                "nodeType": "fact",
+                "tags": ["e2e-journey", "regression"],
+                "source": "tests/e2e/tests/mcp/tool_tests.rs",
+                "forceCreate": true
+            }),
+        )
+        .expect("smart_ingest must succeed");
+
+    assert_eq!(ingest["success"], true, "ingest payload: {ingest}");
+    assert_eq!(ingest["decision"], "create", "ingest payload: {ingest}");
+    let node_id = ingest["nodeId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("ingest must return a nodeId: {ingest}"))
+        .to_string();
     assert!(
-        response["content"].is_array(),
-        "Response must have content array"
+        uuid::Uuid::parse_str(&node_id).is_ok(),
+        "nodeId must be a UUID minted by storage, got {node_id:?}"
     );
-    let content = response["content"].as_array().unwrap();
-    assert!(!content.is_empty(), "Content array must not be empty");
-    assert!(content[0]["type"].is_string(), "Content must have type");
-    assert!(content[0]["text"].is_string(), "Content must have text");
-}
-
-/// Parse the text content from a tool response
-fn parse_response_text(response: &Value) -> Value {
-    let text = response["content"][0]["text"].as_str().unwrap();
-    serde_json::from_str(text).unwrap_or(json!({"raw": text}))
-}
-
-// ============================================================================
-// INGEST TOOL TESTS (3 tests)
-// ============================================================================
-
-/// Test ingest tool with valid content.
-#[test]
-fn test_ingest_tool_valid_content() {
-    let _tool_call = json!({
-        "name": "ingest",
-        "arguments": {
-            "content": "The Rust programming language is memory-safe.",
-            "nodeType": "fact",
-            "tags": ["rust", "programming", "safety"]
-        }
-    });
-
-    // Expected response format
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"success\": true, \"nodeId\": \"mock-id\", \"message\": \"Knowledge ingested successfully\"}"
-        }],
-        "isError": false
-    });
-
-    validate_tool_response(&expected_response);
-    let parsed = parse_response_text(&expected_response);
-    assert_eq!(parsed["success"], true, "Ingest should succeed");
-    assert!(parsed["nodeId"].is_string(), "Should return nodeId");
-}
-
-/// Test ingest tool rejects empty content.
-#[test]
-fn test_ingest_tool_rejects_empty_content() {
-    let _tool_call = json!({
-        "name": "ingest",
-        "arguments": {
-            "content": ""
-        }
-    });
-
-    // Expected error response
-    let expected_error = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"error\": \"Content cannot be empty\"}"
-        }],
-        "isError": true
-    });
-
     assert_eq!(
-        expected_error["isError"], true,
-        "Empty content should be an error"
+        ingest["hasEmbedding"], true,
+        "the child process must embed with the offline mock embedder: {ingest}"
     );
-}
+    assert!(
+        server.db_path().exists(),
+        "the server must have created its own database at {} — isolated from the \
+         developer's store",
+        server.db_path().display()
+    );
 
-/// Test ingest tool with all optional fields.
-#[test]
-fn test_ingest_tool_with_all_fields() {
-    let tool_call = json!({
-        "name": "ingest",
-        "arguments": {
-            "content": "Complex knowledge with all metadata.",
-            "nodeType": "decision",
-            "tags": ["architecture", "design"],
-            "source": "team meeting notes"
-        }
-    });
+    // ---- 2. search --------------------------------------------------------
+    let search = server
+        .call_tool(
+            "search",
+            json!({ "query": E2E_QUERY, "limit": 5, "retrievalMode": "precise" }),
+        )
+        .expect("search must succeed");
+    let results = search["results"]
+        .as_array()
+        .unwrap_or_else(|| panic!("search must return a results array: {search}"));
+    assert!(
+        !results.is_empty(),
+        "search returned no results for a memory that was just ingested: {search}"
+    );
+    let ids: Vec<&str> = results.iter().filter_map(|r| r["id"].as_str()).collect();
+    assert!(
+        ids.contains(&node_id.as_str()),
+        "search must find the ingested memory {node_id}; got {ids:?}"
+    );
+    let hit = results
+        .iter()
+        .find(|r| r["id"] == json!(node_id))
+        .expect("hit must be present");
+    assert!(
+        hit["content"]
+            .as_str()
+            .is_some_and(|c| c.contains("quantum-walrus-42")),
+        "search must return the stored content: {hit}"
+    );
 
-    // All fields should be accepted
-    assert!(tool_call["arguments"]["content"].is_string());
-    assert!(tool_call["arguments"]["nodeType"].is_string());
-    assert!(tool_call["arguments"]["tags"].is_array());
-    assert!(tool_call["arguments"]["source"].is_string());
-}
-
-// ============================================================================
-// RECALL TOOL TESTS (3 tests)
-// ============================================================================
-
-/// Test recall tool with valid query.
-#[test]
-fn test_recall_tool_valid_query() {
-    let _tool_call = json!({
-        "name": "recall",
-        "arguments": {
-            "query": "rust programming",
-            "limit": 10
-        }
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"query\": \"rust programming\", \"total\": 1, \"results\": [{\"id\": \"test-id\", \"content\": \"Rust is safe\"}]}"
-        }],
-        "isError": false
-    });
-
-    validate_tool_response(&expected_response);
-    let parsed = parse_response_text(&expected_response);
-    assert!(parsed["query"].is_string(), "Should echo query");
-    assert!(parsed["results"].is_array(), "Should return results array");
-}
-
-/// Test recall tool rejects empty query.
-#[test]
-fn test_recall_tool_rejects_empty_query() {
-    let tool_call = json!({
-        "name": "recall",
-        "arguments": {
-            "query": ""
-        }
-    });
-
-    // Empty query should be rejected
-    assert!(tool_call["arguments"]["query"].as_str().unwrap().is_empty());
-    // Expected behavior: return error with isError: true
-}
-
-/// Test recall tool clamps limit values.
-#[test]
-fn test_recall_tool_clamps_limit() {
-    // Test minimum clamping
-    let min_call = json!({
-        "name": "recall",
-        "arguments": {
-            "query": "test",
-            "limit": 0
-        }
-    });
-    let limit = min_call["arguments"]["limit"].as_i64().unwrap();
-    assert!(limit < 1, "Limit 0 should be clamped to 1");
-
-    // Test maximum clamping
-    let max_call = json!({
-        "name": "recall",
-        "arguments": {
-            "query": "test",
-            "limit": 1000
-        }
-    });
-    let limit = max_call["arguments"]["limit"].as_i64().unwrap();
-    assert!(limit > 100, "Limit 1000 should be clamped to 100");
-}
-
-// ============================================================================
-// SEMANTIC SEARCH TESTS (2 tests)
-// ============================================================================
-
-/// Test semantic search with valid parameters.
-#[test]
-fn test_semantic_search_valid() {
-    let _tool_call = json!({
-        "name": "semantic_search",
-        "arguments": {
-            "query": "memory management concepts",
-            "limit": 5,
-            "minSimilarity": 0.7
-        }
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"query\": \"memory management concepts\", \"method\": \"semantic\", \"total\": 2, \"results\": []}"
-        }],
-        "isError": false
-    });
-
-    validate_tool_response(&expected_response);
-    let parsed = parse_response_text(&expected_response);
+    // ---- 3. get -----------------------------------------------------------
+    let fetched = server
+        .call_tool("memory", json!({ "action": "get", "id": node_id }))
+        .expect("memory get must succeed");
+    assert_eq!(fetched["found"], true, "memory get payload: {fetched}");
+    let stored_content = fetched["node"]["content"]
+        .as_str()
+        .unwrap_or_else(|| panic!("stored content must be a string: {fetched}"))
+        .to_string();
+    assert!(
+        stored_content.contains("quantum-walrus-42"),
+        "the stored content must keep the ingested marker (preprocessing may rewrite, \
+         it must not lose the fact): {fetched}"
+    );
     assert_eq!(
-        parsed["method"], "semantic",
-        "Should indicate semantic search"
+        hit["content"], stored_content,
+        "search and get must agree on the stored content"
     );
-}
-
-/// Test semantic search handles embedding not ready.
-#[test]
-fn test_semantic_search_embedding_not_ready() {
-    // When embeddings aren't initialized, should return helpful error
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"error\": \"Embedding service not ready\", \"hint\": \"Run consolidation first\"}"
-        }],
-        "isError": false
-    });
-
-    let parsed = parse_response_text(&expected_response);
-    assert!(
-        parsed["error"].is_string(),
-        "Should explain embedding not ready"
-    );
-    assert!(parsed["hint"].is_string(), "Should provide hint");
-}
-
-// ============================================================================
-// HYBRID SEARCH TESTS (2 tests)
-// ============================================================================
-
-/// Test hybrid search with weights.
-#[test]
-fn test_hybrid_search_with_weights() {
-    let _tool_call = json!({
-        "name": "hybrid_search",
-        "arguments": {
-            "query": "error handling patterns",
-            "limit": 10,
-            "keywordWeight": 0.3,
-            "semanticWeight": 0.7
-        }
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"query\": \"error handling patterns\", \"method\": \"hybrid\", \"total\": 0, \"results\": []}"
-        }],
-        "isError": false
-    });
-
-    validate_tool_response(&expected_response);
-    let parsed = parse_response_text(&expected_response);
-    assert_eq!(parsed["method"], "hybrid", "Should indicate hybrid search");
-}
-
-/// Test hybrid search with default weights.
-#[test]
-fn test_hybrid_search_default_weights() {
-    let tool_call = json!({
-        "name": "hybrid_search",
-        "arguments": {
-            "query": "testing strategies"
-        }
-    });
-
-    // Default weights should be 0.5/0.5
-    assert!(tool_call["arguments"].get("keywordWeight").is_none());
-    assert!(tool_call["arguments"].get("semanticWeight").is_none());
-}
-
-// ============================================================================
-// KNOWLEDGE MANAGEMENT TESTS (2 tests)
-// ============================================================================
-
-/// Test get_knowledge by ID.
-#[test]
-fn test_get_knowledge_by_id() {
-    let _tool_call = json!({
-        "name": "get_knowledge",
-        "arguments": {
-            "nodeId": "abc-123-def"
-        }
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"id\": \"abc-123-def\", \"content\": \"Test content\", \"nodeType\": \"fact\"}"
-        }],
-        "isError": false
-    });
-
-    validate_tool_response(&expected_response);
-    let parsed = parse_response_text(&expected_response);
-    assert!(parsed["id"].is_string(), "Should return node ID");
-    assert!(parsed["content"].is_string(), "Should return content");
-}
-
-/// Test delete_knowledge by ID.
-#[test]
-fn test_delete_knowledge_by_id() {
-    let _tool_call = json!({
-        "name": "delete_knowledge",
-        "arguments": {
-            "nodeId": "to-delete-123"
-        }
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"success\": true, \"deleted\": true}"
-        }],
-        "isError": false
-    });
-
-    let parsed = parse_response_text(&expected_response);
-    assert_eq!(parsed["success"], true, "Delete should succeed");
-}
-
-// ============================================================================
-// REVIEW TOOL TESTS (2 tests)
-// ============================================================================
-
-/// Test mark_reviewed with FSRS rating.
-#[test]
-fn test_mark_reviewed_with_rating() {
-    let tool_call = json!({
-        "name": "mark_reviewed",
-        "arguments": {
-            "nodeId": "review-node-123",
-            "rating": 3  // Good
-        }
-    });
-
-    // Rating values: 1=Again, 2=Hard, 3=Good, 4=Easy
-    let rating = tool_call["arguments"]["rating"].as_i64().unwrap();
-    assert!((1..=4).contains(&rating), "Rating must be 1-4");
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"success\": true, \"nextReview\": \"2024-01-20T10:00:00Z\"}"
-        }],
-        "isError": false
-    });
-
-    let parsed = parse_response_text(&expected_response);
-    assert_eq!(parsed["success"], true, "Review should succeed");
-    assert!(
-        parsed["nextReview"].is_string(),
-        "Should return next review date"
-    );
-}
-
-/// Test mark_reviewed with invalid rating.
-#[test]
-fn test_mark_reviewed_invalid_rating() {
-    let invalid_ratings = [0, 5, -1, 100];
-
-    for rating in invalid_ratings {
-        let tool_call = json!({
-            "name": "mark_reviewed",
-            "arguments": {
-                "nodeId": "test-node",
-                "rating": rating
-            }
-        });
-
-        // Rating should be validated
-        let r = tool_call["arguments"]["rating"].as_i64().unwrap();
-        assert!(!(1..=4).contains(&r), "Rating {} should be invalid", r);
-    }
-}
-
-// ============================================================================
-// STATS AND MAINTENANCE TESTS (2 tests)
-// ============================================================================
-
-/// Test get_stats returns system statistics.
-#[test]
-fn test_get_stats() {
-    let _tool_call = json!({
-        "name": "get_stats",
-        "arguments": {}
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"totalNodes\": 42, \"averageRetention\": 0.85, \"embeddingsGenerated\": 40}"
-        }],
-        "isError": false
-    });
-
-    validate_tool_response(&expected_response);
-    let parsed = parse_response_text(&expected_response);
-    assert!(
-        parsed["totalNodes"].is_number(),
-        "Should return total nodes"
-    );
-    assert!(
-        parsed["averageRetention"].is_number(),
-        "Should return average retention"
-    );
-}
-
-/// Test health_check returns health status.
-#[test]
-fn test_health_check() {
-    let _tool_call = json!({
-        "name": "health_check",
-        "arguments": {}
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"status\": \"healthy\", \"database\": \"ok\", \"embeddings\": \"ready\"}"
-        }],
-        "isError": false
-    });
-
-    let parsed = parse_response_text(&expected_response);
-    assert!(parsed["status"].is_string(), "Should return status");
-}
-
-// ============================================================================
-// INTENTION TOOL TESTS (5 tests)
-// ============================================================================
-
-/// Test set_intention creates a new intention.
-#[test]
-fn test_set_intention_basic() {
-    let _tool_call = json!({
-        "name": "set_intention",
-        "arguments": {
-            "description": "Remember to review error handling",
-            "priority": "high"
-        }
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"success\": true, \"intentionId\": \"int-123\", \"priority\": 3}"
-        }],
-        "isError": false
-    });
-
-    let parsed = parse_response_text(&expected_response);
-    assert_eq!(parsed["success"], true, "Should succeed");
-    assert!(
-        parsed["intentionId"].is_string(),
-        "Should return intention ID"
-    );
-    assert_eq!(parsed["priority"], 3, "High priority should be 3");
-}
-
-/// Test set_intention with time trigger.
-#[test]
-fn test_set_intention_with_time_trigger() {
-    let tool_call = json!({
-        "name": "set_intention",
-        "arguments": {
-            "description": "Check build status",
-            "trigger": {
-                "type": "time",
-                "inMinutes": 30
-            }
-        }
-    });
-
-    let trigger = &tool_call["arguments"]["trigger"];
-    assert_eq!(trigger["type"], "time", "Should be time trigger");
-    assert!(trigger["inMinutes"].is_number(), "Should have duration");
-}
-
-/// Test check_intentions with context matching.
-#[test]
-fn test_check_intentions_with_context() {
-    let _tool_call = json!({
-        "name": "check_intentions",
-        "arguments": {
-            "context": {
-                "codebase": "payments-service",
-                "file": "src/handlers/payment.rs",
-                "topics": ["error handling", "validation"]
-            }
-        }
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"triggered\": [{\"id\": \"int-1\", \"description\": \"Review payments\"}], \"pending\": []}"
-        }],
-        "isError": false
-    });
-
-    let parsed = parse_response_text(&expected_response);
-    assert!(
-        parsed["triggered"].is_array(),
-        "Should return triggered intentions"
-    );
-    assert!(
-        parsed["pending"].is_array(),
-        "Should return pending intentions"
-    );
-}
-
-/// Test complete_intention marks as fulfilled.
-#[test]
-fn test_complete_intention() {
-    let _tool_call = json!({
-        "name": "complete_intention",
-        "arguments": {
-            "intentionId": "int-to-complete"
-        }
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"success\": true, \"message\": \"Intention marked as complete\"}"
-        }],
-        "isError": false
-    });
-
-    let parsed = parse_response_text(&expected_response);
-    assert_eq!(parsed["success"], true, "Should succeed");
-}
-
-/// Test list_intentions with status filter.
-#[test]
-fn test_list_intentions_with_filter() {
-    let _tool_call = json!({
-        "name": "list_intentions",
-        "arguments": {
-            "status": "active",
-            "limit": 10
-        }
-    });
-
-    let expected_response = json!({
-        "content": [{
-            "type": "text",
-            "text": "{\"intentions\": [], \"total\": 0, \"status\": \"active\"}"
-        }],
-        "isError": false
-    });
-
-    let parsed = parse_response_text(&expected_response);
-    assert!(
-        parsed["intentions"].is_array(),
-        "Should return intentions array"
-    );
-    assert_eq!(parsed["status"], "active", "Should echo status filter");
-}
-
-// ============================================================================
-// INPUT SCHEMA VALIDATION TESTS (2 tests)
-// ============================================================================
-
-/// Test tool input schemas have proper JSON Schema format.
-#[test]
-fn test_tool_schemas_are_valid_json_schema() {
-    let ingest_schema = json!({
-        "type": "object",
-        "properties": {
-            "content": {
-                "type": "string",
-                "description": "The content to remember"
-            },
-            "nodeType": {
-                "type": "string",
-                "description": "Type of knowledge"
-            },
-            "tags": {
-                "type": "array",
-                "items": { "type": "string" }
-            }
-        },
-        "required": ["content"]
-    });
-
-    assert_eq!(
-        ingest_schema["type"], "object",
-        "Schema must be object type"
-    );
-    assert!(
-        ingest_schema["properties"].is_object(),
-        "Must have properties"
-    );
-    assert!(
-        ingest_schema["required"].is_array(),
-        "Must specify required fields"
-    );
-}
-
-/// Test all tools have required inputSchema fields.
-#[test]
-fn test_all_tools_have_schema() {
-    let tool_definitions = vec![
-        ("ingest", vec!["content"]),
-        ("recall", vec!["query"]),
-        ("semantic_search", vec!["query"]),
-        ("hybrid_search", vec!["query"]),
-        ("get_knowledge", vec!["nodeId"]),
-        ("delete_knowledge", vec!["nodeId"]),
-        ("mark_reviewed", vec!["nodeId", "rating"]),
-        ("set_intention", vec!["description"]),
-        ("complete_intention", vec!["intentionId"]),
-        ("snooze_intention", vec!["intentionId"]),
-    ];
-
-    for (tool_name, required_fields) in tool_definitions {
+    assert_eq!(fetched["node"]["nodeType"], "fact");
+    let tags = fetched["node"]["tags"]
+        .as_array()
+        .unwrap_or_else(|| panic!("tags must be an array: {fetched}"));
+    for expected in ["e2e-journey", "regression"] {
         assert!(
-            !required_fields.is_empty(),
-            "Tool {} should have at least one required field",
-            tool_name
+            tags.iter().any(|t| t == expected),
+            "tag {expected} must round-trip through SQLite (preprocessing may add its own \
+             tags, it must not drop the caller's): {fetched}"
         );
     }
+    assert_eq!(
+        fetched["node"]["hasEmbedding"], true,
+        "the stored row must carry an embedding: {fetched}"
+    );
+    assert!(
+        fetched["node"]["createdAt"].is_string(),
+        "createdAt must be an RFC3339 timestamp: {fetched}"
+    );
+
+    // A miss must be reported as a miss, not as an error or an empty success.
+    let missing = server
+        .call_tool(
+            "memory",
+            json!({ "action": "get", "id": "00000000-0000-4000-8000-000000000000" }),
+        )
+        .expect("memory get for an unknown id must still answer");
+    assert_eq!(
+        missing["found"], false,
+        "unknown ids must report found=false: {missing}"
+    );
+
+    // ---- 4. restart the server on the same database -----------------------
+    server.restart().expect("server must restart");
+    server
+        .initialize()
+        .expect("initialize after restart must succeed");
+
+    let after_restart = server
+        .call_tool("memory", json!({ "action": "get", "id": node_id }))
+        .expect("memory get after restart must succeed");
+    assert_eq!(
+        after_restart["found"], true,
+        "the memory must survive a server restart: {after_restart}"
+    );
+    assert_eq!(
+        after_restart["node"]["content"], stored_content,
+        "content must be byte-identical after the restart"
+    );
+
+    assert_eq!(
+        server.shutdown(),
+        Some(0),
+        "server must exit 0 after stdin EOF (stderr tail:\n{})",
+        server.stderr_tail()
+    );
+}
+
+// ============================================================================
+// TOOL-LEVEL VALIDATION ERRORS
+// ============================================================================
+
+/// Invalid arguments must come back as a *tool* error (`isError: true` with an
+/// explanatory payload), not as a silent success and not as a panic that kills
+/// the transport — the server has to stay usable for the next call.
+#[test]
+fn test_smart_ingest_validation_errors_keep_the_server_usable() {
+    let Some(mut server) = McpServerProcess::spawn_or_skip(
+        "test_smart_ingest_validation_errors_keep_the_server_usable",
+    ) else {
+        return;
+    };
+    server.initialize().expect("initialize must succeed");
+
+    let (is_error, text) = server
+        .call_tool_expecting_error("smart_ingest", json!({ "content": "   " }))
+        .expect("empty content must produce a tool response");
+    assert!(is_error, "empty content must set isError: {text}");
+    assert!(
+        text.contains("Content cannot be empty"),
+        "error payload must explain the problem: {text}"
+    );
+
+    let (is_error, text) = server
+        .call_tool_expecting_error("smart_ingest", json!({ "tags": ["no-content"] }))
+        .expect("missing content must produce a tool response");
+    assert!(is_error, "missing content must set isError: {text}");
+    assert!(
+        text.contains("Missing 'content' field"),
+        "error payload must explain the problem: {text}"
+    );
+
+    // The transport survived both errors: a valid call still works.
+    let ingest = server
+        .call_tool(
+            "smart_ingest",
+            json!({ "content": E2E_CONTENT, "forceCreate": true }),
+        )
+        .expect("server must still serve valid calls after tool errors");
+    assert_eq!(ingest["success"], true, "ingest payload: {ingest}");
+}
+
+// ============================================================================
+// session_context: retrieval through a different tool
+// ============================================================================
+
+/// `session_context` must return the memory it was asked about (retrieval
+/// through hybrid search + the Testing Effect) and report the automation
+/// triggers on a fresh store.
+#[test]
+fn test_session_context_returns_ingested_memory_and_automation_triggers() {
+    let Some(mut server) = McpServerProcess::spawn_or_skip(
+        "test_session_context_returns_ingested_memory_and_automation_triggers",
+    ) else {
+        return;
+    };
+    server.initialize().expect("initialize must succeed");
+
+    let ingest = server
+        .call_tool(
+            "smart_ingest",
+            json!({
+                "content": E2E_CONTENT,
+                "nodeType": "fact",
+                "tags": ["e2e-journey"],
+                "forceCreate": true
+            }),
+        )
+        .expect("smart_ingest must succeed");
+    assert_eq!(ingest["success"], true);
+
+    let context = server
+        .call_tool(
+            "session_context",
+            json!({
+                "queries": ["quantum-walrus-42"],
+                "tokenBudget": 2000,
+                "context": { "codebase": "vestige-e2e" }
+            }),
+        )
+        .expect("session_context must succeed");
+
+    let text = context["context"]
+        .as_str()
+        .unwrap_or_else(|| panic!("session_context must return a context string: {context}"));
+    assert!(
+        text.contains("## Session ("),
+        "context must start with the session header: {text}"
+    );
+    assert!(
+        text.contains("quantum-walrus-42"),
+        "session_context must surface the ingested memory for its query: {text}"
+    );
+
+    let tokens_used = context["tokensUsed"]
+        .as_i64()
+        .unwrap_or_else(|| panic!("tokensUsed must be numeric: {context}"));
+    let budget = context["tokenBudget"].as_i64().unwrap_or(2000);
+    assert!(
+        tokens_used <= budget,
+        "session_context must respect its token budget ({tokens_used} > {budget})"
+    );
+
+    let triggers = &context["automationTriggers"];
+    for trigger in ["needsDream", "needsBackup", "needsGc"] {
+        assert!(
+            triggers[trigger].is_boolean(),
+            "automationTriggers.{trigger} must be a boolean: {context}"
+        );
+    }
+    // A brand-new store has never been dreamed or backed up.
+    assert_eq!(
+        triggers["needsDream"], true,
+        "a store that was never dreamed needs a dream: {context}"
+    );
+    assert_eq!(
+        triggers["needsBackup"], true,
+        "a store that was never backed up needs a backup: {context}"
+    );
 }

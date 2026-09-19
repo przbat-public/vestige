@@ -7,6 +7,10 @@
 //! - **Default**: Nomic Embed Text v1.5 (ONNX, 768d → 384d Matryoshka, 8192 context)
 //! - **Optional**: Nomic Embed Text v2 MoE (Candle, 475M params, 305M active, 8 experts)
 //!   Enable with `nomic-v2` feature flag + `metal` for Apple Silicon acceleration.
+//! - **Test only**: a deterministic, offline stand-in embedder enabled by
+//!   `VESTIGE_TEST_MOCK_EMBEDDINGS=1` (see [`mock_embedding`]). It keeps the
+//!   semantic path (embeddings → HNSW → RRF) covered without downloading the
+//!   ONNX model, and never touches the network.
 
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use std::sync::{Mutex, OnceLock};
@@ -72,6 +76,25 @@ impl EmbedTask {
     }
 }
 
+/// Parse a boolean-ish environment value.
+///
+/// Truthy: `1`, `true`, `yes`, `on` (case-insensitive, surrounding whitespace
+/// ignored). Anything else — including an unset or empty value — is false.
+#[must_use]
+pub fn is_truthy_env_value(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+/// Read a boolean-ish environment variable (see [`is_truthy_env_value`]).
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| is_truthy_env_value(&v))
+        .unwrap_or(false)
+}
+
 /// Whether Nomic task prefixes are enabled (env `VESTIGE_NOMIC_PREFIXES`).
 ///
 /// Read once and cached for the process lifetime so the regime cannot drift
@@ -80,16 +103,142 @@ impl EmbedTask {
 #[must_use]
 pub fn nomic_prefixes_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("VESTIGE_NOMIC_PREFIXES")
-            .map(|v| {
-                matches!(
-                    v.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            })
-            .unwrap_or(false)
-    })
+    *ENABLED.get_or_init(|| env_truthy("VESTIGE_NOMIC_PREFIXES"))
+}
+
+// ----------------------------------------------------------------------------
+// Deterministic offline test embedder
+// ----------------------------------------------------------------------------
+//
+// `VESTIGE_TEST_MOCK_EMBEDDINGS` is documented in CONTRIBUTING.md and
+// docs/CONFIGURATION.md as the switch that lets the test suite exercise the
+// semantic path without downloading the ~547 MB ONNX model. It is read HERE —
+// this is the only place in the codebase that may consult it, so the switch can
+// never silently change behaviour in code that is not about embedding.
+
+/// Env var that replaces the ONNX model with [`mock_embedding`].
+pub const MOCK_EMBEDDINGS_ENV: &str = "VESTIGE_TEST_MOCK_EMBEDDINGS";
+
+/// `model` name reported by [`EmbeddingService::model_name`] while the mock
+/// embedder is active.
+///
+/// Deliberately *not* wired into [`embedding_model_tag`]: that tag describes the
+/// Nomic prefix regime persisted alongside vectors and is asserted by tests that
+/// know nothing about the mock switch, so coupling the two would make those
+/// tests fail whenever the mock is enabled.
+pub const MOCK_EMBEDDING_MODEL_TAG: &str = "vestige-test-mock-embedder";
+
+/// Test-only override of the mock switch.
+///
+/// Unit tests must not enable the mock through the environment: `set_var` races
+/// with every concurrent reader in the process, so a stray observation from an
+/// unrelated test would silently swap the real model for a hash. Tests that need
+/// the mock hold [`MockEmbeddingsOverride`] instead, which touches only this
+/// atomic. `0` = defer to the environment, `1` = force on.
+#[cfg(test)]
+static MOCK_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// RAII guard forcing the mock embedder on for the duration of a unit test.
+#[cfg(test)]
+pub(crate) struct MockEmbeddingsOverride;
+
+#[cfg(test)]
+impl MockEmbeddingsOverride {
+    pub(crate) fn on() -> Self {
+        MOCK_OVERRIDE.store(1, std::sync::atomic::Ordering::Relaxed);
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for MockEmbeddingsOverride {
+    fn drop(&mut self) {
+        MOCK_OVERRIDE.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Whether the deterministic mock embedder is enabled.
+///
+/// Reads `VESTIGE_TEST_MOCK_EMBEDDINGS` (documented in CONTRIBUTING.md and
+/// docs/CONFIGURATION.md) on every call — `true`, `1`, `yes` or `on`. It is
+/// deliberately **not** cached, so a process cannot be stuck in one mode for its
+/// lifetime; the read costs orders of magnitude less than the ONNX forward pass
+/// it replaces.
+#[must_use]
+pub fn mock_embeddings_enabled() -> bool {
+    #[cfg(test)]
+    {
+        if MOCK_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) == 1 {
+            return true;
+        }
+    }
+    env_truthy(MOCK_EMBEDDINGS_ENV)
+}
+
+/// FNV-1a 64-bit hash — tiny, stable across runs/platforms, no dependencies.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Deterministic stand-in for the ONNX forward pass.
+///
+/// Contract relied upon by `tests/e2e` and by the unit tests below:
+///
+/// 1. **Deterministic** — same input, same vector, on every run, machine and
+///    call site (no RNG, no clock, no I/O). `embed`, `embed_query` and
+///    `embed_batch` all funnel through here.
+/// 2. **Distinct** — different inputs produce different vectors, so
+///    "identical text matches, different text does not" assertions are real.
+/// 3. **Shaped like the real thing** — exactly [`EMBEDDING_DIMENSIONS`] values
+///    and L2-normalized, so cosine similarity, HNSW indexing and RRF behave as
+///    they do in production.
+/// 4. **Lexically meaningful** — texts that share tokens score a higher cosine
+///    similarity than disjoint texts, so ranking assertions in tests are not
+///    degenerate coin flips. The effect is deliberately modest: disjoint
+///    boilerplate stays far below the 0.85 consolidation dedup cutoff.
+#[must_use]
+pub fn mock_embedding(text: &str) -> Embedding {
+    /// Weight of one token occurrence in its hashed dimension.
+    const TOKEN_WEIGHT: f32 = 1.0;
+    /// Amplitude of the per-content jitter that separates texts sharing a
+    /// token bag. Small enough that shared tokens dominate the ranking.
+    const CONTENT_JITTER: f32 = 0.1;
+
+    let mut vector = vec![0.0_f32; EMBEDDING_DIMENSIONS];
+
+    // 1. Token signal: every token bumps one signed dimension, so two texts
+    //    sharing vocabulary (in any order) point in a similar direction.
+    for token in text.split(|c: char| !c.is_alphanumeric()) {
+        if token.is_empty() {
+            continue;
+        }
+        let hash = fnv1a64(token.to_lowercase().as_bytes());
+        let slot = (hash % EMBEDDING_DIMENSIONS as u64) as usize;
+        let sign = if hash & (1 << 63) == 0 { 1.0 } else { -1.0 };
+        vector[slot] += sign * TOKEN_WEIGHT;
+    }
+
+    // 2. Content signal: a hash-seeded xorshift64* drawn over every dimension
+    //    keeps two different texts apart even when their token bags match
+    //    (e.g. "a b" vs "b a") and keeps the vector non-zero for one token.
+    let mut state = fnv1a64(text.trim().as_bytes()) | 1;
+    for slot in &mut vector {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        let rand = state.wrapping_mul(0x2545_f491_4f6c_dd1d);
+        // 53-bit mantissa → uniform in [0, 1).
+        let unit = ((rand >> 11) as f64 / (1u64 << 53) as f64) as f32;
+        *slot += (unit - 0.5) * CONTENT_JITTER;
+    }
+
+    // Already `EMBEDDING_DIMENSIONS` long, so this only L2-normalizes.
+    Embedding::new(matryoshka_truncate(vector))
 }
 
 /// The `embedding_model` tag to persist alongside each vector, encoding the
@@ -314,6 +463,10 @@ impl EmbeddingService {
 
     /// Check if the model is ready
     pub fn is_ready(&self) -> bool {
+        if mock_embeddings_enabled() {
+            // The mock embedder is pure computation — it cannot fail to load.
+            return true;
+        }
         match get_model() {
             Ok(_) => true,
             Err(e) => {
@@ -325,24 +478,36 @@ impl EmbeddingService {
 
     /// Check if the model is ready and return the error if not
     pub fn check_ready(&self) -> Result<(), EmbeddingError> {
+        if mock_embeddings_enabled() {
+            return Ok(());
+        }
         get_model().map(|_| ())
     }
 
     /// Initialize the model (downloads if necessary)
     pub fn init(&self) -> Result<(), EmbeddingError> {
+        if mock_embeddings_enabled() {
+            // No download, no ONNX session: the switch exists precisely so
+            // tests (and CI) never depend on either.
+            return Ok(());
+        }
         let _model = get_model()?; // Ensures model is loaded and returns any init errors
         Ok(())
     }
 
     /// Get the model name
     pub fn model_name(&self) -> &'static str {
-        #[cfg(feature = "nomic-v2")]
-        {
-            "nomic-ai/nomic-embed-text-v2-moe"
-        }
-        #[cfg(not(feature = "nomic-v2"))]
-        {
-            "nomic-ai/nomic-embed-text-v1.5"
+        if mock_embeddings_enabled() {
+            MOCK_EMBEDDING_MODEL_TAG
+        } else {
+            #[cfg(feature = "nomic-v2")]
+            {
+                "nomic-ai/nomic-embed-text-v2-moe"
+            }
+            #[cfg(not(feature = "nomic-v2"))]
+            {
+                "nomic-ai/nomic-embed-text-v1.5"
+            }
         }
     }
 
@@ -380,8 +545,6 @@ impl EmbeddingService {
             ));
         }
 
-        let mut model = get_model()?;
-
         let prefixed = apply_prefix(task, text);
 
         // Truncate if too long (char-boundary safe)
@@ -394,6 +557,14 @@ impl EmbeddingService {
         } else {
             &prefixed
         };
+
+        // Checked before `get_model()` so an enabled mock never loads (or
+        // downloads) the ONNX model, not even lazily.
+        if mock_embeddings_enabled() {
+            return Ok(mock_embedding(input));
+        }
+
+        let mut model = get_model()?;
 
         let embeddings = model
             .embed(vec![input], None)
@@ -414,7 +585,7 @@ impl EmbeddingService {
             return Ok(vec![]);
         }
 
-        let mut model = get_model()?;
+        let mock = mock_embeddings_enabled();
         let mut all_embeddings = Vec::with_capacity(texts.len());
 
         // Process in batches for efficiency. Batch embedding is only used for
@@ -426,7 +597,7 @@ impl EmbeddingService {
                 .map(|t| apply_prefix(EmbedTask::Document, t))
                 .collect();
 
-            let truncated: Vec<&str> = prefixed
+            let truncated: Vec<String> = prefixed
                 .iter()
                 .map(|t| {
                     if t.len() > MAX_TEXT_LENGTH {
@@ -434,15 +605,26 @@ impl EmbeddingService {
                         while !t.is_char_boundary(end) && end > 0 {
                             end -= 1;
                         }
-                        &t[..end]
+                        t[..end].to_string()
                     } else {
-                        t.as_str()
+                        t.clone()
                     }
                 })
                 .collect();
 
+            // Mock path never touches the model: same vectors, no ONNX, and
+            // identical to what `embed` returns for the same text.
+            if mock {
+                all_embeddings.extend(truncated.iter().map(|t| mock_embedding(t)));
+                continue;
+            }
+
+            let mut model = get_model()?;
             let embeddings = model
-                .embed(truncated, None)
+                .embed(
+                    truncated.iter().map(String::as_str).collect::<Vec<_>>(),
+                    None,
+                )
                 .map_err(|e| EmbeddingError::EmbeddingFailed(e.to_string()))?;
 
             for emb in embeddings {
@@ -753,5 +935,137 @@ mod tests {
         for (a, b) in original.vector.iter().zip(restored.vector.iter()) {
             assert!((a - b).abs() < 1e-7);
         }
+    }
+
+    // ========================================================================
+    // VESTIGE_TEST_MOCK_EMBEDDINGS
+    // ========================================================================
+    //
+    // The mock is enabled through `MockEmbeddingsOverride` rather than
+    // `std::env::set_var`: the environment is process-wide and `set_var` is
+    // `unsafe` in Rust 2024 precisely because it races with concurrent readers,
+    // so an unrelated test could observe the flag and silently get hash vectors
+    // instead of the real model. The override touches one atomic and is undone
+    // by `Drop`, even on panic. The *environment* path is covered end to end by
+    // `tests/e2e/tests/mcp` (the spawned server reports
+    // `embeddingServiceReady: true` and `hasEmbedding: true` with no ONNX model
+    // available, which is only possible if it read the variable).
+
+    #[test]
+    fn is_truthy_env_value_accepts_only_documented_spellings() {
+        for value in ["1", "true", "TRUE", " yes ", "On"] {
+            assert!(is_truthy_env_value(value), "{value:?} must be truthy");
+        }
+        for value in ["", " ", "0", "false", "no", "off", "2", "maybe"] {
+            assert!(!is_truthy_env_value(value), "{value:?} must be falsy");
+        }
+    }
+
+    /// Pin the documented variable name: CONTRIBUTING.md, docs/CONFIGURATION.md
+    /// and the CI workflow all refer to this exact string.
+    #[test]
+    fn mock_embeddings_env_var_name_is_pinned() {
+        assert_eq!(MOCK_EMBEDDINGS_ENV, "VESTIGE_TEST_MOCK_EMBEDDINGS");
+    }
+
+    /// The switch must produce a deterministic, normalized, text-specific
+    /// vector of the documented width — and must do it without ONNX, which is
+    /// what lets the E2E suite cover the semantic path with no model download.
+    #[test]
+    fn mock_embeddings_are_deterministic_normalized_and_text_specific() {
+        let _guard = MockEmbeddingsOverride::on();
+        assert!(
+            mock_embeddings_enabled(),
+            "guard must have enabled the mock embedder"
+        );
+
+        let service = EmbeddingService::new();
+
+        // Readiness/init must short-circuit the model: no ONNX session, no
+        // ~547 MB download, no network.
+        assert!(service.is_ready(), "mock embedder is always ready");
+        assert!(service.check_ready().is_ok());
+        assert!(service.init().is_ok());
+
+        let text_a = "Rust enforces memory safety without a garbage collector";
+        let text_b = "Sourdough needs a twelve hour cold ferment";
+
+        let first = service.embed(text_a).expect("mock embed must succeed");
+        let second = service
+            .embed(text_a)
+            .expect("mock embed must be repeatable");
+        let other = service.embed(text_b).expect("mock embed must succeed");
+
+        // 1. Dimension contract.
+        assert_eq!(first.dimensions, EMBEDDING_DIMENSIONS);
+        assert_eq!(first.vector.len(), EMBEDDING_DIMENSIONS);
+        assert_eq!(other.vector.len(), EMBEDDING_DIMENSIONS);
+
+        // 2. Normalized like the real Matryoshka output.
+        assert!(
+            first.is_normalized(),
+            "mock vectors must be L2-normalized, norm was off"
+        );
+
+        // 3. Identical text → identical vector, bit for bit.
+        assert_eq!(
+            first.vector, second.vector,
+            "identical text must produce an identical vector"
+        );
+
+        // 4. Different text → different vector (guards against a constant mock
+        //    that would make every "semantic" assertion vacuous).
+        assert_ne!(
+            first.vector, other.vector,
+            "different text must produce a different vector"
+        );
+        assert!(
+            first.cosine_similarity(&other) < 0.5,
+            "unrelated texts must not look similar, got {}",
+            first.cosine_similarity(&other)
+        );
+
+        // 5. Batch and single paths agree — both funnel into `mock_embedding`.
+        let batch = service
+            .embed_batch(&[text_a, text_b])
+            .expect("mock batch embed must succeed");
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].vector, first.vector);
+        assert_eq!(batch[1].vector, other.vector);
+
+        // 6. The active "model" is identifiable while the mock is on. The
+        //    persisted `embedding_model_tag` deliberately stays on the Nomic
+        //    regime (see its docs): tests that assert it know nothing about the
+        //    mock switch and must not depend on whether it is enabled.
+        assert_eq!(service.model_name(), MOCK_EMBEDDING_MODEL_TAG);
+        assert_ne!(embedding_model_tag(), MOCK_EMBEDDING_MODEL_TAG);
+    }
+
+    /// Pure-function property (no env var needed): shared vocabulary must rank
+    /// higher than disjoint vocabulary, while staying below the 0.85 dedup
+    /// cutoff used by consolidation — otherwise enabling the mock would make
+    /// unrelated memories merge.
+    #[test]
+    fn mock_embedding_rewards_shared_vocabulary() {
+        let base = mock_embedding("consolidation never deletes low retention memories");
+        let paraphrase =
+            mock_embedding("low retention memories are never deleted by consolidation");
+        let unrelated = mock_embedding("sourdough starter hydration ratios for bread");
+
+        let shared = base.cosine_similarity(&paraphrase);
+        let disjoint = base.cosine_similarity(&unrelated);
+
+        assert!(
+            shared > disjoint,
+            "shared vocabulary must outrank disjoint text: {shared} vs {disjoint}"
+        );
+        assert!(
+            shared < 0.85,
+            "mock similarity must stay below the consolidation dedup cutoff, got {shared}"
+        );
+        assert!(
+            base.is_normalized(),
+            "mock_embedding must always return a unit vector"
+        );
     }
 }

@@ -1,30 +1,33 @@
 //! E2E Test Infrastructure for Vestige
 //!
-//! Provides comprehensive testing utilities for 250+ end-to-end tests:
+//! Provides shared testing utilities for the `tests/e2e` targets:
 //!
-//! - **Harness**: Test setup, time travel, database management
-//! - **Mocks**: MockEmbeddingService (FxHash-based), test fixtures
-//! - **Assertions**: Custom assertions for memory states, decay, etc.
+//! - **Harness** — `TestDatabaseManager` (isolated TempDir storage),
+//!   `McpServerProcess` (spawns the real `vestige-mcp` binary and speaks
+//!   JSON-RPC over stdio), `EnvGuard` (safe process-wide switches) and
+//!   `TimeTravelEnvironment` (pure-function time travel)
+//! - **Mocks** — `MockEmbeddingService` (FxHash-based), `TestDataFactory`
+//! - **Assertions** — custom assertions for memory states, decay, etc.
+//!
+//! <!-- The `TimeTravelEnvironment`, `MockEmbeddingService` and
+//! `TestDataFactory` are used by this crate's own unit tests only; the E2E
+//! targets use `TestDatabaseManager`, `McpServerProcess` and `EnvGuard`. -->
 //!
 //! ## Quick Start
 //!
 //! ```rust,ignore
-//! use vestige_e2e_tests::prelude::*;
+//! use vestige_e2e_tests::harness::{McpServerProcess, TestDatabaseManager};
 //!
-//! #[test]
-//! fn test_memory_decay() {
-//!     let mut env = TimeTravelEnvironment::new();
-//!     let mut db = TestDatabaseManager::new_temp();
-//!
-//!     // Create test data
-//!     let node = TestDataFactory::create_memory(&mut db.storage, "test content");
-//!
-//!     // Time travel to test decay
-//!     env.advance_days(30);
-//!
-//!     // Assert decay occurred
-//!     assert_retention_decreased!(db.storage.get_node(&node.id), 0.9);
+//! // Drive the real server over stdio (skips loudly if it is not built).
+//! if let Some(mut server) = McpServerProcess::spawn_or_skip("my_test") {
+//!     server.initialize().unwrap();
+//!     let tools = server.tools_list().unwrap();
+//!     assert!(!tools.is_empty());
 //! }
+//!
+//! // Or exercise Storage directly on a throwaway database.
+//! let db = TestDatabaseManager::new_temp();
+//! assert!(db.is_empty());
 //! ```
 
 pub mod assertions;
@@ -32,7 +35,7 @@ pub mod harness;
 pub mod mocks;
 
 // Re-export commonly used items
-pub use harness::{TestDatabaseManager, TimeTravelEnvironment};
+pub use harness::{McpServerProcess, TestDatabaseManager, TimeTravelEnvironment};
 pub use mocks::{MockEmbeddingService, TestDataFactory};
 
 /// Convenient imports for tests

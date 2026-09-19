@@ -544,15 +544,20 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn create_test_storage() -> Storage {
+    /// Returns the `TempDir` alongside the storage: the directory must outlive
+    /// the test body, otherwise the database file is deleted (and the open
+    /// connections silently start reading an unlinked inode) the moment this
+    /// function returns — which made every assertion below see an empty store.
+    fn create_test_storage() -> (tempfile::TempDir, Storage) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        Storage::new(Some(db_path)).unwrap()
+        let storage = Storage::new(Some(db_path)).unwrap();
+        (dir, storage)
     }
 
     #[test]
     fn test_create_memory() {
-        let mut storage = create_test_storage();
+        let (_dir, mut storage) = create_test_storage();
         let node = TestDataFactory::create_memory(&mut storage, "test content");
 
         assert!(node.is_some());
@@ -561,7 +566,7 @@ mod tests {
 
     #[test]
     fn test_create_batch() {
-        let mut storage = create_test_storage();
+        let (_dir, mut storage) = create_test_storage();
         let ids = TestDataFactory::create_batch(&mut storage, 10);
 
         assert_eq!(ids.len(), 10);
@@ -572,7 +577,7 @@ mod tests {
 
     #[test]
     fn test_create_decay_scenario() {
-        let mut storage = create_test_storage();
+        let (_dir, mut storage) = create_test_storage();
         let scenario = TestDataFactory::create_decay_scenario(&mut storage);
 
         assert!(!scenario.node_ids.is_empty());
@@ -583,7 +588,7 @@ mod tests {
 
     #[test]
     fn test_create_scheduling_scenario() {
-        let mut storage = create_test_storage();
+        let (_dir, mut storage) = create_test_storage();
         let scenario = TestDataFactory::create_scheduling_scenario(&mut storage);
 
         assert!(!scenario.node_ids.is_empty());
