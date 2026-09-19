@@ -225,7 +225,7 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
         tool(
             "split_memories",
             "Split compound memories",
-            "Find compound/multi-topic memories that should be split into atomic pieces. Returns memories with splitting suggestions. Use dry_run=false to auto-delete compounds after reading them. Then re-ingest each as separate atomic items via smart_ingest batch mode.",
+            "Find compound/multi-topic memories that should be split into atomic pieces. Returns memories with splitting suggestions. dry_run=false deletes the compounds after reading them and requires confirmed=true. Then re-ingest each as separate atomic items via smart_ingest batch mode.",
             tools::maintenance::split_memories_schema(),
             // dry_run=true is the safe default, dry_run=false deletes — pick
             // the worst case for the annotation.

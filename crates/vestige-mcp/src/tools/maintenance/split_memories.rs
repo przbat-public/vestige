@@ -26,8 +26,13 @@ pub fn split_memories_schema() -> Value {
             },
             "dry_run": {
                 "type": "boolean",
-                "description": "If true (default), only report compound memories without deleting. If false, delete compound memories after reporting (you must re-ingest as atomic items).",
+                "description": "If true (default), only report compound memories without deleting. If false, delete compound memories after reporting (you must re-ingest as atomic items) — and `confirmed: true` is then required.",
                 "default": true
+            },
+            "confirmed": {
+                "type": "boolean",
+                "description": "Required to be `true` when `dry_run` is `false`. Deletion is irreversible: the compound memory is dropped and its atomic replacements do not exist yet, so every destructive call has to be explicit. Mirrors the gate on `gc` and `restore`.",
+                "default": false
             }
         }
     })
@@ -44,6 +49,7 @@ pub async fn execute_split_memories(
     storage: &Arc<Storage>,
     args: Option<Value>,
 ) -> Result<Value, String> {
+    let raw_args = args.clone().unwrap_or_else(|| serde_json::json!({}));
     let args: SplitMemoriesArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => SplitMemoriesArgs {
@@ -56,6 +62,17 @@ pub async fn execute_split_memories(
     let min_length = args.min_length.unwrap_or(300);
     let limit = args.limit.unwrap_or(20);
     let dry_run = args.dry_run.unwrap_or(true);
+
+    // Destructive-op gate, same contract as `gc` and `restore`: a dry run needs nothing,
+    // a real deletion needs an explicit confirmation. `dry_run: false` used to delete
+    // every compound memory it found without any acknowledgement, which contradicted the
+    // project's own rule that nothing removes memories unless the user says so.
+    if !dry_run && !crate::tools::common::is_confirmed(&raw_args) {
+        return Err(crate::tools::common::missing_confirmation_error(
+            "split_memories",
+            "split_memories with dry_run:false deletes every compound memory it reports,              and the atomic replacements have to be re-ingested afterwards.",
+        ));
+    }
 
     let storage_fetch = storage.clone();
     let all_nodes = tokio::task::spawn_blocking(move || storage_fetch.get_all_nodes(500, 0))

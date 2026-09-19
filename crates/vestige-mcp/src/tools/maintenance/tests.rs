@@ -372,3 +372,90 @@ async fn test_gc_rejects_string_confirmed_to_avoid_hallucinated_flags() {
         err
     );
 }
+
+// ------------------------------------------------------------------
+// split_memories carried the same destructive power as `gc` but none of
+// its gate: `dry_run: false` deleted every compound memory it reported,
+// with no acknowledgement, on a tool whose whole workflow is "read the
+// report, decide, re-ingest atomically". These tests pin the gate.
+// ------------------------------------------------------------------
+
+#[test]
+fn test_split_memories_schema_exposes_confirmed_flag() {
+    let schema = super::split_memories::split_memories_schema();
+    let props = schema["properties"]
+        .as_object()
+        .expect("split_memories schema must have properties");
+    assert!(
+        props.contains_key("confirmed"),
+        "split_memories must advertise the `confirmed` flag so a client can prompt before the destructive call"
+    );
+    assert_eq!(props["confirmed"]["type"], "boolean");
+    assert_eq!(props["confirmed"]["default"], false);
+}
+
+#[tokio::test]
+async fn test_split_memories_dry_run_does_not_require_confirmation() {
+    let (storage, _dir) = test_storage().await;
+    let result =
+        execute_split_memories(&storage, Some(serde_json::json!({ "dry_run": true }))).await;
+    assert!(
+        result.is_ok(),
+        "dry_run=true is the safe default and must never require confirmation; got: {:?}",
+        result.err()
+    );
+}
+
+#[tokio::test]
+async fn test_split_memories_destructive_call_without_confirmation_is_blocked() {
+    let (storage, _dir) = test_storage().await;
+    // A compound memory that the detector would happily delete on dry_run:false.
+    let compound = storage
+        .ingest(vestige_core::IngestInput {
+            content: "Session notes: the release moved to Friday because the migration slipped, \
+                      the retry budget was raised to three, and the dashboard bundle was rebuilt."
+                .to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let before = storage.get_stats().unwrap().total_nodes;
+
+    let result = execute_split_memories(
+        &storage,
+        Some(serde_json::json!({ "dry_run": false, "min_length": 100 })),
+    )
+    .await;
+
+    let err = result.expect_err("dry_run:false without confirmed must be refused");
+    assert!(
+        err.contains("confirmed"),
+        "the refusal must name the missing confirmation, got: {err}"
+    );
+
+    assert_eq!(
+        storage.get_stats().unwrap().total_nodes,
+        before,
+        "nothing may be deleted when the gate refuses the call"
+    );
+    assert!(
+        storage.get_node(&compound.id).unwrap().is_some(),
+        "the compound memory must still exist"
+    );
+}
+
+#[tokio::test]
+async fn test_split_memories_confirmed_call_is_allowed() {
+    let (storage, _dir) = test_storage().await;
+    let result = execute_split_memories(
+        &storage,
+        Some(serde_json::json!({ "dry_run": false, "confirmed": true, "min_length": 100 })),
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "a confirmed destructive call must go through; got: {:?}",
+        result.err()
+    );
+}
