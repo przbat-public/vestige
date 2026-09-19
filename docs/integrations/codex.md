@@ -23,7 +23,7 @@ Edit `~/.codex/config.json`:
   "mcpServers": {
     "vestige": {
       "command": "/path/to/vestige-mcp",
-      "args": ["--transport", "stdio"]
+      "args": []
     }
   }
 }

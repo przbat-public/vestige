@@ -187,7 +187,7 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 │  Light/Dark Mode · a11y · 16 pages                  │
 ├─────────────────────────────────────────────────────┤
 │  Axum HTTP + WebSocket Server (port 3927)           │
-│  39 REST routes · ts-rs/Zod wire contract · WS bus  │
+│  40 REST routes · ts-rs/Zod wire contract · WS bus  │
 ├─────────────────────────────────────────────────────┤
 │  MCP Server (stdio JSON-RPC + HTTP on :3928)        │
 │  28 tools · 11 resources · per-session instances    │
@@ -209,7 +209,7 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 │  Storage Layer                                      │
 │  SQLite + FTS5 · USearch HNSW · Nomic Embed v1.5    │
 │  Jina Reranker v2 · RRF · Active Forgetting         │
-│  Migrations v1–v13 · WAL · optional SQLCipher       │
+│  Migrations v1–v14 · WAL · optional SQLCipher       │
 └─────────────────────────────────────────────────────┘
 ```
 

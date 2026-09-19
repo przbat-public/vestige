@@ -7,7 +7,7 @@ A Rust [Model Context Protocol](https://modelcontextprotocol.io) server that giv
 - **FSRS-6 spaced repetition** — 21-parameter personalized decay model.
 - **Dual-strength memory** — storage strength + retrieval strength (Bjork & Bjork 1992).
 - **Local semantic embeddings** — `nomic-embed-text-v1.5` (768d → 384d Matryoshka) via fastembed v5; no external API call leaves the host.
-- **HNSW vector search** — USearch index, in-memory (persistence is on the roadmap).
+- **HNSW vector search** — USearch index, in-memory, persisted to a `vestige.hnsw` sidecar and loaded on startup (rebuilds from SQLite when the sidecar is missing or stale).
 - **Hybrid retrieval** — BM25 + semantic, fused with Reciprocal Rank Fusion (RRF), wrapped in an 8-stage cognitive pipeline (compound-query decomposition, Jina Reranker v2, temporal boosting, accessibility filtering, context matching, retrieval competition, spreading activation).
 - **Content Intelligence Pipeline** — entity extraction, coreference rewriting, temporal anchoring, relation extraction, and provenance tracking before storage.
 - **28 MCP tools** with `readOnlyHint` / `destructiveHint` annotations so clients can decide auto-approval per the MCP `2025-03-26` spec.

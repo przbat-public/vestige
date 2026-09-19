@@ -43,7 +43,7 @@ vestige ingest "MCP protocol uses JSON-RPC 2.0 over stdio — no HTTP overhead, 
 vestige ingest "Bjork dual-strength model: storage strength never decreases, retrieval strength decays with time" --tags science,bjork
 vestige ingest "HyDE query expansion classifies intent into 6 types and generates 3-5 hypothetical document variants" --tags hyde,search
 vestige ingest "Ebbinghaus forgetting curve: R = e^(-t/S) where R=retrievability, t=time, S=stability" --tags science,ebbinghaus
-vestige ingest "USearch HNSW index gives sub-millisecond in-memory ANN; persistence is a known gap" --tags performance,search
+vestige ingest "USearch HNSW index gives sub-millisecond in-memory ANN; persisted to a sidecar and loaded on startup, rebuild-from-SQLite fallback" --tags performance,search
 vestige ingest "Reconsolidation (Nader 2000): retrieved memories enter a labile state for 24-48 hours where they can be modified" --tags science,reconsolidation
 vestige ingest "Anderson 1994 retrieval-induced forgetting: retrieving one memory suppresses competing memories" --tags science,competition
 vestige ingest "Einstein & McDaniel 1990 prospective memory: remember to do X when Y happens, with time/context/event triggers" --tags science,prospective-memory
@@ -105,7 +105,7 @@ open http://localhost:3927/dashboard
 > Mem0 is a cloud memory API. Great product, well-funded. But it's fundamentally a vector store with categories. Vestige implements the actual cognitive science — memories decay on the Ebbinghaus curve, get strengthened by retrieval, get consolidated in dream cycles, compete for activation. It's the difference between a filing cabinet and a brain.
 
 **"What's the MCP integration like?"**
-> One command: `claude mcp add vestige vestige-mcp -s user`. That's it. Twenty-one tools, but they're organized into five subsystems that Claude uses automatically. You don't even think about it — your AI just starts remembering.
+> One command: `claude mcp add vestige vestige-mcp -s user`. That's it. Twenty-eight tools, organized into subsystems that Claude uses automatically. You don't even think about it — your AI just starts remembering.
 
 **"Is it open source?"**
 > AGPL-3.0. Fully open. The neuroscience is the moat, not the code.
@@ -383,7 +383,7 @@ vestige-mcp --version
 # 734 tests, zero failures
 # 29 cognitive modules
 # 22MB release binary with embedded dashboard
-# 21 MCP tools across 5 subsystems
+# 28 MCP tools across the cognitive subsystems
 # 12 published neuroscience principles implemented
 # <50ms typical ingest latency
 # <300ns cosine similarity (benchmarked with Criterion)
@@ -408,7 +408,7 @@ vestige-mcp --version
 > RAG is retrieval-augmented generation — you search a corpus and inject results into the prompt. Vestige does that, but with a cognitive layer on top. RAG doesn't have retention decay. RAG doesn't have memory consolidation. RAG doesn't have prediction error gating to prevent duplicates. RAG doesn't suppress competing memories on retrieval. Vestige is to RAG what human memory is to a filing cabinet — the retrieval mechanism is similar, but the memory lifecycle is completely different.
 
 **Q: What embedding model do you use?**
-> Nomic Embed Text v1.5 by default — 768 dimensions truncated to 256 via Matryoshka representation learning. All local via ONNX through fastembed. v2.0 also supports Nomic v2 MoE (475M params, 8 experts) as an opt-in feature. The reranker is Jina v1 Turbo, with Qwen3-Reranker-0.6B available as opt-in.
+> Nomic Embed Text v1.5 by default — 768 dimensions truncated to 384 via Matryoshka representation learning. All local via ONNX through fastembed. Nomic v2 MoE (475M params, 8 experts) is available as an opt-in feature. The reranker is Jina Reranker v2 Base Multilingual (278M params).
 
 **Q: What's the storage backend?**
 > SQLite with WAL mode. FTS5 for keyword search with Porter stemming. USearch HNSW for in-memory vector search — historical README quotes about "20× faster than FAISS" come from upstream marketing material, not our own benchmark, and have been removed. Separate reader/writer connections for concurrent access. Single file database.

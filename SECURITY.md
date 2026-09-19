@@ -100,6 +100,6 @@ We use `cargo audit`, `cargo deny`, and Dependabot. Current status (3.4.0 releas
 - [x] Constant-time bearer-token comparison on the HTTP transport.
 - [x] Input validation on every tool.
 - [x] No command injection vectors (no `Command::new`, no shell expansion).
-- [x] No unsafe Rust in our own code (transitive `unsafe` documented).
+- [x] No `unsafe` Rust in our own production code (the only `unsafe` is in `#[cfg(test)]` test helpers for `env::set_var`, which is `unsafe` on the Rust 2024 edition; transitive `unsafe` documented).
 - [x] Dependencies audited automatically in CI.
 - [x] SQLite WAL checkpoint on graceful shutdown so a `SIGINT` does not leave a dirty journal.

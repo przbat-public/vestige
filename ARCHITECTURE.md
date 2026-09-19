@@ -53,7 +53,7 @@ vestige/
 │   │       │                  # intentions, maintenance, embeddings, fsrs_personalization,
 │   │       │                  # review, consolidation, search, graph, gdpr, temporal,
 │   │       │                  # smart_ingest, insights, records, stats),
-│   │       │                  # migrations v1–v13, WAL, FTS5
+│   │       │                  # migrations v1–v14, WAL, FTS5
 │   │       ├── memory/        # Node types, FSRS strength, temporal, typed-memory MemoryKind
 │   │       ├── fsrs/          # Algorithm, scheduler, optimizer
 │   │       ├── embeddings/    # Nomic v1.5 local ONNX, hybrid, code embeddings
@@ -166,7 +166,7 @@ vestige/
 ActivationNetwork (Collins & Loftus 1975), SynapticTaggingSystem (Frey & Morris 1997), HippocampalIndex (Teyler & Rudy 2007), ContextMatcher (Tulving 1973), AccessibilityCalculator, CompetitionManager (Anderson 1994), StateUpdateService, ImportanceSignals (Novelty / Arousal / Reward / Attention sub-signals), EmotionalMemory (Brown & Kulik 1977), PredictiveMemory, ProspectiveMemory, IntentionParser.
 
 **Advanced:**
-ImportanceTracker, ReconsolidationManager (Nader — 5-minute labile window), IntentDetector, ActivityTracker, MemoryDreamer (4-phase NREM1 → NREM3 → REM → Integration cycle with six sub-modules — lifecycle, clustering, connections, contradictions, hubs, insights), MemoryChainBuilder, MemoryCompressor, CrossProjectLearner, AdaptiveEmbedder, SpeculativeRetriever, ConsolidationScheduler, PredictionErrorGate.
+ImportanceTracker, ReconsolidationManager (Nader — 5-minute labile window), IntentDetector, ActivityTracker, DreamEngine (canonical 4-phase NREM1 → NREM3 → REM → Integration cycle), MemoryDreamer (6 sub-phases — connections, clustering, contradictions, insights, hubs, strengthen/compress — insight/hub/contradiction synthesis), MemoryChainBuilder, MemoryCompressor, CrossProjectLearner, AdaptiveEmbedder, SpeculativeRetriever, ConsolidationScheduler (inline replay-style FSRS consolidation), PredictionErrorGate.
 
 **Search:** Reranker (Jina Reranker v2), TemporalSearcher, CompoundQueryDecomposer.
 
@@ -193,7 +193,7 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 |-----------|---------|
 | **SQLite** | WAL mode, reader/writer connection split, PRAGMA optimizations |
 | **FTS5** | Full-text search with porter tokenizer, page_size tuning |
-| **Migrations** | Versions 1–13. FSRS, embeddings, neuroscience tables, graph/scopes, FSRS-6 upgrade, dream history, FTS5, autonomic fields, emotional/temporal hierarchy, V10 provenance tracking, V11 typed memory `MemoryKind`, V12 typed-memory tables (`decisions`, `hubs`, `insights` + foreign-key indexes), V13 tier/confidence columns on `insights` and `decisions`. All forward-only and idempotent. |
+| **Migrations** | Versions 1–14. FSRS, embeddings, neuroscience tables, graph/scopes, FSRS-6 upgrade, dream history, FTS5, autonomic fields, emotional/temporal hierarchy, V10 provenance tracking, V11 typed memory `MemoryKind`, V12 typed-memory tables (`decisions`, `hubs`, `insights` + foreign-key indexes), V13 tier/confidence columns on `insights` and `decisions`, V14 `auto_vacuum=INCREMENTAL` (reclaims deleted pages without a full `VACUUM`; runs outside a transaction, see `migrations/runner.rs`). All forward-only and idempotent. |
 | **Vector index** | USearch HNSW, feature-gated behind `vector-search` |
 | **Embeddings** | Nomic Embed v1.5 via fastembed (local ONNX), feature-gated behind `embeddings` |
 | **FTS sanitization** | `fts.rs` — strips injection patterns, length limits, always available |
@@ -220,7 +220,7 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 
 ### REST API Endpoints
 
-39 routes total. Every response body is a `Json<T>` of a ts-rs DTO from `dashboard/wire/`; the dashboard re-validates the five highest-blast-radius endpoints with Zod at runtime.
+40 routes total. Every response body is a `Json<T>` of a ts-rs DTO from `dashboard/wire/`; the dashboard re-validates the five highest-blast-radius endpoints with Zod at runtime.
 
 **Memory CRUD**
 
@@ -389,7 +389,11 @@ After any memory is accessed, it enters a 5-minute "labile" state where modifica
 Memories encoded in the last 9 hours can be retroactively promoted when something important happens (Frey & Morris 1997). Related memories from the past 9 hours get importance boosts automatically.
 
 ### Dream Consolidation
-5-stage cycle: Replay → Cross-reference → Strengthen → Prune → Transfer. Uses Waking SWR tagging (70% tagged + 30% random). Generates insights by cross-referencing recent memories with older knowledge. Check `insights_generated` in dream results.
+The `dream` tool and `/api/dream` run two engines over the selected memory set (70% Waking-SWR-tagged + 30% random):
+- **DreamEngine** — the canonical 4-phase NREM-grounded cycle: NREM1 triage → NREM3 consolidation (synaptic downscaling, tunable via `VESTIGE_NREM3_DOWNSCALE_FACTOR`) → REM creative pairing → Integration (Diekelmann & Born 2010, Stickgold & Walker 2013, Tononi & Cirelli 2006).
+- **MemoryDreamer** — runs alongside for backward-compatible synthesis across the same set: 6 sub-phases (connections → clustering → contradictions → insights → hubs → strengthen/compress). Emits insights, Topic-Hub candidates, and contradiction flags. Check `insights_generated` in dream results.
+
+A separate **ConsolidationScheduler** drives the inline replay-style FSRS consolidation (replay → cross-reference → strengthen → prune → transfer) — distinct from the dream tool; see `advanced/dreams/`.
 
 ### Metacognitive Tools (v3.1)
 

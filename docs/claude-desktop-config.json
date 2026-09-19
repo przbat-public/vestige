@@ -2,10 +2,7 @@
   "mcpServers": {
     "vestige": {
       "command": "vestige-mcp",
-      "args": ["--project", "."],
-      "env": {
-        "VESTIGE_DATA_DIR": "~/.vestige"
-      }
+      "args": ["--data-dir", "./.vestige"]
     }
   }
 }

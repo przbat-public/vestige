@@ -64,7 +64,7 @@ vestige consolidate    # Run memory maintenance cycle
 - **FSRS-6 Algorithm**: State-of-the-art spaced repetition for optimal memory retention
 - **Dual-Strength Memory**: Bjork & Bjork (1992) - Storage + Retrieval strength model
 - **Synaptic Tagging**: Memories become important retroactively (Frey & Morris 1997)
-- **Semantic Search**: Local embeddings via nomic-embed-text-v1.5 (768 dimensions)
+- **Semantic Search**: Local embeddings via nomic-embed-text-v1.5 (384-dim Matryoshka truncation)
 - **Local-First**: All data stays on your machine - no cloud, no API costs
 
 ## Storage & Memory
@@ -81,7 +81,7 @@ You'll never run out of space. A heavy user creating 100 memories/day would use 
 
 On first use, Vestige downloads the nomic-embed-text-v1.5 model (~130MB). This is a one-time download and all subsequent operations are fully offline.
 
-The model is stored in `.fastembed_cache/` in your working directory, or you can set a global location:
+The model is cached in a platform-specific directory (macOS `~/Library/Caches/vestige.vestige/fastembed`, Linux `~/.cache/vestige/fastembed`). Override it with:
 
 ```bash
 export FASTEMBED_CACHE_PATH="$HOME/.fastembed_cache"
@@ -91,9 +91,11 @@ export FASTEMBED_CACHE_PATH="$HOME/.fastembed_cache"
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VESTIGE_DATA_DIR` | Data storage directory | `~/.vestige` |
-| `VESTIGE_LOG_LEVEL` | Log verbosity | `info` |
-| `FASTEMBED_CACHE_PATH` | Embeddings model location | `./.fastembed_cache` |
+| `RUST_LOG` | Log verbosity / tracing filter | `info` |
+| `FASTEMBED_CACHE_PATH` | Embeddings model cache location | platform cache dir |
+| `VESTIGE_DASHBOARD_PORT` | Dashboard HTTP + WebSocket port | `3927` |
+
+Custom storage location is set with the `--data-dir <PATH>` flag, not an environment variable. See [docs/CONFIGURATION.md](https://github.com/samvallad33/vestige/blob/main/docs/CONFIGURATION.md) for the full list.
 
 ## Troubleshooting
 

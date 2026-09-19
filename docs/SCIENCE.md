@@ -201,7 +201,7 @@ Beyond search, `deep_reference` runs a full reasoning pipeline across memories: 
 ## Embedding Model
 
 **Nomic Embed Text v1.5** (via fastembed):
-- 768-dimensional vectors, truncated to 384D via Matryoshka representation learning (sub-linear quality loss, ~2× faster vector search).
+- 768-dimensional vectors, truncated to 384D via Matryoshka representation learning (~1% MTEB loss vs full 768, ~2× smaller vectors → lower HNSW memory footprint), then L2-renormalized.
 - 8,192-token context window.
 - ~130 MB model size.
 - Runs 100% local (after first download).

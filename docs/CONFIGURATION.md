@@ -33,11 +33,11 @@ export FASTEMBED_CACHE_PATH="/custom/path"
 
 ## Environment Variables
 
+Custom database location is set with the `--data-dir` flag (see [Command-Line Options](#command-line-options)), not an environment variable. Logging level is controlled by `RUST_LOG`.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VESTIGE_DATA_DIR` | Platform default (see [STORAGE.md](STORAGE.md)) | Custom database location |
-| `VESTIGE_LOG_LEVEL` | `info` | Logging verbosity |
-| `RUST_LOG` | — | Detailed tracing filter (e.g. `vestige_mcp=debug,vestige_core=info`) |
+| `RUST_LOG` | `info` | Tracing filter (e.g. `vestige_mcp=debug,vestige_core=info`) |
 | `VESTIGE_DASHBOARD_PORT` | `3927` | Dashboard HTTP + WebSocket port |
 | `VESTIGE_HTTP_BIND` | `127.0.0.1` | HTTP MCP transport bind address |
 | `VESTIGE_HTTP_PORT` | `3928` | HTTP MCP transport port (overridden by `--http-port`) |
@@ -45,9 +45,28 @@ export FASTEMBED_CACHE_PATH="/custom/path"
 | `VESTIGE_MAX_TOKEN_BUDGET` | tool default | Cap for `search` / `session_context` token budget |
 | `VESTIGE_RETENTION_TARGET` | `0.85` | FSRS-6 retention target |
 | `VESTIGE_CONSOLIDATION_INTERVAL_HOURS` | `6` | Background consolidation cadence |
+| `VESTIGE_NOMIC_PREFIXES` | off | Apply Nomic `search_query:`/`search_document:` task prefixes. Coupled with `regenerate_embeddings` — see [`.env.example`](../.env.example) |
 | `VESTIGE_ENCRYPTION_KEY` | — | Required when built with the `encryption` feature (SQLCipher) |
 | `VESTIGE_TEST_MOCK_EMBEDDINGS` | — | Use mock embeddings in tests (skips ONNX model download) |
 | `FASTEMBED_CACHE_PATH` | platform default | Embedding model cache location |
+
+### Advanced tuning
+
+Niche knobs read at runtime. Defaults are sensible; change only with a reason.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VESTIGE_HYBRID_KEYWORD_WEIGHT` | `0.3` | BM25 channel weight in hybrid-search blending (clamped `[0,1]`) |
+| `VESTIGE_HYBRID_SEMANTIC_WEIGHT` | `0.7` | Semantic (HNSW cosine) channel weight (clamped `[0,1]`) |
+| `VESTIGE_NREM3_DOWNSCALE_FACTOR` | `0.90` | DreamEngine NREM3 synaptic-downscaling factor (clamped `(0,1]`) |
+| `VESTIGE_REQUEST_TIMEOUT_SECS` | `300` | Per-request budget for the HTTP MCP transport |
+| `VESTIGE_CORS_ORIGINS` | — | Comma-separated extra CORS origins for the HTTP MCP transport |
+| `VESTIGE_HUB_SYNTHESIS` | heuristic | Set to `llm` to enable LLM-based topic-hub naming (otherwise heuristic) |
+| `VESTIGE_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP exporter endpoint (requires `telemetry` build; `VESTIGE_`-prefixed wins) |
+| `VESTIGE_MMR` | off | Enable Maximal-Marginal-Relevance diversity reordering of search results (helps multi-hop synthesis) |
+| `VESTIGE_MMR_LAMBDA` | `0.7` | MMR relevance/diversity trade-off in `[0,1]` (1.0 = pure relevance) |
+| `VESTIGE_LATE_INTERACTION` | off | Use the ColBERT late-interaction reranker instead of the Jina cross-encoder (requires the `late-interaction` build + `VESTIGE_COLBERT_MODEL_DIR`) |
+| `VESTIGE_COLBERT_MODEL_DIR` | — | Directory holding ColBERTv2 `model.onnx` + `tokenizer.json` (only read with the `late-interaction` build) |
 
 ---
 
@@ -185,6 +204,7 @@ vestige-mcp --version
 | `metal` | Apple Silicon GPU acceleration for embeddings (fastembed Metal backend) |
 | `encryption` | SQLCipher encryption at rest — requires `VESTIGE_ENCRYPTION_KEY`. Mutually exclusive with `bundled-sqlite` |
 | `telemetry` | Compile-in OpenTelemetry/OTLP scaffolding (no-op until exporter is wired) |
+| `late-interaction` | ColBERT token-level reranker via `ort` (adds `ort` + `tokenizers`). Inert unless `VESTIGE_LATE_INTERACTION` + `VESTIGE_COLBERT_MODEL_DIR` are set |
 | `--no-default-features` | Skips embeddings + vector search. Smallest binary, keyword-only search |
 
 Example — encryption build:
