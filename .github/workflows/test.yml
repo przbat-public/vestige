@@ -298,6 +298,54 @@ jobs:
             exit 1
           fi
 
+  dashboard-e2e:
+    name: Dashboard E2E (Playwright)
+    runs-on: ubuntu-latest
+    needs: [dashboard]
+    if: github.event_name != 'schedule'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      # Chromium only — the suite never opens another engine, and the WebGL
+      # fallback flags in playwright.config.ts keep the graph page renderable on
+      # a runner with no GPU.
+      - run: pnpm --filter vestige-dashboard exec playwright install --with-deps chromium
+      # The dashboard bundle is embedded into the binary (include_dir! in
+      # dashboard/static_files.rs) at *compile* time, so it has to be built
+      # before `cargo build` — otherwise this job would e2e-test whatever UI was
+      # committed last.
+      - run: pnpm --filter vestige-dashboard build
+      - run: cargo build --release --package vestige-mcp
+      # The suite starts and stops this binary itself (e2e/start-server.mjs) on
+      # ports 4327/4328 with a temporary data directory, so it cannot touch any
+      # other process or database. `VESTIGE_E2E_BIN` tells the launcher which
+      # build to exercise; everything else is derived in e2e/env.ts.
+      - name: Run Playwright suite
+        run: pnpm --filter vestige-dashboard run test:e2e
+        env:
+          VESTIGE_E2E_BIN: target/release/vestige-mcp
+      # Traces, videos and the HTML report are only interesting when something
+      # failed — that is the whole reason this job exists: before it, the eleven
+      # Playwright tests had no assertion in seven cases and had never run
+      # anywhere but the author's machine.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            apps/dashboard/dist/playwright-report/
+            apps/dashboard/dist/test-results/
+          retention-days: 7
+
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest

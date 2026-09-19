@@ -1,414 +1,266 @@
-import { expect, type Page, test } from '@playwright/test';
-import { readFileSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
+/**
+ * Dashboard end-to-end suite.
+ *
+ * Rewritten from the 2026-09 review finding that the previous eleven tests
+ * were unrunnable outside one developer's Mac and that seven of them asserted
+ * nothing (their whole body was `page.screenshot()`). The rules this file
+ * follows now:
+ *
+ * 1. **Self-contained.** `playwright.config.ts` starts the `vestige-mcp`
+ *    binary built from this repository on throwaway ports with a temporary
+ *    data directory and a token supplied through `VESTIGE_AUTH_TOKEN`. No
+ *    hardcoded absolute paths, no macOS-only token file, no assumption that a
+ *    server is already running, and nothing that can reach the developer's own
+ *    database.
+ * 2. **Every test asserts an observable outcome** — rendered text, a network
+ *    effect, or persisted server state. Screenshots are produced by Playwright
+ *    on failure, not by the test body.
+ * 3. **Cleanup deletes only ids this run created** (tracked in `createdIds`).
+ *    The old suite deleted every memory whose content contained "E2E TEST",
+ *    which is an irreversible operation on real data.
+ * 4. **Playwright auto-waits.** No `waitForTimeout`: assertions poll for the
+ *    WebSocket-driven refetch instead of sleeping a fixed number of
+ *    milliseconds and hoping.
+ */
+import { expect, test } from '@playwright/test';
+import {
+  deleteMemory,
+  fetchGraph,
+  fetchMemories,
+  fetchMemory,
+  ingestViaMcp,
+  newMarker,
+} from './api';
+import { E2E } from './env';
 
-const API = 'http://127.0.0.1:3927';
-const MCP = 'http://127.0.0.1:3928/mcp';
-const GRAPH_URL = '/dashboard/graph';
+/** Ids created by the running test; removed in `afterEach`. */
+const createdIds: string[] = [];
 
-// ─────────────────────────────────────────────────
-// MCP CLIENT — for creating memories
-// ─────────────────────────────────────────────────
-
-let mcpSessionId: string | null = null;
-let authToken: string | null = null;
-
-function getAuthToken(): string {
-  if (authToken) return authToken;
-  const tokenPath = join(homedir(), 'Library', 'Application Support', 'com.vestige.core', 'auth_token');
-  authToken = readFileSync(tokenPath, 'utf-8').trim();
-  return authToken;
+async function ingest(content: string, tags: string[] = ['e2e']): Promise<string> {
+  const id = await ingestViaMcp(content, { tags });
+  createdIds.push(id);
+  return id;
 }
 
-async function initMcpSession(): Promise<string> {
-  if (mcpSessionId) return mcpSessionId;
+test.afterEach(async () => {
+  while (createdIds.length > 0) {
+    const id = createdIds.pop();
+    if (id) await deleteMemory(id);
+  }
+});
 
-  const token = getAuthToken();
+test.describe('Live materialization — an external MCP client drives the UI', () => {
+  test('a memory ingested over MCP appears in the memories list without a reload', async ({ page }) => {
+    const marker = newMarker('live list');
 
-  // Initialize
-  const initRes = await fetch(MCP, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: {
-        protocolVersion: '2025-03-26',
-        capabilities: {},
-        clientInfo: { name: 'e2e-playwright', version: '1.0.0' },
-      },
-    }),
+    await page.goto(E2E.memoriesPath);
+    await expect(page.getByRole('textbox', { name: 'Search memories...' })).toBeVisible();
+    await expect(page.getByText(marker, { exact: false })).toHaveCount(0);
+
+    const id = await ingest(marker, ['e2e-live']);
+
+    // The server broadcasts MemoryCreated on /ws, the store invalidates the
+    // `['memories']` query, and the row renders in the page that was already
+    // open — that round trip is the behaviour under test.
+    await expect(page.getByText(marker, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+
+    // ...and the row came from the server, not from optimistic client state.
+    expect((await fetchMemory(id)).content).toBe(marker);
   });
 
-  mcpSessionId = initRes.headers.get('mcp-session-id')!;
+  test('the activity feed shows the MemoryCreated event raised by an MCP ingest', async ({ page }) => {
+    const marker = newMarker('feed event');
 
-  // Send initialized notification
-  await fetch(MCP, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'Mcp-Session-Id': mcpSessionId,
-    },
-    body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+    await page.goto(E2E.feedPath);
+    await expect(page.getByTestId('feed-event')).toHaveCount(0);
+
+    const id = await ingest(marker, ['e2e-feed']);
+
+    const row = page.getByTestId('feed-event').filter({ hasText: 'MemoryCreated' }).first();
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    // The payload carries the id of the memory that was just written, which
+    // ties the broadcast to this exact ingest. (The `contentPreview` field is
+    // empty for tool-driven writes, so the id is the assertion that actually
+    // distinguishes one event from another.)
+    await expect(row).toContainText(id);
   });
 
-  return mcpSessionId;
-}
+  test('a memory deleted by another client leaves the open list', async ({ page }) => {
+    const marker = newMarker('remote removal');
+    const id = await ingest(marker, ['e2e-live']);
 
-let mcpCallId = 10;
+    await page.goto(E2E.memoriesPath);
+    await expect(page.getByText(marker, { exact: false }).first()).toBeVisible();
 
-async function mcpCall(toolName: string, args: Record<string, unknown>): Promise<unknown> {
-  const sessionId = await initMcpSession();
-  const token = getAuthToken();
-  const id = mcpCallId++;
+    expect(await deleteMemory(id), 'DELETE /api/memories/{id} must report success').toBe(true);
 
-  const res = await fetch(MCP, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'Mcp-Session-Id': sessionId,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id,
-      method: 'tools/call',
-      params: { name: toolName, arguments: args },
-    }),
+    await expect(page.getByText(marker, { exact: false })).toHaveCount(0, { timeout: 15_000 });
+  });
+});
+
+test.describe('Memory CRUD through the dashboard', () => {
+  test('the add-memory dialog persists a memory and lists it', async ({ page }) => {
+    const marker = newMarker('ui create');
+
+    await page.goto(E2E.memoriesPath);
+    await expect(page.getByRole('textbox', { name: 'Search memories...' })).toBeVisible();
+
+    // Ctrl/Cmd+N is the documented shortcut for the primary write action.
+    await page.keyboard.press('ControlOrMeta+n');
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByLabel('Content', { exact: true }).fill(marker);
+    await dialog.getByLabel('Tags', { exact: true }).fill('e2e-ui');
+    await dialog.getByRole('button', { name: 'Save memory' }).click();
+
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByText(marker, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+
+    const created = (await fetchMemories()).memories.find((memory) => memory.content === marker);
+    expect(created, 'the UI-created memory must be readable through the REST API').toBeTruthy();
+    if (created) createdIds.push(created.id);
   });
 
-  const data = (await res.json()) as { result?: { content?: Array<{ text: string }> }; error?: unknown };
-  if (data.error) throw new Error(`MCP error: ${JSON.stringify(data.error)}`);
+  test('deleting from the detail panel removes the memory from the list and the API', async ({ page }) => {
+    // Marker wording matters: accessible-name matching is substring-based, so a
+    // content containing the word "delete" makes the row button itself match
+    // `getByRole('button', { name: 'Delete' })` and the click below would hit
+    // the wrong control.
+    const marker = newMarker('ui removal');
+    const id = await ingest(marker, ['e2e-ui']);
 
-  const text = data.result?.content?.[0]?.text;
-  return text ? JSON.parse(text) : data.result;
-}
+    await page.goto(E2E.memoriesPath);
+    const row = page.locator(`[data-memory-row="${id}"]`);
+    await expect(row).toContainText(marker);
+    // The row body is a button; the label that wraps the bulk-select checkbox
+    // sits on top of the leading edge, so clicking the raw text would toggle
+    // selection instead of opening the detail panel.
+    await row.getByRole('button').first().click();
 
-// ─────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────
+    // `exact` keeps the panel's Delete button from competing with any other
+    // button whose name merely contains the word.
+    const panelDelete = page.getByRole('button', { name: 'Delete', exact: true });
+    await panelDelete.click();
 
-async function waitForGraphReady(page: Page) {
-  await page.waitForSelector('canvas', { timeout: 15_000 });
-  await page.waitForTimeout(2000);
-}
-
-async function createMemory(content: string, tags: string[] = [], nodeType = 'fact') {
-  const result = (await mcpCall('smart_ingest', { content, tags, node_type: nodeType })) as {
-    nodeId?: string;
-    success?: boolean;
-  };
-  return { id: result.nodeId!, success: result.success };
-}
-
-async function searchMemory(query: string) {
-  const res = await fetch(`${API}/api/search?q=${encodeURIComponent(query)}&limit=5`);
-  return res.json();
-}
-
-async function promoteMemory(id: string) {
-  const res = await fetch(`${API}/api/memories/${id}/promote`, { method: 'POST' });
-  return res.json();
-}
-
-async function deleteMemory(id: string) {
-  const res = await fetch(`${API}/api/memories/${id}`, { method: 'DELETE' });
-  return res.ok;
-}
-
-async function triggerDream() {
-  const res = await fetch(`${API}/api/dream`, { method: 'POST' });
-  return res.json();
-}
-
-// ─────────────────────────────────────────────────
-// TESTS
-// ─────────────────────────────────────────────────
-
-test.describe('Live Memory Materialization — Visual Proof', () => {
-  test.describe.configure({ mode: 'serial' });
-
-  let createdMemoryId: string;
-  let secondMemoryId: string;
-
-  test('1. Graph page loads with existing nodes', async ({ page }) => {
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
-
-    const canvas = page.locator('canvas');
-    await expect(canvas).toBeVisible();
-
-    const stats = page.locator('.absolute.top-16.left-4');
-    await expect(stats).toContainText('nodes');
-    await expect(stats).toContainText('edges');
-
-    await page.screenshot({
-      path: 'e2e/screenshots/01-graph-loaded.png',
-      fullPage: true,
-    });
+    // Delete is deferred: the row leaves the list immediately, but the actual
+    // DELETE fires only after the five-second undo window, so a row that
+    // merely vanished from the cache has deleted nothing. Assert both halves.
+    await expect(row).toHaveCount(0);
+    await expect
+      .poll(
+        async () => {
+          try {
+            await fetchMemory(id);
+            return 'present';
+          } catch {
+            return 'gone';
+          }
+        },
+        { timeout: 20_000, message: 'the deferred delete was never committed to the server' },
+      )
+      .toBe('gone');
+    // Once the server confirms, `onDelete` closes the detail panel, which
+    // falls back to its "Select a memory" placeholder.
+    await expect(panelDelete).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Select a memory to view details' })).toBeVisible();
   });
+});
 
-  test('2. Memory materializes with rainbow burst when created', async ({ page }) => {
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
+test.describe('Graph view', () => {
+  test('the graph renders exactly the node set the API returns', async ({ page }) => {
+    await ingest(newMarker('graph parity a'), ['e2e-graph']);
+    await ingest(newMarker('graph parity b'), ['e2e-graph']);
 
-    const statsBefore = await page.locator('.absolute.top-16.left-4').textContent();
-    const nodeCountBefore = parseInt(statsBefore?.match(/(\d+) nodes/)?.[1] ?? '0');
+    const expected = await fetchGraph();
+    await page.goto(E2E.graphPath);
 
-    await page.screenshot({
-      path: 'e2e/screenshots/02a-before-creation.png',
-      fullPage: true,
-    });
+    const graph = page.getByRole('application', { name: /memory graph canvas/i });
+    await expect(graph).toBeVisible();
+    await expect(graph.locator('canvas')).toBeVisible();
 
-    // Create a memory via MCP — fires WebSocket MemoryCreated event
-    const result = await createMemory(
-      'E2E TEST: Rust ownership model prevents data races at compile time',
-      ['rust', 'memory-safety', 'e2e-test'],
-      'fact',
+    // The stats bar is derived from the same payload the test just fetched:
+    // exact numbers, not "at least as many as before".
+    await expect(page.getByText(`${expected.nodeCount} nodes`, { exact: true })).toBeVisible();
+    await expect(page.getByText(`${expected.edgeCount} connections`, { exact: true })).toBeVisible();
+
+    // Every node is mirrored into an sr-only list (aria-activedescendant
+    // targets), which is the only DOM representation of the 3D scene.
+    const renderedLabels = graph.getByRole('listitem');
+    await expect(renderedLabels).toHaveCount(expected.nodeCount);
+    expect(new Set(await renderedLabels.allTextContents())).toEqual(
+      new Set(expected.nodes.map((node) => node.label)),
     );
-    createdMemoryId = result.id;
-
-    // Wait for materialization animation (rainbow burst + elastic scale-up)
-    await page.waitForTimeout(3000);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/02b-after-creation-materialized.png',
-      fullPage: true,
-    });
-
-    // Verify node count increased
-    const statsAfter = await page.locator('.absolute.top-16.left-4').textContent();
-    const nodeCountAfter = parseInt(statsAfter?.match(/(\d+) nodes/)?.[1] ?? '0');
-    expect(nodeCountAfter).toBeGreaterThanOrEqual(nodeCountBefore);
   });
 
-  test('3. Second memory materializes and spawns near related node', async ({ page }) => {
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
+  test('searching the graph materializes an MCP-created memory and keyboard Enter opens it', async ({ page }) => {
+    const marker = newMarker('graph search');
+    await ingest(marker, ['e2e-graph']);
 
-    const result = await createMemory(
-      'E2E TEST: Rust lifetimes ensure references are always valid',
-      ['rust', 'lifetimes', 'e2e-test'],
-      'fact',
-    );
-    secondMemoryId = result.id;
+    await page.goto(E2E.graphPath);
+    const graph = page.getByRole('application', { name: /memory graph canvas/i });
+    await expect(graph).toBeVisible();
 
-    await page.waitForTimeout(3000);
+    await page.getByRole('textbox', { name: 'Search your memories...' }).fill(marker);
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
 
-    await page.screenshot({
-      path: 'e2e/screenshots/03-second-node-spawned.png',
-      fullPage: true,
-    });
-  });
+    // The backend centres the subgraph on the search hit, so exactly one node
+    // is on screen and it is the memory the external client just wrote.
+    const renderedLabels = graph.getByRole('listitem');
+    await expect(renderedLabels).toHaveCount(1);
+    await expect(renderedLabels.first()).toHaveText(marker);
 
-  test('4. Search triggers pulse effect across all nodes', async ({ page }) => {
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/04a-before-search.png',
-      fullPage: true,
-    });
-
-    // Trigger search — fires SearchPerformed WebSocket event
-    await searchMemory('rust ownership');
-
-    await page.waitForTimeout(1500);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/04b-search-pulse.png',
-      fullPage: true,
-    });
-  });
-
-  test('5. Memory promotion triggers green glow + node growth', async ({ page }) => {
-    test.skip(!createdMemoryId, 'No memory to promote');
-
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/05a-before-promotion.png',
-      fullPage: true,
-    });
-
-    await promoteMemory(createdMemoryId);
-
-    await page.waitForTimeout(2500);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/05b-after-promotion-green-glow.png',
-      fullPage: true,
-    });
-  });
-
-  test('6. Dream cycle triggers purple effects and connection discoveries', async ({ page }) => {
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/06a-before-dream.png',
-      fullPage: true,
-    });
-
-    // Trigger dream — fires DreamStarted, DreamProgress, DreamCompleted,
-    // and ConnectionDiscovered events
-    await triggerDream();
-
-    // Wait for dream effects (purple pulses cascade, connections appear)
-    await page.waitForTimeout(5000);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/06b-after-dream-connections.png',
-      fullPage: true,
-    });
-  });
-
-  test('7. Memory deletion triggers implosion effect', async ({ page }) => {
-    test.skip(!secondMemoryId, 'No memory to delete');
-
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/07a-before-deletion.png',
-      fullPage: true,
-    });
-
-    await deleteMemory(secondMemoryId);
-
-    await page.waitForTimeout(2500);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/07b-after-deletion-implosion.png',
-      fullPage: true,
-    });
-  });
-
-  test('8. Rapid-fire creation: 5 memories spawn smoothly', async ({ page }) => {
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
-
-    const statsBefore = await page.locator('.absolute.top-16.left-4').textContent();
-    const nodeCountBefore = parseInt(statsBefore?.match(/(\d+) nodes/)?.[1] ?? '0');
-
-    await page.screenshot({
-      path: 'e2e/screenshots/08a-before-rapid-fire.png',
-      fullPage: true,
-    });
-
-    const rapidIds: string[] = [];
-    for (let i = 0; i < 5; i++) {
-      const result = await createMemory(
-        `E2E RAPID ${i}: Testing live materialization performance #${i}`,
-        ['e2e-rapid', 'performance'],
-        i % 2 === 0 ? 'fact' : 'concept',
-      );
-      rapidIds.push(result.id);
-      await page.waitForTimeout(500);
-    }
-
-    // Wait for all animations to complete
-    await page.waitForTimeout(4000);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/08b-after-rapid-fire-5-nodes.png',
-      fullPage: true,
-    });
-
-    const statsAfter = await page.locator('.absolute.top-16.left-4').textContent();
-    const nodeCountAfter = parseInt(statsAfter?.match(/(\d+) nodes/)?.[1] ?? '0');
-    expect(nodeCountAfter).toBeGreaterThanOrEqual(nodeCountBefore);
-
-    // Cleanup
-    for (const id of rapidIds) {
-      await deleteMemory(id);
-    }
-    await page.waitForTimeout(2000);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/08c-after-rapid-fire-cleanup.png',
-      fullPage: true,
-    });
-  });
-
-  test('9. Node selection works on live-spawned nodes', async ({ page }) => {
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
-
-    const result = await createMemory(
-      'E2E TEST: Interactive node selection verification',
-      ['e2e-test', 'interaction'],
-      'note',
+    // Keyboard contract: arrows/Home move a cursor, the aria-live region
+    // announces it, Enter opens the detail sheet.
+    await graph.focus();
+    await page.keyboard.press('Home');
+    await expect(page.getByRole('status').filter({ hasText: 'Focused node:' })).toHaveText(
+      `Focused node: ${marker}`,
     );
 
-    await page.waitForTimeout(3000);
+    await page.keyboard.press('Enter');
+    const detailHeading = page.getByRole('heading', { name: 'Selected' });
+    await expect(detailHeading).toBeVisible();
+    // The sheet renders the header row and the memory body as siblings, so
+    // asserting on the header's grandparent covers the whole panel.
+    await expect(detailHeading.locator('xpath=../..')).toContainText(marker);
 
-    const canvas = page.locator('canvas');
-    const box = await canvas.boundingBox();
-    if (box) {
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      await page.waitForTimeout(500);
-    }
-
-    await page.screenshot({
-      path: 'e2e/screenshots/09-node-interaction.png',
-      fullPage: true,
-    });
-
-    await deleteMemory(result.id);
+    await page.keyboard.press('Escape');
+    await expect(detailHeading).toBeHidden();
   });
 
-  test('10. Stats bar updates live during mutations', async ({ page }) => {
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
+  test('the tag filter can empty the graph and the reset control restores it', async ({ page }) => {
+    await ingest(newMarker('tag filter'), ['e2e-graph']);
+    const expected = await fetchGraph();
 
-    const initialStats = await page.locator('.absolute.top-16.left-4').textContent();
-    const initialNodes = parseInt(initialStats?.match(/(\d+) nodes/)?.[1] ?? '0');
+    await page.goto(E2E.graphPath);
+    const graph = page.getByRole('application', { name: /memory graph canvas/i });
+    const renderedLabels = graph.getByRole('listitem');
+    await expect(renderedLabels).toHaveCount(expected.nodeCount);
 
-    const result = await createMemory('E2E TEST: Stats bar live update verification', ['e2e-test'], 'fact');
+    const tagFilter = page.getByRole('textbox', { name: 'Filter by tag' });
+    await tagFilter.fill('e2e-tag-that-matches-nothing');
 
-    await page.waitForTimeout(2000);
+    await expect(renderedLabels).toHaveCount(0);
+    await expect(page.getByText('0 nodes', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No nodes match the current filter' })).toBeVisible();
 
-    const afterCreate = await page.locator('.absolute.top-16.left-4').textContent();
-    const afterNodes = parseInt(afterCreate?.match(/(\d+) nodes/)?.[1] ?? '0');
-    expect(afterNodes).toBeGreaterThanOrEqual(initialNodes);
-
-    await page.screenshot({
-      path: 'e2e/screenshots/10-live-stats-update.png',
-      fullPage: true,
-    });
-
-    await deleteMemory(result.id);
+    await page.getByRole('button', { name: 'Clear filter' }).click();
+    await expect(renderedLabels).toHaveCount(expected.nodeCount);
   });
 
-  test('11. Cleanup: remove e2e test memories', async ({ page }) => {
-    if (createdMemoryId) {
-      await deleteMemory(createdMemoryId);
-    }
+  test('sidebar navigation switches between the memories page and the graph', async ({ page }) => {
+    await ingest(newMarker('navigation'), ['e2e-graph']);
 
-    // Search for remaining e2e test memories and clean them up
-    const results = await searchMemory('E2E TEST');
-    if (results.results) {
-      for (const r of results.results) {
-        if (r.content?.includes('E2E TEST') || r.content?.includes('E2E RAPID')) {
-          await deleteMemory(r.id);
-        }
-      }
-    }
+    await page.goto(E2E.memoriesPath);
+    await expect(page.getByRole('textbox', { name: 'Search memories...' })).toBeVisible();
 
-    await page.goto(GRAPH_URL);
-    await waitForGraphReady(page);
+    await page.getByRole('link', { name: 'Graph', exact: true }).click();
+    await expect(page).toHaveURL(/\/dashboard\/graph$/);
+    await expect(page.getByRole('application', { name: /memory graph canvas/i })).toBeVisible();
 
-    await page.screenshot({
-      path: 'e2e/screenshots/11-final-clean-state.png',
-      fullPage: true,
-    });
+    await page.getByRole('link', { name: 'Memories', exact: true }).click();
+    await expect(page).toHaveURL(/\/dashboard\/memories$/);
+    await expect(page.getByRole('textbox', { name: 'Search memories...' })).toBeVisible();
   });
 });
