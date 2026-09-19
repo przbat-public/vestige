@@ -527,13 +527,13 @@ impl Storage {
         }
 
         let mut count = 0i64;
-        let writer = self
+        let mut writer = self
             .writer
             .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-        // BEGIN IMMEDIATE + retry — a DEFERRED upgrade here can lose the write to
+        // BEGIN IMMEDIATE — a DEFERRED upgrade here can lose the write to
         // SQLITE_BUSY_SNAPSHOT when the CLI commits beside the server.
-        let tx = super::helpers::begin_write_transaction(&writer)?;
+        let tx = super::helpers::begin_write_transaction(&mut writer)?;
 
         for node_id in &node_ids {
             let timestamps: Vec<String> = tx

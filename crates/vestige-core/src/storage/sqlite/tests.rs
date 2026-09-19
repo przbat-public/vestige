@@ -786,3 +786,74 @@ fn snapshot_restore_rejects_a_newer_schema() {
         "a future snapshot must be refused with an explanation, got: {message}"
     );
 }
+
+/// Regression for the double-`BEGIN` bug: `begin_write_transaction` issued
+/// `BEGIN IMMEDIATE` and then `unchecked_transaction()`, which sends a *second* `BEGIN`.
+/// Every write through the helper therefore failed with "cannot start a transaction
+/// within a transaction", and because the first `BEGIN` had already succeeded the
+/// connection stayed inside an open transaction — later writes were invisible to readers
+/// and were lost when the process exited. Consolidation (step 1: `apply_decay`) never ran.
+#[test]
+fn write_transaction_issues_exactly_one_begin_and_commits() {
+    use super::helpers::begin_write_transaction;
+
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(Some(dir.path().join("wal.db"))).unwrap();
+    let node = storage
+        .ingest(IngestInput {
+            content: "before the transaction".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    {
+        let mut writer = storage.writer.lock().unwrap();
+        // A clean connection: one BEGIN IMMEDIATE, wrapped by rusqlite itself.
+        let tx = begin_write_transaction(&mut writer)
+            .expect("BEGIN IMMEDIATE must succeed once — a second BEGIN is the bug");
+        tx.execute(
+            "UPDATE knowledge_nodes SET content = ?1 WHERE id = ?2",
+            rusqlite::params!["after the transaction", node.id],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+
+    // Visible to a reader immediately: with the bug the write sat in an uncommitted
+    // transaction and this read returned the old content.
+    assert_eq!(
+        storage.get_node(&node.id).unwrap().map(|n| n.content),
+        Some("after the transaction".to_string()),
+        "a committed write must be visible to other connections"
+    );
+}
+
+/// End-to-end version of the same regression: consolidation used to fail on its very
+/// first step, so FSRS decay, dedup, dream and retention snapshots silently never ran.
+#[test]
+fn consolidation_runs_to_completion() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(Some(dir.path().join("consolidate.db"))).unwrap();
+    storage
+        .ingest(IngestInput {
+            content: "A memory that should survive a consolidation cycle".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let result = storage
+        .run_consolidation()
+        .expect("consolidation must complete — its first step is a write transaction");
+
+    assert_eq!(
+        storage.get_stats().unwrap().total_nodes,
+        1,
+        "consolidation must never delete memories (auto-GC removed in 608d866)"
+    );
+    assert!(
+        result.duration_ms >= 0,
+        "the pipeline must report a completed run, not bail out at step 1"
+    );
+}
