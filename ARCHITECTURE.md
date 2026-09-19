@@ -17,7 +17,7 @@ Vestige is a single Rust binary (`vestige-mcp`) that runs three concurrent subsy
 │  JSON-RPC     │  JSON-RPC     │  Axum REST + WS + SPA     │
 │  stdin/stdout │  POST /mcp    │  React 19 + Three.js      │
 ├───────────────┴───────────────┴───────────────────────────┤
-│  McpServer — 28 tools, event emission                     │
+│  McpServer — 29 tools, event emission                     │
 ├───────────────────────────────────────────────────────────┤
 │  CognitiveEngine (Arc<Mutex<_>>)                          │
 │  Stateful cognitive modules: FSRS-6, spreading            │
@@ -87,7 +87,7 @@ vestige/
 │   │       │                  # maintenance, review, cognitive, metacognitive,
 │   │       │                  # observability, decisions, hubs, insights, pages),
 │   │       │                  # websocket.rs, events.rs, state.rs, static_files.rs
-│   │       ├── tools/         # One file (or submodule) per MCP tool (28 tools)
+│   │       ├── tools/         # One file (or submodule) per MCP tool (29 tools)
 │   │       ├── resources/     # MCP resources (memory.rs, codebase.rs)
 │   │       └── bin/           # cli/ (vestige CLI). vestige-restore is its own crate.
 │   └── vestige-restore/       # Standalone restore binary (no fastembed/USearch deps)
@@ -226,7 +226,7 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 
 ### REST API Endpoints
 
-40 route registrations total (`dashboard/mod.rs`): 35 of them sit under `/api/*` and cover **33 distinct REST paths** (`/api/memories/{id}` is registered three times — GET/DELETE/PATCH), plus 4 page/SPA routes (`/dashboard`, `/dashboard/{*path}`, `/`, `/graph`) and 1 WebSocket route (`/ws`). Every response body is a `Json<T>` of a ts-rs DTO from `dashboard/wire/`; the dashboard re-validates the five highest-blast-radius endpoints with Zod at runtime.
+42 route registrations total (`dashboard/mod.rs`): 36 of them sit under `/api/*` and cover **34 distinct REST paths** (`/api/memories/{id}` is registered three times — GET/DELETE/PATCH), plus 4 page/SPA routes (`/dashboard`, `/dashboard/{*path}`, `/`, `/graph`), 1 WebSocket route (`/ws`) and 1 Prometheus scrape endpoint (`/metrics`). Every response body is a `Json<T>` of a ts-rs DTO from `dashboard/wire/`, except `/metrics`, which is Prometheus text exposition v0.0.4; the dashboard re-validates the five highest-blast-radius endpoints with Zod at runtime.
 
 **Memory CRUD**
 
@@ -294,14 +294,16 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 | POST | `/api/maintenance/find-duplicates` | Cluster near-duplicates by cosine |
 | POST | `/api/maintenance/gc` | Garbage-collect low-retention memories |
 | POST | `/api/maintenance/backup` | SQLite backup (WAL checkpoint + copy) |
+| POST | `/api/maintenance/erase` | GDPR Art. 17 erasure of one memory (`action: "memory", id`) or an exact tag (`action: "tag", tag`); dry-run by default, destructive pass requires `confirmed: true` |
 
 **Observability & Meta**
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET  | `/api/stats` | System statistics |
-| GET  | `/api/health` | Health check |
+| GET  | `/api/health` | Health check — 200 for `healthy`/`degraded`/`empty`, **503 for `critical`** (average retention < 0.3), with the same `HealthCheckDto` body either way |
 | GET  | `/api/_meta/limits` | Dashboard caps (page sizes, search timeouts, fetch budgets) |
+| GET  | `/metrics` | Prometheus text exposition v0.0.4: store gauges, per-stage `try_lock` skip counters, WS subscribers, uptime |
 
 ### Static SPA
 - `GET /dashboard` and `GET /dashboard/{*path}` — Embedded React build via `include_dir!`

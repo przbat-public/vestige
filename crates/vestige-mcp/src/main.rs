@@ -1,8 +1,8 @@
 //! Vestige MCP Server v1.0 - Cognitive Memory for Claude
 //!
 //! A Rust MCP (Model Context Protocol) server that provides
-//! Claude and other AI assistants with long-term memory capabilities
-//! powered by 130 years of memory research.
+//! Claude and other AI assistants with long-term memory capabilities built on
+//! memory research from Ebbinghaus (1885) to FSRS-6.
 //!
 //! Core Features:
 //! - FSRS-6 spaced repetition algorithm (21 parameters; see the upstream SRS
@@ -214,6 +214,22 @@ async fn main() {
                 }
             }
 
+            // A build with neither feature is the documented "Build (no
+            // embeddings)" configuration (docs/CONFIGURATION.md calls it
+            // "keyword-only search"). Say which retrieval stages are missing
+            // once, up front, so a short result list is never mistaken for a
+            // thin database: the facade degrades silently at the call site by
+            // design, and this is the counterweight. The flag and the gate on
+            // `retrieval::hybrid_search` are asserted equal by a unit test.
+            if !vestige_mcp::retrieval::SEMANTIC_RETRIEVAL {
+                warn!(
+                    "built without `embeddings`/`vector-search`: retrieval is FTS5 keyword-only. \
+                     No query embeddings, no HNSW index, no cross-encoder reranker, no compound-query \
+                     decomposition, no MMR and no temporal recency/validity boost. \
+                     Rebuild with default features for semantic search."
+                );
+            }
+
             Arc::new(s)
         }
         Err(e) => {
@@ -411,8 +427,13 @@ async fn main() {
         }
     }
 
-    // Load cross-encoder reranker in the background (downloads ~150MB on first run)
-    #[cfg(feature = "embeddings")]
+    // Load cross-encoder reranker in the background (downloads ~150MB on first run).
+    //
+    // Gated on `vector-search` as well as `embeddings`: `Reranker` is
+    // re-exported from `vestige_core::search`, and the reranker only ever
+    // reorders a hybrid candidate pool — a build with an embedder but no vector
+    // index has nothing to hand it (and, before this gate, did not compile).
+    #[cfg(all(feature = "embeddings", feature = "vector-search"))]
     {
         let cog_clone = Arc::clone(&cognitive);
         tokio::spawn(async move {
@@ -440,8 +461,10 @@ async fn main() {
 
     // ColBERT late-interaction reranker: load the ONNX model when the feature is
     // compiled in AND enabled at runtime. Failure falls back to the Jina
-    // cross-encoder — never breaks search.
-    #[cfg(feature = "late-interaction")]
+    // cross-encoder — never breaks search. `vector-search` too, for the same
+    // reason as the cross-encoder above: the type comes from
+    // `vestige_core::search` and there is no hybrid pool without it.
+    #[cfg(all(feature = "late-interaction", feature = "vector-search"))]
     if vestige_core::search::late_interaction_enabled() {
         match vestige_core::search::ColbertEmbedder::from_env(Default::default()) {
             Ok(Some(embedder)) => {
@@ -456,18 +479,37 @@ async fn main() {
         }
     }
 
-    // Nomic task prefixes are a coupled operation: enabling them changes the
-    // embedding space, so any vector stored under the old raw regime must be
-    // regenerated or queries (now prefixed) compare across incompatible
-    // spaces. Warn loudly so the operator runs `regenerate_embeddings`.
+    // Nomic task prefixes are a coupled operation: changing the regime changes
+    // the embedding space, so vectors stored under the other regime must be
+    // regenerated or queries compare across incompatible spaces.
+    //
+    // Prefixes are the DEFAULT since embedding space v2, so "ON" is not an
+    // opt-in and warning about it on every default startup only trains people
+    // to ignore the warning. Report the regime at info level when it is the
+    // default, and warn only when the operator has explicitly selected the
+    // off-label raw regime. The actionable case — a database that still holds
+    // vectors from an older space — is detected and reported separately by
+    // `Storage::new` (`stale_embedding_space_warning`), with the row count.
     #[cfg(feature = "embeddings")]
     if vestige_core::embeddings::nomic_prefixes_enabled() {
+        info!(
+            "embedding space v{} ({}) — Nomic task prefixes are ON, which is the default \
+             (VESTIGE_NOMIC_PREFIXES unset or truthy): queries are embedded as search_query: \
+             and memories as search_document:. A database written by a pre-v2 build keeps its \
+             old vectors until `regenerate_embeddings` (force: true) re-embeds them; storage \
+             reports that case at startup.",
+            vestige_core::embeddings::EMBEDDING_SPACE_VERSION,
+            vestige_core::embeddings::embedding_model_tag(),
+        );
+    } else {
         warn!(
-            "VESTIGE_NOMIC_PREFIXES is ON: queries and new memories use Nomic \
-             search_query:/search_document: prefixes. If you enabled this on an \
-             existing database, run the `regenerate_embeddings` tool now — until \
-             you do, previously stored embeddings remain in the raw regime and \
-             retrieval will be inconsistent."
+            "embedding space v{} ({}) — VESTIGE_NOMIC_PREFIXES is set to a falsey value, so \
+             this process uses the legacy raw regime: no search_query:/search_document: \
+             prefixes. That is off the model card and a different vector space from the \
+             default, so run `regenerate_embeddings` (force: true) after switching in either \
+             direction.",
+            vestige_core::embeddings::EMBEDDING_SPACE_VERSION,
+            vestige_core::embeddings::embedding_model_tag(),
         );
     }
 

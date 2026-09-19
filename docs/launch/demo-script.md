@@ -383,7 +383,7 @@ vestige-mcp --version
 # 734 tests, zero failures
 # 29 cognitive modules
 # 22MB release binary with embedded dashboard
-# 28 MCP tools across the cognitive subsystems
+# 29 MCP tools across the cognitive subsystems
 # 12 published neuroscience principles implemented
 # <50ms typical ingest latency
 # <300ns cosine similarity (benchmarked with Criterion)

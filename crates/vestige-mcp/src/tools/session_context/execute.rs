@@ -56,8 +56,7 @@ pub async fn execute(
             let mut out = Vec::with_capacity(queries_for_task.len());
             for query in &queries_for_task {
                 let (kw, sem) = vestige_core::default_hybrid_weights();
-                let results = storage_search
-                    .hybrid_search(query, 5, kw, sem)
+                let results = crate::retrieval::hybrid_search(&storage_search, query, 5, kw, sem)
                     .map_err(|e| e.to_string())?;
                 out.push(results);
             }

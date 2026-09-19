@@ -104,6 +104,10 @@ impl McpServer {
                 tools::maintenance::execute_regenerate_embeddings(&self.storage, effective_args)
                     .await
             }
+            // GDPR Article 17 erasure. Deliberately NOT routed through
+            // `memory(action="delete")`: that path leaves embeddings, access
+            // logs and derived insights behind. See `tools::erase`.
+            "erase" => tools::erase::execute(&self.storage, effective_args).await,
 
             // ---- Auto-save & dedup (v1.3+) ---------------------------------
             "importance_score" => {

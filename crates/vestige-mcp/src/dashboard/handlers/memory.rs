@@ -47,15 +47,17 @@ pub async fn list_memories(
     if let Some(query) = params.q.as_ref().filter(|q| !q.trim().is_empty()) {
         // Hybrid search re-embeds the query (~150–500ms on cold cache) and
         // touches BM25 + HNSW indices. Run it on the blocking pool so other
-        // dashboard requests don't queue up on the reactor thread.
+        // dashboard requests don't queue up on the reactor thread. The facade
+        // makes the no-embeddings build an FTS5 query instead of a build error.
         let storage = state.storage.clone();
         let q = query.clone();
         let (kw, sem) = vestige_core::default_hybrid_weights();
-        let results =
-            tokio::task::spawn_blocking(move || storage.hybrid_search(&q, limit, kw, sem))
-                .await
-                .map_err(log_join_err("hybrid_search task panicked"))?
-                .map_err(log_err("storage operation"))?;
+        let results = tokio::task::spawn_blocking(move || {
+            crate::retrieval::hybrid_search(&storage, &q, limit, kw, sem)
+        })
+        .await
+        .map_err(log_join_err("hybrid_search task panicked"))?
+        .map_err(log_err("storage operation"))?;
 
         let memories: Vec<MemoryDto> = results
             .into_iter()

@@ -32,14 +32,18 @@ pub async fn search_memories(
     // hybrid_search re-embeds the query (~150–500ms on cold cache) and
     // touches BM25 + HNSW indices, so it blocks longer than the 10ms
     // soft-limit Tokio sets for its async reactor threads.
+    //
+    // Goes through `crate::retrieval` so the documented no-embeddings build
+    // answers this route on FTS5 instead of failing to compile.
     let storage = state.storage.clone();
     let query = params.q.clone();
     let (kw, sem) = vestige_core::default_hybrid_weights();
-    let results =
-        tokio::task::spawn_blocking(move || storage.hybrid_search(&query, limit, kw, sem))
-            .await
-            .map_err(log_join_err("hybrid_search task panicked"))?
-            .map_err(log_err("storage operation"))?;
+    let results = tokio::task::spawn_blocking(move || {
+        crate::retrieval::hybrid_search(&storage, &query, limit, kw, sem)
+    })
+    .await
+    .map_err(log_join_err("hybrid_search task panicked"))?
+    .map_err(log_err("storage operation"))?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
     let result_ids: Vec<String> = results.iter().map(|r| r.node.id.clone()).collect();

@@ -32,6 +32,14 @@ pub(super) async fn execute_batch(
 
     let mut results = Vec::new();
     let mut created = 0u32;
+    // Only the `embeddings` + `vector-search` ingest branch below increments
+    // `updated`, so the documented no-embeddings build mutates it nowhere.
+    // Keep the counter (the response always reports it) and silence the
+    // resulting `unused_mut` for that configuration only.
+    #[cfg_attr(
+        not(all(feature = "embeddings", feature = "vector-search")),
+        allow(unused_mut)
+    )]
     let mut updated = 0u32;
     let mut skipped = 0u32;
     let mut errors = 0u32;
@@ -116,9 +124,19 @@ pub(super) async fn execute_batch(
                 Some(pp.provenance.to_json()),
             )
         };
+        // The tuple is annotated because with `preprocessing` off the last slot
+        // is a bare `None`, and nothing downstream pinned its type: the closure
+        // at `batch_pp_prov.map(...)` calls `as_object_mut()`, which serde_json
+        // implements for `Value` but not through an unconstrained type variable.
+        // That was the `E0282` in the no-default-features build.
         #[cfg(not(feature = "preprocessing"))]
-        let (item_content, batch_pp_tags, batch_pp_from, batch_pp_until, batch_pp_prov) =
-            (item.content.clone(), Vec::<String>::new(), None, None, None);
+        let (item_content, batch_pp_tags, batch_pp_from, batch_pp_until, batch_pp_prov): (
+            String,
+            Vec<String>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<serde_json::Value>,
+        ) = (item.content.clone(), Vec::new(), None, None, None);
 
         tags.extend(batch_pp_tags);
 

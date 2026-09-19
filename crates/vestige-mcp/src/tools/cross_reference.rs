@@ -381,8 +381,7 @@ pub async fn execute(
     let query_owned = args.query.clone();
     let results = tokio::task::spawn_blocking(move || {
         let (kw, sem) = vestige_core::default_hybrid_weights();
-        storage_search
-            .hybrid_search(&query_owned, overfetch as i32, kw, sem)
+        crate::retrieval::hybrid_search(&storage_search, &query_owned, overfetch as i32, kw, sem)
             .map_err(|e| format!("Search failed: {}", e))
     })
     .await

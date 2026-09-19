@@ -45,7 +45,7 @@ Custom database location is set with the `--data-dir` flag (see [Command-Line Op
 | `VESTIGE_MAX_TOKEN_BUDGET` | `100000` | Upper clamp for the `search` / `session_context` **response** token budget (requests are capped separately: `vestige_core::fts` truncates queries to 1,000 chars / 32 terms) |
 | `VESTIGE_RETENTION_TARGET` | `0.8` | FSRS-6 retention target (read by consolidation reporting and `health`) |
 | `VESTIGE_CONSOLIDATION_INTERVAL_HOURS` | `6` | Background consolidation cadence |
-| `VESTIGE_NOMIC_PREFIXES` | off | Apply Nomic `search_query:`/`search_document:` task prefixes. Coupled with `regenerate_embeddings` — see [`.env.example`](../.env.example) |
+| `VESTIGE_NOMIC_PREFIXES` | **on** | Apply the Nomic model-card `search_query:`/`search_document:` task prefixes (embedding space v2). Any non-truthy value (`0`/`false`/`no`/`off`) selects the legacy raw regime, which is a *different vector space* — coupled with `regenerate_embeddings`, see [`.env.example`](../.env.example) |
 | `VESTIGE_ENCRYPTION_KEY` | — | Required when built with the `encryption` feature (SQLCipher) |
 | `VESTIGE_TEST_MOCK_EMBEDDINGS` | — | Use mock embeddings in tests (skips ONNX model download) |
 | `FASTEMBED_CACHE_PATH` | platform default | Embedding model cache location |
@@ -205,7 +205,7 @@ vestige-mcp --version
 | `encryption` | SQLCipher encryption at rest — requires `VESTIGE_ENCRYPTION_KEY`. Mutually exclusive with `bundled-sqlite` |
 | `telemetry` | Compile-in OpenTelemetry/OTLP scaffolding (no-op until exporter is wired) |
 | `late-interaction` | ColBERT token-level reranker via `ort` (adds `ort` + `tokenizers`). Inert unless `VESTIGE_LATE_INTERACTION` + `VESTIGE_COLBERT_MODEL_DIR` are set |
-| `--no-default-features` | Skips embeddings + vector search. Smallest binary, keyword-only search |
+| `--no-default-features` | Skips embeddings + vector search + preprocessing. Smallest binary. Retrieval is FTS5 keyword-only: `search`, `session_context`, `reflect`, `temporal`, `deep_reference` and the dashboard search/explore routes all still answer, but without query embeddings, the HNSW index, the cross-encoder reranker, compound-query decomposition, MMR or the temporal recency/validity boost. The server logs that list once at startup |
 
 Example — encryption build:
 

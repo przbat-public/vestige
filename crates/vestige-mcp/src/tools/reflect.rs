@@ -67,9 +67,9 @@ pub async fn execute(
     let memories = tokio::task::spawn_blocking(
         move || -> Result<Vec<vestige_core::KnowledgeNode>, String> {
             if let Some(query) = focus_owned {
-                let results = storage_load
-                    .hybrid_search(&query, memory_limit, 0.2, 0.8)
-                    .map_err(|e| e.to_string())?;
+                let results =
+                    crate::retrieval::hybrid_search(&storage_load, &query, memory_limit, 0.2, 0.8)
+                        .map_err(|e| e.to_string())?;
                 Ok(results
                     .into_iter()
                     .filter_map(|r| storage_load.get_node(&r.node.id).ok().flatten())

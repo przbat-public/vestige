@@ -122,7 +122,7 @@ if [[ -z "${TOOL_COUNT:-}" || "$TOOL_COUNT" -eq 0 ]]; then
 fi
 note "server.rs exposes ${TOOL_COUNT} tools"
 
-EXPECTED_TOOL_COUNT=28
+EXPECTED_TOOL_COUNT=29
 [[ "$TOOL_COUNT" == "$EXPECTED_TOOL_COUNT" ]] || fail \
   "server.rs exposes ${TOOL_COUNT} tools but the docs claim ${EXPECTED_TOOL_COUNT}. Update either."
 
@@ -170,11 +170,13 @@ note "All docs advertise migration range ${MIGRATION_RANGE}"
 # 4. Dashboard route count vs docs
 # ----------------------------------------------------------------------------
 # The dashboard router is a single chain of `.route(...)` calls in
-# dashboard/mod.rs. Several docs quote the total ("40 REST routes",
-# "40 routes total"). New v3.5 endpoints (deep_reference, hubs, intentions
+# dashboard/mod.rs. Several docs quote the total ("42 routes", "42 route
+# registrations"). New v3.5 endpoints (deep_reference, hubs, intentions
 # PATCH) drifted past the documented 39 without a doc bump — caught on
-# 2026-05-29. The canonical count is the number of route call sites anchored
-# at line start (so a `.route(` inside a comment or string cannot inflate it).
+# 2026-05-29; `/api/maintenance/erase` and `/metrics` moved 40 → 42 on
+# 2026-09-19, and this gate is what kept every doc in step. The canonical
+# count is the number of route call sites anchored at line start (so a
+# `.route(` inside a comment or string cannot inflate it).
 ROUTER="crates/vestige-mcp/src/dashboard/mod.rs"
 ROUTE_COUNT="$(grep -cE '^[[:space:]]*\.route\(' "$ROUTER")"
 if [[ -z "${ROUTE_COUNT:-}" || "$ROUTE_COUNT" -eq 0 ]]; then

@@ -76,7 +76,7 @@ All local heuristic/regex — zero model downloads, sub-millisecond latency.
 - Proactive interference resolution — fan-effect penalty for competing memories (Anderson 1974).
 - Memory evolution (A-Mem) — new memories auto-discover and link to related existing memories.
 - Context compression (LightMem) — key-sentence extraction for token budget compliance.
-- Privacy governance — `right_to_erasure()` for GDPR-style complete removal.
+- Privacy governance — `right_to_erasure()`/`erase_by_tag()` for GDPR-style complete removal, exposed as the MCP `erase` tool, `POST /api/maintenance/erase` and `vestige erase` (dry-run by default, `confirmed: true` for the destructive pass).
 - Ten scientific validation tests, each mapped to published research.
 
 ### Inherited from upstream v2.0.3
@@ -187,10 +187,10 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 │  Light/Dark Mode · a11y · 16 pages                  │
 ├─────────────────────────────────────────────────────┤
 │  Axum HTTP + WebSocket Server (port 3927)           │
-│  40 routes (33 REST API paths) · ts-rs/Zod · WS     │
+│  42 routes (34 REST API paths) · ts-rs/Zod · WS     │
 ├─────────────────────────────────────────────────────┤
 │  MCP Server (stdio JSON-RPC + HTTP on :3928)        │
-│  28 tools · 11 resources · per-session instances    │
+│  29 tools · 11 resources · per-session instances    │
 ├─────────────────────────────────────────────────────┤
 │  Cognitive Engine                                   │
 │  ┌──────────┐ ┌────────────┐ ┌───────────────┐      │
@@ -259,7 +259,7 @@ This isn't a key-value store with an embedding model bolted on. Vestige implemen
 
 ---
 
-## 🛠 28 MCP Tools
+## 🛠 29 MCP Tools
 
 The canonical catalog lives in [`crates/vestige-mcp/src/server/catalog.rs`](crates/vestige-mcp/src/server/catalog.rs). CI fails any PR that drifts.
 
@@ -320,6 +320,7 @@ The canonical catalog lives in [`crates/vestige-mcp/src/server/catalog.rs`](crat
 | `regenerate_embeddings` | Backfill or rebuild embeddings (e.g. after a model upgrade, a long offline stretch, or any change to the embedding space — after upgrading to a build with a new embedding-space version run it with `force: true`, otherwise vectors from the old and new spaces coexist and semantic ranking degrades silently) |
 | `backup` / `export` / `gc` | Database backup, JSON export, garbage collection (`gc` is dry-run by default; the destructive pass needs `confirmed: true`) |
 | `restore` | Restore from JSON backup — no dry-run mode; every call must pass `confirmed: true` |
+| `erase` | **GDPR Art. 17 hard-deletion** of one memory (`action: "memory", id`) or of every memory carrying an exact tag (`action: "tag", tag` — `code` never matches `codebase`). Unlike `memory(action="delete")`/`gc`, it also removes the derived data: connections, embeddings, access log, state history and every insight derived from the memory. `dry_run: true` by default; the destructive pass needs `confirmed: true`. Also available as `POST /api/maintenance/erase` and `vestige erase` |
 
 ---
 
@@ -364,7 +365,7 @@ At the start of every session:
 | **Locales** | English, Polish (extensible) |
 | **Themes** | Light + Dark (oklch design tokens, `prefers-color-scheme` aware) |
 | **Transport** | MCP stdio (JSON-RPC 2.0) + optional HTTP MCP (port 3928) + WebSocket |
-| **MCP tools** | 28 (4 unified + smart_ingest + 2 temporal + 7 maintenance + 2 dedup + 4 cognitive + restore + session_context + 2 autonomic + 3 metacognitive + deep_reference) |
+| **MCP tools** | 29 (4 unified + smart_ingest + 2 temporal + 8 maintenance + 2 dedup + 4 cognitive + restore + session_context + 2 autonomic + 3 metacognitive + deep_reference) |
 | **Cognitive modules** | Stateful neuroscience + advanced + search families. Canonical list in `cognitive.rs::CognitiveEngine` |
 | **First run** | Downloads embedding + reranker models (~1.68 GB: ~547 MB nomic-embed-text-v1.5 ONNX + ~1.11 GB Jina Reranker v2 ONNX), then fully offline |
 | **Platforms** | macOS (ARM/Intel), Linux (x86_64), Windows |
@@ -389,6 +390,8 @@ vestige stats --tagging          # Retention distribution
 vestige stats --states           # Cognitive state breakdown
 vestige health                   # System health check
 vestige consolidate              # Run memory maintenance
+vestige erase --tag <tag> --dry-run   # GDPR Art. 17: preview an erasure
+vestige erase --tag <tag> --confirm   # …and perform it (irreversible)
 vestige restore <file>           # Restore from backup
 vestige dashboard                # Open 3D dashboard in browser
 ```
@@ -460,5 +463,5 @@ AGPL-3.0 — free to use, modify, and self-host. If you offer Vestige as a netwo
 
 <p align="center">
   <i>Originally built by <a href="https://github.com/samvallad33">@samvallad33</a></i><br>
-  <sub>28 tools · typed-memory dashboard · content intelligence pipeline · scientific validation · i18n · light/dark mode · one binary</sub>
+  <sub>29 tools · typed-memory dashboard · content intelligence pipeline · scientific validation · i18n · light/dark mode · one binary</sub>
 </p>

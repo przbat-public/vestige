@@ -29,6 +29,8 @@ export * from './DeepRefSupersededDto';
 export * from './DeepReferenceResultDto';
 export * from './EndangeredMemoryDto';
 export * from './EpistemicStatusDto';
+export * from './EraseRequestDto';
+export * from './EraseResponseDto';
 export * from './ExploreResponseDto';
 export * from './ExploreResultDto';
 export * from './GraphEdgeDto';

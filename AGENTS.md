@@ -295,7 +295,17 @@ backup: {}
 export: { "format": "json", "tags": ["bug-fix"], "since": "2026-01-01" }
 gc: { "min_retention": 0.1, "dry_run": true }                      // dry_run:false additionally requires "confirmed": true
 restore: { "path": "/path/to/backup.json", "confirmed": true }     // no dry-run mode — confirmed is mandatory on every call
+erase: { "action": "memory", "id": "uuid", "dry_run": true }       // GDPR Art. 17; "action":"tag" + "tag" for bulk. dry_run:false additionally requires "confirmed": true
 ```
+
+### erase — GDPR Article 17 Erasure
+```json
+{ "action": "memory", "id": "uuid" }
+{ "action": "tag", "tag": "gdpr-subject", "dry_run": false, "confirmed": true }
+```
+Hard-deletes the memory (or every memory carrying that exact tag — `code` does not match `codebase`) **and** the data derived from it: connections, embeddings, access log, state history, and every insight whose `source_memories` named it. `memory(action="delete")` and `gc` do not do this.
+
+**Always dry-run first** — the call is irreversible. `dry_run` defaults to `true` and reports the exact count plus up to 100 ids; the destructive pass additionally requires `confirmed: true`. Same operation is available as `POST /api/maintenance/erase` and `vestige erase --id|--tag [--dry-run] [--confirm]`.
 
 ---
 
@@ -348,7 +358,7 @@ restore: { "path": "/path/to/backup.json", "confirmed": true }     // no dry-run
 ## Development
 
 - **Crate:** `vestige-mcp` v3.4.0, Rust 2024 edition, MSRV 1.91
-- **Tools:** 28 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference). Canonical list lives in `vestige-mcp/src/server/catalog.rs::build_tools_list`.
+- **Tools:** 29 MCP tools (core memory, cognitive, metacognitive, autonomic, maintenance, deep_reference). Canonical list lives in `vestige-mcp/src/server/catalog.rs::build_tools_list`; `scripts/check-version-and-tools.sh` fails the build if this number, `catalog.rs` and `README.md`/`ARCHITECTURE.md` disagree.
 - **Tests:** workspace `cargo test` runs the full unit + E2E + cognitive + journey + extreme + MCP protocol + scientific-validation suites; exact pass count drifts with each release, so check the latest CI log instead of hard-coding it here
 - **Build:** `cargo build --release -p vestige-mcp` (features: `embeddings` + `vector-search` + `preprocessing`)
 - **Build (no embeddings):** `cargo build --release -p vestige-mcp --no-default-features`
@@ -365,7 +375,7 @@ restore: { "path": "/path/to/backup.json", "confirmed": true }     // no dry-run
 - **Vector index:** USearch HNSW (in-memory ANN; persisted to a `vestige.hnsw` sidecar + meta JSON and loaded on startup via a row-count-validated fast path, with rebuild-from-SQLite fallback when the sidecar is missing or stale)
 - **Binaries:** `vestige-mcp` (MCP server), `vestige` (CLI), `vestige-restore`
 - **Dashboard:** React 19 + Vite 6 + React Router 7 + Three.js + Tailwind 4 + i18next (EN/PL), embedded at `/dashboard`
-- **Dashboard API:** 40 route registrations — 33 distinct REST API paths plus 4 page/SPA routes (`/dashboard`, `/dashboard/{*path}`, `/`, `/graph`) and 1 WebSocket (`/ws`); `/api/memories/{id}` counts three times because GET, DELETE and PATCH each register it. Includes `/api/reflect`, `/api/temporal`, `/api/confidence`, `/api/decisions`, `/api/hubs`, `/api/insights`, `/api/_meta/limits`. Handlers split per domain under `dashboard/handlers/` (memory, search, graph, history, intentions, maintenance, review, cognitive, metacognitive, observability, decisions, hubs, insights, pages).
+- **Dashboard API:** 42 route registrations — 34 distinct REST API paths (36 registrations, because `/api/memories/{id}` registers GET, DELETE and PATCH) plus 4 page/SPA routes (`/dashboard`, `/dashboard/{*path}`, `/`, `/graph`), 1 WebSocket (`/ws`) and 1 Prometheus scrape endpoint (`/metrics`); the arithmetic is 36 + 4 + 1 + 1 = 42. Includes `/api/reflect`, `/api/temporal`, `/api/confidence`, `/api/decisions`, `/api/hubs`, `/api/insights`, `/api/_meta/limits`, `/api/maintenance/erase`. Handlers split per domain under `dashboard/handlers/` (memory, search, graph, history, intentions, maintenance, review, cognitive, metacognitive, observability, decisions, hubs, insights, pages).
 - **Env vars:** `VESTIGE_DASHBOARD_PORT` (default 3927), `VESTIGE_CONSOLIDATION_INTERVAL_HOURS` (default 6), `RUST_LOG`, `VESTIGE_NOMIC_PREFIXES` (default **on** — apply the Nomic `search_query:`/`search_document:` task prefixes the model card mandates; set it to any non-truthy value (`0`/`false`/`no`/`off`) for the legacy raw regime. Either direction changes the embedding space, so it is coupled with `regenerate_embeddings` — see `.env.example`)
 
 For cognitive architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).

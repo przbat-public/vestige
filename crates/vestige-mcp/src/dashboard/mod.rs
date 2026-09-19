@@ -188,11 +188,19 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
             "/api/maintenance/backup",
             post(handlers::maintenance_backup),
         )
+        // GDPR Article 17 erasure — same tool, same confirmation gate as the
+        // MCP `erase` tool and `vestige erase`.
+        .route("/api/maintenance/erase", post(handlers::maintenance_erase))
         // Search
         .route("/api/search", get(handlers::search_memories))
         // Stats & health
         .route("/api/stats", get(handlers::get_stats))
         .route("/api/health", get(handlers::health_check))
+        // Prometheus scrape endpoint. Deliberately outside `/api`: it is not a
+        // dashboard resource, it is the process talking to the monitoring
+        // system, and a scraper must be able to find it without knowing the
+        // dashboard's API layout.
+        .route("/metrics", get(handlers::metrics))
         // Timeline
         .route("/api/timeline", get(handlers::get_timeline))
         // Graph

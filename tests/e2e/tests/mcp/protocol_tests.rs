@@ -19,10 +19,11 @@
 use serde_json::json;
 use vestige_e2e_tests::harness::McpServerProcess;
 
-/// Exact size of the catalog in `vestige-mcp/src/server/catalog.rs`
-/// (guarded there by `tools_list_has_exactly_28_entries`). Asserting it here
-/// too means a catalog change must be a conscious, end-to-end visible act.
-const EXPECTED_TOOL_COUNT: usize = 28;
+/// Exact size of the catalog in `vestige-mcp/src/server/catalog.rs`. Asserting
+/// it here as well means a catalog change has to be a conscious, end-to-end
+/// visible act: adding a tool means updating this number, the registry guard and
+/// `scripts/check-version-and-tools.sh`, which is the point.
+const EXPECTED_TOOL_COUNT: usize = 29;
 
 /// Tools whose presence downstream clients depend on. Names, not counts, are
 /// the contract that breaks integrations.

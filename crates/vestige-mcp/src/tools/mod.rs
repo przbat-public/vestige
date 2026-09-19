@@ -4,7 +4,7 @@
 //!
 //! The unified tools (`codebase_unified`, `intention_unified`, `memory_unified`,
 //! `search_unified`) plus `smart_ingest` and the metacognitive/maintenance set
-//! make up the 28 tools advertised in `tools/list`. `review` is internal —
+//! make up the 29 tools advertised in `tools/list`. `review` is internal —
 //! used by the `mark_reviewed` dispatch in `server.rs::handle_tools_call` and
 //! exercised by e2e tests, but is not advertised in `tools/list`.
 
@@ -25,6 +25,9 @@ pub mod timeline;
 
 // v1.2: Maintenance tools
 pub mod maintenance;
+
+// v3.5: GDPR Article 17 erasure — hard-delete a memory or a tag, with dry-run.
+pub mod erase;
 
 // v1.3: Auto-save and dedup tools
 pub mod dedup;

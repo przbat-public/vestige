@@ -195,13 +195,14 @@ pub async fn explore_connections(
                 })?;
 
             // hybrid_search re-embeds the query (~150–500ms cold) — keep it
-            // off the async reactor.
+            // off the async reactor. Via the facade so the no-embeddings build
+            // still answers `/api/explore` from the FTS5 channel.
             let storage = state.storage.clone();
             let source_content = source_node.content.clone();
             let limit_i32 = limit as i32;
             let (kw, sem) = vestige_core::default_hybrid_weights();
             let results = tokio::task::spawn_blocking(move || {
-                storage.hybrid_search(&source_content, limit_i32, kw, sem)
+                crate::retrieval::hybrid_search(&storage, &source_content, limit_i32, kw, sem)
             })
             .await
             .map_err(|e| {

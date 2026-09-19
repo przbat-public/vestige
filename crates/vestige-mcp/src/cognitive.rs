@@ -17,6 +17,12 @@ use tokio::sync::RwLock;
 
 use vestige_core::neuroscience::predictive_retrieval::PredictiveMemory;
 use vestige_core::neuroscience::prospective_memory::{IntentionParser, ProspectiveMemory};
+// `TemporalSearcher` and `Reranker` live in `vestige_core::search`, which the
+// `vector-search` feature gates. A build without hybrid retrieval has nothing
+// for either to operate on, so they are optional here instead of forcing the
+// whole cognitive engine — and every tool that touches it — out of the
+// no-embeddings build (`cargo check -p vestige-mcp --no-default-features`).
+#[cfg(feature = "vector-search")]
 use vestige_core::search::TemporalSearcher;
 use vestige_core::{
     AccessibilityCalculator,
@@ -45,9 +51,6 @@ use vestige_core::{
     MetacognitionMonitor,
     NoveltySignal,
     ReconsolidationManager,
-    // Search modules
-    Reranker,
-    RerankerConfig,
     RewardSignal,
     SpeculativeRetriever,
     StateUpdateService,
@@ -55,6 +58,8 @@ use vestige_core::{
     Storage,
     SynapticTaggingSystem,
 };
+#[cfg(feature = "vector-search")]
+use vestige_core::{Reranker, RerankerConfig};
 
 /// Stateful cognitive engine holding all neuroscience modules.
 ///
@@ -148,12 +153,21 @@ pub struct CognitiveEngine {
     pub dream_engine: DreamEngine,
 
     // -- Search --
+    /// Cross-encoder reranker. Absent without `vector-search`: the type lives
+    /// in `vestige_core::search` and there is no hybrid candidate pool for it
+    /// to reorder, so the search pipeline simply keeps its retrieval order.
+    #[cfg(feature = "vector-search")]
     pub reranker: Reranker,
     /// ColBERT late-interaction reranker. Loaded on demand in `main` when
     /// `VESTIGE_LATE_INTERACTION` + `VESTIGE_COLBERT_MODEL_DIR` are set; `None`
     /// otherwise, in which case the Jina cross-encoder remains the reranker.
-    #[cfg(feature = "late-interaction")]
+    /// Requires `vector-search` for the same reason `reranker` does — the type
+    /// is re-exported from `vestige_core::search`.
+    #[cfg(all(feature = "late-interaction", feature = "vector-search"))]
     pub colbert: Option<vestige_core::search::ColbertEmbedder>,
+    /// Recency/validity boost used by search stage 3. Absent without
+    /// `vector-search`; `temporal_factor` then reports the neutral multiplier.
+    #[cfg(feature = "vector-search")]
     pub temporal_searcher: TemporalSearcher,
 
     // -- Metacognition (Nelson & Narens 1990) --
@@ -235,7 +249,9 @@ impl CognitiveEngine {
                     for node in &nodes {
                         // Embedding lookup is best-effort; missing embedding
                         // is fine because index_memory accepts Option<Vec<f32>>.
-                        let embedding = storage.get_node_embedding(&node.id).ok().flatten();
+                        // A build without embedding storage always gets None
+                        // here (see `crate::retrieval::node_embedding`).
+                        let embedding = crate::retrieval::node_embedding(storage, &node.id);
                         if let Err(e) = self.hippocampal_index.index_memory(
                             &node.id,
                             &node.content,
@@ -271,6 +287,59 @@ impl CognitiveEngine {
                 errors = total_errors,
                 "Hydrated hippocampal index from persisted memories"
             );
+        }
+    }
+
+    /// Whether a cross-encoder reranker is installed and usable.
+    ///
+    /// `false` in every build without `vector-search`: the reranker type is
+    /// gated behind it and there is no hybrid candidate pool to reorder. Kept
+    /// as a method (rather than a `cfg` at the `system_status` call site) so
+    /// the health report reads the same in both builds.
+    pub fn reranker_ready(&self) -> bool {
+        #[cfg(feature = "vector-search")]
+        {
+            self.reranker.has_cross_encoder()
+        }
+        #[cfg(not(feature = "vector-search"))]
+        {
+            false
+        }
+    }
+
+    /// Whether the compiled feature set can ever rerank, regardless of whether
+    /// a model has been loaded yet. Used to distinguish "warming up" from
+    /// "not built in" in `system_status`.
+    pub const fn reranker_compiled_in() -> bool {
+        cfg!(all(feature = "embeddings", feature = "vector-search"))
+    }
+
+    /// Recency × validity multiplier for search stage 3.
+    ///
+    /// Without `vector-search`, `TemporalSearcher` is not compiled in, so this
+    /// returns `1.0` — the identity element of the stage-3 blend
+    /// (`score * 0.85 + score * factor * 0.15`). Returning 1.0 keeps the
+    /// keyword-only build's ranking stable instead of applying a boost whose
+    /// parameters are unavailable; a memory is not treated as freshly created
+    /// just because the temporal module is missing.
+    pub fn temporal_factor(
+        &self,
+        created_at: chrono::DateTime<chrono::Utc>,
+        valid_from: Option<chrono::DateTime<chrono::Utc>>,
+        valid_until: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> f64 {
+        #[cfg(feature = "vector-search")]
+        {
+            let recency = self.temporal_searcher.recency_boost(created_at);
+            let validity = self
+                .temporal_searcher
+                .validity_boost(valid_from, valid_until, None);
+            recency * validity
+        }
+        #[cfg(not(feature = "vector-search"))]
+        {
+            let _ = (created_at, valid_from, valid_until);
+            1.0
         }
     }
 
@@ -312,9 +381,11 @@ impl CognitiveEngine {
             dream_engine: DreamEngine::new(),
 
             // Search
+            #[cfg(feature = "vector-search")]
             reranker: Reranker::new(RerankerConfig::default()),
-            #[cfg(feature = "late-interaction")]
+            #[cfg(all(feature = "late-interaction", feature = "vector-search"))]
             colbert: None,
+            #[cfg(feature = "vector-search")]
             temporal_searcher: TemporalSearcher::new(),
 
             // Metacognition

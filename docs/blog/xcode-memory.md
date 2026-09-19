@@ -83,7 +83,7 @@ Vestige remembers the way a brain does:
 - **Prediction error gating** — automatically deduplicates and decides whether to create, update, or supersede memories
 - **Spreading activation** — searching for one memory strengthens related memories
 - **Synaptic tagging** — important memories get tagged for long-term consolidation
-- **28 MCP tools** — search, ingest, dream, predict, explore connections, garbage collect, and more
+- **29 MCP tools** — search, ingest, dream, predict, explore connections, garbage collect, and more
 
 All running locally in a single Rust binary. No cloud. No API keys. No data leaves your machine.
 

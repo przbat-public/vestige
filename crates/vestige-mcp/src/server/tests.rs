@@ -258,12 +258,12 @@ async fn test_tools_list_returns_all_tools() {
     let result = response.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
 
-    // v3.3.0: 28 tools advertised. Authoritative list lives in
+    // v3.3.0+: 29 tools advertised. Authoritative list lives in
     // `server::catalog::build_tools_list` (see b15 split). The
-    // `tools_list_has_exactly_28_entries` test there catches drift first
+    // `tools_list_has_exactly_29_entries` test there catches drift first
     // — this end-to-end test only verifies the JSON-RPC plumbing forwards
     // the catalog faithfully and asserts a few well-known tool names.
-    assert_eq!(tools.len(), 28, "Expected exactly 28 tools in v3.3.0+");
+    assert_eq!(tools.len(), 29, "Expected exactly 29 tools in v3.3.0+");
 
     let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 

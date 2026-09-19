@@ -141,7 +141,10 @@ pub async fn execute(
         node_meta
             .into_iter()
             .map(|(id, content, tags, created_at, reps)| {
-                let embedding = storage_emb.get_node_embedding(&id).ok().flatten();
+                // `DreamMemory.embedding` is optional, so a build without
+                // embedding storage simply runs the dream cycle without the
+                // vector-similarity signals instead of failing to compile.
+                let embedding = crate::retrieval::node_embedding(&storage_emb, &id);
                 vestige_core::DreamMemory {
                     id,
                     content,

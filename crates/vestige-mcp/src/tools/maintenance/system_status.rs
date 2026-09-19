@@ -179,8 +179,12 @@ pub async fn execute_system_status(
                 "timeUntilNextConsolidation": format!("{:?}", cog.consolidation_scheduler.time_until_next()),
             },
         }));
-        let ready = cog.reranker.has_cross_encoder();
-        let status = if !cfg!(feature = "embeddings") {
+        // `reranker_ready`/`reranker_compiled_in` fold in the `vector-search`
+        // gate: the reranker type lives in `vestige_core::search`, so a build
+        // without hybrid retrieval must report "disabled", not "warming"
+        // forever. `embeddings` alone is not enough to load a reranker.
+        let ready = cog.reranker_ready();
+        let status = if !CognitiveEngine::reranker_compiled_in() {
             "disabled"
         } else if ready {
             "ready"
@@ -193,7 +197,7 @@ pub async fn execute_system_status(
         // Lock contention — assume warming rather than ready. False
         // negatives here are safe (a brief "warming" blip); a false
         // positive would mislead monitoring.
-        let status = if cfg!(feature = "embeddings") {
+        let status = if CognitiveEngine::reranker_compiled_in() {
             "warming"
         } else {
             "disabled"

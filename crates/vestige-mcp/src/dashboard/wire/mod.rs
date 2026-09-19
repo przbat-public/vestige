@@ -43,6 +43,7 @@
 pub mod cognitive;
 pub mod decisions;
 pub mod deep_reference;
+pub mod erasure;
 pub mod graph;
 pub mod history;
 pub mod hubs;
@@ -66,6 +67,7 @@ pub use deep_reference::{
     DeepRefContradictionDto, DeepRefEvidenceDto, DeepRefEvolutionDto, DeepRefInsightDto,
     DeepRefStagesDto, DeepRefSupersededDto, DeepReferenceResultDto,
 };
+pub use erasure::{EraseRequestDto, EraseResponseDto};
 pub use graph::{
     ExploreResponseDto, ExploreResultDto, GraphEdgeDto, GraphNodeDto, GraphResponseDto,
 };

@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 
 mod backup;
 mod consolidate;
+mod erase;
 mod export;
 mod gc;
 mod health;
@@ -24,7 +25,7 @@ mod util;
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "CLI for the Vestige cognitive memory system")]
 #[command(
-    long_about = "Vestige is a cognitive memory system based on 130 years of memory research.\n\nIt implements FSRS-6, spreading activation, synaptic tagging, and more."
+    long_about = "Vestige is a cognitive memory system built on memory research from Ebbinghaus (1885) to FSRS-6.\n\nIt implements FSRS-6, spreading activation, synaptic tagging, and more."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -93,6 +94,22 @@ enum Commands {
         yes: bool,
     },
 
+    /// GDPR Article 17 erasure: hard-delete a memory, or every memory with a tag
+    Erase {
+        /// Erase a single memory by id
+        #[arg(long, conflicts_with = "tag", required_unless_present = "tag")]
+        id: Option<String>,
+        /// Erase every memory carrying this exact tag (not a prefix match)
+        #[arg(long, conflicts_with = "id", required_unless_present = "id")]
+        tag: Option<String>,
+        /// Show what would be erased without deleting anything
+        #[arg(long)]
+        dry_run: bool,
+        /// Confirm the irreversible deletion (required without --dry-run)
+        #[arg(long)]
+        confirm: bool,
+    },
+
     /// Launch the memory web dashboard
     Dashboard {
         /// Port to bind the dashboard server to
@@ -153,6 +170,12 @@ fn main() -> anyhow::Result<()> {
             dry_run,
             yes,
         } => gc::run_gc(min_retention, max_age_days, dry_run, yes),
+        Commands::Erase {
+            id,
+            tag,
+            dry_run,
+            confirm,
+        } => erase::run_erase(id, tag, dry_run, confirm),
         Commands::Dashboard { port, no_open } => serve::run_dashboard(port, !no_open),
         Commands::Ingest {
             content,

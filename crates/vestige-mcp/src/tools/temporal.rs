@@ -58,9 +58,9 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
                 tokio::task::spawn_blocking(move || -> Result<Vec<_>, String> {
                     if let Some(query) = topic_owned {
                         let (kw, sem) = vestige_core::default_hybrid_weights();
-                        let results = storage_clone
-                            .hybrid_search(&query, limit, kw, sem)
-                            .map_err(|e| e.to_string())?;
+                        let results =
+                            crate::retrieval::hybrid_search(&storage_clone, &query, limit, kw, sem)
+                                .map_err(|e| e.to_string())?;
                         Ok(results
                             .into_iter()
                             .filter_map(|r| storage_clone.get_node(&r.node.id).ok().flatten())
@@ -110,9 +110,14 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
                 tokio::task::spawn_blocking(move || -> Result<Vec<_>, String> {
                     if let Some(query) = topic_owned {
                         let (kw, sem) = vestige_core::default_hybrid_weights();
-                        let results = storage_clone
-                            .hybrid_search(&query, limit * 3, kw, sem)
-                            .map_err(|e| e.to_string())?;
+                        let results = crate::retrieval::hybrid_search(
+                            &storage_clone,
+                            &query,
+                            limit * 3,
+                            kw,
+                            sem,
+                        )
+                        .map_err(|e| e.to_string())?;
                         Ok(results
                             .into_iter()
                             .filter_map(|r| storage_clone.get_node(&r.node.id).ok().flatten())
@@ -153,9 +158,14 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
             let query_owned = query.to_string();
             let mut memories: Vec<vestige_core::KnowledgeNode> =
                 tokio::task::spawn_blocking(move || -> Result<Vec<_>, String> {
-                    let results = storage_clone
-                        .hybrid_search(&query_owned, limit, 0.2, 0.8)
-                        .map_err(|e| e.to_string())?;
+                    let results = crate::retrieval::hybrid_search(
+                        &storage_clone,
+                        &query_owned,
+                        limit,
+                        0.2,
+                        0.8,
+                    )
+                    .map_err(|e| e.to_string())?;
                     Ok(results
                         .into_iter()
                         .filter_map(|r| storage_clone.get_node(&r.node.id).ok().flatten())

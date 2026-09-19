@@ -25,12 +25,12 @@
 //! an unknown tool name is invalid *params*, only an unknown JSON-RPC method is
 //! `-32601`.
 //!
-//! v3.3.0: 28 tools advertised in tools/list. Categories:
+//! v3.3.0: 29 tools advertised in tools/list. Categories:
 //!   - 4 unified  : search, memory, codebase, intention
 //!   - 1 core     : smart_ingest
 //!   - 2 temporal : memory_timeline, memory_changelog
-//!   - 7 maint    : system_status, consolidate, backup, export, gc,
-//!     split_memories, regenerate_embeddings
+//!   - 8 maint    : system_status, consolidate, backup, export, gc,
+//!     split_memories, regenerate_embeddings, erase
 //!   - 2 dedup    : importance_score, find_duplicates
 //!   - 4 cog      : dream, explore_connections, predict,
 //!     precompute_for_context (sleep-time compute)
@@ -135,7 +135,7 @@ fn tool(
 // Catalog
 // ---------------------------------------------------------------------------
 
-/// Build the canonical `tools/list` payload (28 entries).
+/// Build the canonical `tools/list` payload (29 entries).
 pub(super) fn build_tools_list() -> Vec<ToolDescription> {
     vec![
         // ================================================================
@@ -262,6 +262,15 @@ pub(super) fn build_tools_list() -> Vec<ToolDescription> {
             // Overwrites embedding vectors but keeps content intact; idempotent
             // for force=true with the same model.
             mutating("Regenerate embeddings", true),
+        ),
+        tool(
+            "erase",
+            "Erase memory (GDPR Art. 17)",
+            "Irreversible GDPR Article 17 erasure. Actions: 'memory' (one memory by `id`) or 'tag' (every memory carrying that exact tag — 'code' never matches 'codebase'). Unlike `memory(action=\"delete\")` and `gc`, this also removes the derived data: connections, embeddings, access log, state history and every insight whose source included the memory. Defaults to `dry_run: true`, which reports how many memories and which ids WOULD be erased without deleting; the destructive pass additionally requires `confirmed: true`.",
+            tools::erase::schema(),
+            // Irreversible hard-delete — worst case wins over the dry-run default.
+            // Idempotent: erasing an already-erased id or tag is a no-op.
+            destructive("Erase memory (GDPR Art. 17)", true),
         ),
         // ================================================================
         // AUTO-SAVE & DEDUP TOOLS (v1.3+)
@@ -474,12 +483,12 @@ mod tests {
     /// b15 split guard: any drift in the catalog must update
     /// scripts/check-version-and-tools.sh and the comment above.
     #[test]
-    fn tools_list_has_exactly_28_entries() {
+    fn tools_list_has_exactly_29_entries() {
         let tools = build_tools_list();
         assert_eq!(
             tools.len(),
-            28,
-            "build_tools_list must advertise exactly 28 tools; update scripts/check-version-and-tools.sh if you add or remove one"
+            29,
+            "build_tools_list must advertise exactly 29 tools; update scripts/check-version-and-tools.sh if you add or remove one"
         );
     }
 
