@@ -17,6 +17,7 @@ pub mod smart_ingest;
 
 // Cross-cutting helpers (destructive-op confirmation gate, etc.)
 pub mod common;
+pub mod untrusted;
 
 // v1.2: Temporal query tools
 pub mod changelog;

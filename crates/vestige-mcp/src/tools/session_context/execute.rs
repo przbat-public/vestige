@@ -73,7 +73,13 @@ pub async fn execute(
             }
             let summary = first_sentence(&r.node.content);
             let date_str = r.node.updated_at.format("%b %d, %Y").to_string();
-            let line = format!("- ({}) {}", date_str, summary);
+            // Recalled text is data, not instructions — label it so a model reading this
+            // packet cannot mistake a stored sentence for a directive.
+            let line = format!(
+                "- ({}) {}",
+                date_str,
+                crate::tools::untrusted::wrap(&r.node.id, summary.as_str())
+            );
             let line_len = line.len() + 1;
 
             if char_count + line_len > budget_chars {
@@ -98,7 +104,11 @@ pub async fn execute(
     }
 
     if !memory_lines.is_empty() {
-        context_parts.push(format!("**Memories:**\n{}", memory_lines.join("\n")));
+        context_parts.push(format!(
+            "**Memories:**\n{}\n\n_{}_",
+            memory_lines.join("\n"),
+            crate::tools::untrusted::UNTRUSTED_NOTICE
+        ));
     }
 
     // ====================================================================
