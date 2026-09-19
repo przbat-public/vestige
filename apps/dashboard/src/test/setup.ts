@@ -1,8 +1,25 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import * as axeMatchers from 'vitest-axe/matchers';
 
 expect.extend(axeMatchers);
+
+/**
+ * Testing Library gives every `findBy*` / `waitFor` a 1000 ms budget by
+ * default, which is a deadline rather than a contract: a React Query fetch that
+ * resolves in a millisecond on an idle machine can take longer than that when
+ * the whole suite runs in parallel on a loaded CI runner. That produced a
+ * genuine flake — `TemporalPage.test.tsx` failed roughly one full-suite run in
+ * three with "Unable to find role=button", while passing every time in
+ * isolation, because the row simply had not rendered yet when the budget
+ * expired. Raising the budget keeps the assertion (the row must appear) and
+ * removes the timing assumption.
+ *
+ * `testTimeout` in `vitest.config.ts` is raised to match: if it stayed at
+ * Vitest's 5 s default, an assertion that never becomes true would be reported
+ * as "test timed out", which hides which assertion failed.
+ */
+configure({ asyncUtilTimeout: 5000 });
 
 /**
  * jsdom does not implement <canvas> 2D/WebGL contexts. Components like

@@ -18,5 +18,9 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     css: false,
+    // Must stay above the 5 s async-utility budget configured in
+    // src/test/setup.ts: with a shorter test timeout a slow assertion is
+    // reported as "test timed out", which hides which assertion failed.
+    testTimeout: 15000,
   },
 });
