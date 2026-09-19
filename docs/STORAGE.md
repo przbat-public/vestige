@@ -132,26 +132,42 @@ Claude Code config - for "Storm":
 
 ## Backup Options
 
+> **Do not `cp` a running database.** Vestige runs SQLite in WAL mode, so a
+> plain file copy can miss every write still in the `-wal` file and can capture
+> a torn page if a checkpoint lands mid-copy. The copy usually looks fine — the
+> damage only shows up when you try to restore it. Use `vestige backup`, which
+> takes a `VACUUM INTO` snapshot: one consistent transaction, no `-wal` file to
+> lose, compacted.
+
 ### Manual (one-time)
 
 ```bash
-# macOS
-cp ~/Library/Application\ Support/com.vestige.core/vestige.db ~/vestige-backup.db
-
-# Linux
-cp ~/.local/share/core/vestige.db ~/vestige-backup.db
+vestige backup ~/vestige-backup.db
 ```
+
+The command refuses to overwrite an existing file, so a failed run cannot
+destroy your last good backup — pick a new name or move the old one aside.
+Restore it with `vestige restore ~/vestige-backup.db` (or the `restore` MCP
+tool, which detects the snapshot format from the file header).
 
 ### Automated (cron job)
 
 ```bash
-# Add to crontab - backs up every hour
-0 * * * * cp ~/Library/Application\ Support/com.vestige.core/vestige.db ~/.vestige-backups/vestige-$(date +\%Y\%m\%d-\%H\%M).db
+# Add to crontab — backs up every hour, keeping the last 24 files
+0 * * * * vestige backup ~/.vestige-backups/vestige-$(date +\%Y\%m\%d-\%H).db \
+  && ls -1t ~/.vestige-backups/*.db | tail -n +25 | xargs -r rm --
 ```
+
+If `vestige` is not on cron's `PATH`, use its absolute path. Each run writes a
+new file because the command never overwrites, so the retention line above is
+what keeps the directory from growing without bound.
 
 ### System Backups
 
-Just use **Time Machine** (macOS) / **Windows Backup** / **rsync** — they'll catch the file automatically.
+**Time Machine** (macOS) / **Windows Backup** / **rsync** copy whatever is on
+disk at the moment they run, which has the same `-wal` caveat as `cp`. If you
+rely on them, either run `vestige backup` first and let them pick up the
+snapshot, or accept that the newest writes may be missing from the copy.
 
 > For personal use with Claude? Don't overthink it. The memories aren't that precious.
 
