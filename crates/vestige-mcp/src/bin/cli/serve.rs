@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use colored::Colorize;
+use tokio::sync::Mutex;
 use vestige_core::Storage;
 use vestige_mcp::cognitive::CognitiveEngine;
 
@@ -32,7 +33,25 @@ pub(super) fn run_dashboard(port: u16, open_browser: bool) -> anyhow::Result<()>
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        vestige_mcp::dashboard::start_dashboard(storage, None, port, open_browser)
+        // The cognitive engine is not optional for a dashboard that shows
+        // reflection, dreams, temporal history and confidence. Passing `None`
+        // here made every one of those endpoints answer 503 by construction —
+        // the Briefing page failed with "/reflect failed (503)" while the rest
+        // of the UI looked healthy, which reads as a data problem rather than a
+        // missing engine. Build and hydrate it exactly as `run_serve` does.
+        let cognitive = Arc::new(Mutex::new(CognitiveEngine::new()));
+        {
+            let cognitive_for_hydrate = Arc::clone(&cognitive);
+            let storage_for_hydrate = Arc::clone(&storage);
+            tokio::task::spawn_blocking(move || {
+                let mut cog = cognitive_for_hydrate.blocking_lock();
+                cog.hydrate(&storage_for_hydrate);
+            })
+            .await
+            .expect("CognitiveEngine hydrate task panicked");
+        }
+
+        vestige_mcp::dashboard::start_dashboard(storage, Some(cognitive), port, open_browser)
             .await
             .map_err(|e| anyhow::anyhow!("Dashboard error: {}", e))
     })
