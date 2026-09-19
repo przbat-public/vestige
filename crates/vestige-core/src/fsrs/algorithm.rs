@@ -274,7 +274,20 @@ pub fn same_day_stability_with_weights(current_s: f64, grade: Rating, weights: &
     let w19 = weights[19];
     let g = grade.as_i32() as f64;
 
-    let new_s = current_s * (w17 * (g - 3.0 + w18)).exp() * current_s.powf(-w19);
+    let sinc = (w17 * (g - 3.0 + w18)).exp() * current_s.powf(-w19);
+
+    // FSRS requires SInc >= 1 for a successful recall (G >= Hard), so a passing review can
+    // never *shorten* the interval. With the default weights the raw factor drops below 1
+    // for any S > ~2.1 days (at S = 30 it is 0.84, at S = 100 it is 0.78), which means
+    // "promote" or a Good rating was quietly cutting stability and the next interval by up
+    // to ~22% — and Hard by ~50%. The reference implementation clamps the same way:
+    // `sinc.max(1.0) if rating >= 2 else sinc`.
+    let new_s = if grade == Rating::Again {
+        current_s * sinc
+    } else {
+        current_s * sinc.max(1.0)
+    };
+
     clamp(new_s, MIN_STABILITY, MAX_STABILITY)
 }
 
@@ -466,6 +479,26 @@ mod tests {
 
         assert!(s_again < s_good);
         assert!(s_good < s_easy);
+    }
+
+    /// A successful review must never shorten stability — the invariant the FSRS
+    /// reference implementation enforces with `SInc >= 1` for grades >= Hard. The old
+    /// formula returned less than `current_s` for every S above ~2.1 days, so "promote"
+    /// reduced the next interval instead of extending it.
+    #[test]
+    fn successful_review_never_reduces_stability() {
+        for s in [1.0_f64, 2.0, 2.5, 5.0, 30.0, 100.0, 365.0] {
+            for grade in [Rating::Hard, Rating::Good, Rating::Easy] {
+                let next = same_day_stability(s, grade);
+                assert!(
+                    next >= s - 1e-9,
+                    "grade {grade:?} at stability {s} must not shorten it, got {next}"
+                );
+            }
+
+            // Again is the only grade allowed to reduce stability.
+            assert!(same_day_stability(s, Rating::Again) < s);
+        }
     }
 
     #[test]

@@ -425,11 +425,28 @@ mod tests {
         card = result.state;
         let initial_stability = card.stability;
 
-        // Same-day review (0.5 days later)
+        // Same-day review (0.5 days later) takes the short-term formula, and a passing
+        // grade there must never shorten stability — FSRS-6 requires SInc >= 1 for
+        // G >= Hard, which the clamp now enforces. Before the clamp this assertion read
+        // `!= initial_stability`, which encoded the bug: Good was *reducing* stability.
         let result = scheduler.review(&card, Rating::Good, 0.5, None);
+        assert!(
+            result.state.stability >= initial_stability,
+            "same-day Good must not reduce stability: {initial_stability} -> {}",
+            result.state.stability
+        );
 
-        // Should use same-day formula, not regular recall
-        assert!(result.state.stability != initial_stability);
+        // Again is the only grade allowed to shorten it.
+        let lapsed = scheduler.review(&card, Rating::Again, 0.5, None);
+        assert!(
+            lapsed.state.stability < initial_stability,
+            "a lapse must reduce stability"
+        );
+
+        // A review a full interval later goes through the regular recall path and keeps
+        // growing stability.
+        let regular = scheduler.review(&card, Rating::Good, 5.0, None);
+        assert!(regular.state.stability > initial_stability);
     }
 
     #[test]

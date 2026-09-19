@@ -593,6 +593,26 @@ impl Storage {
     fn optimize_w20_if_ready(&self) -> Result<Option<f64>> {
         use crate::fsrs::{FSRSOptimizer, ReviewLog};
 
+        // OFF BY DEFAULT. The search below fits the decay shape against a training set
+        // that does not describe FSRS: every row of the access log is paired with the
+        // node's *current* stability (not the stability before that review), `elapsed` is
+        // measured from `created_at` rather than from the previous review, and the query
+        // takes the OLDEST events in the window. The optimizer therefore minimises a loss
+        // whose regressors do not correspond to the model, and the result overwrote the
+        // global decay parameter for every memory on every consolidation cycle with no
+        // quality gate. Until the observations are rebuilt from real review transitions,
+        // an operator has to ask for it explicitly.
+        if !matches!(
+            std::env::var("VESTIGE_FSRS_AUTO_W20").as_deref(),
+            Ok("1") | Ok("true") | Ok("on") | Ok("yes")
+        ) {
+            tracing::debug!(
+                "w20 auto-optimization skipped (set VESTIGE_FSRS_AUTO_W20=1 to enable; the \
+                 current training set does not describe FSRS review transitions)"
+            );
+            return Ok(None);
+        }
+
         let reader = self
             .reader
             .lock()
