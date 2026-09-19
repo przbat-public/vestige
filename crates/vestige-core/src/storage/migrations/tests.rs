@@ -228,3 +228,110 @@ fn runner_rolls_back_a_failed_migration() {
         "the runner must roll back the partial migration — the probe table survived"
     );
 }
+
+// ============================================================================
+// V15 — FTS5 tokenizer upgrade
+// ============================================================================
+
+/// V15 replaced `porter ascii` (V7) with `porter unicode61 remove_diacritics 2`
+/// and rebuilt the index. The distinction that matters to a user is whether
+/// non-ASCII text is indexed at all: `ascii` treats every byte above 0x7F as a
+/// separator, so `Gdańsk` produced a token fragment that no query reaches,
+/// while `unicode61 remove_diacritics 2` folds the accent and indexes `gdansk`.
+///
+/// The migration is only correct if the REBUILD covers rows that already
+/// existed, not just rows written afterwards — otherwise the upgrade silently
+/// leaves every pre-existing memory unsearchable, which is exactly the kind of
+/// data-shaped bug a schema change can hide. The test therefore writes a row
+/// under the old tokenizer, asserts it is unreachable by its folded form before
+/// the migration, and asserts it is reachable after.
+#[test]
+fn v15_rebuilds_the_index_for_rows_written_before_the_upgrade() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+
+    // Database as it stood at V14, with one memory written under `porter ascii`.
+    apply_pending(&conn, &MIGRATIONS[..14], 0).unwrap();
+    conn.execute(
+        "INSERT INTO knowledge_nodes (id, content, node_type, created_at, updated_at, last_accessed, tags)
+         VALUES ('pre-upgrade', 'Gdańsk wspomnienia z wyjazdu', 'fact',
+                 '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '[]')",
+        [],
+    )
+    .unwrap();
+
+    let fts_hits = |term: &str| -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM knowledge_fts WHERE knowledge_fts MATCH ?1",
+            rusqlite::params![term],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+
+    assert_eq!(
+        fts_hits("wspomnienia"),
+        1,
+        "the ASCII part of the memory must be indexed before the upgrade — \
+         without this the test would pass for the wrong reason"
+    );
+    assert_eq!(
+        fts_hits("gdansk"),
+        0,
+        "`porter ascii` cannot index `Gdańsk`; if this is 1 the pre-upgrade \
+         state under test no longer exists"
+    );
+
+    // The upgrade itself. `apply_pending` reports how many migrations it ran,
+    // so the resulting version is read back separately.
+    let applied = apply_pending(&conn, &MIGRATIONS[..15], 14).unwrap();
+    assert_eq!(applied, 1, "only V15 is pending after V14");
+    assert_eq!(get_current_version(&conn).unwrap(), 15);
+
+    let create_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name = 'knowledge_fts'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        create_sql.contains("remove_diacritics 2"),
+        "V15 must install the folding tokenizer, found: {create_sql}"
+    );
+
+    assert_eq!(
+        fts_hits("gdansk"),
+        1,
+        "the rebuild must re-tokenize existing rows, not only the ones written afterwards"
+    );
+    assert_eq!(
+        fts_hits("wspomnienia"),
+        1,
+        "the rebuild must keep the rows it had"
+    );
+
+    // V15 drops and re-creates the sync triggers; if that step regressed, new
+    // memories would stop reaching the index while every old row still answers.
+    conn.execute(
+        "INSERT INTO knowledge_nodes (id, content, node_type, created_at, updated_at, last_accessed, tags)
+         VALUES ('post-upgrade', 'Kraków after the upgrade', 'fact',
+                 '2026-01-02T00:00:00+00:00', '2026-01-02T00:00:00+00:00', '2026-01-02T00:00:00+00:00', '[]')",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        fts_hits("krakow"),
+        1,
+        "rows written after V15 must be indexed by the re-created triggers"
+    );
+    assert_eq!(
+        fts_hits("gdansk"),
+        1,
+        "the re-created triggers must not disturb the rows the rebuild indexed"
+    );
+
+    let nodes: i64 = conn
+        .query_row("SELECT COUNT(*) FROM knowledge_nodes", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(nodes, 2, "the migration must not add or drop memories");
+}
