@@ -209,7 +209,7 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 │  Storage Layer                                      │
 │  SQLite + FTS5 · USearch HNSW · Nomic Embed v1.5    │
 │  Jina Reranker v2 · RRF · Active Forgetting         │
-│  Migrations v1–v15 · WAL · optional SQLCipher       │
+│  Migrations v1–v16 · WAL · optional SQLCipher       │
 └─────────────────────────────────────────────────────┘
 ```
 

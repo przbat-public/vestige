@@ -123,12 +123,18 @@ impl Storage {
             .reader
             .lock()
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
+        // Order by the FTS5 `rank` (bm25), not by retention: the sanitizer emits a
+        // term query (`"a" OR "b" OR ...`), so a document matching one of many
+        // terms could otherwise outrank a document matching all of them just by
+        // being "hotter". `min_retention` stays in the WHERE clause as a floor.
+        // The other two keyword paths (`Storage::search`,
+        // `keyword_search_with_scores`) already order by `rank`.
         let mut stmt = reader.prepare(
             "SELECT n.* FROM knowledge_nodes n
              JOIN knowledge_fts fts ON n.id = fts.id
              WHERE knowledge_fts MATCH ?1
              AND n.retention_strength >= ?2
-             ORDER BY n.retention_strength DESC
+             ORDER BY rank
              LIMIT ?3",
         )?;
 

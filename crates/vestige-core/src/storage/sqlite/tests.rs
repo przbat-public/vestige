@@ -8,7 +8,7 @@ use crate::memory::IngestInput;
 
 use super::Storage;
 use super::init::VectorIndexSource;
-use super::records::{ConnectionRecord, DreamHistoryRecord};
+use super::records::{ConnectionRecord, DreamHistoryRecord, InsightRecord};
 
 fn create_test_storage() -> Storage {
     let dir = tempdir().unwrap();
@@ -855,5 +855,334 @@ fn consolidation_runs_to_completion() {
     assert!(
         result.duration_ms >= 0,
         "the pipeline must report a completed run, not bail out at step 1"
+    );
+}
+
+// ============================================================================
+// 2026-09-19 core audit — medium/low findings
+// ============================================================================
+
+/// Regression: `keyword_search` sorted by `retention_strength` instead of the
+/// FTS5 `rank`. The sanitizer emits a term query (`"alpha" OR "beta" OR ...`),
+/// so a memory matching a single term but with retention 1.0 could outrank —
+/// and, past the LIMIT, push out — a memory matching every term. The other two
+/// keyword paths (`Storage::search`, `keyword_search_with_scores`) already
+/// order by `rank`; this pins the third.
+#[test]
+fn keyword_search_orders_by_bm25_rank_not_retention() {
+    let storage = create_test_storage();
+
+    let matches_all = storage
+        .ingest(IngestInput {
+            content: "alpha beta gamma".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+    let matches_one = storage
+        .ingest(IngestInput {
+            content: "alpha omega psi".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Make the weaker match the "hotter" memory — the exact shape that used to
+    // put it first.
+    {
+        let writer = storage.writer.lock().unwrap();
+        writer
+            .execute(
+                "UPDATE knowledge_nodes SET retention_strength = 1.0 WHERE id = ?1",
+                rusqlite::params![matches_one.id],
+            )
+            .unwrap();
+        writer
+            .execute(
+                "UPDATE knowledge_nodes SET retention_strength = 0.1 WHERE id = ?1",
+                rusqlite::params![matches_all.id],
+            )
+            .unwrap();
+    }
+
+    let hits = storage
+        .keyword_search("alpha beta gamma", 10, 0.0)
+        .expect("keyword search must succeed");
+    let ids: Vec<&str> = hits.iter().map(|n| n.id.as_str()).collect();
+
+    assert!(
+        ids.contains(&matches_all.id.as_str()) && ids.contains(&matches_one.id.as_str()),
+        "both matches must be returned: {ids:?}"
+    );
+    assert_eq!(
+        ids[0], matches_all.id,
+        "bm25 rank must lead the ordering — retention is only a floor, got {ids:?}"
+    );
+}
+
+/// Regression: the tag filter was `tags LIKE '%"<tag>%'`, which matched tag
+/// *prefixes* (`code` matched `codebase`) and let `%`/`_` inside the tag act as
+/// wildcards. `get_all_nodes_filtered`/`count_nodes_filtered` already use an
+/// exact `json_each` match.
+#[test]
+fn get_nodes_by_type_and_tag_matches_exact_tags() {
+    let storage = create_test_storage();
+
+    let code = storage
+        .ingest(IngestInput {
+            content: "pattern tagged code".to_string(),
+            node_type: "pattern".to_string(),
+            tags: vec!["code".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+    let codebase = storage
+        .ingest(IngestInput {
+            content: "pattern tagged codebase".to_string(),
+            node_type: "pattern".to_string(),
+            tags: vec!["codebase".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+
+    let hits = storage
+        .get_nodes_by_type_and_tag("pattern", Some("code"), 10)
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|n| n.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![code.id.as_str()],
+        "prefix LIKE pulled in unrelated tags: {ids:?}"
+    );
+    assert!(!ids.contains(&codebase.id.as_str()));
+
+    // `%` in a tag must be a literal, not a wildcard.
+    let literal = storage
+        .ingest(IngestInput {
+            content: "pattern tagged 100%".to_string(),
+            node_type: "pattern".to_string(),
+            tags: vec!["100%".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+    storage
+        .ingest(IngestInput {
+            content: "pattern tagged 100x".to_string(),
+            node_type: "pattern".to_string(),
+            tags: vec!["100x".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+
+    let hits = storage
+        .get_nodes_by_type_and_tag("pattern", Some("100%"), 10)
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|n| n.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![literal.id.as_str()],
+        "wildcard in a tag leaked into the LIKE pattern: {ids:?}"
+    );
+}
+
+/// V16 regression: `knowledge_au` fires on every UPDATE, so a retention-only
+/// write (each search hit, every `apply_decay` batch) deleted and re-inserted
+/// the FTS5 document. `total_changes()` counts rows written through triggers,
+/// so one changed row means the FTS rewrite is gone — and the control block
+/// recreates the old trigger shape to show it really was counted.
+#[test]
+fn metadata_only_update_does_not_rewrite_fts_document() {
+    let storage = create_test_storage();
+    let node = storage
+        .ingest(IngestInput {
+            content: "the quick brown fox".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let retention_bump_changes = |storage: &Storage| -> u64 {
+        let writer = storage.writer.lock().unwrap();
+        let before = writer.total_changes();
+        writer
+            .execute(
+                "UPDATE knowledge_nodes SET retention_strength = 0.42 WHERE id = ?1",
+                rusqlite::params![node.id],
+            )
+            .unwrap();
+        writer.total_changes() - before
+    };
+
+    assert_eq!(
+        retention_bump_changes(&storage),
+        1,
+        "V16 trigger must not rewrite the FTS document for a metadata-only UPDATE"
+    );
+
+    // Content edits must still reach the index.
+    storage
+        .update_node_content(&node.id, "a completely different wording")
+        .unwrap();
+    assert!(
+        storage
+            .keyword_search("wording", 10, 0.0)
+            .unwrap()
+            .iter()
+            .any(|n| n.id == node.id),
+        "content changes must still refresh the FTS index"
+    );
+
+    // Control: the pre-V16 trigger (no column filter) does rewrite the document.
+    {
+        let writer = storage.writer.lock().unwrap();
+        writer
+            .execute_batch(
+                "DROP TRIGGER knowledge_au;
+                 CREATE TRIGGER knowledge_au AFTER UPDATE ON knowledge_nodes BEGIN
+                     INSERT INTO knowledge_fts(knowledge_fts, rowid, id, content, tags)
+                     VALUES ('delete', OLD.rowid, OLD.id, OLD.content, OLD.tags);
+                     INSERT INTO knowledge_fts(rowid, id, content, tags)
+                     VALUES (NEW.rowid, NEW.id, NEW.content, NEW.tags);
+                 END;",
+            )
+            .unwrap();
+    }
+    assert!(
+        retention_bump_changes(&storage) > 1,
+        "control failed: the unfiltered trigger should still rewrite the FTS document"
+    );
+}
+
+/// Regression: the HNSW sidecar meta only recorded `row_count`, so a memory
+/// edit (same number of embeddings, different vector) passed validation and the
+/// next boot loaded an index built from the OLD wording. The meta now carries
+/// an embedding-state fingerprint.
+#[test]
+fn vector_index_sidecar_invalidated_by_embedding_rewrite() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+
+    let node_id = {
+        let storage = Storage::new(Some(db_path.clone())).unwrap();
+        let node = storage
+            .ingest(IngestInput {
+                content: "original wording about migration safety".to_string(),
+                node_type: "fact".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        storage.persist_vector_index().unwrap();
+        node.id
+    };
+
+    // Boot 2: rewrite content (and therefore the vector) through the public edit
+    // path — the row count stays the same.
+    {
+        let storage = Storage::new(Some(db_path.clone())).unwrap();
+        assert_eq!(
+            storage.vector_index_source(),
+            VectorIndexSource::Loaded,
+            "precondition: the sidecar must be considered valid before the edit"
+        );
+        storage
+            .update_node_content(&node_id, "rewritten wording about vector staleness")
+            .unwrap();
+    }
+
+    // Boot 3: same row count, different embeddings → the sidecar is stale.
+    let storage3 = Storage::new(Some(db_path)).unwrap();
+    assert_eq!(
+        storage3.vector_index_source(),
+        VectorIndexSource::Rebuilt,
+        "an embedding rewrite must invalidate the sidecar even when row_count matches"
+    );
+}
+
+/// GDPR erasure used to leave `insights.source_memories` (a JSON array with no
+/// foreign key) pointing at the erased id — a reversible reference to personal
+/// data.
+#[test]
+fn right_to_erasure_removes_insights_referencing_the_memory() {
+    let storage = create_test_storage();
+    let erased = ingest_id(&storage, "memory the subject asked us to forget");
+    let kept = ingest_id(&storage, "unrelated memory");
+
+    let save_insight = |id: &str, sources: Vec<String>| {
+        storage
+            .save_insight(&InsightRecord {
+                id: id.to_string(),
+                insight: "an emergent observation".to_string(),
+                source_memories: sources,
+                confidence: 0.9,
+                novelty_score: 0.5,
+                insight_type: "hidden_connection".to_string(),
+                generated_at: Utc::now(),
+                ..Default::default()
+            })
+            .unwrap();
+    };
+    save_insight("ins-touches-erased", vec![erased.clone(), kept.clone()]);
+    save_insight("ins-unrelated", vec![kept.clone()]);
+
+    storage.right_to_erasure(&erased).unwrap();
+
+    let remaining: Vec<String> = storage
+        .get_insights(50)
+        .unwrap()
+        .into_iter()
+        .map(|i| i.id)
+        .collect();
+    assert!(
+        !remaining.contains(&"ins-touches-erased".to_string()),
+        "an insight referencing the erased memory must be removed, got {remaining:?}"
+    );
+    assert!(
+        remaining.contains(&"ins-unrelated".to_string()),
+        "unrelated insights must survive, got {remaining:?}"
+    );
+}
+
+/// The erasure sequence must be atomic: a failure half-way cannot leave the
+/// node stripped of its embeddings/logs but still present. Dropping a table the
+/// path must touch forces the failure.
+#[test]
+fn right_to_erasure_rolls_back_when_a_step_fails() {
+    let storage = create_test_storage();
+    let node = storage
+        .ingest(IngestInput {
+            content: "memory whose erasure will fail half-way".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    storage
+        .writer
+        .lock()
+        .unwrap()
+        .execute_batch("DROP TABLE insights;")
+        .unwrap();
+
+    assert!(
+        storage.right_to_erasure(&node.id).is_err(),
+        "the failing step must surface as an error"
+    );
+    assert!(
+        storage.get_node(&node.id).unwrap().is_some(),
+        "a failed erasure must not remove the node"
+    );
+    let embedding_rows: i64 = storage
+        .reader
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM node_embeddings WHERE node_id = ?1",
+            rusqlite::params![node.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        embedding_rows, 1,
+        "the embedding must survive a rolled-back erasure"
     );
 }

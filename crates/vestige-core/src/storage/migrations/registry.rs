@@ -80,4 +80,9 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "FTS5 tokenizer: porter unicode61 remove_diacritics 2 (accent folding, non-ASCII tokens)",
         up: MIGRATION_V15_UP,
     },
+    Migration {
+        version: 16,
+        description: "Narrow FTS update trigger to content/tags; partial index for waking-tag replay",
+        up: MIGRATION_V16_UP,
+    },
 ];

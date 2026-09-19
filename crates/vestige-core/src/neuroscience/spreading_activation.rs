@@ -18,7 +18,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // ============================================================================
 // CONSTANTS
@@ -298,6 +298,15 @@ impl ActivationNetwork {
     /// `visited` map already keeps the highest-activation arrival for each
     /// node, so BFS gives the same result as best-first for well-formed
     /// graphs without the extra `Ord` plumbing a priority queue would need.
+    ///
+    /// The returned vector contains **one entry per memory**: a node reachable
+    /// through several edges is pushed once per incoming edge, and callers
+    /// index these results by memory id (the search pipeline folds them into a
+    /// `HashMap`, and the associations block takes the first few). Duplicates
+    /// meant the entry a caller happened to keep could be the *weakest* path,
+    /// and the same memory could be listed twice as two independent
+    /// associations. The result is sorted by activation descending before
+    /// deduplication, so the surviving entry carries the strongest arrival.
     pub fn activate(&mut self, source_id: &str, initial_activation: f64) -> Vec<ActivatedMemory> {
         let mut results = Vec::new();
         let mut visited = HashMap::new();
@@ -370,6 +379,11 @@ impl ActivationNetwork {
                 .partial_cmp(&a.activation)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+
+        // Collapse the per-edge arrivals into one entry per memory. Sorting
+        // descending first means the retained entry is the strongest path.
+        let mut seen = HashSet::new();
+        results.retain(|entry| seen.insert(entry.memory_id.clone()));
         results
     }
 
@@ -474,6 +488,40 @@ mod tests {
             .map(|r| r.activation);
 
         assert!(b_activation.unwrap_or(0.0) > c_activation.unwrap_or(0.0));
+    }
+
+    /// A memory reachable through several edges must appear exactly once, with
+    /// the strongest arrival. Pushing one entry per incoming edge made the
+    /// caller's id-keyed fold keep an arbitrary (possibly weakest) activation
+    /// and duplicated the memory in the associations list.
+    #[test]
+    fn test_activation_results_are_deduplicated_per_memory() {
+        let mut network = ActivationNetwork::new();
+
+        // `d` is reachable directly (weak) and through `b` (strong).
+        network.add_edge("a".to_string(), "b".to_string(), LinkType::Semantic, 0.95);
+        network.add_edge("b".to_string(), "d".to_string(), LinkType::Semantic, 0.9);
+        network.add_edge("a".to_string(), "d".to_string(), LinkType::Semantic, 0.4);
+
+        let results = network.activate("a", 1.0);
+
+        let d_entries: Vec<&ActivatedMemory> =
+            results.iter().filter(|r| r.memory_id == "d").collect();
+        assert_eq!(
+            d_entries.len(),
+            1,
+            "expected one entry per memory id, got {d_entries:?}"
+        );
+
+        // 1.0 (source) × 0.95 (a→b) × 0.7 (decay) × 0.9 (b→d) × 0.7 (decay)
+        let strongest = 1.0 * 0.95 * DEFAULT_DECAY_FACTOR * 0.9 * DEFAULT_DECAY_FACTOR;
+        // 1.0 (source) × 0.4 (a→d) × 0.7 (decay)
+        let weakest = 1.0 * 0.4 * DEFAULT_DECAY_FACTOR;
+        assert!(
+            (d_entries[0].activation - strongest).abs() < 1e-9,
+            "expected the strongest path ({strongest}), got {} (weakest would be {weakest})",
+            d_entries[0].activation
+        );
     }
 
     #[test]

@@ -241,4 +241,85 @@ mod tests {
         let per_lang_total: usize = report.per_language.values().map(|m| m.total).sum();
         assert_eq!(per_lang_total, report.total);
     }
+
+    /// The ECE gate in `tests/nlp_baseline.rs` is only meaningful when the
+    /// detector emits a spread of confidence values *and* each evidence signal
+    /// has enough support to be graded. With a handful of discrete levels ECE
+    /// degenerates into an average over a few points, so a detector can be
+    /// badly overconfident and still clear a 0.35 bar. This test pins the
+    /// resolution and the per-signal accuracy that justify the published
+    /// per-signal confidence constants.
+    #[test]
+    fn contradiction_calibration_has_resolution_and_per_signal_support() {
+        use crate::nlp::EvidenceKind;
+        use crate::nlp::contradiction::{
+            ASYMMETRIC_NEGATION_CONFIDENCE, CORRECTION_PHRASE_CONFIDENCE, NEGATION_SCOPE_CONFIDENCE,
+        };
+        use std::collections::{BTreeSet, HashMap};
+
+        let det = HeuristicContradictionDetector::new();
+        let dataset = data::contradiction_dataset();
+
+        let mut confidences: BTreeSet<u32> = BTreeSet::new();
+        let mut per_kind: HashMap<EvidenceKind, (usize, usize)> = HashMap::new();
+
+        for example in dataset.examples {
+            let result = det.detect(example.text_a, example.text_b);
+            confidences.insert((result.confidence * 100.0).round() as u32);
+
+            let correct = result.positive == example.label.is_positive();
+            if let Some(evidence) = result.evidence.first() {
+                let entry = per_kind.entry(evidence.kind.clone()).or_insert((0, 0));
+                entry.1 += 1;
+                if correct {
+                    entry.0 += 1;
+                }
+            }
+        }
+
+        // The 2026-09-19 core audit measured this gate as "practically empty":
+        // ECE is averaged over a handful of discrete fusion levels. Pin the
+        // measured resolution so a refactor that collapses it further (making
+        // the ECE gate even more vacuous) fails here. Raising this to the
+        // audit's ">5" target needs a detector change, not a test change.
+        assert!(
+            confidences.len() >= 5,
+            "ECE would be averaged over only {} distinct confidence values: {confidences:?}",
+            confidences.len()
+        );
+
+        // Every published per-signal confidence must be backed by examples and
+        // must not be overconfident on them. Under-confidence is acceptable —
+        // the constants are deliberately conservative. 0.15 is the slack.
+        let signals = [
+            (
+                EvidenceKind::NegationScope,
+                "NegationScope",
+                NEGATION_SCOPE_CONFIDENCE,
+            ),
+            (
+                EvidenceKind::CorrectionPhrase,
+                "CorrectionPhrase",
+                CORRECTION_PHRASE_CONFIDENCE,
+            ),
+            (
+                EvidenceKind::AsymmetricNegation,
+                "AsymmetricNegation",
+                ASYMMETRIC_NEGATION_CONFIDENCE,
+            ),
+        ];
+        for (kind, name, stated) in signals {
+            let (correct, total) = per_kind.get(&kind).copied().unwrap_or((0, 0));
+            assert!(
+                total >= 5,
+                "{name} has too little support to grade ({total} examples)"
+            );
+            let accuracy = correct as f32 / total as f32;
+            assert!(
+                accuracy >= stated - 0.15,
+                "{name} accuracy {accuracy:.3} is overconfident against its \
+                 published weight {stated:.2} (n={total})"
+            );
+        }
+    }
 }

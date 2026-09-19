@@ -122,18 +122,18 @@ fn split_by_question_chains(query: &str) -> Option<Vec<String>> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|s| {
-            // Strip leading connectors
+            // Strip leading connectors. Matching is ASCII-case-insensitive on
+            // the original `&str`: deriving a slice offset from
+            // `s.to_lowercase()` is unsafe because lowercasing can change byte
+            // lengths (U+212A KELVIN, U+0130, U+1E9E) and the offset can land
+            // inside a character. See `find_ascii_case_insensitive`.
             let stripped = s.trim_start_matches(|c: char| c.is_whitespace());
-            let lower = stripped.to_lowercase();
-            if lower.starts_with("and ") {
-                stripped[4..].trim().to_string()
-            } else if lower.starts_with("also ") {
-                stripped[5..].trim().to_string()
-            } else if lower.starts_with("what about ") {
-                stripped[11..].trim().to_string()
-            } else {
-                stripped.to_string()
+            for prefix in ["and ", "also ", "what about "] {
+                if let Some(rest) = strip_ascii_prefix_ci(stripped, prefix) {
+                    return rest.trim().to_string();
+                }
             }
+            stripped.to_string()
         })
         .filter(|s| !s.is_empty())
         .collect();
@@ -197,6 +197,21 @@ fn is_substantial(text: &str) -> bool {
     text.len() >= 15 || text.split_whitespace().count() >= 3
 }
 
+/// Strip an ASCII `prefix` from `text` case-insensitively, returning the rest.
+///
+/// The returned slice starts at a character boundary because every matched
+/// byte is ASCII (< 0x80), and a byte of a multi-byte UTF-8 character is
+/// always >= 0x80.
+fn strip_ascii_prefix_ci<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let bytes = text.as_bytes();
+    if bytes.len() >= prefix.len() && bytes[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+    {
+        Some(&text[prefix.len()..])
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +269,28 @@ mod tests {
     fn test_question_chain() {
         let result = decompose_query("What is FSRS-6? And what about spreading activation?");
         assert!(result.is_compound);
+        assert_eq!(result.sub_queries.len(), 2);
+    }
+
+    #[test]
+    fn test_question_chain_strips_connectors_without_lowercase_offsets() {
+        // Same anti-pattern as `split_by_conjunctions`: connector stripping used
+        // an offset derived from `to_lowercase()`, whose byte length can differ
+        // from the original (U+212A → `k`, U+0130 → `i̇`), so the slice could
+        // land inside a character.
+        let result = decompose_query("What is FSRS-6? ALSO what about the scheduler?");
+        assert!(result.is_compound, "expected a split, got {result:?}");
+        assert_eq!(result.sub_queries.len(), 2, "got {result:?}");
+        assert_eq!(result.sub_queries[0], "What is FSRS-6");
+        assert!(
+            !result.sub_queries[1].to_lowercase().starts_with("also "),
+            "leading connector must be stripped, got {:?}",
+            result.sub_queries[1]
+        );
+
+        // A length-changing character in the connector position must not panic.
+        let result = decompose_query("What is FSRS-6? \u{212A}nd the scheduler?");
+        assert!(result.is_compound, "expected a split, got {result:?}");
         assert_eq!(result.sub_queries.len(), 2);
     }
 

@@ -736,3 +736,34 @@ END;
 
 UPDATE schema_version SET version = 15, applied_at = datetime('now');
 "#;
+
+/// V16: two storage-layer fixes from the 2026-09-19 core audit.
+///
+/// 1. `knowledge_au` was `AFTER UPDATE ON knowledge_nodes` with no column
+///    filter, so *every* FSRS/retention write — each search hit
+///    (`review.rs::strengthen_batch_on_access`) and every whole-table
+///    `apply_decay` batch — deleted and re-inserted the FTS5 document even
+///    though `content`/`tags` had not moved. That multiplied write cost,
+///    bloated the index and inflated the WAL for writes that cannot change a
+///    single token. `AFTER UPDATE OF content, tags` fires only when those
+///    columns appear in the `SET` list (value equality is irrelevant, so
+///    content edits are still indexed even when the text is the same).
+/// 2. `waking_tag` / `waking_tag_at` (added in V8) had no index, so
+///    `get_waking_tagged_memories` — called twice per `dream` cycle — ran a
+///    full table scan with per-row JSON parsing of `tags`/`provenance`.
+///    The partial index holds only the rows the query can return.
+pub(super) const MIGRATION_V16_UP: &str = r#"
+DROP TRIGGER IF EXISTS knowledge_au;
+CREATE TRIGGER knowledge_au AFTER UPDATE OF content, tags ON knowledge_nodes BEGIN
+    INSERT INTO knowledge_fts(knowledge_fts, rowid, id, content, tags)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.content, OLD.tags);
+    INSERT INTO knowledge_fts(rowid, id, content, tags)
+    VALUES (NEW.rowid, NEW.id, NEW.content, NEW.tags);
+END;
+
+CREATE INDEX IF NOT EXISTS idx_nodes_waking_tag
+    ON knowledge_nodes(waking_tag_at)
+    WHERE waking_tag = TRUE;
+
+UPDATE schema_version SET version = 16, applied_at = datetime('now');
+"#;

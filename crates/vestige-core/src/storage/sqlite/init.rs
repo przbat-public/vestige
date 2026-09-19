@@ -227,6 +227,27 @@ impl Storage {
         VectorIndexSource::from_u8(self.vector_index_source.load(Ordering::Relaxed))
     }
 
+    /// Cheap state fingerprint of the `node_embeddings` table.
+    ///
+    /// The HNSW sidecar is only valid for the exact embedding rows it was
+    /// written from. A row count alone misses an in-place vector rewrite
+    /// (`update_node_content` / `regenerate_embeddings`): the count stays the
+    /// same while the vector's semantics change, and the next boot would load
+    /// a binary that answers semantic queries with the *old* wording.
+    /// `store_embedding_for_node` refreshes `created_at` on every write, so
+    /// `(COUNT(*), MAX(created_at))` changes whenever an embedding row is
+    /// added, replaced or deleted.
+    #[cfg(feature = "vector-search")]
+    fn embeddings_fingerprint(&self) -> Result<String> {
+        let reader = self.acquire_reader()?;
+        let (rows, newest): (i64, Option<String>) = reader.query_row(
+            "SELECT COUNT(*), MAX(created_at) FROM node_embeddings",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(format!("{}:{}", rows, newest.unwrap_or_default()))
+    }
+
     /// Persist the current HNSW index to its sidecar.
     ///
     /// Safe to call frequently — it's a write, not a serialize-from-scratch.
@@ -235,6 +256,11 @@ impl Storage {
     /// half-written binary. Best-effort: callers may ignore the error.
     #[cfg(feature = "vector-search")]
     pub fn persist_vector_index(&self) -> Result<()> {
+        // Read the embedding state *before* taking the index lock — the sidecar
+        // is valid only for exactly this state, and the lock order used
+        // elsewhere in this module is reader/writer first, index second.
+        let fingerprint = self.embeddings_fingerprint()?;
+
         let index = self
             .vector_index
             .lock()
@@ -249,6 +275,7 @@ impl Storage {
             "schema": 1,
             "row_count": row_count,
             "dimensions": index.dimensions(),
+            "embeddings_fingerprint": fingerprint,
         });
         let meta_path = self.vector_index_meta_path();
         if let Err(e) = std::fs::write(
@@ -397,8 +424,9 @@ impl Storage {
     /// 1. Both `vestige.hnsw` and `vestige.hnsw.meta.json` exist.
     /// 2. Meta schema is recognized.
     /// 3. `meta.row_count` matches the current DB row count.
-    /// 4. `VectorIndex::load` and the mappings sidecar both succeed.
-    /// 5. Loaded index reports the expected size.
+    /// 4. `meta.embeddings_fingerprint` matches the current embedding state.
+    /// 5. `VectorIndex::load` and the mappings sidecar both succeed.
+    /// 6. Loaded index reports the expected size.
     ///
     /// Any failure is logged and returns `false` so the caller falls through
     /// to the rebuild path.
@@ -441,6 +469,29 @@ impl Storage {
                 meta_rows,
                 db_rows = expected_rows,
                 "vector index sidecar stale (row count drift) — rebuilding"
+            );
+            return false;
+        }
+
+        // Row count alone cannot see an in-place vector rewrite (memory edit),
+        // so also compare the embedding-state fingerprint. A sidecar written by
+        // an older build has no fingerprint and is conservatively rebuilt once.
+        let expected_fingerprint = match self.embeddings_fingerprint() {
+            Ok(fingerprint) => fingerprint,
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot fingerprint embeddings — rebuilding vector index");
+                return false;
+            }
+        };
+        let meta_fingerprint = meta_val
+            .get("embeddings_fingerprint")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if meta_fingerprint != expected_fingerprint {
+            tracing::info!(
+                meta_fingerprint,
+                db_fingerprint = %expected_fingerprint,
+                "vector index sidecar stale (embedding state changed) — rebuilding"
             );
             return false;
         }

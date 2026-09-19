@@ -518,19 +518,21 @@ impl Storage {
             .map_err(|_| StorageError::Init("Reader lock poisoned".into()))?;
         match tag_filter {
             Some(tag) => {
-                // Query with tag filter using JSON LIKE search
-                // Tags are stored as JSON array, e.g., '["pattern", "codebase", "codebase:vestige"]'
-                let tag_pattern = format!("%\"{}%", tag);
+                // Exact tag match via `json_each`, same pattern as
+                // `get_all_nodes_filtered` / `count_nodes_filtered`. The old
+                // `tags LIKE '%"<tag>%'` pattern matched tag *prefixes*
+                // (`code` matched `codebase`, `work` matched `workshop`) and
+                // let `%`/`_` inside the tag act as wildcards. Tags are stored
+                // already lowercased by `normalize_tags`, so no `LOWER()` is
+                // needed.
                 let mut stmt = reader.prepare(
                     "SELECT * FROM knowledge_nodes
                      WHERE node_type = ?1
-                     AND tags LIKE ?2
+                     AND EXISTS (SELECT 1 FROM json_each(knowledge_nodes.tags) WHERE value = ?2)
                      ORDER BY retention_strength DESC, created_at DESC
                      LIMIT ?3",
                 )?;
-                let rows = stmt.query_map(params![node_type, tag_pattern, limit], |row| {
-                    Self::row_to_node(row)
-                })?;
+                let rows = stmt.query_map(params![node_type, tag, limit], Self::row_to_node)?;
                 let mut nodes = Vec::new();
                 for node in rows.flatten() {
                     nodes.push(node);
