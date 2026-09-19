@@ -43,9 +43,17 @@ pub fn reciprocal_rank_fusion(
         *scores.entry(key.clone()).or_default() += 1.0 / (k + rank as f32);
     }
 
-    // Sort by combined score
+    // Sort by combined score. The accumulator is drained from a `HashMap`, whose
+    // iteration order is randomised per instance, and `sort_by` is stable — so documents
+    // an RRF tie puts on equal scores (symmetric ranks produce identical scores) would
+    // swap places between runs. Ties break on the id, which makes the ranking
+    // reproducible without touching the scores themselves.
     let mut results: Vec<(String, f32)> = scores.into_iter().collect();
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
 
     results
 }
@@ -88,9 +96,14 @@ pub fn linear_combination(
         *scores.entry(key.clone()).or_default() += (score / max_semantic) * semantic_weight;
     }
 
-    // Sort by combined score
+    // Sort by combined score; see `reciprocal_rank_fusion` for why the id is the
+    // tie-breaker — weighted sums of normalised scores tie far more often than raw ones.
     let mut results: Vec<(String, f32)> = scores.into_iter().collect();
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
 
     results
 }
@@ -367,5 +380,66 @@ mod tests {
             gap_k1 > gap_k60,
             "Lower k should produce larger score gaps between ranks"
         );
+    }
+
+    #[test]
+    fn fused_ranking_is_reproducible_and_ties_break_on_id() {
+        // Regression: the accumulator was drained from a `HashMap` (randomised iteration
+        // order) into a *stable* score sort, so documents on equal fused scores swapped
+        // places between runs. RRF ties are routine — symmetric ranks give identical
+        // scores, as `test_rrf_is_scale_invariant` pins.
+        let forward: Vec<(String, f32)> = (0..12).map(|i| (format!("doc-{i:02}"), 1.0)).collect();
+        let mut reverse = forward.clone();
+        reverse.reverse();
+
+        let expected: Vec<String> = {
+            let mut ranked = reciprocal_rank_fusion(&forward, &reverse, 60.0);
+            ranked.sort_by(|a, b| {
+                b.1.partial_cmp(&a.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.0.cmp(&b.0))
+            });
+            ranked.into_iter().map(|(id, _)| id).collect()
+        };
+
+        let ranked = reciprocal_rank_fusion(&forward, &reverse, 60.0);
+        assert!(
+            ranked.windows(2).all(|w| w[0].1 >= w[1].1),
+            "reported score must stay non-increasing down the vector"
+        );
+        assert_eq!(
+            ranked.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+            expected,
+            "ranking must be score descending, then id"
+        );
+
+        for _ in 0..16 {
+            let again: Vec<String> = reciprocal_rank_fusion(&forward, &reverse, 60.0)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
+            assert_eq!(again, expected, "same input, same ranking");
+        }
+    }
+
+    #[test]
+    fn linear_fused_ranking_is_reproducible_and_ties_break_on_id() {
+        // Twelve documents normalise to the same weighted score, so the entire vector is
+        // one tie group: before the fix each run permuted it differently.
+        let keyword: Vec<(String, f32)> = (0..12).map(|i| (format!("doc-{i:02}"), 1.0)).collect();
+        let ids: Vec<String> = keyword.iter().map(|(id, _)| id.clone()).collect();
+
+        let ranked = linear_combination(&keyword, &[], 0.5, 0.5);
+        assert!(ranked.windows(2).all(|w| w[0].1 >= w[1].1));
+        assert_eq!(
+            ranked.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+            ids,
+            "ranking must be score descending, then id"
+        );
+
+        for _ in 0..16 {
+            let again = linear_combination(&keyword, &[], 0.5, 0.5);
+            assert_eq!(again, ranked, "same input, same ranking");
+        }
     }
 }

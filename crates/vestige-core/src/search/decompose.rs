@@ -89,10 +89,16 @@ pub fn merge_results<T: HasIdAndScore>(results: Vec<Vec<T>>) -> Vec<T> {
     }
 
     let mut merged: Vec<T> = best_by_id.into_values().collect();
+    // `into_values()` yields hash order, which a `HashMap` randomises per instance, and
+    // `sort_by` is stable — so hits with equal scores (routine once sub-query scores are
+    // normalised) would come back in a different order on every run and the merged
+    // ranking would not be reproducible. Ties break on the node id to make the order
+    // total; the reported score stays the primary key, so this is still descending.
     merged.sort_by(|a, b| {
         b.score()
             .partial_cmp(&a.score())
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.id().cmp(b.id()))
     });
     merged
 }
@@ -422,11 +428,44 @@ mod tests {
         assert_eq!(merged[2].id(), "a");
     }
 
+    #[test]
+    fn merged_ranking_is_a_total_order_so_ties_cannot_follow_hash_order() {
+        // Regression: the winners were drained out of a `HashMap` (randomised iteration
+        // order) into a *stable* score sort, so sub-query hits on equal scores came back
+        // in a different order on every call. Equal scores are the common case once
+        // sub-query scores are normalised, and the order decides which candidates survive
+        // a later `truncate(limit)`.
+        let ids: Vec<String> = (0..12).map(|i| format!("node-{i:02}")).collect();
+        let batch = |skip: usize| -> Vec<FakeResult> {
+            ids.iter()
+                .skip(skip)
+                .map(|id| FakeResult {
+                    id: id.clone(),
+                    score: 1.0,
+                })
+                .collect()
+        };
+        let order = |rs: &[FakeResult]| rs.iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+
+        let first = merge_results(vec![batch(0), batch(3)]);
+        assert_eq!(order(&first), ids, "ties must break on the node id");
+        assert!(
+            first.windows(2).all(|w| w[0].score() >= w[1].score()),
+            "reported score must stay non-increasing down the vector"
+        );
+
+        for _ in 0..8 {
+            let again = merge_results(vec![batch(0), batch(3)]);
+            assert_eq!(order(&again), order(&first), "same input, same ranking");
+        }
+    }
+
     #[derive(Debug)]
     struct FakeResult {
         id: String,
         score: f64,
     }
+
     impl HasIdAndScore for FakeResult {
         fn id(&self) -> &str {
             &self.id
