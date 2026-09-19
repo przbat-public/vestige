@@ -25,12 +25,16 @@ metal = ["vestige-core/metal"]
 # ColBERT late-interaction reranker (token-level MaxSim). Forwards to vestige-core;
 # inert at runtime unless VESTIGE_LATE_INTERACTION + VESTIGE_COLBERT_MODEL_DIR are set.
 late-interaction = ["vestige-core/late-interaction"]
-# OpenTelemetry / OTLP export. OFF by default so the binary stays lean —
-# turn on when shipping to an environment with an OTLP collector. With the
-# feature off, `telemetry::init` is a no-op and reports `FeatureDisabled`.
-# Real OTLP exporter wiring lands in a follow-up once we agree on the
-# concrete dependency set (opentelemetry / opentelemetry-otlp /
-# tracing-opentelemetry — gated here to keep the default build fast).
+# OpenTelemetry / OTLP export. A placeholder, and documented as one: whether
+# this feature is on or off, no exporter is compiled into the binary today
+# (`telemetry::OTLP_EXPORTER_COMPILED_IN` is false), so `telemetry::init`
+# reports `FeatureDisabled`/`Disabled` with no endpoint configured and
+# `NotWired` — a startup warning naming the endpoint that is being ignored —
+# when VESTIGE_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_ENDPOINT is set. Do not
+# describe this feature as enabling export until the opentelemetry /
+# opentelemetry-otlp / tracing-opentelemetry stack is actually wired in behind
+# it; it stays empty to keep the default build fast while that dependency set
+# is settled.
 telemetry = []
 
 [[bin]]

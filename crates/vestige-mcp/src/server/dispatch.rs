@@ -4,8 +4,10 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use tracing;
+use uuid::Uuid;
 
 use crate::dashboard::events::VestigeEvent;
 use crate::protocol::messages::{CallToolRequest, CallToolResult};
@@ -15,12 +17,70 @@ use crate::tools;
 use super::McpServer;
 use super::deprecated;
 
+/// Records `duration_ms` on the tool-call span when it is dropped.
+///
+/// A single `span.record(...)` at the end of the happy path would miss every
+/// early exit — a malformed frame, missing `params`, the unknown-tool branch —
+/// and those are exactly the calls an operator needs to see timed in a trace.
+/// A drop guard runs on all of them.
+struct ToolCallTimer {
+    span: tracing::Span,
+    started: Instant,
+}
+
+impl ToolCallTimer {
+    fn start(span: tracing::Span) -> Self {
+        Self {
+            span,
+            started: Instant::now(),
+        }
+    }
+
+    /// Record (and return) the elapsed time. Called explicitly so a
+    /// completion log line can carry the duration, and again from `Drop`.
+    fn record_ms(&self) -> u64 {
+        // `Instant::elapsed` is monotonic; `as_millis` is u128 and `tracing`
+        // records u64, so saturate instead of wrapping after ~584M years.
+        let ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.span.record("duration_ms", ms);
+        ms
+    }
+}
+
+impl Drop for ToolCallTimer {
+    fn drop(&mut self) {
+        let _ = self.record_ms();
+    }
+}
+
 impl McpServer {
     /// Handle tools/call request
+    ///
+    /// Every call runs inside an `mcp.tool_call` span carrying the effective
+    /// tool name, a per-call id and the wall-clock duration; tool failures are
+    /// recorded as `error` events inside that span, so a trace shows which call
+    /// failed without a separate correlation exercise.
+    ///
+    /// The span deliberately records **no arguments**. `smart_ingest` and
+    /// `search` carry user memories, `restore`/`export` carry file paths and
+    /// `intention` carries reminders, while a span is a log line that an OTLP
+    /// exporter ships off-process — the fields stay routing metadata only.
+    #[tracing::instrument(
+        name = "mcp.tool_call",
+        skip(self, params),
+        fields(
+            tool = tracing::field::Empty,
+            request_id = tracing::field::Empty,
+            duration_ms = tracing::field::Empty
+        )
+    )]
     pub(super) async fn handle_tools_call(
         &self,
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, JsonRpcError> {
+        let span = tracing::Span::current();
+        let timer = ToolCallTimer::start(span.clone());
+
         let request: CallToolRequest = match params {
             Some(p) => serde_json::from_value(p)
                 .map_err(|e| JsonRpcError::invalid_params(&e.to_string()))?,
@@ -50,6 +110,19 @@ impl McpServer {
                 Some((new_name, new_args)) => (new_name.to_string(), new_args),
                 None => (request.name.clone(), original_args),
             };
+
+        // Fill in the span now that the deprecated-name rewrite has decided
+        // which tool actually runs (an alias such as `mark_reviewed` must show
+        // up as `memory`, not as a name no tool implements).
+        //
+        // `request_id` is minted here rather than read from the JSON-RPC frame:
+        // the dispatcher only receives `params` (the `id` member is a sibling
+        // owned by `McpServer::handle_request`), and a stable per-call id still
+        // ties this span to its events and to anything a future per-call audit
+        // record writes.
+        let request_id = Uuid::new_v4().to_string();
+        span.record("tool", effective_name.as_str());
+        span.record("request_id", request_id.as_str());
 
         let result = match effective_name.as_str() {
             // ---- Unified tools (v1.1+) — current API -----------------------
@@ -176,6 +249,12 @@ impl McpServer {
                 //
                 // `-32601` stays reserved for an unknown JSON-RPC *method*
                 // (see `McpServer::handle_request`); do not collapse the two.
+                //
+                // Recorded as a span event too: the client gets the error frame,
+                // but the server log otherwise says nothing about a request it
+                // answered, which makes a typo'd tool name indistinguishable
+                // from a call that never arrived.
+                tracing::error!(tool = %unknown, "unknown tool requested");
                 return Err(JsonRpcError::invalid_params(&format!(
                     "Unknown tool: {}",
                     unknown
@@ -190,6 +269,10 @@ impl McpServer {
         if let Ok(ref content) = result {
             self.emit_tool_event(&request.name, &saved_args, content);
         }
+
+        // Keep the tool's own message for the request log; `result` is consumed
+        // below to build the response frame.
+        let tool_error = result.as_ref().err().cloned();
 
         let response = match result {
             Ok(content) => {
@@ -262,6 +345,25 @@ impl McpServer {
                     }
                 }
             });
+        }
+
+        // One line of request log per call, emitted once the response frame is
+        // built so its `duration_ms` matches the span's. Logged at `debug` —
+        // not `info` — on purpose: the span already carries the same facts for
+        // trace consumers, and an `info` line per tool call would drown the
+        // startup/lifecycle lines operators actually watch. Failures are
+        // `error`, so they survive a default `RUST_LOG=info`.
+        if let Some(error) = tool_error {
+            // The tool's own message — the same string the client gets back.
+            // It is never the arguments: those may be memories.
+            tracing::error!(error = %error, "tool call failed");
+        } else {
+            tracing::debug!(
+                tool = %effective_name,
+                request_id = %request_id,
+                duration_ms = timer.record_ms(),
+                "tool call completed"
+            );
         }
 
         response

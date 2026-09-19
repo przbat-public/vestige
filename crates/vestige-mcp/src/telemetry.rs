@@ -1,40 +1,124 @@
 //! Telemetry / OpenTelemetry scaffolding.
 //!
 //! Vestige's default build emits structured logs through `tracing_subscriber::fmt`.
-//! When you want distributed-trace export to an OTLP collector (Tempo, Jaeger,
-//! Honeycomb, Datadog APM, etc.), build with `--features telemetry` and set
-//! `VESTIGE_OTLP_ENDPOINT` (or the standard `OTEL_EXPORTER_OTLP_ENDPOINT`).
+//! For distributed-trace export to an OTLP collector (Tempo, Jaeger, Honeycomb,
+//! Datadog APM, etc.) an operator sets `VESTIGE_OTLP_ENDPOINT` (or the standard
+//! `OTEL_EXPORTER_OTLP_ENDPOINT`) — and this module says what that actually does.
 //!
-//! Why feature-gated?
-//! ------------------
-//! The opentelemetry crate stack pulls in tonic + prost + reqwest by default,
-//! which roughly triples cold-build time. Operators who don't need APM should
-//! never pay that cost. We keep the *interface* stable here so call sites
-//! (`main.rs` and the upcoming `vestige` CLI) don't branch on `cfg!(feature)`.
+//! What this module does today
+//! ---------------------------
+//! It reports the truth instead of the operator's hopes. No exporter is compiled
+//! into this binary in *any* feature configuration (see
+//! [`OTLP_EXPORTER_COMPILED_IN`]), so [`init`] never claims that spans were
+//! shipped: an endpoint configured without an exporter is a
+//! [`TelemetryStatus::NotWired`] **warning** that names the endpoint and says it
+//! is not being dialed.
 //!
-//! The actual OTLP exporter wiring (a `tracing-opentelemetry` layer attached
-//! to `tracing_subscriber::Registry`) is a follow-up once we settle the dep
-//! versions; the layer code goes inside the `telemetry` cfg block of
-//! [`init`] and the public surface in this module does not change.
+//! The revision this replaces logged `telemetry exporter initialized`
+//! (`main.rs`) and returned a status called `Initialized { endpoint }` while a
+//! comment two lines above admitted the exporter wiring was still "a follow-up".
+//! An operator who pointed the endpoint at a collector therefore got a green
+//! startup line and an empty collector — a success report for an export that
+//! never happened, which is worse than silence because it stops the
+//! investigation.
+//!
+//! Spans are still emitted, and are useful without an exporter: every MCP tool
+//! call runs inside a `mcp.tool_call` span (see `server::dispatch`) carrying the
+//! tool name, a per-call id and the duration; tool failures are recorded as
+//! `error` events inside that span. They land in the process log, and with no
+//! exporter they go no further — which the startup line now says out loud.
+//!
+//! Adding the real exporter
+//! ------------------------
+//! It needs `opentelemetry` + `opentelemetry-otlp` + `tracing-opentelemetry`
+//! (tonic/prost; roughly triples cold-build time by the old note in
+//! `Cargo.toml`), so the dependency set stays a separate decision and the
+//! `telemetry` feature currently pulls in nothing. When it lands: install the
+//! layer inside [`init`], flip [`OTLP_EXPORTER_COMPILED_IN`], and add a success
+//! variant to [`TelemetryStatus`]. `main` and the tests branch on
+//! [`TelemetryStatus::level`] / [`TelemetryStatus::message`] — never on
+//! `cfg!(feature)` — so nothing outside this module has to change.
 
 use std::env;
 
-/// What [`init`] decided to do after looking at the environment + cargo
-/// features. Returned so `main` can log a single line about the choice — that
-/// line is the operator's "did APM actually start?" signal.
+/// Whether this binary actually ships spans to an OTLP collector.
+///
+/// `false` for every feature combination Vestige builds today, including
+/// `--features telemetry`: that feature compiles this decision surface only and
+/// adds no exporter dependency. Named (rather than an inline `false`) so the
+/// exporter work has one switch to flip, and so
+/// `no_status_reports_an_export_that_cannot_happen` can refuse to let someone
+/// flip it without also wiring the exporter and its success message.
+pub const OTLP_EXPORTER_COMPILED_IN: bool = false;
+
+/// Severity [`TelemetryStatus::message`] deserves.
+///
+/// `main` maps this onto `tracing` directly, so the wording and the level can
+/// never disagree about whether the operator has a problem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelemetryLevel {
+    /// True, but not a misconfiguration: spans exist, they just stay local.
+    Info,
+    /// The operator asked for export and this build cannot deliver it.
+    Warn,
+}
+
+/// What [`init`] found after looking at the environment + cargo features.
+/// Returned so `main` can log a single startup line about the choice — and so
+/// the tests can assert on that line through the same seam `main` uses, instead
+/// of parsing a global logger.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TelemetryStatus {
-    /// `telemetry` feature off at compile time. No endpoint will ever be
-    /// honored in this binary. Operators who hit this should rebuild with
-    /// `--features telemetry`.
+    /// `telemetry` feature off and no endpoint configured: the default, fully
+    /// local deployment. Nothing is exported, and nothing was requested.
     FeatureDisabled,
-    /// Feature compiled in, but no endpoint configured — same behavior as
-    /// `FeatureDisabled` at runtime, kept distinct so the operator sees that
-    /// the binary *could* export if they set the env var.
+    /// `telemetry` feature on, no endpoint configured. Kept distinct from
+    /// [`TelemetryStatus::FeatureDisabled`] because the operator enabled a flag
+    /// and deserves to hear that this flag still wires no exporter.
     Disabled,
-    /// Endpoint discovered and the exporter is wired into the tracing stack.
-    /// `endpoint` is what we will dial out to.
-    Initialized { endpoint: String },
+    /// An endpoint **is** configured, but no exporter is compiled in. The
+    /// operator expects a collector to receive spans and none will: this is the
+    /// case that used to log a fake success, and it must be loud.
+    NotWired { endpoint: String },
+}
+
+impl TelemetryStatus {
+    /// The level `main` logs [`TelemetryStatus::message`] at.
+    pub fn level(&self) -> TelemetryLevel {
+        match self {
+            Self::FeatureDisabled | Self::Disabled => TelemetryLevel::Info,
+            Self::NotWired { .. } => TelemetryLevel::Warn,
+        }
+    }
+
+    /// The single startup line: what telemetry is (not) doing, in operator
+    /// terms, including what to do about it.
+    ///
+    /// `main` logs exactly this string and the tests assert on exactly this
+    /// string, so the wording an operator sees and the wording the tests pin
+    /// cannot drift apart. No memory content and no secret can reach it: the
+    /// only value it interpolates is the operator's own endpoint.
+    pub fn message(&self) -> String {
+        match self {
+            Self::FeatureDisabled => "OTLP export: not available in this build — no exporter is \
+                 compiled into this binary (built without `--features telemetry`, and that feature \
+                 wires no exporter yet) and no endpoint is set. Tracing spans stay in the process \
+                 log (RUST_LOG=info); nothing is exported."
+                .to_string(),
+            Self::Disabled => "OTLP export: not available in this build — no exporter is compiled \
+                 into this binary (`--features telemetry` wires none yet) even though the feature \
+                 is enabled, and no endpoint is configured (VESTIGE_OTLP_ENDPOINT / \
+                 OTEL_EXPORTER_OTLP_ENDPOINT). Tracing spans stay in the process log; nothing is \
+                 exported."
+                .to_string(),
+            Self::NotWired { endpoint } => format!(
+                "OTLP export: endpoint {endpoint} is configured but no exporter is compiled into \
+                 this binary — no spans will be exported to it. Unset VESTIGE_OTLP_ENDPOINT / \
+                 OTEL_EXPORTER_OTLP_ENDPOINT to silence this, or accept log-only tracing \
+                 (RUST_LOG=info)."
+            ),
+        }
+    }
 }
 
 /// Telemetry configuration resolved from the environment.
@@ -62,33 +146,24 @@ impl TelemetryConfig {
     }
 }
 
-/// Initialize OTel export based on `config`. Idempotent at the call-site
-/// level: callers should call this exactly once at startup. Returns the
-/// status enum so the caller can log the outcome.
+/// Decide what telemetry is actually running, based on `config`.
 ///
-/// When the `telemetry` feature is off, this is a no-op and returns
-/// [`TelemetryStatus::FeatureDisabled`] regardless of `config`.
+/// Callers call this exactly once at startup and log
+/// [`TelemetryStatus::message`] at [`TelemetryStatus::level`]. No branch here
+/// installs anything into the tracing stack, because there is no exporter to
+/// install in any configuration: a branch whose only reachable arm was "not
+/// wired" is exactly the shape that let the old code report a success that
+/// could not happen. When the exporter lands it is installed here, and that is
+/// where [`TelemetryStatus`] grows its success variant.
 pub fn init(config: &TelemetryConfig) -> TelemetryStatus {
-    #[cfg(not(feature = "telemetry"))]
-    {
-        let _ = config;
-        TelemetryStatus::FeatureDisabled
-    }
-
-    #[cfg(feature = "telemetry")]
-    {
-        let Some(endpoint) = config.endpoint.clone() else {
-            return TelemetryStatus::Disabled;
-        };
-        // Real OTLP exporter installation lands here. We intentionally keep
-        // this branch reachable + dep-free for now so the public surface
-        // can be tested and tracing-subscriber callers can switch over to
-        // calling `telemetry::init` unconditionally.
-        tracing::info!(
-            endpoint = %endpoint,
-            "telemetry feature enabled; OTLP exporter wiring is a follow-up"
-        );
-        TelemetryStatus::Initialized { endpoint }
+    match &config.endpoint {
+        // An endpoint is the operator stating an intent: "spans should leave
+        // this process". They will not, so warn instead of logging a success.
+        Some(endpoint) => TelemetryStatus::NotWired {
+            endpoint: endpoint.clone(),
+        },
+        None if cfg!(feature = "telemetry") => TelemetryStatus::Disabled,
+        None => TelemetryStatus::FeatureDisabled,
     }
 }
 
@@ -154,6 +229,21 @@ mod tests {
         }
     }
 
+    /// Substrings that would claim spans reached a collector. The audit finding
+    /// this module fixes was a startup line saying exactly that while the
+    /// exporter admitted it did not exist.
+    const EXPORT_SUCCESS_CLAIMS: [&str; 3] = ["initialized", "exporting to", "export succeeded"];
+
+    fn assert_no_export_claim(message: &str) {
+        let lowered = message.to_lowercase();
+        for claim in EXPORT_SUCCESS_CLAIMS {
+            assert!(
+                !lowered.contains(claim),
+                "startup line reports an export that cannot happen ({claim:?}): {message}"
+            );
+        }
+    }
+
     #[test]
     fn from_env_returns_none_when_unset() {
         let _g = EnvGuard::snapshot_and_clear();
@@ -202,34 +292,109 @@ mod tests {
         assert_eq!(cfg.endpoint.as_deref(), Some("http://vestige:4317"));
     }
 
+    /// The failure mode the audit found, pinned end to end at the seam `main`
+    /// logs through: a startup with nothing configured must state that there is
+    /// no exporter, not report an export.
     #[test]
-    #[cfg(not(feature = "telemetry"))]
-    fn init_reports_feature_disabled_without_feature() {
-        let cfg = TelemetryConfig {
-            endpoint: Some("http://collector:4317".into()),
+    fn startup_without_endpoint_never_reports_an_export() {
+        let _g = EnvGuard::snapshot_and_clear();
+        let status = init(&TelemetryConfig::from_env());
+
+        let expected = if cfg!(feature = "telemetry") {
+            TelemetryStatus::Disabled
+        } else {
+            TelemetryStatus::FeatureDisabled
         };
-        assert_eq!(init(&cfg), TelemetryStatus::FeatureDisabled);
+        assert_eq!(status, expected);
+        assert_eq!(status.level(), TelemetryLevel::Info);
+
+        let message = status.message();
+        assert!(message.contains("no exporter is compiled"), "{message}");
+        assert!(message.contains("nothing is exported"), "{message}");
+        assert_no_export_claim(&message);
     }
 
+    /// The other half of the finding: `VESTIGE_OTLP_ENDPOINT` set with no
+    /// exporter compiled in used to be answered with `Initialized` + an `info!`
+    /// line. It must warn, and the warning must name the endpoint that is being
+    /// ignored so the operator knows which setting to remove.
     #[test]
-    #[cfg(feature = "telemetry")]
-    fn init_reports_disabled_when_endpoint_missing() {
-        let cfg = TelemetryConfig { endpoint: None };
-        assert_eq!(init(&cfg), TelemetryStatus::Disabled);
-    }
+    fn configured_endpoint_without_exporter_warns_and_names_the_endpoint() {
+        let _g = EnvGuard::snapshot_and_clear();
+        unsafe {
+            env::set_var("VESTIGE_OTLP_ENDPOINT", "http://collector.invalid:4317");
+        }
+        let status = init(&TelemetryConfig::from_env());
 
-    #[test]
-    #[cfg(feature = "telemetry")]
-    fn init_reports_initialized_with_endpoint() {
-        let cfg = TelemetryConfig {
-            endpoint: Some("http://collector:4317".into()),
-        };
-        let status = init(&cfg);
-        match status {
-            TelemetryStatus::Initialized { endpoint } => {
-                assert_eq!(endpoint, "http://collector:4317");
+        assert_eq!(
+            status,
+            TelemetryStatus::NotWired {
+                endpoint: "http://collector.invalid:4317".to_string()
             }
-            other => panic!("expected Initialized, got {other:?}"),
+        );
+        assert_eq!(status.level(), TelemetryLevel::Warn);
+
+        let message = status.message();
+        assert!(
+            message.contains("http://collector.invalid:4317"),
+            "{message}"
+        );
+        assert!(message.contains("no exporter is compiled"), "{message}");
+        assert!(message.contains("no spans will be exported"), "{message}");
+        assert_no_export_claim(&message);
+    }
+
+    /// The OTel-standard variable takes the same path as the
+    /// vestige-namespaced one — operators with an existing collector config
+    /// must not be the ones who get silence.
+    #[test]
+    fn standard_otel_endpoint_without_exporter_also_warns() {
+        let _g = EnvGuard::snapshot_and_clear();
+        unsafe {
+            env::set_var(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "http://standard.invalid:4318",
+            );
+        }
+        let status = init(&TelemetryConfig::from_env());
+
+        assert_eq!(status.level(), TelemetryLevel::Warn);
+        assert!(status.message().contains("http://standard.invalid:4318"));
+    }
+
+    /// Guard against re-introducing the fake success: while
+    /// [`OTLP_EXPORTER_COMPILED_IN`] is false, no status this build can report
+    /// may claim an export. Flipping the constant without wiring a real
+    /// exporter (and giving it a success variant + message) fails here on
+    /// purpose.
+    #[test]
+    fn no_status_reports_an_export_that_cannot_happen() {
+        // Written as a branch rather than `assert!(!OTLP_EXPORTER_COMPILED_IN)`:
+        // the constant is `false` today, and clippy folds that form into
+        // `assert!(true)` and rejects it under `-D warnings`, which would delete
+        // the guard instead of keeping it.
+        if OTLP_EXPORTER_COMPILED_IN {
+            panic!(
+                "an exporter is now compiled in: wire it in `init`, give TelemetryStatus a success \
+                 variant with an honest 'initialized' message, and update this test together with \
+                 the constant"
+            );
+        }
+
+        let statuses = [
+            TelemetryStatus::FeatureDisabled,
+            TelemetryStatus::Disabled,
+            TelemetryStatus::NotWired {
+                endpoint: "http://collector.invalid:4317".to_string(),
+            },
+        ];
+        for status in &statuses {
+            let message = status.message();
+            assert!(
+                message.contains("no exporter is compiled"),
+                "{status:?} must state that no exporter exists: {message}"
+            );
+            assert_no_export_claim(&message);
         }
     }
 }

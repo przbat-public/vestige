@@ -62,7 +62,7 @@ Niche knobs read at runtime. Defaults are sensible; change only with a reason.
 | `VESTIGE_REQUEST_TIMEOUT_SECS` | `300` | Per-request budget for the HTTP MCP transport |
 | `VESTIGE_CORS_ORIGINS` | — | Comma-separated extra CORS origins for the HTTP MCP transport |
 | `VESTIGE_HUB_SYNTHESIS` | heuristic | Set to `llm` to enable LLM-based topic-hub naming (otherwise heuristic) |
-| `VESTIGE_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP exporter endpoint (requires `telemetry` build; `VESTIGE_`-prefixed wins) |
+| `VESTIGE_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP endpoint. No exporter is compiled into the binary today (the `telemetry` feature is an empty placeholder), so setting this produces a startup warning naming the ignored endpoint — nothing is exported. `VESTIGE_`-prefixed wins |
 | `VESTIGE_MMR` | off | Enable Maximal-Marginal-Relevance diversity reordering of search results (helps multi-hop synthesis) |
 | `VESTIGE_MMR_LAMBDA` | `0.7` | MMR relevance/diversity trade-off in `[0,1]` (1.0 = pure relevance) |
 | `VESTIGE_LATE_INTERACTION` | off | Use the ColBERT late-interaction reranker instead of the Jina cross-encoder (requires the `late-interaction` build + `VESTIGE_COLBERT_MODEL_DIR`) |

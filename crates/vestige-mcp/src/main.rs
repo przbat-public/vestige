@@ -178,21 +178,18 @@ async fn main() {
         env!("CARGO_PKG_VERSION")
     );
 
-    // Optional OTLP exporter (opt-in via `--features telemetry`). Logged once
-    // so operators can confirm whether spans will actually be shipped.
+    // OTLP export decision. No exporter is compiled into this binary in any
+    // feature configuration, so this logs what is true rather than what the
+    // endpoint suggests: the revision this replaces logged "telemetry exporter
+    // initialized" for an export that never happened, and ignored a configured
+    // endpoint silently. `level`/`message` are the module's single seam — the
+    // same strings its tests assert on — so the line an operator reads and the
+    // line the tests pin cannot drift.
     let telemetry_status =
         vestige_mcp::telemetry::init(&vestige_mcp::telemetry::TelemetryConfig::from_env());
-    match &telemetry_status {
-        vestige_mcp::telemetry::TelemetryStatus::Initialized { endpoint } => {
-            info!(otlp_endpoint = %endpoint, "telemetry exporter initialized");
-        }
-        vestige_mcp::telemetry::TelemetryStatus::Disabled => {
-            info!("telemetry feature compiled in but no endpoint set; export disabled");
-        }
-        vestige_mcp::telemetry::TelemetryStatus::FeatureDisabled => {
-            // Stay quiet by default — this is the most common production path
-            // and we already log at higher levels of importance elsewhere.
-        }
+    match telemetry_status.level() {
+        vestige_mcp::telemetry::TelemetryLevel::Warn => warn!("{}", telemetry_status.message()),
+        vestige_mcp::telemetry::TelemetryLevel::Info => info!("{}", telemetry_status.message()),
     }
 
     // Initialize storage with optional custom data directory
