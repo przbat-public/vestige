@@ -914,8 +914,12 @@ This does not mean the atomic rule is wrong — it is well-suited to a store wit
 - [Mem0 open-source custom instructions](https://docs.mem0.ai/open-source/features/custom-instructions) — describes the feature; the prompt text itself is in the repository, which is what is quoted above.
 
 **Unverified / could not confirm:**
-- MemoryOS's actual extraction prompt (not published in the paper text retrieved).
 - Whether the current `letta-ai/letta-code` runtime still uses the exact `archival_memory_insert` docstring quoted above (it is from a pinned commit of the archived `letta-ai/letta` tree).
 - Cognee's temporal-graph prompt (the path I probed 404s; a `generate_temporal_graph_prompt.txt` may exist under a different name — not confirmed).
 - Zep's Graphiti v3 docs pages (`adding-fact-triples`, `searching`) render client-side; the prompt files in the Apache-2.0 repository were used instead.
 - `legendary-mcp`'s benchmark methodology and results (page referenced but not read).
+- MemoryOS's reported ablation figures (rasterized in a figure; the numeric table survives only commented-out in the arXiv LaTeX) — see §6.9.
+- Whether MemoryOS's paper-reported numbers came from the shipped code at all: the eval harness constants (heat weights, recency units, STM capacity) disagree with the paper, and eviction is LFU rather than heat-based.
+
+**Not found in any system surveyed** (a genuine gap, not an unverified claim):
+- **No prompt anywhere resolves a bare file path into a self-contained statement.** The closest is Cognee's code-retrieval prompt, which treats filenames as *query* keys rather than as memory anchors, and MemOS, which stores `doc_path` as provenance only. This is the gap Vestige's complaint (a) falls into and is why §5 and §7.1-C lean on a small dedicated project rather than on any established system.

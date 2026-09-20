@@ -72,6 +72,20 @@ To nie jest wina modelu. Kanoniczne instrukcje repozytorium **nakazują** oba an
   'recently' are relative, and the memory is persisted indefinitely"*.
   ([sleeptime.txt](https://raw.githubusercontent.com/letta-ai/letta/0.7.0/letta/prompts/system/sleeptime.txt))
 
+**Kontrprzykład, który warto zobaczyć, bo wygląda znajomo.** MemoryOS **publikuje** swój prompt
+ekstrakcji (w repozytorium, nie w pracy) i jest w nim dokładnie ta instrukcja, po której powstają
+skrawki: *„Be extremely concise and factual in your extensions. Use the shortest possible phrases."*
+plus szablon `- [Brief fact]: [Minimal context (Including entities and time)]` — bez reguły
+o zaimkach, bez wymogu samodzielności, bez zakazu uogólnień. Polecenie „jak najkrócej" bez reguły
+mówiącej, co czyni krótką frazę zrozumiałą, to udokumentowany generator klasy wspomnień, którą
+zgłaszasz. ([prompts.py](https://raw.githubusercontent.com/BAI-LAB/MemoryOS/main/memoryos-chromadb/prompts.py))
+
+**Czego nie robi żaden z ośmiu zbadanych systemów:** żaden nie zamienia **nagiej ścieżki pliku**
+w zdanie samodzielne. Cognee traktuje nazwy plików jako klucze zapytań, MemOS trzyma `doc_path`
+wyłącznie jako proweniencję. To jest dokładnie luka, w którą wpada skarga o „plik i linia" — i dlatego
+rekomendacja z §5.1 opiera się na małym, dedykowanym projekcie (legendary-mcp), a nie na którymkolwiek
+z uznanych systemów.
+
 **Czego świadomie nie zapisywać:**
 
 - **Claude Code** — *„Claude skips anything it can derive from the codebase, such as architecture,
@@ -103,13 +117,19 @@ To nie jest wina modelu. Kanoniczne instrukcje repozytorium **nakazują** oba an
 
 ## 4. Niewygodne dane, które przestawiają priorytety
 
-Cztery pomiary mówią, czego **nie** robić i czego nie obiecywać:
+Cztery ustalenia przestawiają priorytety — pierwsze z nich jest **sporem, nie dowodem**:
 
-1. **Zapis rusza wyniki znacznie słabiej niż wyszukiwanie.** Metoda wyszukiwania zmienia dokładność
-   LoCoMo o 20 punktów, strategia zapisu o 3–8, a surowe trzyrundowe fragmenty rozmów (zero wywołań
-   LLM) biją ekstrakcję faktów w stylu Mem0. ([arXiv 2603.02473](https://ar5iv.labs.arxiv.org/html/2603.02473))
-   → Pracę przy zapisie trzeba uzasadniać **zrozumiałością i rozwiązywalnością odniesień**, nie
-   wzrostem benchmarku.
+1. **Zapis kontra wyszukiwanie — spór jest nierozstrzygnięty, nie rozstrzygnięty.** Jeden
+   kontrolowane badanie czynnikowe (arXiv 2603.02473) znajduje, że metoda wyszukiwania zmienia
+   dokładność LoCoMo o 20 punktów, a strategia zapisu o 3–8, i że surowe trzyrundowe fragmenty rozmów
+   (zero wywołań LLM) biją ekstrakcję faktów. Po drugiej stronie stoją **trzy raporty autorstwa
+   producentów** (mem0, Zep, MemReader) twierdzące, że struktura zapisu pomaga — a system, który ma
+   własny harness ewaluacyjny, Cognee, **wprost odmawia** twierdzenia o ablacji: *„we did not run
+   controlled ablations. The scores therefore describe the combined pipeline, not the contribution of
+   each component."* Niezależnej replikacji nie ma żadnej. ([arXiv 2603.02473](https://ar5iv.labs.arxiv.org/html/2603.02473))
+   → Kontrdowód należy nosić **obok** twierdzeń producentów, nie jako rozstrzygnięcie. Wniosek
+   operacyjny się nie zmienia: pracę przy zapisie uzasadniaj zrozumiałością i rozwiązywalnością
+   odniesień, a nie obietnicą wzrostu benchmarku.
 2. **Destylacja potrafi zaszkodzić.** Użyteczność pamięci „najpierw rośnie, potem spada i może zejść
    poniżej poziomu braku pamięci", a agenci na surowych epizodach osiągają dwukrotnie wyższą
    dokładność niż ci pod przymusem konsolidacji; w innym badaniu **0 z 121 refleksji** trafia w
@@ -170,7 +190,11 @@ Wszystkie punkty to **bramki na istniejącej maszynerii**, nie nowe podsystemy.
 - **Brak dowodu, że automatyczne dociąganie zerwanego odniesienia przy odczycie cokolwiek naprawia.**
   Działająca naprawa przy odczycie to *przeformułuj i zapytaj ponownie* (IRCoT +21 punktów
   wyszukiwania), nigdy „podążaj za wskaźnikiem".
-- **MemoryOS nie publikuje swojego promptu ekstrakcji** — twierdzenia o nim są niezweryfikowane.
+- **MemoryOS jest niereprodukowane i nie wolno cytować jego ablacji.** Prompt ekstrakcji publikuje
+  (w repo — i jest kontrprzykładem, §3), ale jego kod ewiktuje wpisy metodą LFU, **nie** „heat score"
+  opisanym w pracy, a stałe w kodzie różnią się od tych z pracy (`RECENCY_TAU_HOURS=24` vs μ=1e+7 s).
+  Liczby z ablacji są w pracy rasteryzowane w figurze, a tabela numeryczna istnieje tylko
+  zakomentowana w LaTeX-u.
 
 ---
 
