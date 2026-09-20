@@ -367,3 +367,19 @@ konsolidacji). Dlatego:
 - **Nie ogłaszamy wzrostu bez kontroli.** Każdy raport z wynikiem musi nieść informację, **jaka zmiana**
   go wywołała i czym to potwierdzono — tak jak binarka kontrolna w pomiarze FactConsolidation, gdzie
   identyczny wynik na wersji sprzed zmiany obalił pokusę przypisania sobie poprawy.
+
+---
+
+## 13. Nota procesowa: jak weryfikować „test failuje przed zmianą"
+
+Wymóg czerwonego testu jest w tym projekcie egzekwowany przez materializację wersji bazowej
+(`git archive HEAD | tar -x -C /tmp/...`) i uruchomienie tam nowych testów. Ta metoda ma pułapkę,
+która **raz dała dziewięć fałszywych porażek**: jeśli drzewo bazowe buduje się do **współdzielonego
+`target/`**, cargo potrafi uznać artefakty za „Fresh" i nadpisać binarkę testową workspace'u, a wtedy
+testy failują z powodów, których w wersji bazowej nie ma. Objaw: ten sam hash unitu w obu drzewach
+(`vestige_mcp-<hash>` niezmieniony) i porażki znikające po `cargo clean -p vestige-core -p vestige-mcp`.
+
+**Zasada:** przebiegi na wersji bazowej uruchamiaj z **osobnym `CARGO_TARGET_DIR`**. Czerwony dowód,
+który powstał w współdzielonym `target/`, jest nieważny do czasu powtórzenia — dotyczy to również
+wcześniejszych napraw w tym projekcie, gdzie komunikat błędu (`no such column`, `no such table`)
+był zgodny z rzeczywistym stanem bazy, ale sam mechanizm był narażony na to samo zakłócenie.

@@ -1,8 +1,40 @@
 //! Pure helpers used by the search pipeline (compression, overlap, gating).
 
+use chrono::{DateTime, NaiveDate, Utc};
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+/// Parse an instant from a tool argument.
+///
+/// Accepts RFC 3339 (`2026-09-01T12:00:00Z`, any offset) and a bare date
+/// (`2026-09-01`, read as midnight UTC) because a caller asking "what did we
+/// believe on 1 September" has a date, not a timestamp, and making them invent
+/// a time of day would be the tool deciding an instant they did not mean.
+///
+/// Matches the formats `memory_timeline` accepts, so one instant syntax works
+/// across the read tools.
+pub(super) fn parse_instant(raw: &str) -> Result<DateTime<Utc>, String> {
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(raw) {
+        return Ok(parsed.with_timezone(&Utc));
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        return date
+            .and_hms_opt(0, 0, 0)
+            .map(|naive| naive.and_utc())
+            .ok_or_else(|| {
+                format!(
+                    "Invalid as_of '{}'. Use ISO 8601: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ.",
+                    raw
+                )
+            });
+    }
+    Err(format!(
+        "Invalid as_of '{}'. Use ISO 8601: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ.",
+        raw
+    ))
+}
 
 // ============================================================================
 // READ PATH GATING (Oblivion pattern)

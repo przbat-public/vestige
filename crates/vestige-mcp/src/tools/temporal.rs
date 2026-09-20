@@ -20,7 +20,7 @@ pub fn schema() -> Value {
             "action": {
                 "type": "string",
                 "enum": ["current", "expired", "history", "invalidate"],
-                "description": "current: valid-now facts. expired: no-longer-valid. history: evolution of a topic. invalidate: mark a fact as no-longer-valid."
+                "description": "current: valid-now facts. expired: no-longer-valid. history: evolution of a topic — each memory also carries `lastChange`, the newest content revision (kind, record time, previous and new text, reason), so the entry shows how it changed and not only that it did; the full content chain is memory_changelog(memory_id). invalidate: mark a fact as no-longer-valid."
             },
             "topic": {
                 "type": "string",
@@ -177,6 +177,21 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
             memories.sort_by_key(|m| m.created_at);
 
             let now = Utc::now();
+            // The life-cycle status says *that* a memory changed; the newest
+            // revision says *how* and *why*. One hop per memory, not the whole
+            // chain: a topic-level read must not balloon, and the full content
+            // history already has a home in `memory_changelog`.
+            let ids: Vec<String> = memories.iter().map(|m| m.id.clone()).collect();
+            let storage_revisions = storage.clone();
+            let last_changes: Vec<Option<vestige_core::MemoryRevision>> =
+                tokio::task::spawn_blocking(move || {
+                    ids.iter()
+                        .map(|id| storage_revisions.get_latest_revision(id).ok().flatten())
+                        .collect()
+                })
+                .await
+                .map_err(|e| format!("temporal history revision task panicked: {}", e))?;
+
             // The dashboard wire DTO (`TemporalResultDto`) consumes one
             // shape across all four actions: `memories: [TemporalEntryDto]`
             // with `id`, `content`, `retention`, `tags` (+ optional
@@ -186,14 +201,16 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
             // (the array name didn't match) and would also have 502-ed
             // because `retention` was missing. Keep `createdAt` and the
             // `status` chip embedded under names the DTO ignores — the
-            // wire layer is forwards-compatible on extra fields.
+            // wire layer is forwards-compatible on extra fields — and the
+            // same goes for `lastChange`.
             Ok(serde_json::json!({
                 "action": "history",
                 "topic": query,
                 "count": memories.len(),
-                "memories": memories.iter().map(|m| {
+                "contentLimitChars": vestige_core::REVISION_CONTENT_CHAR_LIMIT,
+                "memories": memories.iter().enumerate().map(|(index, m)| {
                     let is_current = m.valid_until.is_none_or(|t| t > now);
-                    serde_json::json!({
+                    let mut entry = serde_json::json!({
                         "id": m.id,
                         "content": truncate(&m.content, 200),
                         "created_at": m.created_at.to_rfc3339(),
@@ -202,7 +219,14 @@ pub async fn execute(storage: &Arc<Storage>, args: Option<Value>) -> Result<Valu
                         "retention": format!("{:.2}", m.retention_strength),
                         "status": if is_current { "current" } else { "superseded" },
                         "tags": m.tags,
-                    })
+                    });
+                    if let Some(revision) = last_changes.get(index).and_then(|r| r.as_ref()) {
+                        entry["lastChange"] = crate::tools::search_unified::revision_json(
+                            revision,
+                            vestige_core::REVISION_CONTENT_CHAR_LIMIT,
+                        );
+                    }
+                    entry
                 }).collect::<Vec<_>>()
             }))
         }
@@ -394,6 +418,60 @@ mod tests {
         assert!(
             entry.get("retention").is_some(),
             "history entries must include `retention` (TemporalEntryDto requires it)"
+        );
+    }
+
+    /// `temporal history` answers "how did knowledge about this topic evolve",
+    /// and the life-cycle status alone does not: an entry has to say what the
+    /// memory last said, what it says now, and why it changed. The full chain
+    /// stays in `memory_changelog` so a topic-level read cannot balloon.
+    #[tokio::test]
+    async fn history_entries_carry_the_last_content_change() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let storage = Arc::new(Storage::new(Some(dir.path().join("test.db"))).unwrap());
+
+        let first = "Redis caching gives sub-ms reads when the working set fits in RAM";
+        let id = storage
+            .ingest(IngestInput {
+                content: first.to_string(),
+                node_type: "fact".to_string(),
+                tags: vec!["redis".to_string(), "caching".to_string()],
+                ..Default::default()
+            })
+            .unwrap()
+            .id;
+        let second = "Redis caching gives sub-ms reads when the working set fits in RAM, measured 2026-05-12";
+        storage
+            .update_node_content_with_revision(&id, second, Some("added the measurement date"))
+            .unwrap();
+
+        let args = Some(serde_json::json!({
+            "action": "history",
+            "topic": "redis caching",
+            "limit": 10,
+        }));
+        let result = execute(&storage, args).await.unwrap();
+
+        let entry = result["memories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == serde_json::json!(id))
+            .expect("the updated memory must appear in its topic history")
+            .clone();
+        let change = entry
+            .get("lastChange")
+            .cloned()
+            .expect("a history entry must carry the last content change");
+
+        assert_eq!(change["kind"], "edit");
+        assert_eq!(change["reason"], "added the measurement date");
+        assert_eq!(change["oldContent"], first);
+        assert!(
+            change["newContent"]
+                .as_str()
+                .is_some_and(|text| text.contains("measured 2026-05-12")),
+            "the new wording has to be there, not just the fact that it changed: {change}"
         );
     }
 }

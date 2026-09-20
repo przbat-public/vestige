@@ -35,6 +35,12 @@ pub(super) struct PipelineConfig {
     pub limit: i32,
     pub min_retention: f64,
     pub min_similarity: f32,
+    /// Record time to answer for, or `None` for "what we believe now".
+    ///
+    /// Parsed once here so the whole pipeline — retrieval filter, formatting,
+    /// response echo — reads the same instant, and an invalid argument fails
+    /// before any work is done.
+    pub as_of: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Output of the retrieval phase — the candidate set and the dedup count.

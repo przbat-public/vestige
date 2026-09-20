@@ -80,11 +80,33 @@ pub(in crate::tools::search_unified) async fn run(
     .await?;
 
     // Cheap filters — retention floor, semantic floor, temporal validity.
+    //
+    // With `as_of` the temporal filter changes meaning: "valid now" is the wrong
+    // question for a past instant, and applying it would hide exactly the
+    // memories the parameter exists to surface (one retracted *after* the
+    // instant was the current belief *at* it, yet its `valid_until` lies before
+    // today). The record-time rule below replaces it.
     let now = chrono::Utc::now();
+    let retracted = match config.as_of {
+        Some(at) => retracted_at_or_before(storage, at, &raw).await?,
+        None => std::collections::HashSet::new(),
+    };
     let mut filtered_results: Vec<SearchResult> = raw
         .into_iter()
         .filter(|r| {
-            if let Some(valid_until) = r.node.valid_until
+            if let Some(at) = config.as_of {
+                // Existed: it had been written down by then.
+                if r.node.recorded_at > at {
+                    return false;
+                }
+                // Still believed: nothing had retracted it by then. The valid
+                // window is *reported* (see `format_search_result`), never used
+                // as a filter here — it answers "when was this true", and mixing
+                // the two clocks returns a set that matches neither question.
+                if retracted.contains(&r.node.id) {
+                    return false;
+                }
+            } else if let Some(valid_until) = r.node.valid_until
                 && valid_until < now
             {
                 return false;
@@ -202,8 +224,25 @@ pub(in crate::tools::search_unified) async fn run(
     }))
 }
 
-/// Token sets for a candidate list, built once per candidate.
+/// Which of the candidates the store had already retracted at `at`.
 ///
+/// One query for the whole candidate page, on the blocking pool, and only when
+/// `as_of` was asked for: the default read path pays nothing for a parameter it
+/// did not receive.
+async fn retracted_at_or_before(
+    storage: &Arc<Storage>,
+    at: chrono::DateTime<chrono::Utc>,
+    candidates: &[SearchResult],
+) -> Result<std::collections::HashSet<String>, String> {
+    let ids: Vec<String> = candidates.iter().map(|r| r.node.id.clone()).collect();
+    let storage = Arc::clone(storage);
+    tokio::task::spawn_blocking(move || storage.retracted_node_ids_at_or_before(at, &ids))
+        .await
+        .map_err(|e| format!("as_of retraction lookup panicked: {}", e))?
+        .map_err(|e| e.to_string())
+}
+
+/// Token sets for a candidate list, built once per candidate.///
 /// Both stages below compare pairs, and rebuilding the sets inside
 /// `content_overlap` cost two builds per comparison: the dedup stage alone paid up
 /// to n(n−1) builds per search with nothing removed (n = 6 → 30 comparison-pairs'

@@ -47,10 +47,19 @@ fn code_refs_json(code_refs: &[vestige_core::CodeRef]) -> Option<Value> {
 /// Every detail level carries them: `brief` is what a reader scans first, and an
 /// anchor verdict that only appears at `full` is a warning most readers never
 /// reach.
+///
+/// `as_of` is the record time the answer was asked for, if any. When it is set,
+/// the result gains the two fields that make the answer readable: the memory's
+/// own `recordedAt` (how old the belief already was at that instant — `brief`
+/// otherwise drops dates) and `validityAtAsOf`, the valid-time window's standing
+/// *at that instant*. The window is reported rather than filtered on, because
+/// "what did we believe then" and "what was true then" are different questions
+/// and one flag cannot answer both.
 pub(super) fn format_search_result(
     r: &vestige_core::SearchResult,
     detail_level: &str,
     code_refs: &[vestige_core::CodeRef],
+    as_of: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Value {
     let anchors = code_refs_json(code_refs);
     let mut formatted = match detail_level {
@@ -117,7 +126,78 @@ pub(super) fn format_search_result(
     if let Some(anchors) = anchors {
         formatted["codeRefs"] = anchors;
     }
+    if let Some(at) = as_of {
+        if formatted.get("recordedAt").is_none() {
+            formatted["recordedAt"] = serde_json::json!(r.node.recorded_at.to_rfc3339());
+        }
+        formatted["validityAtAsOf"] = serde_json::json!(r.node.validity_at(at).as_str());
+    }
     formatted
+}
+
+/// The first `limit` characters of a revision's text, plus whether it was cut.
+///
+/// Character-based, not byte-based: a byte slice would panic on a multi-byte
+/// boundary, and half a character is not a truncation a reader can act on.
+fn capped(text: Option<&str>, limit: usize) -> (Option<String>, bool) {
+    match text {
+        None => (None, false),
+        Some(text) if text.chars().count() <= limit => (Some(text.to_string()), false),
+        Some(text) => (Some(text.chars().take(limit).collect()), true),
+    }
+}
+
+/// One step of a memory's content timeline, as `memory_changelog` and
+/// `temporal history` both render it.
+///
+/// The shape is shared on purpose: a reader who learns "`oldContentTruncated`
+/// means the text was cut at `contentLimitChars`" in one tool must not have to
+/// learn a second shape in the other.
+///
+/// `contentField` names what `oldContent` / `newContent` actually hold. For
+/// every kind but `invalidate` they are the memory's text; an `invalidate`
+/// stores the previous and new `valid_until` instead, because that is the state
+/// that operation changed — without the label those two values read as text and
+/// a reader would take a timestamp for prose.
+pub fn revision_json(revision: &vestige_core::MemoryRevision, content_limit_chars: usize) -> Value {
+    use vestige_core::RevisionKind;
+
+    let field = match revision.kind {
+        RevisionKind::Invalidate => "validUntil",
+        _ => "content",
+    };
+    let (old_content, old_truncated) = capped(revision.old_content.as_deref(), content_limit_chars);
+    let (new_content, new_truncated) = capped(revision.new_content.as_deref(), content_limit_chars);
+
+    serde_json::json!({
+        "id": revision.id,
+        "recordedAt": revision.recorded_at.to_rfc3339(),
+        "kind": revision.kind.as_str(),
+        "contentField": field,
+        "oldContent": old_content,
+        "newContent": new_content,
+        "oldContentTruncated": old_truncated,
+        "newContentTruncated": new_truncated,
+        "reason": revision.reason,
+        "actor": revision.actor,
+    })
+}
+
+/// A memory's content history as a timeline: oldest step first.
+///
+/// `newest_first` is what storage returns, because that is the order a *page*
+/// wants (the newest N). A timeline is read forward, so the page is reversed
+/// here: the caller gets the newest N steps in the order they happened, which is
+/// the order that answers "how did this change" and "what did it say on date X".
+pub fn revision_timeline_json(
+    newest_first: &[vestige_core::MemoryRevision],
+    content_limit_chars: usize,
+) -> Vec<Value> {
+    newest_first
+        .iter()
+        .rev()
+        .map(|revision| revision_json(revision, content_limit_chars))
+        .collect()
 }
 
 /// Format a KnowledgeNode based on the requested detail level.
@@ -162,5 +242,30 @@ pub fn format_node(node: &vestige_core::KnowledgeNode, detail_level: &str) -> Va
             "tags": node.tags,
             "retentionStrength": node.retention_strength,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Truncation is character-based. A byte slice would panic on a multi-byte
+    /// boundary, and this store is bilingual — the memories it truncates are
+    /// exactly the ones that contain Polish text.
+    #[test]
+    fn capped_cuts_on_character_boundaries() {
+        let text = "ż".repeat(600);
+        let (cut, truncated) = capped(Some(&text), 500);
+
+        assert!(truncated, "600 characters must be reported as cut at 500");
+        assert_eq!(cut.unwrap().chars().count(), 500);
+
+        let (whole, truncated) = capped(Some("krótko"), 500);
+        assert!(!truncated);
+        assert_eq!(whole.as_deref(), Some("krótko"));
+
+        let (absent, truncated) = capped(None, 500);
+        assert!(absent.is_none());
+        assert!(!truncated, "a revision with no text is not a truncated one");
     }
 }

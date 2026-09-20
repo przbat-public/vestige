@@ -619,3 +619,78 @@ fn an_edit_records_the_actor_it_was_given() {
         "a caller that knows no actor must not have one invented for it"
     );
 }
+
+/// Retraction is read from the revisions, not from `valid_until`, and "at or
+/// before the instant" is what decides: a memory taken back before the instant
+/// was no longer believed then, and one taken back after it still was.
+///
+/// This is the storage half of the as-of search filter. Reading `valid_until`
+/// instead would call a write-time validity anchor ("this holds until Friday") a
+/// retraction, and would miss that a memory superseded after the instant was the
+/// current belief at it.
+#[test]
+fn retraction_is_dated_by_the_revision_not_by_the_validity_bound() {
+    let storage = create_test_storage();
+    let retracted_before = ingest(&storage, "the release channel is stable-3.4");
+    let retracted_after = ingest(&storage, "the release channel is stable-3.5");
+    let never_retracted = ingest(&storage, "the release channel is stable-3.6");
+
+    let at = Utc::now();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    storage
+        .invalidate_with_revision(
+            &retracted_before.id,
+            Utc::now(),
+            Some("superseded by stable-3.5"),
+        )
+        .unwrap();
+
+    let candidates: Vec<String> = vec![
+        retracted_before.id.clone(),
+        retracted_after.id.clone(),
+        never_retracted.id.clone(),
+    ];
+    let before = storage
+        .retracted_node_ids_at_or_before(at, &candidates)
+        .unwrap();
+    assert!(
+        before.is_empty(),
+        "nothing had been retracted at the instant, so nothing may be filtered: {before:?}"
+    );
+
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let later = Utc::now();
+    let after = storage
+        .retracted_node_ids_at_or_before(later, &candidates)
+        .unwrap();
+    assert!(
+        after.contains(&retracted_before.id),
+        "the invalidate revision predates the later instant: {after:?}"
+    );
+    assert_eq!(
+        after.len(),
+        1,
+        "a memory with no retraction revision is not retracted: {after:?}"
+    );
+
+    // An empty candidate list is a caller asking about nothing, not a reason to
+    // scan the table.
+    assert!(
+        storage
+            .retracted_node_ids_at_or_before(later, &[])
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// The rendered timeline's content cap is part of the read contract every client
+/// renders truncation from, so its value is pinned here — the same way the
+/// dashboard's limits are pinned — and a change has to be deliberate.
+#[test]
+fn revision_content_cap_is_the_documented_value() {
+    assert_eq!(
+        crate::REVISION_CONTENT_CHAR_LIMIT,
+        500,
+        "the cap is advertised in tool output; changing it changes the wire contract"
+    );
+}

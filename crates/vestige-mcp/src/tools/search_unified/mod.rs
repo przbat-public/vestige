@@ -28,5 +28,5 @@ mod schema;
 mod tests;
 
 pub use execute::execute;
-pub use format::format_node;
+pub use format::{format_node, revision_json, revision_timeline_json};
 pub use schema::schema;

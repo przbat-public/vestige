@@ -18,7 +18,7 @@
 //! history rows are the one place where a client-supplied timestamp would let
 //! a later writer silently rewrite the past.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use super::records::{MemoryRevision, RevisionKind};
@@ -27,6 +27,26 @@ use super::{Result, Storage};
 // is not there must say so instead of reporting success.
 #[cfg(test)]
 use super::StorageError;
+
+/// How much of one revision's `old_content` / `new_content` a rendered timeline
+/// carries, in characters.
+///
+/// An edit stores two full copies of a memory's text, and a history page holds
+/// up to a hundred of them, so a timeline that renders everything verbatim stops
+/// being a timeline and becomes a payload. The cap is public — and every reader
+/// that applies it also reports it, together with a per-field `…Truncated`
+/// marker — so a client renders the truncation from the payload instead of
+/// hard-coding the number and drifting away from the server.
+pub const REVISION_CONTENT_CHAR_LIMIT: usize = 500;
+
+/// The revision kinds that take a memory back: after one of these, the store no
+/// longer asserted the memory was the current picture.
+///
+/// Named here because the *same* list decides both what a reader may be shown as
+/// believed at a past instant (`Storage::retracted_node_ids_at_or_before`) and
+/// what the timeline calls a retraction. A second copy of it in a caller is how
+/// those two answers start disagreeing.
+pub const RETRACTION_KINDS: [RevisionKind; 2] = [RevisionKind::Invalidate, RevisionKind::Supersede];
 
 impl Storage {
     /// Append one revision row inside a caller-owned transaction.
@@ -129,12 +149,79 @@ impl Storage {
         Ok(revision)
     }
 
-    /// Count a node's revisions straight from the table.
+    /// Which of `candidates` the store had already taken back at or before `at`.
     ///
-    /// Exists so a test can assert "exactly one revision" against the stored
-    /// rows rather than against a read path that might itself filter.
-    #[cfg(test)]
-    pub(super) fn count_revisions(&self, node_id: &str) -> Result<i64> {
+    /// This is the half of "what did we believe at instant T" that the node row
+    /// cannot answer on its own. `recorded_at <= T` says a memory existed; it
+    /// does not say whether it was still the current picture, and today's
+    /// `valid_until` is the wrong clock for that question — a memory superseded
+    /// *after* T was the belief *at* T even though its `valid_until` lies in T's
+    /// future, and one invalidated *before* T was already gone even though the
+    /// revision that says so is the only place that fact survives.
+    ///
+    /// Read from the revisions rather than from `valid_until` on purpose: a
+    /// validity bound can also be anchored at write time as a claim about the
+    /// world ("this holds until Friday"), which is not a retraction and must not
+    /// be scored as one. Only an `invalidate` / `supersede` row is the store
+    /// saying "we no longer assert this".
+    ///
+    /// A row whose `recorded_at` cannot be parsed counts as a retraction: this
+    /// decides whether a memory may be presented as believed, and a timestamp
+    /// nobody can read is not evidence that it was.
+    pub fn retracted_node_ids_at_or_before(
+        &self,
+        at: DateTime<Utc>,
+        candidates: &[String],
+    ) -> Result<std::collections::HashSet<String>> {
+        let mut retracted = std::collections::HashSet::new();
+        if candidates.is_empty() {
+            return Ok(retracted);
+        }
+
+        let kind_list = RETRACTION_KINDS
+            .iter()
+            .map(|kind| format!("'{}'", kind.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let placeholders = (1..=candidates.len())
+            .map(|i| format!("?{}", i))
+            .collect::<Vec<_>>()
+            .join(", ");
+        // The `kind` list is built from the closed enum above, never from input,
+        // so the only bound parameters are the candidate ids themselves.
+        let sql = format!(
+            "SELECT node_id, recorded_at FROM memory_revisions
+             WHERE kind IN ({kind_list}) AND node_id IN ({placeholders})"
+        );
+
+        let reader = self.acquire_reader()?;
+        let mut stmt = reader.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = candidates
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        for row in rows {
+            let (node_id, recorded_at) = row?;
+            let was_retracted = DateTime::parse_from_rfc3339(&recorded_at)
+                .map(|stamp| stamp.with_timezone(&Utc) <= at)
+                .unwrap_or(true);
+            if was_retracted {
+                retracted.insert(node_id);
+            }
+        }
+        Ok(retracted)
+    }
+
+    /// How many revisions a node has, in total.
+    ///
+    /// A page of history is not the history: a caller that renders the newest
+    /// `limit` steps has to be able to say how many older steps it left out, or
+    /// a truncated timeline reads as a complete one.
+    pub fn count_revisions(&self, node_id: &str) -> Result<i64> {
         let reader = self.acquire_reader()?;
         Ok(reader.query_row(
             "SELECT COUNT(*) FROM memory_revisions WHERE node_id = ?1",

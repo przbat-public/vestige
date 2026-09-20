@@ -112,6 +112,7 @@ pub use records::{
     CodeRef, ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,
     IntentionRecord, MemoryRevision, MemoryStateRecord, RevisionKind, StateTransitionRecord,
 };
+pub use revisions::{RETRACTION_KINDS, REVISION_CONTENT_CHAR_LIMIT};
 pub use search::{
     DEFAULT_HYBRID_KEYWORD_WEIGHT, DEFAULT_HYBRID_SEMANTIC_WEIGHT, default_hybrid_weights,
 };

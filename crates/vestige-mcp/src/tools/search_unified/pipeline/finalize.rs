@@ -48,7 +48,7 @@ pub(in crate::tools::search_unified) async fn run(
                 .get(&r.node.id)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            format_search_result(r, config.detail_level, anchors)
+            format_search_result(r, config.detail_level, anchors, config.as_of)
         })
         .collect();
 
@@ -66,6 +66,14 @@ pub(in crate::tools::search_unified) async fn run(
         "results": formatted,
     });
 
+    if let Some(at) = config.as_of {
+        // Echo the instant and *which clock* answered for it. A reader handed
+        // "what we believed on 1 September" has to be able to tell that this is
+        // the record-time reading and not the valid-time one — the two differ,
+        // and only one of them was asked for.
+        response["asOf"] = serde_json::json!(at.to_rfc3339());
+        response["asOfBasis"] = serde_json::json!("record_time");
+    }
     if formatted.is_empty() {
         response["hint"] = serde_json::json!(
             "No memories found. Use smart_ingest to add memories, or try a broader query."

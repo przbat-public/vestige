@@ -1149,6 +1149,252 @@ async fn a_result_with_no_anchors_carries_no_code_refs_field() {
     }
 }
 
+// ========================================================================
+// as_of — what the store believed at a past instant
+// ========================================================================
+//
+// `as_of` asks a *record-time* question: what had been written down by then and
+// not yet retracted. These tests pin the three cases that make the question
+// worth asking, plus the boundary of the validity window it reports rather than
+// filters on.
+
+/// A memory recorded after the instant did not exist yet, so the answer to
+/// "what did we believe then" must not contain it.
+#[tokio::test]
+async fn test_search_as_of_excludes_a_memory_recorded_after_the_instant() {
+    let (storage, _dir) = test_storage().await;
+    ingest_test_content(
+        &storage,
+        "The staging database password rotation happens on Monday morning",
+    )
+    .await;
+
+    let instant = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "query": "staging database password rotation",
+            "min_similarity": 0.0,
+            "as_of": instant,
+        })),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        value["asOf"], instant,
+        "the response must echo the instant it answered for: {value}"
+    );
+    assert_eq!(
+        value["total"], 0,
+        "a memory recorded after `as_of` did not exist yet: {value}"
+    );
+    assert!(
+        value["results"].as_array().unwrap().is_empty(),
+        "and it must not be smuggled into the result list: {value}"
+    );
+}
+
+/// The case that makes `as_of` worth building: a memory was the current belief
+/// at the instant, and today's retrieval suppresses it because it was retracted
+/// afterwards. Reporting today's answer for a past instant is the bug this
+/// parameter exists to avoid.
+#[tokio::test]
+async fn test_search_as_of_returns_a_memory_retracted_after_the_instant() {
+    let (storage, _dir) = test_storage().await;
+    let id = ingest_test_content(&storage, "The release channel is stable-3.4").await;
+
+    // A record time strictly between the create and the retraction: at that
+    // instant the memory was on record and nothing had taken it back.
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    let instant = chrono::Utc::now();
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    storage
+        .set_valid_until(&id, chrono::Utc::now())
+        .expect("retracting the memory must write its invalidate revision");
+
+    let today = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "query": "release channel stable",
+            "min_similarity": 0.0,
+        })),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        today["total"], 0,
+        "premise: today's retrieval already suppresses the retracted memory: {today}"
+    );
+
+    let then = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "query": "release channel stable",
+            "min_similarity": 0.0,
+            "as_of": instant.to_rfc3339(),
+        })),
+    )
+    .await
+    .unwrap();
+
+    let results = then["results"].as_array().unwrap();
+    assert_eq!(
+        results.len(),
+        1,
+        "at the instant the memory was the current belief: {then}"
+    );
+    assert_eq!(results[0]["id"], id);
+    assert_eq!(
+        results[0]["validityAtAsOf"], "true",
+        "the retraction happened after the instant, so the claim still held: {then}"
+    );
+    assert!(
+        results[0]["recordedAt"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()),
+        "an as-of answer has to date the belief it reports: {then}"
+    );
+}
+
+/// The other half of the same rule: a memory that had already been taken back
+/// before the instant was *not* the belief then. Today's `valid_until` cannot
+/// tell the two cases apart — both lie in the past — so the retraction's own
+/// record time is what decides.
+#[tokio::test]
+async fn test_search_as_of_excludes_a_memory_retracted_before_the_instant() {
+    let (storage, _dir) = test_storage().await;
+    let id = ingest_test_content(&storage, "The release channel is stable-3.4").await;
+    storage.set_valid_until(&id, chrono::Utc::now()).unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    let instant = chrono::Utc::now();
+
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "query": "release channel stable",
+            "min_similarity": 0.0,
+            "as_of": instant.to_rfc3339(),
+        })),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        value["total"], 0,
+        "a memory retracted before the instant was not believed then: {value}"
+    );
+    assert_eq!(value["asOf"], instant.to_rfc3339());
+}
+
+/// The validity window is *reported*, not filtered, and its boundary is
+/// half-open: `valid_until` names the instant the claim stopped holding, so a
+/// window that ends exactly at `as_of` had already stopped being true.
+#[tokio::test]
+async fn test_search_as_of_reports_the_validity_window_at_its_boundary() {
+    let (storage, _dir) = test_storage().await;
+    // Slightly ahead of now so the record-time side cannot be what decides the
+    // answer: this test is about the validity boundary alone.
+    let instant = chrono::Utc::now() + chrono::Duration::milliseconds(50);
+    storage
+        .ingest(IngestInput {
+            content: "The audit window closed on the last day of the quarter".to_string(),
+            node_type: "fact".to_string(),
+            valid_from: Some(instant),
+            valid_until: Some(instant),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "query": "audit window closed quarter",
+            "min_similarity": 0.0,
+            "as_of": instant.to_rfc3339(),
+        })),
+    )
+    .await
+    .unwrap();
+
+    let results = value["results"].as_array().unwrap();
+    assert_eq!(
+        results.len(),
+        1,
+        "a validity window is evidence, not a filter, so the memory is returned: {value}"
+    );
+    assert_eq!(
+        results[0]["validityAtAsOf"], "expired",
+        "`valid_until` at or before the instant means the claim had stopped holding: {value}"
+    );
+}
+
+/// An existing caller must not change behaviour: without `as_of` the response
+/// is the one this pipeline produced before the parameter existed.
+#[tokio::test]
+async fn test_search_without_as_of_keeps_todays_answer_and_shape() {
+    let (storage, _dir) = test_storage().await;
+    let id = ingest_test_content(&storage, "The release channel is stable-3.4").await;
+    storage.set_valid_until(&id, chrono::Utc::now()).unwrap();
+
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "query": "release channel stable",
+            "min_similarity": 0.0,
+        })),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        value.get("asOf").is_none(),
+        "no `as_of` in, no as-of fields out: {value}"
+    );
+    assert_eq!(
+        value["total"], 0,
+        "the retracted memory stays suppressed: {value}"
+    );
+    for result in value["results"].as_array().unwrap() {
+        assert!(
+            result.get("validityAtAsOf").is_none(),
+            "the default answer carries no as-of annotation: {result}"
+        );
+    }
+}
+
+/// The parameter is documented where it is defined, and it is additive: the
+/// schema names it in snake_case like every other optional argument.
+#[test]
+fn test_schema_documents_as_of_as_an_optional_record_time_question() {
+    let schema_value = schema();
+    let as_of = &schema_value["properties"]["as_of"];
+    assert!(
+        as_of.is_object(),
+        "the tool must advertise `as_of`: {schema_value}"
+    );
+    assert_eq!(as_of["type"], "string");
+    let description = as_of["description"].as_str().unwrap_or_default();
+    assert!(
+        description.contains("record"),
+        "the description has to name the clock it reads: {description}"
+    );
+    assert!(
+        !schema_value["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("as_of")),
+        "`as_of` must stay optional: {schema_value}"
+    );
+}
+
 /// `brief` is the level a reader scans first, so the verdict has to be there
 /// too — a warning that only appears at `full` is a warning most readers never
 /// reach.

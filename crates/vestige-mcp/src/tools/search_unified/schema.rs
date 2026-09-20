@@ -54,6 +54,10 @@ pub fn schema() -> Value {
                 "description": "precise: top results only (fast, token-efficient, skips activation/competition). balanced: full cognitive pipeline (default). exhaustive: maximum recall with 5x overfetch, deep graph traversal, no competition suppression.",
                 "enum": ["precise", "balanced", "exhaustive"],
                 "default": "balanced"
+            },
+            "as_of": {
+                "type": "string",
+                "description": "Ask what the store BELIEVED at a past instant instead of what it believes now — a record-time question, not a valid-time one. Format: ISO 8601, either a full timestamp ('2026-09-01T12:00:00Z') or a date ('2026-09-01', read as midnight UTC). A memory is included when its record time (recordedAt) is at or before the instant AND nothing had retracted it by then (no invalidate/supersede revision recorded at or before it) — so a memory that was superseded after the instant comes back as the belief that was current then. The valid-time window (validFrom/validUntil) is NOT used to filter, because 'when was this true' is a different question; each result instead carries validityAtAsOf (true | not_yet_true | expired | unbounded) so you can read the valid-time answer off the same rows. Omit for today's answer, which is unchanged."
             }
         },
         "required": ["query"]

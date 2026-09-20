@@ -165,6 +165,46 @@ impl std::fmt::Display for MemoryKind {
 // KNOWLEDGE NODE
 // ============================================================================
 
+/// Where a memory's *valid time* window stands at one instant.
+///
+/// The three clocks are deliberately separate: `recorded_at` is when we wrote a
+/// memory down, `valid_from`/`valid_until` are when its claim about the world
+/// held, and `last_accessed` is when we last read it. A reader who asks "what
+/// did we believe at instant T" is asking a *record-time* question, and
+/// filtering that answer on valid time as well would return a set that answers
+/// neither question. The read path therefore reports this value next to the
+/// result instead, so the caller can apply the valid-time reading themselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidityAt {
+    /// Both bounds were open: the memory carried no validity window at all.
+    Unbounded,
+    /// `valid_from` is after the instant — the claim had not started holding.
+    NotYetTrue,
+    /// The instant falls inside the window.
+    True,
+    /// `valid_until` is at or before the instant — the claim had stopped holding.
+    Expired,
+}
+
+impl ValidityAt {
+    /// The name this value is reported under on the wire.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unbounded => "unbounded",
+            Self::NotYetTrue => "not_yet_true",
+            Self::True => "true",
+            Self::Expired => "expired",
+        }
+    }
+}
+
+impl std::fmt::Display for ValidityAt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// A knowledge node in the memory graph
 ///
 /// Combines multiple memory science models:
@@ -394,6 +434,31 @@ impl KnowledgeNode {
         let after_start = self.valid_from.map(|t| time >= t).unwrap_or(true);
         let before_end = self.valid_until.map(|t| time <= t).unwrap_or(true);
         after_start && before_end
+    }
+
+    /// Where this memory's validity window stands at `at`.
+    ///
+    /// The window is treated as **half-open** `[valid_from, valid_until)`:
+    /// `valid_until` names the instant the claim *stopped* holding, so a window
+    /// that ends exactly at `at` has already expired, while one that starts
+    /// exactly at `at` has just become true. This differs from
+    /// [`Self::is_valid_at`], which still counts the closing instant as valid —
+    /// kept as it is because the flag has callers that would change behaviour,
+    /// and the two readings only disagree on the boundary instant itself.
+    pub fn validity_at(&self, at: DateTime<Utc>) -> ValidityAt {
+        // `not yet true` first: a window whose start is after `at` has not
+        // opened, even if its end is also already behind it (an inverted window
+        // is never open, and "has not opened" is the honest reading of that).
+        if self.valid_from.is_some_and(|from| from > at) {
+            return ValidityAt::NotYetTrue;
+        }
+        if self.valid_until.is_some_and(|until| until <= at) {
+            return ValidityAt::Expired;
+        }
+        if self.valid_from.is_none() && self.valid_until.is_none() {
+            return ValidityAt::Unbounded;
+        }
+        ValidityAt::True
     }
 
     /// Check if this node is currently valid (now)
@@ -654,6 +719,49 @@ mod tests {
         ] {
             assert_eq!(NodeType::parse_name(node_type.as_str()), node_type);
         }
+    }
+
+    /// The valid-time window is half-open at its end: `valid_until` names the
+    /// instant the claim *stopped* holding. This is the reading the as-of read
+    /// path documents, and the boundary is exactly where the three conventions
+    /// in this repository disagree, so it is pinned here.
+    #[test]
+    fn validity_at_treats_valid_until_as_the_instant_the_claim_stopped_holding() {
+        let at = Utc::now();
+
+        let mut node = KnowledgeNode::default();
+        assert_eq!(
+            node.validity_at(at),
+            ValidityAt::Unbounded,
+            "no window means the claim carried no validity bound at all"
+        );
+
+        node.valid_from = Some(at);
+        assert_eq!(
+            node.validity_at(at),
+            ValidityAt::True,
+            "a window that opens exactly at the instant has just become true"
+        );
+
+        node.valid_until = Some(at);
+        assert_eq!(
+            node.validity_at(at),
+            ValidityAt::Expired,
+            "a window that closes exactly at the instant has already stopped holding"
+        );
+        assert!(
+            node.is_valid_at(at),
+            "test premise: `is_valid_at` keeps the closing instant, which is the \
+             documented difference between the two readings"
+        );
+
+        node.valid_from = Some(at + chrono::Duration::seconds(1));
+        node.valid_until = None;
+        assert_eq!(node.validity_at(at), ValidityAt::NotYetTrue);
+
+        node.valid_from = None;
+        node.valid_until = Some(at + chrono::Duration::seconds(1));
+        assert_eq!(node.validity_at(at), ValidityAt::True);
     }
 
     #[test]

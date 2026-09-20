@@ -88,11 +88,20 @@ fn build_config(args: &SearchArgs) -> Result<PipelineConfig, String> {
         }
     };
 
+    // `as_of` asks a record-time question (see `SearchArgs::as_of`). Parsed here
+    // so a malformed instant is a request error rather than a silently ignored
+    // argument that quietly answers for *now*.
+    let as_of = match args.as_of.as_deref() {
+        Some(raw) => Some(super::helpers::parse_instant(raw)?),
+        None => None,
+    };
+
     Ok(PipelineConfig {
         detail_level,
         retrieval_mode,
         limit: args.limit.unwrap_or(10).clamp(1, 100),
         min_retention: args.min_retention.unwrap_or(0.0).clamp(0.0, 1.0),
         min_similarity: args.min_similarity.unwrap_or(0.5).clamp(0.0, 1.0),
+        as_of,
     })
 }
