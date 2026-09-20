@@ -177,16 +177,8 @@ impl DreamEngine {
         tag_b: &str,
         conn_type: CreativeConnectionType,
     ) -> String {
-        let a_summary = if a.content.len() > 60 {
-            &a.content[..60]
-        } else {
-            &a.content
-        };
-        let b_summary = if b.content.len() > 60 {
-            &b.content[..60]
-        } else {
-            &b.content
-        };
+        let a_summary = summary_of(&a.content, 60);
+        let b_summary = summary_of(&b.content, 60);
 
         match conn_type {
             CreativeConnectionType::CrossDomain => {
@@ -264,5 +256,50 @@ impl DreamEngine {
         }
 
         pattern_count
+    }
+}
+
+/// The first `max` bytes of `content`, floored to a character boundary.
+///
+/// `&content[..max]` panics whenever byte `max` lands inside a multi-byte
+/// character, and memory content is not guaranteed ASCII: the first Polish
+/// memory of at least `max` bytes took the whole REM phase (and the MCP request
+/// that asked for it) down with `byte index N is not a char boundary`. A
+/// truncated summary is a cosmetic loss; a panic in the middle of a dream is a
+/// dropped consolidation pass.
+fn summary_of(content: &str, max: usize) -> &str {
+    if content.len() <= max {
+        return content;
+    }
+    // Same 60-byte budget as before, floored to a character boundary: a
+    // multi-byte character straddling the cut is dropped rather than split.
+    // `floor_char_boundary` is the idiom the other two truncation sites in this
+    // workspace already use (`codebase_unified.rs`, `search_unified/format.rs`).
+    &content[..content.floor_char_boundary(max)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summary_of;
+
+    #[test]
+    fn a_summary_never_splits_a_character() {
+        // The regression: byte 60 sits inside 'ł' in this content, and the
+        // pre-fix `&content[..60]` panicked on it.
+        let polish = "Objaw: emulowana gra nie wchodziła do poziomu, tylko w kółko odtwarzała intro.";
+        assert!(polish.len() > 60);
+        assert!(!polish.is_char_boundary(60), "test needs a split inside 'ł'");
+        let summary = summary_of(polish, 60);
+        assert!(polish.starts_with(summary));
+        assert!(summary.len() <= 60 && !summary.is_empty());
+    }
+
+    #[test]
+    fn a_short_memory_is_returned_whole() {
+        assert_eq!(summary_of("krótko", 60), "krótko");
+        assert_eq!(summary_of("", 60), "");
+        // A boundary that would floor to zero still yields a valid (empty) slice
+        // rather than panicking.
+        assert_eq!(summary_of("łł", 1), "");
     }
 }
