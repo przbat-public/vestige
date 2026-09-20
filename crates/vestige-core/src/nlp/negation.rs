@@ -386,7 +386,13 @@ fn conditional_markers_for(language: Language) -> &'static [&'static str] {
     let en = EN.get_or_init(|| vec!["if", "unless", "whether", "suppose", "assuming"]);
     let pl = PL.get_or_init(|| {
         vec![
-            "jeśli", "jeżeli", "gdyby", "gdy", "chyba", "zakładając", "przypuśćmy",
+            "jeśli",
+            "jeżeli",
+            "gdyby",
+            "gdy",
+            "chyba",
+            "zakładając",
+            "przypuśćmy",
         ]
     });
 

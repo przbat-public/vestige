@@ -618,12 +618,14 @@ fn summary_view_names_the_source_of_a_memory() {
     named.node.source = Some("nes-emulator-stm32".to_string());
 
     let formatted = super::format::format_search_result(&named, "summary", &[], None);
-    assert_eq!(
-        formatted["source"],
-        serde_json::json!("nes-emulator-stm32")
-    );
+    assert_eq!(formatted["source"], serde_json::json!("nes-emulator-stm32"));
 
-    let anonymous = fixture("mem-2", "no source on this one", 1.0, "2026-09-20T15:37:51Z");
+    let anonymous = fixture(
+        "mem-2",
+        "no source on this one",
+        1.0,
+        "2026-09-20T15:37:51Z",
+    );
     let formatted = super::format::format_search_result(&anonymous, "summary", &[], None);
     assert_eq!(
         formatted["source"],
