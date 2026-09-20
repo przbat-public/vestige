@@ -12,7 +12,7 @@ use serde_json::Value;
 /// `note` is computed here rather than stored: it is a pure function of the
 /// verdict, the anchor and when the check ran, and persisting prose that can be
 /// recomputed is how a row's text drifts away from its columns.
-fn code_refs_json(code_refs: &[vestige_core::CodeRef]) -> Option<Value> {
+pub(crate) fn code_refs_json(code_refs: &[vestige_core::CodeRef]) -> Option<Value> {
     if code_refs.is_empty() {
         return None;
     }

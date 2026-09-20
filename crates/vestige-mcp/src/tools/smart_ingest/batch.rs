@@ -9,10 +9,9 @@ use vestige_core::{ContentType, ImportanceContext, IngestInput, Storage};
 
 use crate::cognitive::CognitiveEngine;
 
-use super::anchors;
 use super::args::BatchItem;
 use super::post_ingest::run_post_ingest;
-use super::self_contained::{detect_with_anchors, reject_response};
+use super::write_preparation::{FileRefs, prepare};
 
 /// Execute batch mode: process up to 20 items, each with full cognitive pipeline.
 ///
@@ -157,22 +156,18 @@ pub(super) async fn execute_batch(
 
         tags.extend(batch_pp_tags);
 
-        // Anchors, exactly as in single mode: explicit first, then the paths the
-        // stored text names. Collected before the gate so the gate can see which
-        // of its `bare_code_reference` findings this write already answered.
-        let item_anchors = anchors::resolve(anchors::collect(&explicit_anchors, &item_content));
-        let anchored_paths = anchors::anchored_paths(&item_anchors);
-
-        // The same gate the single-item path runs, on the preprocessed text and
-        // for the same reason: a pronoun that survived coreference rewriting is
-        // one the rewriter could not resolve. It has to run here as well, or
-        // batch mode would be an open door past the one refusal that exists.
-        let self_contained = detect_with_anchors(
+        // Anchors and the gate, exactly as in single mode — the same call, so
+        // batch mode cannot become an open door past the one refusal that
+        // exists, and a path this item anchors is not reported as a bare
+        // reference. The gate runs on the preprocessed text for the same reason
+        // as there: a pronoun that survived coreference rewriting is one the
+        // rewriter could not resolve.
+        let prepared = prepare(
             &item_content,
+            FileRefs::from(explicit_anchors.as_slice()),
             batch_pp_from.is_some() || batch_pp_until.is_some(),
-            &anchored_paths,
         );
-        if let Some(mut refusal) = reject_response(&self_contained) {
+        if let Some(mut refusal) = prepared.refusal {
             refusal["index"] = serde_json::json!(i);
             refusal["status"] = serde_json::json!("rejected");
             results.push(refusal);
@@ -200,10 +195,10 @@ pub(super) async fn execute_batch(
             valid_from: batch_pp_from,
             valid_until: batch_pp_until,
             provenance: provenance_with_importance,
-            self_contained: Some(self_contained.marker()),
-            self_contained_findings: self_contained.findings_json(),
+            self_contained: Some(prepared.marker),
+            self_contained_findings: prepared.findings.clone(),
             actor: actor.map(str::to_string),
-            anchors: item_anchors,
+            anchors: prepared.anchors.clone(),
             ..Default::default()
         };
 
@@ -243,8 +238,8 @@ pub(super) async fn execute_batch(
                         "importanceScore": importance_composite,
                         "reason": "Forced creation - skipped similarity check"
                     });
-                    if !input.anchors.is_empty() {
-                        saved["anchors"] = anchors::response_anchors(&input.anchors);
+                    if let Some(anchors) = prepared.response_anchors() {
+                        saved["anchors"] = anchors;
                     }
                     results.push(saved);
                 }
@@ -298,8 +293,8 @@ pub(super) async fn execute_batch(
                         "importanceScore": importance_composite,
                         "reason": result.reason
                     });
-                    if !input.anchors.is_empty() {
-                        saved["anchors"] = anchors::response_anchors(&input.anchors);
+                    if let Some(anchors) = prepared.response_anchors() {
+                        saved["anchors"] = anchors;
                     }
                     results.push(saved);
                 }
@@ -345,8 +340,8 @@ pub(super) async fn execute_batch(
                         "importanceScore": importance_composite,
                         "reason": "Embeddings not available - used regular ingest"
                     });
-                    if !input.anchors.is_empty() {
-                        saved["anchors"] = anchors::response_anchors(&input.anchors);
+                    if let Some(anchors) = prepared.response_anchors() {
+                        saved["anchors"] = anchors;
                     }
                     results.push(saved);
                 }

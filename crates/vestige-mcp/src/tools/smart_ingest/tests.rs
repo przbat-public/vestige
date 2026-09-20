@@ -1160,3 +1160,68 @@ async fn batch_items_store_their_own_anchors() {
         "a batch item reports its anchors like the single mode does: {value}"
     );
 }
+
+/// A reported contradiction has to reach the writer, or the write path's whole
+/// restraint is invisible: the memory is stored, nothing is retired, and the
+/// only place that says "this may deny something you already have" is the
+/// response. Before the report was attached, an agent saw `decision: "create"`
+/// with a high similarity and no way to tell a fresh fact from a contradiction.
+#[tokio::test]
+async fn a_reported_contradiction_reaches_the_response() {
+    let (storage, _dir) = test_storage().await;
+    if !storage.embedding_service_ready() {
+        eprintln!("embedding service not ready — the gate cannot compare candidates");
+        return;
+    }
+    let cognitive = test_cognitive();
+
+    let existing = storage
+        .ingest(vestige_core::IngestInput {
+            content: "We use synchronous code for the payment callback because it is simpler to \
+                      reason about."
+                .to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    // No `forceCreate`: the gate must see the neighbour and decide.
+    let result = execute(
+        &storage,
+        &cognitive,
+        Some(serde_json::json!({
+            "content": "Don't use synchronous code for the payment callback; it blocks the worker.",
+            "node_type": "fact"
+        })),
+    )
+    .await
+    .expect("ingest");
+
+    let report = &result["contradiction"];
+    assert_eq!(
+        report["existingId"].as_str(),
+        Some(existing.id.as_str()),
+        "the report must name the memory it may deny: {result}"
+    );
+    assert!(
+        report["confidence"].as_f64().is_some_and(|c| c >= 0.8),
+        "the report carries the evidence strength: {result}"
+    );
+    assert!(
+        report["evidence"].as_array().is_some_and(|e| !e.is_empty()),
+        "a report without its evidence is not actionable: {result}"
+    );
+    assert!(
+        report["hint"]
+            .as_str()
+            .is_some_and(|h| h.contains("invalidate")),
+        "the hint must say how to retire the older memory if that is what was meant: {result}"
+    );
+
+    // And the older memory is still exactly as it was: reported, not retired.
+    let untouched = storage.get_node(&existing.id).unwrap().unwrap();
+    assert!(
+        untouched.valid_until.is_none(),
+        "nothing may date a memory that nobody retired"
+    );
+}

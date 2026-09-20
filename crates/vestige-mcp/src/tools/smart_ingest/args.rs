@@ -34,9 +34,9 @@ pub(super) struct SmartIngestArgs {
 /// Untagged on purpose: the short form is what a caller writes by hand, and the
 /// object form is what a caller writes when it has the parts separately. Making
 /// them two fields would mean two code paths that must agree about precedence.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(super) enum AnchorArg {
+pub enum AnchorArg {
     /// `path`, `path:line`, `path@sha`, or `path@sha#symbol`.
     Text(String),
     /// The parts, spelled out.

@@ -21,6 +21,7 @@ mod compound;
 mod execute;
 mod post_ingest;
 mod schema;
+mod write_preparation;
 
 /// Self-containedness gate: notices when a memory will not be understandable
 /// without the conversation that produced it.
@@ -31,3 +32,8 @@ mod tests;
 
 pub use execute::execute;
 pub use schema::schema;
+
+/// The two steps every write path runs before it stores anything — collecting
+/// code anchors and running the self-containedness gate over the text that will
+/// be stored. Shared so a second write path cannot do one without the other.
+pub use write_preparation::{FileRefs, PreparedWrite, prepare};

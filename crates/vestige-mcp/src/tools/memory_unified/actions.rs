@@ -21,26 +21,33 @@ pub(super) async fn execute_get(storage: &Arc<Storage>, id: &str) -> Result<Valu
     // Group them into a single task so we hand the runtime back exactly once.
     let storage_clone = storage.clone();
     let id_owned = id.to_string();
-    let node = tokio::task::spawn_blocking(move || {
+    let (node, anchors) = tokio::task::spawn_blocking(move || {
         if let Err(e) = storage_clone.record_memory_access(&id_owned) {
             tracing::debug!(error = %e, memory_id = %id_owned, "Failed to record memory access");
         }
-        storage_clone.get_node(&id_owned)
+        let node = storage_clone.get_node(&id_owned)?;
+        // Fetched here rather than in a second hop: the anchors belong to the
+        // memory, and two round trips through the blocking pool for one read is
+        // a cost a reader pays on every `memory get`.
+        let anchors = storage_clone.code_refs_for(&id_owned)?;
+        Ok::<_, vestige_core::StorageError>((node, anchors))
     })
     .await
     .map_err(|e| format!("execute_get task panicked: {}", e))?
     .map_err(|e| e.to_string())?;
 
     match node {
-        Some(n) => Ok(serde_json::json!({
-            "action": "get",
-            "found": true,
-            "node": {
+        Some(n) => {
+            let mut node_json = serde_json::json!({
                 "id": n.id,
                 "content": n.content,
                 "nodeType": n.node_type,
                 "createdAt": n.created_at.to_rfc3339(),
                 "updatedAt": n.updated_at.to_rfc3339(),
+                // When we learned this, as opposed to when the row was created:
+                // the same clock the search path reports, for the same reason —
+                // a reader judging how a picture changed needs the record time.
+                "recordedAt": n.recorded_at.to_rfc3339(),
                 "lastAccessed": n.last_accessed.to_rfc3339(),
                 "stability": n.stability,
                 "difficulty": n.difficulty,
@@ -56,8 +63,26 @@ pub(super) async fn execute_get(storage: &Arc<Storage>, id: &str) -> Result<Valu
                 "tags": n.tags,
                 "hasEmbedding": n.has_embedding,
                 "embeddingModel": n.embedding_model,
+            });
+            // Attached only when the gate found something, and only when there
+            // are anchors: an `ok: true` on every memory is noise that hides the
+            // flagged ones, and an empty array reads as "checked, nothing there"
+            // when the truth is "never checked".
+            if let Some(marker) = n.self_contained {
+                node_json["selfContained"] = serde_json::json!(marker);
+                if let Some(findings) = &n.self_contained_findings {
+                    node_json["selfContainedFindings"] = findings.clone();
+                }
             }
-        })),
+            if let Some(anchors) = crate::tools::search_unified::format::code_refs_json(&anchors) {
+                node_json["codeRefs"] = anchors;
+            }
+            Ok(serde_json::json!({
+                "action": "get",
+                "found": true,
+                "node": node_json,
+            }))
+        }
         None => Ok(serde_json::json!({
             "action": "get",
             "found": false,
@@ -79,18 +104,25 @@ pub(super) async fn execute_get_batch(
     let (nodes, not_found): (Vec<Value>, Vec<String>) = tokio::task::spawn_blocking(move || {
         let mut nodes = Vec::new();
         let mut not_found = Vec::new();
+        // One query for every batch member's anchors, not one per id: this call
+        // exists to save round trips, and a per-id lookup would hand the saving
+        // straight back.
+        let mut anchors_by_node = storage_clone
+            .code_refs_for_nodes(&ids_owned)
+            .unwrap_or_default();
         for id in &ids_owned {
             if let Err(e) = storage_clone.record_memory_access(id) {
                 tracing::debug!(error = %e, memory_id = %id, "Failed to record memory access");
             }
             match storage_clone.get_node(id) {
                 Ok(Some(n)) => {
-                    nodes.push(serde_json::json!({
+                    let mut node_json = serde_json::json!({
                         "id": n.id,
                         "content": n.content,
                         "nodeType": n.node_type,
                         "createdAt": n.created_at.to_rfc3339(),
                         "updatedAt": n.updated_at.to_rfc3339(),
+                        "recordedAt": n.recorded_at.to_rfc3339(),
                         "lastAccessed": n.last_accessed.to_rfc3339(),
                         "stability": n.stability,
                         "difficulty": n.difficulty,
@@ -106,7 +138,25 @@ pub(super) async fn execute_get_batch(
                         "tags": n.tags,
                         "hasEmbedding": n.has_embedding,
                         "embeddingModel": n.embedding_model,
-                    }));
+                    });
+                    // Same rule as `get`: the marker and the anchors are present
+                    // only when there is something to report, because a key that
+                    // is always there cannot tell "checked and clean" from
+                    // "never checked".
+                    if let Some(marker) = n.self_contained {
+                        node_json["selfContained"] = serde_json::json!(marker);
+                        if let Some(findings) = &n.self_contained_findings {
+                            node_json["selfContainedFindings"] = findings.clone();
+                        }
+                    }
+                    if let Some(anchors) = anchors_by_node
+                        .remove(&n.id)
+                        .as_deref()
+                        .and_then(crate::tools::search_unified::format::code_refs_json)
+                    {
+                        node_json["codeRefs"] = anchors;
+                    }
+                    nodes.push(node_json);
                 }
                 Ok(None) => not_found.push(id.clone()),
                 Err(e) => {

@@ -125,8 +125,20 @@ pub(super) fn response_anchors(anchors: &[IngestAnchor]) -> serde_json::Value {
     )
 }
 
-/// Parse the caller's explicit reference into an anchor.
+/// The two ways a caller's explicit reference becomes an anchor.
 impl AnchorArg {
+    /// A bare path from a caller that has no revision and no symbol to offer.
+    ///
+    /// The short form on purpose: the parse is the same one a caller's
+    /// `codeRefs` string goes through, so `files: ["src/lib.rs"]` and
+    /// `codeRefs: ["src/lib.rs"]` cannot come to mean two different things.
+    /// Nothing is filled in — resolution observes the revision later, and a
+    /// symbol is never invented.
+    pub(super) fn from_path(path: impl Into<String>) -> Self {
+        Self::Text(path.into())
+    }
+
+    /// Parse the caller's explicit reference into an anchor.
     fn to_anchor(&self) -> Option<CodeAnchor> {
         match self {
             AnchorArg::Text(text) => parse_anchor_text(text),

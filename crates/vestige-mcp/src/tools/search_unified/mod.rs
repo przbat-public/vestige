@@ -19,7 +19,7 @@
 
 mod args;
 mod execute;
-mod format;
+pub(crate) mod format;
 mod helpers;
 mod pipeline;
 mod schema;

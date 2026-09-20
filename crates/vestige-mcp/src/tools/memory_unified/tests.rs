@@ -96,6 +96,78 @@ async fn ingest_memory(storage: &Arc<Storage>) -> String {
     node.id
 }
 
+/// `memory get` is how a reader looks at one memory, and it showed neither the
+/// anchors nor the gate's marker.
+///
+/// That was survivable while the `codebase` tool inlined `## Affected Files`
+/// into the text — the information was at least in the content. Once the paths
+/// became anchors (where they can be checked against a revision instead of
+/// rotting silently), this read path became the one place a decision's files
+/// were invisible, and a flagged memory looked clean to anyone who opened it
+/// directly instead of searching for it.
+#[tokio::test]
+async fn get_surfaces_anchors_and_the_self_contained_marker() {
+    let (storage, _dir) = test_storage().await;
+
+    let node = storage
+        .ingest(vestige_core::IngestInput {
+            content: "The tutorial starts at the workbench".to_string(),
+            node_type: "decision".to_string(),
+            anchors: vec![vestige_core::IngestAnchor::unchecked(
+                vestige_core::CodeAnchor {
+                    repo_remote: None,
+                    commit_sha: None,
+                    path: "tutorial-pl/README.md".to_string(),
+                    symbol: None,
+                    hint_line: None,
+                    content_hash: None,
+                },
+            )],
+            self_contained: Some(false),
+            self_contained_findings: Some(serde_json::json!([
+                { "kind": "no_subject", "span": "to", "hint": "say what this is about" }
+            ])),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let response = super::execute::execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({ "action": "get", "id": node.id })),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        response["node"]["codeRefs"][0]["path"], "tutorial-pl/README.md",
+        "a reader opening the memory must see its file references: {response}"
+    );
+    assert_eq!(
+        response["node"]["selfContained"], false,
+        "a flagged memory must not look clean when read directly: {response}"
+    );
+    assert!(
+        response["node"]["selfContainedFindings"][0]["kind"] == "no_subject",
+        "the flag without its findings tells the reader nothing to fix: {response}"
+    );
+
+    // The batch read is the same read with more ids, so it must not be the one
+    // path that quietly drops both.
+    let batch = super::execute::execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({ "action": "get_batch", "ids": [node.id] })),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        batch["nodes"][0]["codeRefs"][0]["path"],
+        "tutorial-pl/README.md"
+    );
+    assert_eq!(batch["nodes"][0]["selfContained"], false);
+}
+
 #[tokio::test]
 async fn test_missing_args_fails() {
     let (storage, _dir) = test_storage().await;
