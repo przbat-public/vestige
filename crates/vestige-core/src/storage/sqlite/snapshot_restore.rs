@@ -13,16 +13,30 @@
 //! imported rows are marked `has_embedding = 0` so the existing `regenerate_embeddings`
 //! path re-embeds them instead of leaving a vector from a different model in place.
 //!
-//! A memory is more than its `knowledge_nodes` row, so the merge covers the four tables
+//! A memory is more than its `knowledge_nodes` row, so the merge covers the tables
 //! that describe it: `memory_revisions` (V17 — how its wording changed), `code_refs`
 //! (V19 — what it points at in code), `memory_connections` (the association graph it
-//! takes part in) and `memory_states` (its lifecycle row). All four are imported
-//! **additively**, and every statement is scoped so a row can only arrive for a memory
-//! the merged store holds — the snapshot's nodes, which the node merge has just inserted
-//! — so an older snapshot can add to the live store but never take away from it. Each
-//! import states its own identity and conflict rule and why the alternative loses data.
-//! The node row itself is still replaced by the snapshot's version — pre-existing
-//! behaviour, pinned by the tests.
+//! takes part in), `memory_states` (its lifecycle row), `insights` (what consolidation
+//! derived from it) and `intentions` (what somebody committed to do about it). All six
+//! are imported **additively**, and every statement is scoped so a row can only arrive
+//! for a memory the merged store holds — the snapshot's nodes, which the node merge has
+//! just inserted — so an older snapshot can add to the live store but never take away
+//! from it. Each import states its own identity and conflict rule and why the
+//! alternative loses data. The node row itself is still replaced by the snapshot's
+//! version — pre-existing behaviour, pinned by the tests.
+//!
+//! Two further tables are this store's own record of what it *did* with a memory, and
+//! are therefore preserved rather than imported: `memory_access_log` (every retrieval
+//! the store served — what the retention picture and ACT-R activation are computed
+//! from) and `state_transitions` (every lifecycle move it made — the timeline the
+//! changelog and the dashboard show). Both declare `ON DELETE CASCADE` on the node id,
+//! and the `INSERT OR REPLACE` above deletes the row it replaces, so a weekly restore
+//! would silently wipe a week of retrievals and transitions for every memory the
+//! snapshot carries. They are parked across the merge and put back after it. The
+//! snapshot's copies of those rows are deliberately *not* imported: a row there records
+//! an access the source store served or a move that store made, which is a claim this
+//! store cannot testify to, and importing them would double-count every retrieval for a
+//! memory both stores have touched.
 //!
 //! The whole merge runs inside one `BEGIN IMMEDIATE` transaction. Without it a constraint
 //! the snapshot's rows do not satisfy left a half-merged store behind — some tables
@@ -31,20 +45,23 @@
 //! run inside a transaction, so the snapshot is attached before the transaction opens and
 //! detached after it has committed or rolled back.
 //!
-//! Two further tables hold node ids as JSON arrays — `insights.source_memories` and
-//! `intentions.related_memories` — and this import neither brings them across nor repairs
-//! them afterwards, because a merge cannot leave them dangling and no reader dereferences
-//! them. The merge only inserts or replaces `knowledge_nodes` rows under ids that already
-//! exist, so an id that resolved before it resolves after it too; the direction that could
-//! strand a reference, dropping a node, is not one this import has. Nor is a dead id a
-//! failure for anything that reads them: `resources::memory` echoes `source_memories` as
+//! `insights.source_memories` and `intentions.related_memories` hold node ids as JSON
+//! arrays, and the two imports that carry those tables arrive with their references
+//! checked rather than repaired afterwards: a row is imported only when **every** id it
+//! names is a node the snapshot carries. An insight whose source memory the file does not
+//! contain is derived knowledge about a memory the merge is not bringing back, and an
+//! intention that names one would arrive pointing at a memory the live store may already
+//! have let go — so the half-grounded row stays behind. Neither rule can strand a
+//! reference in the other direction either: a node the merge *replaces* keeps its id
+//! (this schema's only uniqueness constraint on `knowledge_nodes` is the primary key), so
+//! every id that resolved before the merge resolves after it. Nor is a dead id a failure
+//! for anything that reads those arrays: `resources::memory` echoes `source_memories` as
 //! ids without looking them up, `tools::cross_reference` uses only the insight text and
 //! its confidence, `tools::intention` never reads `related_memories` at all, and the
 //! dashboard's insight surface reads `knowledge_nodes.extra_json` rather than the
 //! `insights` table. The one statement that looks inside an array is GDPR's
 //! `json_each(insights.source_memories)` membership delete, where an id with no node
-//! simply never matches. A cleanup pass would have to delete an insight because a node
-//! went missing, which destroys the record instead of repairing it.
+//! simply never matches.
 
 use std::path::Path;
 
@@ -74,6 +91,14 @@ pub struct SnapshotRestoreReport {
     /// Lifecycle rows **added from the snapshot**. A memory the live store
     /// already had a lifecycle row for keeps that row, and is not counted.
     pub states_imported: usize,
+    /// Insights **added from the snapshot**, each one naming only memories the
+    /// snapshot carries. An insight the live store already held keeps its own
+    /// feedback and applied count, and is not counted.
+    pub insights_imported: usize,
+    /// Intentions **added from the snapshot**, each one naming only memories the
+    /// snapshot carries. An intention the live store already held keeps its own
+    /// status, reminder count and snooze, and is not counted.
+    pub intentions_imported: usize,
     /// Vectors copied because their dimension matches this build.
     pub embeddings_imported: usize,
     /// Imported memories marked for re-embedding because their vector did not travel.
@@ -244,6 +269,8 @@ fn import_snapshot(conn: &Connection) -> Result<SnapshotRestoreReport> {
     let code_refs_imported = import_code_refs(conn)?;
     let connections_imported = import_connections(conn)?;
     let states_imported = import_states(conn)?;
+    let insights_imported = import_insights(conn)?;
+    let intentions_imported = import_intentions(conn)?;
 
     let embeddings_imported = import_embeddings(conn)?;
 
@@ -269,6 +296,8 @@ fn import_snapshot(conn: &Connection) -> Result<SnapshotRestoreReport> {
         code_refs_imported,
         connections_imported,
         states_imported,
+        insights_imported,
+        intentions_imported,
         embeddings_imported,
         embeddings_reset,
         snapshot_schema_version,
@@ -519,20 +548,180 @@ fn import_states(conn: &Connection) -> Result<usize> {
     Ok(conn.execute(&sql, [])?)
 }
 
+/// Import the derived knowledge (`insights`) from the snapshot.
+///
+/// **The rule is add, never replace**, and here the identity is the row's own
+/// `id`. Unlike `memory_revisions.id` and `code_refs.id`, which are rowids minted
+/// by the store that wrote the row, this one is a UUID chosen by whichever process
+/// produced the insight: the same value in two files names the same insight, so it
+/// is what the two copies have to be compared on. It travels, and a row the live
+/// store already holds is left alone — the live one is not merely newer:
+/// `feedback` is the user's accept/reject verdict and `applied_count` how often the
+/// insight has been used, both recorded here after the backup, and overwriting them
+/// would un-reject an insight the user threw away.
+///
+/// An insight is knowledge *about* memories, and `source_memories` is where it
+/// says which, so the row is imported only when **every** id in that array is a
+/// node the snapshot carries: see [`json_ids_resolve`]. An insight drawn partly
+/// from a memory the file no longer holds would arrive naming a memory the live
+/// store may not have either — a claim about nothing this store can show, and one
+/// whose text the merge has no way to check. All-or-nothing on the array is the
+/// honest reading: the insight's own sentence is the whole row, and there is no
+/// way to import "most of" it.
+fn import_insights(conn: &Connection) -> Result<usize> {
+    let Some(columns) = importable_columns(
+        conn,
+        "insights",
+        // `id` is the identity; the rest are NOT NULL in this build's table
+        // without a default. `source_memories` is required twice over: without it
+        // there is no reference to check and no row worth importing.
+        &[
+            "id",
+            "insight",
+            "source_memories",
+            "confidence",
+            "novelty_score",
+            "insight_type",
+            "generated_at",
+        ],
+        &[],
+    )?
+    else {
+        return Ok(0);
+    };
+
+    let select_list = columns
+        .iter()
+        .map(|c| format!("s.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "INSERT INTO main.insights ({}) \
+         SELECT {select_list} FROM snapshot.insights s \
+         WHERE {} \
+           AND NOT EXISTS (SELECT 1 FROM main.insights m WHERE m.id IS s.id)",
+        columns.join(", "),
+        json_ids_resolve("s", "source_memories"),
+    );
+
+    Ok(conn.execute(&sql, [])?)
+}
+
+/// Import the prospective memory (`intentions`) from the snapshot.
+///
+/// **The rule is add, never replace**, on the same identity [`import_insights`]
+/// describes: `intentions.id` is a UUID, not a rowid, so it can be compared
+/// across stores and copied. A row the live store already holds is left alone
+/// because everything that matters about an intention after it was written is
+/// bookkeeping this store did: `status` says whether the reminder fired, was
+/// fulfilled, or was cancelled, `reminder_count`/`last_reminded_at` say how often
+/// it already spoke, and `snoozed_until` is when the user asked to be told
+/// instead. The snapshot's copy is frozen at backup time, so writing it back in
+/// would resurrect a commitment the user has already discharged and let it
+/// notify again — the loudest possible version of the loss the additive rules
+/// exist to prevent.
+///
+/// A commitment the live store has never seen is the opposite case: it exists in
+/// the snapshot and nowhere else, and a restore that leaves it behind silently
+/// drops a reminder the user set. It arrives exactly as the snapshot recorded it,
+/// aged by the clock and not by this function: rewriting a past deadline into an
+/// `expired` status would be a claim the backup never made, and the trigger
+/// evaluation that runs afterwards is the part of the store that knows what to do
+/// with a due date that has passed.
+///
+/// `related_memories` is this table's only reference to a memory, and the row is
+/// imported only when every id in it is a node the snapshot carries — an intention
+/// that arrived pointing at a memory this store cannot show would be a commitment
+/// whose stated reason is missing, which is precisely the half-formed row this
+/// scope refuses.
+fn import_intentions(conn: &Connection) -> Result<usize> {
+    let Some(columns) = importable_columns(
+        conn,
+        "intentions",
+        // `id` is the identity; the rest are NOT NULL in this build's table
+        // without a default. `related_memories` is required so the scope
+        // predicate below is always well-formed.
+        &[
+            "id",
+            "content",
+            "trigger_type",
+            "trigger_data",
+            "created_at",
+            "related_memories",
+        ],
+        &[],
+    )?
+    else {
+        return Ok(0);
+    };
+
+    let select_list = columns
+        .iter()
+        .map(|c| format!("s.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "INSERT INTO main.intentions ({}) \
+         SELECT {select_list} FROM snapshot.intentions s \
+         WHERE {} \
+           AND NOT EXISTS (SELECT 1 FROM main.intentions m WHERE m.id IS s.id)",
+        columns.join(", "),
+        json_ids_resolve("s", "related_memories"),
+    );
+
+    Ok(conn.execute(&sql, [])?)
+}
+
+/// A predicate holding when every id in a JSON array column names a node the
+/// snapshot carries.
+///
+/// `insights.source_memories` and `intentions.related_memories` are the two
+/// columns in this schema that point at memories from a text column, so SQLite
+/// cannot enforce them the way it enforces the columns with a foreign key. The
+/// node merge only ever inserts or replaces nodes the snapshot carries, so
+/// requiring every id to be one of those is what makes the merged store able to
+/// resolve the references an imported row names.
+///
+/// The nested `CASE` is not decoration: `json_type` and `json_each` raise on a
+/// malformed document, and an error here aborts the whole merge — one unreadable
+/// row would cost the entire restore. `CASE` evaluates only the branch it
+/// selects, so `json_valid` gates both. A column that is not a JSON array
+/// (NULL included) fails the predicate and its row stays behind, which is the
+/// same answer [`importable_columns`] gives for a table whose shape this build
+/// cannot interpret: skip it rather than import references nothing can check.
+fn json_ids_resolve(alias: &str, column: &str) -> String {
+    format!(
+        "CASE WHEN json_valid({alias}.{column}) THEN \
+             CASE WHEN json_type({alias}.{column}) = 'array' THEN NOT EXISTS (\
+                 SELECT 1 FROM json_each({alias}.{column}) named \
+                 WHERE named.value IS NULL \
+                    OR named.value NOT IN (SELECT id FROM snapshot.knowledge_nodes)) \
+             ELSE 0 END \
+         ELSE 0 END"
+    )
+}
+
 /// Park the live child rows of the snapshot's nodes in `temp` across the node merge.
 ///
-/// The two tables above are the two the merge would otherwise destroy: both
-/// declare `FOREIGN KEY (…) REFERENCES knowledge_nodes(id) ON DELETE CASCADE`,
-/// and the node merge is `INSERT OR REPLACE`, which SQLite implements by
+/// These four tables are the ones the merge would otherwise destroy: every one of
+/// them declares `FOREIGN KEY (…) REFERENCES knowledge_nodes(id) ON DELETE
+/// CASCADE`, and the node merge is `INSERT OR REPLACE`, which SQLite implements by
 /// deleting the conflicting row and inserting the snapshot's version — with
-/// foreign keys enabled, as they are on this connection, the delete cascades.
-/// So every live edge and every live lifecycle row belonging to a memory the
-/// snapshot carries disappears during that one statement, before either import
-/// runs. Without parking them, "add, never replace" would be a rule about rows
-/// that no longer exist: restoring the same snapshot weekly would reset the
-/// whole graph to the backup's frozen strengths and every shared memory's
-/// access history to the backup's count, which is the loss the additive rules
-/// exist to prevent, arriving through the foreign key instead of an `UPDATE`.
+/// foreign keys enabled, as they are on this connection, the delete cascades. So
+/// every live edge, lifecycle row, retrieval and lifecycle move belonging to a
+/// memory the snapshot carries disappears during that one statement, before any
+/// import runs. Without parking them, "add, never replace" would be a rule about
+/// rows that no longer exist: restoring the same snapshot weekly would reset the
+/// whole graph to the backup's frozen strengths, un-count every retrieval the
+/// store served since, and empty the lifecycle timeline it recorded — the loss the
+/// additive rules exist to prevent, arriving through the foreign key instead of an
+/// `UPDATE`.
+///
+/// The access log and the transition log differ from the other two in what happens
+/// next: they are parked and put back, but never imported (see the module
+/// documentation). "The live row wins" has no partial version for an append-only
+/// event log — either this store's own record comes back whole or the restore has
+/// destroyed it — and the rows in the snapshot are another store's events.
 ///
 /// Only rows that touch a node the snapshot carries can be destroyed this way,
 /// so only those are copied. `temp` is per-connection, invisible to readers and
@@ -552,10 +741,24 @@ fn capture_live_child_rows(conn: &Connection) -> Result<()> {
             "restore_live_states",
             "memory_id IN (SELECT id FROM snapshot.knowledge_nodes)",
         ),
+        // The two logs below are copied with their `id` intact, unlike the rows the
+        // imports above re-identify: these are not new rows being minted, they are
+        // the same rows going back where they came from, and a fresh id would
+        // renumber a log whose ordering other reads depend on.
+        (
+            "memory_access_log",
+            "restore_live_access_log",
+            "node_id IN (SELECT id FROM snapshot.knowledge_nodes)",
+        ),
+        (
+            "state_transitions",
+            "restore_live_transitions",
+            "memory_id IN (SELECT id FROM snapshot.knowledge_nodes)",
+        ),
     ] {
-        // The base schema defines both tables, so this only skips for a store that
-        // never had one — in which case there is nothing to lose and nothing to
-        // put back.
+        // The base schema defines all four tables, so this only skips for a store
+        // that never had one — in which case there is nothing to lose and nothing
+        // to put back.
         if table_columns(conn, "main", table)?.is_empty() {
             continue;
         }
@@ -569,15 +772,21 @@ fn capture_live_child_rows(conn: &Connection) -> Result<()> {
 
 /// Put the rows [`capture_live_child_rows`] parked back into `main`.
 ///
-/// Runs after the node merge and before the two imports, which is what makes
-/// their `NOT EXISTS` guards mean "the live store already has this row": the
-/// row is back in `main` by the time they look. `INSERT OR REPLACE` rather than
+/// Runs after the node merge and before the imports, which is what makes their
+/// `NOT EXISTS` guards mean "the live store already has this row": the row is
+/// back in `main` by the time they look. `INSERT OR REPLACE` rather than
 /// `INSERT` so the live values win even on a connection where the cascade did
 /// not run — the rule belongs to this function, not to a `PRAGMA`.
+///
+/// Every parked table is emptied unconditionally: the log rows are not imported,
+/// so nothing else will ever read them, and leaving them behind would keep a
+/// second copy of this store's history inside the connection until it closes.
 fn reinstate_live_child_rows(conn: &Connection) -> Result<()> {
     for (table, parked) in [
         ("memory_connections", "restore_live_connections"),
         ("memory_states", "restore_live_states"),
+        ("memory_access_log", "restore_live_access_log"),
+        ("state_transitions", "restore_live_transitions"),
     ] {
         let columns = table_columns(conn, "main", table)?;
         if columns.is_empty() {

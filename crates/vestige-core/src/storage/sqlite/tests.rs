@@ -11,7 +11,9 @@ use super::StorageError;
 use super::init::{
     ENCRYPTION_KEY_ENV, EncryptionConfig, REQUIRE_ENCRYPTION_ENV, VectorIndexSource,
 };
-use super::records::{ConnectionRecord, DreamHistoryRecord, InsightRecord, MemoryStateRecord};
+use super::records::{
+    ConnectionRecord, DreamHistoryRecord, InsightRecord, IntentionRecord, MemoryStateRecord,
+};
 
 fn create_test_storage() -> Storage {
     let dir = tempdir().unwrap();
@@ -1616,6 +1618,545 @@ fn snapshot_restore_failure_leaves_the_store_untouched() {
             .unwrap()
             .is_empty(),
         "the index must be rebuilt over the merged store"
+    );
+}
+
+/// Probe for the premise the capture/reinstate mechanism rests on, run rather than
+/// assumed: `INSERT OR REPLACE` on `knowledge_nodes` — the statement the node merge
+/// uses — deletes the conflicting row, and with foreign keys on, as they are on this
+/// connection, that delete cascades into the child tables that declare
+/// `ON DELETE CASCADE`. The capture below is only worth its complexity if that is
+/// true; if SQLite ever stops cascading here, this is where it shows.
+#[test]
+fn replacing_a_node_row_cascades_its_access_log_and_transitions_away() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(Some(dir.path().join("probe.db"))).unwrap();
+    let node = storage
+        .ingest(IngestInput {
+            content: "a memory whose own history the replace would destroy".to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    storage.log_access(&node.id, "search_hit").unwrap();
+    storage.record_memory_access(&node.id).unwrap();
+    storage
+        .update_memory_state(&node.id, "dormant", "manual_override")
+        .unwrap();
+
+    let counts = |storage: &Storage| -> (i64, i64) {
+        let conn = storage.reader.lock().unwrap();
+        conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM memory_access_log WHERE node_id = ?1), \
+                    (SELECT COUNT(*) FROM state_transitions WHERE memory_id = ?1)",
+            rusqlite::params![node.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        counts(&storage),
+        (1, 1),
+        "the fixture must really hold both kinds of history, or the probe proves nothing"
+    );
+
+    // The node merge's statement, against the row itself: a one-row REPLACE, which
+    // is what makes the cascade fire on the id the snapshot carries.
+    {
+        let writer = storage.writer.lock().unwrap();
+        writer
+            .execute(
+                "INSERT OR REPLACE INTO knowledge_nodes SELECT * FROM knowledge_nodes WHERE id = ?1",
+                rusqlite::params![node.id],
+            )
+            .unwrap();
+    }
+
+    assert!(
+        storage.get_node(&node.id).unwrap().is_some(),
+        "the probe must replace the node, not remove it"
+    );
+    assert_eq!(
+        counts(&storage),
+        (0, 0),
+        "the premise: the replace really does cascade this store's own history away"
+    );
+}
+
+/// The access log is this store's own record of having served a memory — the input
+/// the retention picture and ACT-R activation are computed from — and the node merge
+/// destroys it, because the table cascades on `node_id` and `INSERT OR REPLACE`
+/// deletes the row it replaces (pinned by the probe above). Parking the rows and
+/// putting them back is the fix, and it is *this* store's rows that come back: a
+/// snapshot is a claim about one moment, and the retrievals served after it are not
+/// the backup's to un-count. Nor are the snapshot's rows to be added, since they
+/// record accesses the source store served — that is what makes this a restore of
+/// the live history rather than a merge of two stores' logs.
+#[test]
+fn snapshot_restore_keeps_the_access_log_the_live_store_recorded() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let node = ingest_id(&source, "a memory the store keeps serving");
+    source.log_access(&node, "search_hit").unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(report.nodes_imported, 1);
+
+    // What this store served after the backup: two retrievals and a promotion, none
+    // of which is in the snapshot.
+    target.log_access(&node, "search_hit").unwrap();
+    target.log_access(&node, "search_hit").unwrap();
+    target.log_access(&node, "promote").unwrap();
+
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(report.nodes_imported, 1, "the node row is replaced again");
+
+    // Counted from the table: this history has no read path of its own, and the rows
+    // a per-node read would show are exactly the ones the cascade deleted.
+    let conn = rusqlite::Connection::open(dir.path().join("target.db")).unwrap();
+    let types: Vec<String> = conn
+        .prepare("SELECT access_type FROM memory_access_log WHERE node_id = ?1")
+        .unwrap()
+        .query_map(rusqlite::params![node], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(
+        types.len(),
+        3,
+        "the retrievals this store served must survive the restore, got {types:?}"
+    );
+    assert_eq!(
+        types.iter().filter(|t| t.as_str() == "search_hit").count(),
+        2,
+        "both retrievals must come back, not just a row that looks like one"
+    );
+    assert_eq!(types.iter().filter(|t| t.as_str() == "promote").count(), 1);
+}
+
+/// `state_transitions` is the lifecycle timeline the changelog and the dashboard read
+/// back, it cascades on the node id exactly as the access log does, and it is this
+/// store's own timeline that has to survive: the snapshot's rows describe moves made
+/// in the store that took the backup, and inserting them here would present another
+/// store's lifecycle as this one's history.
+#[test]
+fn snapshot_restore_keeps_the_lifecycle_timeline_the_live_store_recorded() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let node = ingest_id(&source, "a memory whose lifecycle moved");
+    source.record_memory_access(&node).unwrap();
+    source
+        .update_memory_state(&node, "dormant", "manual_override")
+        .unwrap();
+    assert_eq!(
+        source.get_state_transitions(&node, 10).unwrap().len(),
+        1,
+        "the fixture must really hold a transition, or the assertions below pass vacuously"
+    );
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(report.nodes_imported, 1);
+
+    // The two moves this store made after the backup.
+    target
+        .update_memory_state(&node, "silent", "time_decay")
+        .unwrap();
+    target
+        .update_memory_state(&node, "active", "access")
+        .unwrap();
+
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(report.nodes_imported, 1, "the node row is replaced again");
+
+    let transitions = target.get_state_transitions(&node, 10).unwrap();
+    let moves: Vec<(String, String)> = transitions
+        .iter()
+        .map(|t| (t.from_state.clone(), t.to_state.clone()))
+        .collect();
+    assert_eq!(
+        moves.len(),
+        2,
+        "the timeline this store recorded must survive the restore, got {moves:?}"
+    );
+    assert!(
+        moves.contains(&("dormant".to_string(), "silent".to_string())),
+        "the move this store made after the backup is the one a replace would destroy"
+    );
+    assert!(moves.contains(&("silent".to_string(), "active".to_string())));
+    assert!(
+        !moves.contains(&("active".to_string(), "dormant".to_string())),
+        "the snapshot's own transition may not be replayed as this store's history"
+    );
+}
+
+/// An insight is derived knowledge about memories: it lives in no other table, and
+/// re-deriving it takes a dream cycle the user would have to ask for again. So a
+/// restore brings it back — additively, because `insights.id` is a UUID that names the
+/// same insight in both stores, and because a row the live store already holds carries
+/// `feedback` and `applied_count`, the verdicts and counts recorded after the backup.
+#[test]
+fn snapshot_restore_brings_back_insights_about_memories_it_carries() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let first = ingest_id(&source, "the first memory an insight was drawn from");
+    let second = ingest_id(&source, "the second memory an insight was drawn from");
+    let insight = |id: &str, source_memories: Vec<String>| InsightRecord {
+        id: id.to_string(),
+        insight: format!("what consolidation concluded in {id}"),
+        source_memories,
+        confidence: 0.8,
+        novelty_score: 0.4,
+        insight_type: "synthesis".to_string(),
+        generated_at: Utc::now(),
+        tags: vec!["infra".to_string()],
+        feedback: None,
+        applied_count: 0,
+    };
+    source
+        .save_insight(&insight(
+            "insight-both",
+            vec![first.clone(), second.clone()],
+        ))
+        .unwrap();
+    source
+        .save_insight(&insight("insight-first", vec![first.clone()]))
+        .unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(report.nodes_imported, 2);
+    assert_eq!(
+        report.insights_imported, 2,
+        "derived knowledge travels with the memories it was drawn from"
+    );
+
+    let insights = target.get_insights(10).unwrap();
+    assert_eq!(insights.len(), 2);
+    let both = insights
+        .iter()
+        .find(|i| i.id == "insight-both")
+        .expect("both insights must arrive");
+    assert_eq!(
+        both.source_memories.len(),
+        2,
+        "the references travel with the insight that makes them"
+    );
+    // Every id an imported insight names must resolve: that is the scope rule, and
+    // the reason it is checked rather than repaired afterwards.
+    for row in &insights {
+        for memory in &row.source_memories {
+            assert!(
+                target.get_node(memory).unwrap().is_some(),
+                "an insight may only name memories the merged store holds"
+            );
+        }
+    }
+
+    // The verdict this store recorded after the backup: the user rejected it.
+    let mut rejected = both.clone();
+    rejected.feedback = Some("rejected".to_string());
+    rejected.applied_count = 7;
+    target.save_insight(&rejected).unwrap();
+
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(
+        report.insights_imported, 0,
+        "an insight the live store already holds is left alone"
+    );
+    let after = target
+        .get_insights(10)
+        .unwrap()
+        .into_iter()
+        .find(|i| i.id == "insight-both")
+        .unwrap();
+    assert_eq!(
+        after.feedback.as_deref(),
+        Some("rejected"),
+        "a restore may not un-reject an insight the user threw away"
+    );
+    assert_eq!(
+        after.applied_count, 7,
+        "nor rewind how often it has been applied"
+    );
+}
+
+/// An insight whose source memory the snapshot does not carry is knowledge about a
+/// memory the merge is not bringing back. The live store keeps no tombstone — "erased
+/// here" and "never seen here" are the same absence — so the row stays behind rather
+/// than arrive naming an id this store cannot resolve, and rather than resurrect
+/// through the user's own backup an insight an erasure had removed.
+#[test]
+fn snapshot_restore_drops_an_insight_whose_source_memory_it_does_not_carry() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let kept = ingest_id(&source, "a memory the snapshot still carries");
+    let erased = ingest_id(&source, "a memory the snapshot no longer carries");
+    let mut insight = InsightRecord {
+        id: "insight-erased".to_string(),
+        insight: "a conclusion drawn from a memory that is gone".to_string(),
+        source_memories: vec![kept.clone(), erased.clone()],
+        confidence: 0.9,
+        novelty_score: 0.6,
+        insight_type: "hidden_connection".to_string(),
+        generated_at: Utc::now(),
+        tags: vec![],
+        feedback: None,
+        applied_count: 0,
+    };
+    source.save_insight(&insight).unwrap();
+    insight.id = "insight-kept".to_string();
+    insight.source_memories = vec![kept.clone()];
+    source.save_insight(&insight).unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    // The shape an erasure that reached the node but not the insight leaves behind.
+    {
+        let conn = rusqlite::Connection::open(&snapshot).unwrap();
+        conn.execute(
+            "DELETE FROM knowledge_nodes WHERE id = ?1",
+            rusqlite::params![erased],
+        )
+        .unwrap();
+    }
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(report.nodes_imported, 1);
+    assert_eq!(
+        report.insights_imported, 1,
+        "only the insight whose source memories the snapshot still carries"
+    );
+
+    let insights = target.get_insights(10).unwrap();
+    assert_eq!(insights.len(), 1);
+    assert_eq!(insights[0].id, "insight-kept");
+    assert!(
+        !insights.iter().any(|i| i.source_memories.contains(&erased)),
+        "no imported row may name a memory the restore did not bring back"
+    );
+}
+
+/// A reference array that is not readable JSON must not abort the merge. The JSON
+/// functions raise on a malformed document, and an error anywhere in the import's
+/// single transaction rolls back the whole restore — one corrupt row would cost every
+/// memory in the file. The row stays behind instead, which is the same answer a table
+/// this build cannot interpret gets: skip what cannot be checked rather than refuse
+/// the store.
+#[test]
+fn snapshot_restore_skips_rows_whose_reference_array_is_unreadable() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let memory = ingest_id(&source, "the memory both insights were drawn from");
+    let mut insight = InsightRecord {
+        id: "insight-read".to_string(),
+        insight: "a conclusion with a readable reference".to_string(),
+        source_memories: vec![memory.clone()],
+        confidence: 0.7,
+        novelty_score: 0.3,
+        insight_type: "generalization".to_string(),
+        generated_at: Utc::now(),
+        tags: vec![],
+        feedback: None,
+        applied_count: 0,
+    };
+    source.save_insight(&insight).unwrap();
+    insight.id = "insight-corrupt".to_string();
+    source.save_insight(&insight).unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    {
+        let conn = rusqlite::Connection::open(&snapshot).unwrap();
+        conn.execute(
+            "UPDATE insights SET source_memories = 'the memory, I think' WHERE id = 'insight-corrupt'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target
+        .restore_from_snapshot(&snapshot)
+        .expect("one unreadable row may not cost the whole restore");
+    assert_eq!(report.nodes_imported, 1);
+    assert_eq!(
+        report.insights_imported, 1,
+        "the readable insight still arrives; the unreadable one cannot be checked"
+    );
+    let insights = target.get_insights(10).unwrap();
+    assert_eq!(insights.len(), 1);
+    assert_eq!(insights[0].id, "insight-read");
+}
+
+/// An intention is prospective state — something the user asked to be reminded of —
+/// and the store that recorded it holds the only copy. A restore that left it behind
+/// would drop the reminder silently, so a commitment the live store has never seen
+/// arrives as the snapshot recorded it. A commitment it *has* seen keeps the live row:
+/// `status`, `reminder_count` and `snoozed_until` are what this store did with it after
+/// the backup, and the snapshot's frozen copy would re-arm something already
+/// discharged.
+#[test]
+fn snapshot_restore_brings_back_intentions_whose_memories_it_carries() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let memory = ingest_id(&source, "the memory the reminder is about");
+    let intention = |id: &str, related: Vec<String>| IntentionRecord {
+        id: id.to_string(),
+        content: format!("what {id} asks for"),
+        trigger_type: "time".to_string(),
+        trigger_data: r#"{"type":"time","at":"2099-01-01T00:00:00Z"}"#.to_string(),
+        priority: 3,
+        status: "active".to_string(),
+        created_at: Utc::now(),
+        deadline: None,
+        fulfilled_at: None,
+        reminder_count: 0,
+        last_reminded_at: None,
+        notes: Some("set before the backup".to_string()),
+        tags: vec!["follow-up".to_string()],
+        related_memories: related,
+        snoozed_until: None,
+        source_type: "api".to_string(),
+        source_data: None,
+    };
+    source
+        .save_intention(&intention("intention-bound", vec![memory.clone()]))
+        .unwrap();
+    source
+        .save_intention(&intention("intention-free", vec![]))
+        .unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(report.nodes_imported, 1);
+    assert_eq!(
+        report.intentions_imported, 2,
+        "a reminder exists in one place only, so a restore has to bring it back"
+    );
+
+    let bound = target
+        .get_intention("intention-bound")
+        .unwrap()
+        .expect("the reminder must arrive");
+    assert_eq!(bound.related_memories, vec![memory.clone()]);
+    assert_eq!(
+        bound.trigger_type, "time",
+        "a reminder without its trigger is not a reminder"
+    );
+    assert!(bound.trigger_data.contains("2099"));
+    assert!(
+        target.get_intention("intention-free").unwrap().is_some(),
+        "an intention that references no memory is not held back by the scope rule"
+    );
+
+    // What this store did with the commitment after the backup: discharged it, having
+    // reminded the user three times.
+    let mut fulfilled = bound.clone();
+    fulfilled.status = "fulfilled".to_string();
+    fulfilled.fulfilled_at = Some(Utc::now());
+    fulfilled.reminder_count = 3;
+    target.save_intention(&fulfilled).unwrap();
+
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(
+        report.intentions_imported, 0,
+        "an intention the live store already holds is left alone"
+    );
+    let after = target.get_intention("intention-bound").unwrap().unwrap();
+    assert_eq!(
+        after.status, "fulfilled",
+        "a restore may not re-arm a commitment the user has already discharged"
+    );
+    assert_eq!(
+        after.reminder_count, 3,
+        "nor make the store forget how often it already spoke"
+    );
+}
+
+/// An intention that references a memory the snapshot does not carry must not arrive
+/// half-formed: it would tell the store to remind the user about something whose
+/// stated reason is missing here, and the reference could name a memory this store has
+/// already let go. The check is all-or-nothing on `related_memories`.
+#[test]
+fn snapshot_restore_drops_an_intention_that_references_a_missing_memory() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let kept = ingest_id(&source, "a memory the snapshot still carries");
+    let gone = ingest_id(&source, "a memory the snapshot no longer carries");
+    let mut intention = IntentionRecord {
+        id: "intention-kept".to_string(),
+        content: "a reminder about a memory that is still here".to_string(),
+        trigger_type: "context".to_string(),
+        trigger_data: r#"{"type":"context","topic":"deployments"}"#.to_string(),
+        priority: 2,
+        status: "active".to_string(),
+        created_at: Utc::now(),
+        deadline: None,
+        fulfilled_at: None,
+        reminder_count: 0,
+        last_reminded_at: None,
+        notes: None,
+        tags: vec![],
+        related_memories: vec![kept.clone()],
+        snoozed_until: None,
+        source_type: "api".to_string(),
+        source_data: None,
+    };
+    source.save_intention(&intention).unwrap();
+    intention.id = "intention-gone".to_string();
+    intention.related_memories = vec![kept.clone(), gone.clone()];
+    source.save_intention(&intention).unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    {
+        let conn = rusqlite::Connection::open(&snapshot).unwrap();
+        conn.execute(
+            "DELETE FROM knowledge_nodes WHERE id = ?1",
+            rusqlite::params![gone],
+        )
+        .unwrap();
+    }
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+
+    assert_eq!(
+        report.intentions_imported, 1,
+        "only the intention whose memories the snapshot still carries"
+    );
+    assert!(target.get_intention("intention-kept").unwrap().is_some());
+    let missing = target.get_intention("intention-gone").unwrap();
+    assert!(
+        missing.is_none(),
+        "an intention naming a memory the restore did not bring back must stay behind, \
+         not arrive pointing at nothing"
     );
 }
 
