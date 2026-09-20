@@ -154,7 +154,13 @@ impl Storage {
                     decision: "create".to_string(),
                     node,
                     superseded_id: None,
-                    similarity: None,
+                    // Reported even though nothing was rewritten: the caller
+                    // decides what to tell the writer, and "this is 83% similar
+                    // to a memory you already have, stored separately" is the
+                    // signal that the writer may have meant to edit instead.
+                    // Withholding it made the near-duplicate advisory in the
+                    // MCP layer unreachable on the one path that needs it.
+                    similarity: Some(1.0 - prediction_error),
                     prediction_error: Some(prediction_error),
                     reason: if related_memory_ids.is_empty() {
                         format!("Created new memory: {:?}", reason)

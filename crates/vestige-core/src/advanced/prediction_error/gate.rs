@@ -6,12 +6,18 @@ use crate::memory::freshness::compare_memory_ids;
 
 use super::candidate::{CandidateMemory, SimilarityResult};
 use super::constants::{
-    CORRECTION_THRESHOLD, DEFAULT_SIMILARITY_THRESHOLD, MAX_UPDATE_CANDIDATES,
-    NEAR_IDENTICAL_THRESHOLD,
+    CORRECTION_MIN_CONFIDENCE, CORRECTION_THRESHOLD, DEFAULT_SIMILARITY_THRESHOLD,
+    MAX_UPDATE_CANDIDATES, NEAR_IDENTICAL_THRESHOLD,
 };
 use super::decision::{CreateReason, GateDecision, MergeStrategy, SupersedeReason, UpdateType};
 use super::similarity::cosine_similarity;
 use super::stats::GateStats;
+
+/// Serde default for [`PredictionErrorConfig::correction_min_confidence`], so a
+/// config serialized before the field existed still deserializes.
+fn default_correction_min_confidence() -> f32 {
+    CORRECTION_MIN_CONFIDENCE
+}
 
 /// Configuration for the prediction error gate
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,12 +28,16 @@ pub struct PredictionErrorConfig {
     pub near_identical_threshold: f32,
     /// Threshold for correction detection
     pub correction_threshold: f32,
+    /// Minimum contradiction confidence before a memory may be retired.
+    ///
+    /// Guards the destructive path only: `Update`, `Merge` and `Create` are
+    /// non-destructive and still act on weaker evidence.
+    #[serde(default = "default_correction_min_confidence")]
+    pub correction_min_confidence: f32,
     /// Maximum candidates to consider
     pub max_candidates: usize,
     /// Whether to auto-supersede demoted memories
     pub auto_supersede_demoted: bool,
-    /// Whether to prefer updates over creates
-    pub prefer_updates: bool,
 }
 
 impl Default for PredictionErrorConfig {
@@ -36,9 +46,9 @@ impl Default for PredictionErrorConfig {
             similarity_threshold: DEFAULT_SIMILARITY_THRESHOLD,
             near_identical_threshold: NEAR_IDENTICAL_THRESHOLD,
             correction_threshold: CORRECTION_THRESHOLD,
+            correction_min_confidence: default_correction_min_confidence(),
             max_candidates: MAX_UPDATE_CANDIDATES,
             auto_supersede_demoted: true,
-            prefer_updates: true,
         }
     }
 }
@@ -114,14 +124,15 @@ impl PredictionErrorGate {
             .iter()
             .map(|c| {
                 let similarity = cosine_similarity(new_embedding, &c.embedding);
-                let appears_contradictory = self.detect_contradiction(new_content, &c.content);
+                let contradiction = self.detect_contradiction(new_content, &c.content);
 
                 SimilarityResult {
                     memory_id: c.id.clone(),
                     similarity,
                     prediction_error: 1.0 - similarity,
                     semantic_overlap: similarity, // Simplified; could use more sophisticated measure
-                    appears_contradictory,
+                    appears_contradictory: contradiction.positive,
+                    contradiction_confidence: contradiction.confidence,
                 }
             })
             .collect();
@@ -149,8 +160,15 @@ impl PredictionErrorGate {
         // similar to the memory it corrects ("deploy is Friday" → "deploy moved to
         // Monday"), so testing similarity first swallowed every correction into
         // `Update { Reinforce }` and left `correction_threshold` unreachable.
+        //
+        // The confidence floor applies here and nowhere else: this is the branch
+        // that retires a memory, and retirement is a claim about the past ("this
+        // stopped being true then"), not a note about the present.
         if let Some(best) = top_candidates.first() {
-            if best.appears_contradictory && best.similarity >= self.config.correction_threshold {
+            if best.appears_contradictory
+                && best.contradiction_confidence >= self.config.correction_min_confidence
+                && best.similarity >= self.config.correction_threshold
+            {
                 self.stats.supersedes += 1;
                 return GateDecision::Supersede {
                     old_memory_id: best.memory_id.clone(),
@@ -188,16 +206,25 @@ impl PredictionErrorGate {
                     };
                 }
 
-                // Regular update for similar content (corrections are handled above,
-                // before the near-identical short-circuit)
-                if best.similarity >= self.config.similarity_threshold && self.config.prefer_updates
-                {
-                    self.stats.updates += 1;
-                    return GateDecision::Update {
-                        target_id: best.memory_id.clone(),
-                        similarity: best.similarity,
-                        update_type: UpdateType::Merge,
+                // Similar vocabulary, different claim. This band used to return
+                // `UpdateType::Merge`, which the storage layer implemented by
+                // rewriting the existing memory's text as
+                // `"{old}\n\n[Updated <date>]\n{new}"`: a compound memory under
+                // the wrong heading, and a second copy of the new text next to
+                // its own memory. Sharing the vocabulary of a subject is not
+                // agreeing with a claim, so the new content becomes its own
+                // memory and the neighbours it resembles are named in
+                // `related_memory_ids` — the `Create` path already forges those
+                // edges and reports them.
+                if best.similarity >= self.config.similarity_threshold {
+                    self.stats.creates += 1;
+                    return GateDecision::Create {
+                        reason: CreateReason::DifferentDomain,
                         prediction_error: best.prediction_error,
+                        related_memory_ids: top_candidates
+                            .iter()
+                            .map(|s| s.memory_id.clone())
+                            .collect(),
                     };
                 }
             }
@@ -307,10 +334,12 @@ impl PredictionErrorGate {
     ///
     /// Every Vestige release runs an eval suite against the hand-curated
     /// datasets in `nlp::eval::data` to detect regressions in this signal.
-    pub(super) fn detect_contradiction(&self, new_content: &str, old_content: &str) -> bool {
-        crate::nlp::default_contradiction_detector()
-            .detect(new_content, old_content)
-            .positive
+    pub(super) fn detect_contradiction(
+        &self,
+        new_content: &str,
+        old_content: &str,
+    ) -> crate::nlp::DetectionResult {
+        crate::nlp::default_contradiction_detector().detect(new_content, old_content)
     }
 
     /// Get statistics

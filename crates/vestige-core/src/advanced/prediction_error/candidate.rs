@@ -36,4 +36,14 @@ pub struct SimilarityResult {
     pub semantic_overlap: f32,
     /// Whether contents appear contradictory
     pub appears_contradictory: bool,
+    /// How strong the contradiction evidence is (0.0 - 1.0), fused over the
+    /// detector's signals.
+    ///
+    /// Carried separately from [`Self::appears_contradictory`] because the two
+    /// are held to different bars: `Supersede` retires a memory — it claims the
+    /// old text is no longer true — so it must clear
+    /// `PredictionErrorConfig::correction_min_confidence`, while merely
+    /// *noticing* a possible contradiction is cheap and stays available at any
+    /// confidence.
+    pub contradiction_confidence: f32,
 }

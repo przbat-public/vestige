@@ -41,6 +41,28 @@ fn make_candidate(id: &str, seed: f32) -> CandidateMemory {
     }
 }
 
+/// Build an embedding whose cosine to `base` is `theta.cos()`.
+///
+/// Mixing in the orthogonal direction moves the vector off `base` by a known
+/// angle, which is how the tests reach a chosen point inside a similarity band
+/// instead of guessing at seeds. The achieved similarity is asserted, so a
+/// failure here means the helper — not the gate — is wrong.
+fn make_embedding_at_cosine(base: &[f32], theta: f32) -> Vec<f32> {
+    let orthogonal = make_orthogonal_embedding();
+    let mixed: Vec<f32> = base
+        .iter()
+        .zip(orthogonal.iter())
+        .map(|(b, o)| b * theta.cos() + o * theta.sin())
+        .collect();
+    let achieved = cosine_similarity(base, &mixed);
+    assert!(
+        (achieved - theta.cos()).abs() < 0.02,
+        "helper premise: wanted cos {:.3}, built {achieved:.3}",
+        theta.cos()
+    );
+    mixed
+}
+
 #[test]
 fn test_cosine_similarity() {
     let a = vec![1.0, 0.0, 0.0];
@@ -125,20 +147,27 @@ fn test_different_content_create() {
 fn test_contradiction_detection() {
     let gate = PredictionErrorGate::new();
 
-    assert!(gate.detect_contradiction(
-        "Don't use synchronous code",
-        "Use synchronous code for simplicity"
-    ));
+    assert!(
+        gate.detect_contradiction("Don't use synchronous code", "Use synchronous code for simplicity")
+            .positive
+    );
 
-    assert!(gate.detect_contradiction(
-        "Actually, the correct approach is...",
-        "The approach is to..."
-    ));
+    assert!(
+        gate.detect_contradiction(
+            "Actually, the correct approach is...",
+            "The approach is to..."
+        )
+        .positive
+    );
 
-    assert!(!gate.detect_contradiction(
-        "Use async/await for performance",
-        "Use async patterns when needed"
-    ));
+    assert!(
+        !gate
+            .detect_contradiction(
+                "Use async/await for performance",
+                "Use async patterns when needed"
+            )
+            .positive
+    );
 }
 
 #[test]
@@ -228,6 +257,94 @@ fn near_identical_correction_supersedes_instead_of_reinforcing() {
         ),
         "a near-identical contradiction must supersede, got {decision:?}"
     );
+}
+
+/// Regression, real pair from a production store (2026-09-20).
+///
+/// A Polish adverbial — "w rzeczywistości", "in reality" — sits inside the new
+/// memory's own causal explanation. The detector reports a single
+/// `CorrectionPhrase` at 0.6 confidence, and because both memories belong to
+/// the same project the cosine similarity clears `correction_threshold` (0.70).
+/// The gate retired the older memory as a `Correction` on that alone, so a
+/// decision acquired `valid_until` one second after it was written.
+///
+/// One mid-confidence signal is not grounds for retirement: `Update`/`Create`
+/// leave the old memory intact, `Supersede` claims it stopped being true.
+#[test]
+fn lone_correction_phrase_does_not_retire_a_memory() {
+    let mut gate = PredictionErrorGate::new();
+    let embedding = make_embedding(1.0);
+
+    let mut candidate = make_candidate("decision-tutorial", 1.0);
+    candidate.embedding = embedding.clone();
+    candidate.content = "Materiał zaczyna się od stanowiska pracy: instalacji kompilatora. \
+         Odbiorca nie napisał wcześniej żadnego programu i nie wie, czym jest rejestr."
+        .to_string();
+
+    let decision = gate.evaluate(
+        "Objaw: na panelu pojawiały się poziome pasy będące kopią tego, co wyżej. Przyczyna: \
+         decyzja o pominięciu wysłania pasma porównywała je ze wspólnym cieniem, więc w \
+         rzeczywistości sprawdzała, czy pasmo jest takie samo jak poprzednie.",
+        &embedding,
+        &[candidate],
+    );
+
+    assert!(
+        !matches!(decision, GateDecision::Supersede { .. }),
+        "a lone 0.6-confidence correction phrase retired a memory: {decision:?}"
+    );
+}
+
+/// Regression, real behaviour observed in a production store (2026-09-20).
+///
+/// The 0.75–0.92 similarity band — same project vocabulary, different claim —
+/// used to return `Update { Merge }`, and the storage layer implemented that by
+/// rewriting the existing memory as `"{old}\n\n[Updated YYYY-MM-DD]\n{new}"`.
+/// Three memories in that store ended up carrying an unrelated lesson appended
+/// under somebody else's heading, and two of them duplicated lessons that also
+/// existed as their own memories.
+///
+/// Similar vocabulary is not the same claim: the new content goes in as its own
+/// memory, linked to the neighbour it resembles.
+#[test]
+fn similar_but_distinct_content_is_stored_separately_and_linked() {
+    let mut gate = PredictionErrorGate::new();
+    let embedding = make_embedding(1.0);
+
+    let mut candidate = make_candidate("mem-1", 1.0);
+    // 0.83: above `similarity_threshold` (0.75), below
+    // `near_identical_threshold` (0.92) — the band that used to merge.
+    candidate.embedding = make_embedding_at_cosine(&embedding, 0.6);
+    candidate.content = "The tutorial starts at the workbench: compiler install first, then a \
+         first program that ends with something visible on the panel."
+        .to_string();
+
+    let decision = gate.evaluate(
+        "Every teaching stage is a standalone program that compiles cleanly and gives the \
+         learner a visible result.",
+        &embedding,
+        &[candidate],
+    );
+
+    match decision {
+        GateDecision::Create {
+            reason,
+            related_memory_ids,
+            ..
+        } => {
+            assert_eq!(
+                reason,
+                CreateReason::DifferentDomain,
+                "the decision must say why no existing memory was rewritten"
+            );
+            assert_eq!(
+                related_memory_ids,
+                vec!["mem-1".to_string()],
+                "the neighbour it resembles must still be named, so the caller links them"
+            );
+        }
+        other => panic!("expected a separate, linked memory, got {other:?}"),
+    }
 }
 
 #[test]

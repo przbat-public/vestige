@@ -403,13 +403,12 @@ pub async fn execute(
         }
         // Near-duplicate advisory threshold.
         //
-        // The prediction-error gate routes anything with cosine >= 0.75 to
-        // Update/Reinforce/Supersede/Merge under the default config
-        // (prefer_updates=true). So a `decision == "create"` outcome with
-        // sim > 0.9 is effectively impossible — the old `> 0.9` check was
-        // dead code. Lower the bar to 0.6 (still high enough to surface
-        // "you almost hit Update territory but the gate landed on Create"
-        // cases that warrant a manual look).
+        // The prediction-error gate stores anything above 0.75 cosine as its own
+        // memory and links it to the neighbour (nothing rewrites an existing
+        // memory's text any more), so `decision == "create"` with a high
+        // similarity is the normal outcome for "same project, different claim"
+        // and exactly the case a writer should look at: it may have meant to
+        // edit. The gate reports the similarity on the create path for this.
         const NEAR_DUPLICATE_ADVISORY_THRESHOLD: f32 = 0.6;
         if let Some(sim) = result.similarity
             && sim >= NEAR_DUPLICATE_ADVISORY_THRESHOLD

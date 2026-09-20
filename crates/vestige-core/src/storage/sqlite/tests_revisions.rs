@@ -694,3 +694,74 @@ fn revision_content_cap_is_the_documented_value() {
         "the cap is advertised in tool output; changing it changes the wire contract"
     );
 }
+
+// ============================================================================
+// Similar content is stored separately, never appended to the neighbour
+// ============================================================================
+
+/// Regression from a production store (2026-09-20): the smart-ingest gate used
+/// to answer `Update { Merge }` for anything above 0.75 cosine, and this layer
+/// implemented that by rewriting the neighbour's text as
+/// `"{old}\n\n[Updated <date>]\n{new}"`. Three memories in that store ended up
+/// carrying an unrelated lesson appended under somebody else's heading.
+///
+/// The two properties asserted here are the ones a reader depends on: the older
+/// memory still says exactly what it said, and the new content exists as its own
+/// memory, linked to the one it resembles (a link is how a reader learns the two
+/// are about the same thing without one being rewritten into the other).
+#[test]
+#[cfg(all(feature = "embeddings", feature = "vector-search"))]
+fn similar_content_is_stored_separately_and_linked_to_its_neighbour() {
+    let storage = create_test_storage();
+    if !storage.embedding_service_ready() {
+        eprintln!("embedding service not ready — the similarity band is unreachable");
+        return;
+    }
+
+    let existing = ingest(
+        &storage,
+        "The tutorial starts at the workbench: install the compiler first, then the first \
+         program ends with something the learner can see on the panel.",
+    );
+    let existing_before = existing.content.clone();
+
+    let result = storage
+        .smart_ingest(IngestInput {
+            content: "Every teaching stage in the course is a standalone program that compiles \
+                      cleanly and gives the learner a visible result."
+                .to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(
+        result.decision, "create",
+        "test premise: this pair must land in the separate-memory branch (similarity {:?})",
+        result.similarity
+    );
+    assert_ne!(
+        result.node.id, existing.id,
+        "the new content must be its own memory"
+    );
+
+    let neighbour_after = storage.get_node(&existing.id).unwrap().unwrap();
+    assert_eq!(
+        neighbour_after.content, existing_before,
+        "an ingest of similar content must not rewrite the memory it resembles"
+    );
+    assert!(
+        !neighbour_after.content.contains("[Updated"),
+        "no append marker may be injected into an existing memory"
+    );
+
+    let connections = storage
+        .get_connections_for_memory(&result.node.id)
+        .unwrap();
+    assert!(
+        connections
+            .iter()
+            .any(|c| c.target_id == existing.id || c.source_id == existing.id),
+        "the two memories must be linked; a reader has no other way to see they belong together"
+    );
+}
