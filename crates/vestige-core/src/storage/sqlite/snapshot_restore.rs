@@ -114,12 +114,44 @@ fn import_snapshot(conn: &Connection) -> Result<SnapshotRestoreReport> {
 
     // Explicit column list on both sides: robust to columns added or removed between the
     // snapshot's schema and this build, which `SELECT *` would silently mis-align.
-    let column_list = shared.join(", ");
+    //
+    // `recorded_at` needs more than a shared-column copy. A snapshot written before V17
+    // has no such column at all, and a snapshot written by V17 itself can hold NULL in it
+    // for rows that predated the column. Copying the intersection would import those rows
+    // with no record time stored — the read path papers over it by falling back to
+    // `created_at`, but the stored invariant ("no row lacks a record time") would be
+    // false, an audit filtering on the column would silently skip those memories, and any
+    // point-in-time query would be wrong for exactly the memories whose record time
+    // matters most: old ones arriving in a new store. So the value is derived here instead.
+    // Column names stay unqualified on purpose: in SQLite a column of an attached database
+    // is `schema.table.column`, so `snapshot.<column>` is read as a *table alias* and fails
+    // with "no such column". The FROM clause names the one table, so bare names are exact.
+    let mut insert_columns = shared.clone();
+    let mut select_expressions: Vec<String> = shared.clone();
+    if let Some(position) = insert_columns.iter().position(|c| c == "recorded_at") {
+        select_expressions[position] = "COALESCE(recorded_at, created_at)".to_string();
+    } else if snapshot_columns.iter().any(|c| c == "created_at") {
+        // The snapshot predates the column: its `created_at` is the only honest claim
+        // available about when the fact was recorded.
+        insert_columns.push("recorded_at".to_string());
+        select_expressions.push("created_at".to_string());
+    }
+
+    let column_list = insert_columns.join(", ");
+    let value_list = select_expressions.join(", ");
     let nodes_imported = conn.execute(
         &format!(
             "INSERT OR REPLACE INTO main.knowledge_nodes ({column_list}) \
-             SELECT {column_list} FROM snapshot.knowledge_nodes"
+             SELECT {value_list} FROM snapshot.knowledge_nodes"
         ),
+        [],
+    )?;
+
+    // Belt and braces for the same invariant: whatever the snapshot looked like, no row
+    // may be left without a record time after a merge. A no-op when the copy above did its
+    // job, which is the point — the guarantee should not depend on that branch being right.
+    conn.execute(
+        "UPDATE main.knowledge_nodes SET recorded_at = created_at WHERE recorded_at IS NULL",
         [],
     )?;
 

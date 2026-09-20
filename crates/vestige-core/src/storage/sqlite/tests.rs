@@ -732,6 +732,69 @@ fn snapshot_round_trip_restores_memories_and_fts() {
     );
 }
 
+/// A snapshot written before V17 has no `recorded_at` column at all, and one written by
+/// V17 can hold NULL in it for rows that predated the column. Both must still arrive with
+/// a record time *stored*: the read path falls back to `created_at`, which hides the gap
+/// instead of closing it — an audit filtering on the column would skip those memories, and
+/// a point-in-time query would be wrong for exactly the memories whose record time matters
+/// most, namely old ones arriving in a new store.
+#[test]
+fn snapshot_from_before_the_record_time_column_still_records_one() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let node = source
+        .ingest(IngestInput {
+            content: "The March decision was to keep the WAL sidecar".to_string(),
+            node_type: "decision".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let snapshot = dir.path().join("vestige-snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    // Make the file indistinguishable from one a build without the column produced.
+    {
+        let conn = rusqlite::Connection::open(&snapshot).unwrap();
+        conn.execute_batch("ALTER TABLE knowledge_nodes DROP COLUMN recorded_at;")
+            .unwrap();
+        let still_there: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('knowledge_nodes') WHERE name = 'recorded_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_there, 0, "the fixture must really lack the column");
+    }
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    target.restore_from_snapshot(&snapshot).unwrap();
+
+    let restored = target
+        .get_node(&node.id)
+        .unwrap()
+        .expect("the memory must arrive from the snapshot");
+    assert_eq!(
+        restored.recorded_at, restored.created_at,
+        "for a snapshot that never had the column, its created_at is the only honest \
+         record time available"
+    );
+
+    // The stored column, not the API's fallback: a NULL here is invisible through
+    // `get_node` and wrong for every query that filters or sorts on it.
+    let conn = rusqlite::Connection::open(dir.path().join("target.db")).unwrap();
+    let missing: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM knowledge_nodes WHERE recorded_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(missing, 0, "no row may be left without a record time");
+}
+
 #[test]
 fn snapshot_restore_merges_instead_of_replacing() {
     let dir = tempdir().unwrap();
