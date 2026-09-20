@@ -13,6 +13,12 @@
 //! matches what this build produces; otherwise the imported rows are marked
 //! `has_embedding = 0` so the existing `regenerate_embeddings` path re-embeds them
 //! instead of leaving a vector from a different model in place.
+//!
+//! A memory is more than its `knowledge_nodes` row, so the merge covers the two tables
+//! that describe it: `memory_revisions` (V17 — how its wording changed) and `code_refs`
+//! (V19 — what it points at in code). Both are imported **additively**, scoped to the
+//! nodes the snapshot itself carries; see [`import_revisions`] and [`import_code_refs`]
+//! for the rule and why the alternative loses data.
 
 use std::path::Path;
 
@@ -29,6 +35,12 @@ pub struct SnapshotRestoreReport {
     pub nodes_imported: usize,
     /// Rows the snapshot contained (equal to or greater than `nodes_imported`).
     pub nodes_in_snapshot: usize,
+    /// Content-history rows **added** to the live store's history. A revision the
+    /// live store already had is not counted and not touched.
+    pub revisions_imported: usize,
+    /// Code anchors **added** to the live store. An anchor the live store already
+    /// had keeps its own (possibly fresher) verdict and is not counted.
+    pub code_refs_imported: usize,
     /// Vectors copied because their dimension matches this build.
     pub embeddings_imported: usize,
     /// Imported memories marked for re-embedding because their vector did not travel.
@@ -155,6 +167,9 @@ fn import_snapshot(conn: &Connection) -> Result<SnapshotRestoreReport> {
         [],
     )?;
 
+    let revisions_imported = import_revisions(conn)?;
+    let code_refs_imported = import_code_refs(conn)?;
+
     let embeddings_imported = import_embeddings(conn)?;
 
     // Anything without a usable vector must go back through the embedder rather than sit
@@ -175,11 +190,173 @@ fn import_snapshot(conn: &Connection) -> Result<SnapshotRestoreReport> {
     Ok(SnapshotRestoreReport {
         nodes_imported,
         nodes_in_snapshot,
+        revisions_imported,
+        code_refs_imported,
         embeddings_imported,
         embeddings_reset,
         snapshot_schema_version,
         live_schema_version,
     })
+}
+
+/// Import a memory's content history (`memory_revisions`) from the snapshot.
+///
+/// **The rule is add, never replace.** A snapshot is a claim about one moment;
+/// a revision the live store recorded after the backup is a change the backup
+/// cannot testify against, and the running store is the only place that change
+/// exists. Clearing a live node's history before copying the snapshot's would
+/// therefore lose the most recent part of the timeline for every memory the two
+/// stores share — the same silent loss this import exists to end, reached from
+/// the other direction. So nothing in `main` is ever updated or deleted here.
+///
+/// `id` is not copied. It is a rowid local to the store that minted it, so the
+/// same number in another store belongs to an unrelated revision; carrying it
+/// (with `INSERT OR REPLACE`) would delete a live row, and `INSERT OR IGNORE`
+/// would silently drop the snapshot's row instead. SQLite mints fresh ids, and
+/// idempotency comes from the dedup below: a row is the same revision when every
+/// shared column matches, compared with `IS` so a NULL `reason` or `actor`
+/// matches its own kind rather than falling out of the comparison.
+///
+/// Scoped to the nodes the snapshot itself carries. A revision whose node the
+/// snapshot does not hold belongs to no memory the merge is bringing back, and
+/// importing it would put text the live store no longer has into the one table
+/// that exists to keep text — erasure undone by a file the user was told was a
+/// backup. What this scope cannot do is withhold history from a memory the
+/// snapshot *does* carry: the node merge already resurrects that row (pre-existing
+/// behaviour, unchanged here), its revisions describe no text the node does not
+/// itself hold, and the live store keeps no tombstone — so "erased here" and
+/// "never seen here" are the same absence, and no finer rule is available to this
+/// function.
+fn import_revisions(conn: &Connection) -> Result<usize> {
+    let Some(columns) = importable_columns(
+        conn,
+        "memory_revisions",
+        // NOT NULL in every version of the table; without them there is no row
+        // to insert and nothing to match one against.
+        &["node_id", "recorded_at", "kind"],
+        &["id"],
+    )?
+    else {
+        return Ok(0);
+    };
+
+    // Aliases (`s` for the snapshot, `m` for the live table) are required here,
+    // not cosmetic: the dedup subquery names the same table the outer query reads
+    // from, so a bare column name would be ambiguous between the two.
+    let select_list = columns
+        .iter()
+        .map(|c| format!("s.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let same_row = columns
+        .iter()
+        .map(|c| format!("m.{c} IS s.{c}"))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+
+    let sql = format!(
+        "INSERT INTO main.memory_revisions ({}) \
+         SELECT {select_list} FROM snapshot.memory_revisions s \
+         WHERE s.node_id IN (SELECT id FROM snapshot.knowledge_nodes) \
+           AND NOT EXISTS (SELECT 1 FROM main.memory_revisions m WHERE {same_row})",
+        columns.join(", "),
+    );
+
+    Ok(conn.execute(&sql, [])?)
+}
+
+/// Import a memory's code anchors (`code_refs`) from the snapshot.
+///
+/// **The rule is add, never replace**, for the reasons [`import_revisions`]
+/// gives, plus one this table adds: a live row's `verdict` and `resolved_at` are
+/// the product of this store's own audit and are at least as recent as the
+/// snapshot's frozen copy, so overwriting them would trade a checked answer for
+/// an older one. An anchor this store already holds is left exactly as it is.
+///
+/// Identity is the reference itself — every shared column except `verdict` and
+/// `resolved_at`, which say when the check last ran rather than what the memory
+/// points at. The same anchor re-checked is still the same anchor, so importing
+/// it twice would list the same file twice in every search result that cites the
+/// memory. `id` is excluded for the reason given above: it is a rowid, not an
+/// identity.
+///
+/// Scoped to the snapshot's nodes, also as above: an anchor with no memory
+/// behind it is a record of which files a memory the live store let go of used
+/// to cite, which is precisely what erasure removes.
+fn import_code_refs(conn: &Connection) -> Result<usize> {
+    let Some(columns) = importable_columns(conn, "code_refs", &["node_id", "path"], &["id"])?
+    else {
+        return Ok(0);
+    };
+
+    // `node_id` and `path` are required above, so the identity is never empty and
+    // the `NOT EXISTS` clause below is always a well-formed predicate.
+    let identity = columns
+        .iter()
+        .filter(|c| !matches!(c.as_str(), "verdict" | "resolved_at"))
+        .map(|c| format!("m.{c} IS s.{c}"))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let select_list = columns
+        .iter()
+        .map(|c| format!("s.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!(
+        "INSERT INTO main.code_refs ({}) \
+         SELECT {select_list} FROM snapshot.code_refs s \
+         WHERE s.node_id IN (SELECT id FROM snapshot.knowledge_nodes) \
+           AND NOT EXISTS (SELECT 1 FROM main.code_refs m WHERE {identity})",
+        columns.join(", "),
+    );
+
+    Ok(conn.execute(&sql, [])?)
+}
+
+/// The columns of `table` a snapshot can contribute to `main`: the intersection
+/// of both schemas, minus `excluded`.
+///
+/// `Ok(None)` means "nothing to import" and is not an error. A snapshot written
+/// before V17 has no `memory_revisions` and one before V19 has no `code_refs`;
+/// refusing the whole restore over a table the snapshot never had would trade a
+/// recoverable store for a lost one. A table that exists but lacks a `required`
+/// column is a shape this build does not know, so it is skipped with a warning
+/// rather than imported as a partial row that would either fail the NOT NULL
+/// constraint or invent the missing value.
+fn importable_columns(
+    conn: &Connection,
+    table: &str,
+    required: &[&str],
+    excluded: &[&str],
+) -> Result<Option<Vec<String>>> {
+    let live_columns = table_columns(conn, "main", table)?;
+    if live_columns.is_empty() {
+        return Ok(None);
+    }
+
+    let snapshot_columns = match table_columns(conn, "snapshot", table) {
+        Ok(columns) => columns,
+        Err(_) => return Ok(None), // the attached file has no such schema/table
+    };
+    if snapshot_columns.is_empty() {
+        return Ok(None);
+    }
+
+    let shared: Vec<String> = live_columns
+        .into_iter()
+        .filter(|c| snapshot_columns.contains(c) && !excluded.contains(&c.as_str()))
+        .collect();
+
+    if required.iter().any(|r| !shared.iter().any(|c| c == r)) {
+        tracing::warn!(
+            table,
+            "snapshot table is missing columns this build needs; skipping its import"
+        );
+        return Ok(None);
+    }
+
+    Ok(Some(shared))
 }
 
 /// Copy vectors from the snapshot when their dimension matches what this build produces.

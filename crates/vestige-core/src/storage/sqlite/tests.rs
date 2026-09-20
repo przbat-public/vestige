@@ -853,6 +853,398 @@ fn snapshot_restore_rejects_a_newer_schema() {
     );
 }
 
+/// A restored memory has to arrive with the two things that make it more than its
+/// current text: the history of how it came to say this, and the code it points at.
+/// Before this import existed, a snapshot round trip silently dropped both — a
+/// backup restored the sentence and lost the record of every earlier version of it.
+#[test]
+fn snapshot_round_trip_preserves_revision_history_and_anchors() {
+    use crate::code_refs::{AnchorVerdict, CodeAnchor, IngestAnchor};
+
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+
+    let mut anchor = CodeAnchor::new("src/storage/sqlite/snapshot_restore.rs");
+    anchor.symbol = Some("import_snapshot".to_string());
+    anchor.commit_sha = Some("d134de52".to_string());
+    anchor.hint_line = Some(96);
+
+    let node = source
+        .ingest(IngestInput {
+            content: "the wording the memory was created with".to_string(),
+            node_type: "fact".to_string(),
+            anchors: vec![IngestAnchor::unchecked(anchor)],
+            ..Default::default()
+        })
+        .unwrap();
+    source
+        .update_node_content_with_revision(
+            &node.id,
+            "the wording it holds today",
+            Some("the reason it changed"),
+        )
+        .unwrap();
+    assert_eq!(
+        source.get_memory_revisions(&node.id, 10).unwrap().len(),
+        2,
+        "the fixture must really hold a history, or the assertions below pass vacuously"
+    );
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+
+    assert_eq!(report.nodes_imported, 1);
+    assert_eq!(
+        report.revisions_imported, 2,
+        "the history must travel with the memory it explains"
+    );
+    assert_eq!(report.code_refs_imported, 1);
+
+    let history = target.get_memory_revisions(&node.id, 10).unwrap();
+    assert_eq!(history.len(), 2, "both revisions must arrive");
+    assert_eq!(
+        history[0].new_content.as_deref(),
+        Some("the wording it holds today")
+    );
+    assert_eq!(history[0].reason.as_deref(), Some("the reason it changed"));
+    assert_eq!(
+        history[1].new_content.as_deref(),
+        Some("the wording the memory was created with"),
+        "the revision the memory was created with is what the timeline reads back to"
+    );
+
+    let anchors = target.code_refs_for(&node.id).unwrap();
+    assert_eq!(anchors.len(), 1, "the anchor must arrive with the memory");
+    assert_eq!(
+        anchors[0].anchor.path, "src/storage/sqlite/snapshot_restore.rs",
+        "an anchor that does not come back cannot be checked or reported stale"
+    );
+    assert_eq!(anchors[0].anchor.symbol.as_deref(), Some("import_snapshot"));
+    assert_eq!(anchors[0].anchor.commit_sha.as_deref(), Some("d134de52"));
+    assert_eq!(anchors[0].anchor.hint_line, Some(96));
+    assert_eq!(anchors[0].verdict, AnchorVerdict::Unchecked);
+}
+
+/// A pre-V17 snapshot has no `memory_revisions` table and a V17/V18 one has no
+/// `code_refs`. The import must restore the memories and invent nothing for the
+/// tables the snapshot never had: an empty result is the honest answer, and a row
+/// manufactured to fill it would be a claim the backup never made.
+#[test]
+fn snapshot_from_before_the_history_tables_restores_without_inventing_rows() {
+    use crate::code_refs::{CodeAnchor, IngestAnchor};
+
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let node = source
+        .ingest(IngestInput {
+            content: "the March decision was to keep the WAL sidecar".to_string(),
+            node_type: "decision".to_string(),
+            anchors: vec![IngestAnchor::unchecked(CodeAnchor::new(
+                "src/storage/sqlite/init.rs",
+            ))],
+            ..Default::default()
+        })
+        .unwrap();
+    source
+        .update_node_content(&node.id, "the April decision was to drop the WAL sidecar")
+        .unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    // Two shapes, taken from the same store: a V18 file, where the history table
+    // exists and the anchors table does not, and a pre-V17 file, where neither
+    // does. Each must be read for what it has and no more.
+    let v18_snapshot = dir.path().join("snapshot-v18.db");
+    std::fs::copy(&snapshot, &v18_snapshot).unwrap();
+    {
+        let conn = rusqlite::Connection::open(&v18_snapshot).unwrap();
+        conn.execute_batch(
+            "DROP TABLE code_refs;
+             UPDATE schema_version SET version = 18;",
+        )
+        .unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&snapshot).unwrap();
+        conn.execute_batch(
+            "DROP TABLE memory_revisions;
+             DROP TABLE code_refs;
+             UPDATE schema_version SET version = 16;",
+        )
+        .unwrap();
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' \
+                 AND name IN ('memory_revisions', 'code_refs')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 0, "the fixture must really lack both tables");
+    }
+
+    // V18: the history travels, and the anchors cannot — the snapshot has no table
+    // to read them from, and none may be conjured to fill the gap.
+    let v18_target = Storage::new(Some(dir.path().join("target-v18.db"))).unwrap();
+    let v18_report = v18_target.restore_from_snapshot(&v18_snapshot).unwrap();
+    assert_eq!(v18_report.snapshot_schema_version, 18);
+    assert_eq!(v18_report.nodes_imported, 1);
+    assert_eq!(
+        v18_report.revisions_imported, 2,
+        "a V18 snapshot has the history table, so its history must arrive"
+    );
+    assert_eq!(
+        v18_report.code_refs_imported, 0,
+        "a V18 snapshot has no code_refs table to import from"
+    );
+    assert_eq!(
+        v18_target.get_memory_revisions(&node.id, 10).unwrap().len(),
+        2
+    );
+    assert!(
+        v18_target.code_refs_for(&node.id).unwrap().is_empty(),
+        "no anchor may be invented for a snapshot that could not carry one"
+    );
+
+    // Pre-V17: neither table, and the restore must still succeed — refusing the
+    // file over a table it never had would trade a recoverable store for a lost one.
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+
+    assert_eq!(report.snapshot_schema_version, 16);
+    assert_eq!(
+        report.nodes_imported, 1,
+        "the memory itself must still arrive"
+    );
+    assert_eq!(report.revisions_imported, 0);
+    assert_eq!(report.code_refs_imported, 0);
+    assert!(target.get_node(&node.id).unwrap().is_some());
+
+    // Counted from the tables, not through a read path: a row invented for a
+    // memory that had no history is exactly what a per-node read would hide.
+    let conn = rusqlite::Connection::open(dir.path().join("target.db")).unwrap();
+    let revisions: i64 = conn
+        .query_row("SELECT COUNT(*) FROM memory_revisions", [], |r| r.get(0))
+        .unwrap();
+    let anchors: i64 = conn
+        .query_row("SELECT COUNT(*) FROM code_refs", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        revisions, 0,
+        "a snapshot without the table must gain no rows"
+    );
+    assert_eq!(anchors, 0, "a snapshot without the table must gain no rows");
+}
+
+/// The merge rule for a node the snapshot and the live store both hold: what the
+/// snapshot carries is **added to** the live node's, never substituted for it,
+/// for its history and for its anchors alike.
+/// A snapshot is a claim about one moment; a revision recorded after the backup is
+/// a change the backup cannot testify against, and replacing the live history with
+/// the backup's would lose exactly the most recent part of the timeline. Restoring
+/// the same snapshot twice must also be idempotent — a backup restored weekly
+/// cannot duplicate a memory's whole history every week.
+#[test]
+fn snapshot_restore_adds_to_the_history_of_a_node_on_both_sides() {
+    use crate::code_refs::{AnchorVerdict, CodeAnchor, IngestAnchor};
+
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let mut anchor = CodeAnchor::new("src/storage/sqlite/snapshot_restore.rs");
+    anchor.symbol = Some("import_revisions".to_string());
+    let node = source
+        .ingest(IngestInput {
+            content: "the wording the memory was created with".to_string(),
+            node_type: "fact".to_string(),
+            anchors: vec![IngestAnchor::unchecked(anchor)],
+            ..Default::default()
+        })
+        .unwrap();
+    source
+        .update_node_content_with_revision(
+            &node.id,
+            "the wording at backup time",
+            Some("edit before the backup"),
+        )
+        .unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(target.get_memory_revisions(&node.id, 10).unwrap().len(), 2);
+
+    // The change made *after* the backup — the reason the backup is worth keeping.
+    target
+        .update_node_content_with_revision(
+            &node.id,
+            "the wording written after the backup",
+            Some("edit after the backup"),
+        )
+        .unwrap();
+    assert_eq!(target.get_memory_revisions(&node.id, 10).unwrap().len(), 3);
+
+    // And a check this store ran after the backup, which the snapshot's frozen
+    // copy of the same anchor knows nothing about.
+    let live_anchor = target.code_refs_for(&node.id).unwrap().remove(0);
+    target
+        .record_code_ref_verdict(live_anchor.id, AnchorVerdict::Fresh, Some(Utc::now()), None)
+        .unwrap();
+
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(
+        report.revisions_imported, 0,
+        "nothing was missing, so nothing may be added: a re-import must not \
+         duplicate the history it already brought"
+    );
+    assert_eq!(
+        report.code_refs_imported, 0,
+        "the anchor is already here; only its verdict moved on"
+    );
+
+    let history = target.get_memory_revisions(&node.id, 10).unwrap();
+    assert_eq!(
+        history.len(),
+        3,
+        "the live store's later revision must survive a restore of the older snapshot"
+    );
+    assert!(
+        history
+            .iter()
+            .any(|r| r.reason.as_deref() == Some("edit after the backup")),
+        "the revision the backup predates is the one a replace-style merge would destroy"
+    );
+    assert!(
+        history
+            .iter()
+            .any(|r| r.reason.as_deref() == Some("edit before the backup"))
+    );
+
+    let anchors = target.code_refs_for(&node.id).unwrap();
+    assert_eq!(
+        anchors.len(),
+        1,
+        "an anchor the live store already holds must not be listed twice in every \
+         search result that cites this memory"
+    );
+    assert_eq!(
+        anchors[0].verdict,
+        AnchorVerdict::Fresh,
+        "the store's own check is newer than the snapshot's, and a restore may not \
+         overwrite it with the older answer"
+    );
+
+    // Pre-existing behaviour, pinned here because it is the reason the rule above
+    // has to be additive: the node row itself *is* replaced by the snapshot's
+    // version, so its content moves back in time while its history keeps the
+    // later change. Losing that revision would leave the store unable to explain
+    // how the memory got from the backup's wording to this one.
+    assert_eq!(
+        target.get_node(&node.id).unwrap().unwrap().content,
+        "the wording at backup time"
+    );
+}
+
+/// Nothing may be imported for a node the snapshot does not contain. A revision or
+/// an anchor with no memory behind it is the last copy of text — or of a list of
+/// files — that the live store has already let go of, so importing it would undo an
+/// erasure using the user's own backup.
+#[test]
+fn snapshot_restore_imports_no_history_for_nodes_it_does_not_carry() {
+    use crate::code_refs::{CodeAnchor, IngestAnchor};
+
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let kept = source
+        .ingest(IngestInput {
+            content: "a memory the snapshot carries".to_string(),
+            node_type: "fact".to_string(),
+            anchors: vec![IngestAnchor::unchecked(CodeAnchor::new("src/kept.rs"))],
+            ..Default::default()
+        })
+        .unwrap();
+    let erased = source
+        .ingest(IngestInput {
+            content: "a memory the snapshot does not carry".to_string(),
+            node_type: "fact".to_string(),
+            anchors: vec![IngestAnchor::unchecked(CodeAnchor::new("src/erased.rs"))],
+            ..Default::default()
+        })
+        .unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    // The shape an erasure that reached the node but not its child rows would
+    // leave behind: the memory is gone from the snapshot, its history and its
+    // anchor are not. Nothing in the restore may bring those rows across.
+    {
+        let conn = rusqlite::Connection::open(&snapshot).unwrap();
+        conn.execute(
+            "DELETE FROM knowledge_nodes WHERE id = ?1",
+            rusqlite::params![erased.id],
+        )
+        .unwrap();
+    }
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+
+    assert_eq!(
+        report.nodes_imported, 1,
+        "only the memory the snapshot carries"
+    );
+    assert_eq!(
+        report.revisions_imported, 1,
+        "the kept memory's own revision"
+    );
+    assert_eq!(report.code_refs_imported, 1, "the kept memory's own anchor");
+
+    assert!(
+        target
+            .get_memory_revisions(&erased.id, 10)
+            .unwrap()
+            .is_empty(),
+        "an erased memory's history must not come back through the backup"
+    );
+    assert!(
+        target.code_refs_for(&erased.id).unwrap().is_empty(),
+        "an erased memory's anchors must not come back through the backup"
+    );
+    assert_eq!(
+        target.get_memory_revisions(&kept.id, 10).unwrap().len(),
+        1,
+        "the memory the snapshot does carry keeps its history"
+    );
+
+    // Counted from the tables too: an orphan row is invisible to a per-node read,
+    // which is the whole reason the scope predicate exists.
+    let conn = rusqlite::Connection::open(dir.path().join("target.db")).unwrap();
+    let orphans: i64 = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM memory_revisions WHERE node_id NOT IN \
+                 (SELECT id FROM knowledge_nodes)) + \
+                    (SELECT COUNT(*) FROM code_refs WHERE node_id NOT IN \
+                 (SELECT id FROM knowledge_nodes))",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        orphans, 0,
+        "no history row may outlive the memory it describes"
+    );
+}
+
 /// Regression for the double-`BEGIN` bug: `begin_write_transaction` issued
 /// `BEGIN IMMEDIATE` and then `unchecked_transaction()`, which sends a *second* `BEGIN`.
 /// Every write through the helper therefore failed with "cannot start a transaction
