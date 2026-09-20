@@ -947,6 +947,169 @@ async fn a_flagged_memory_is_stored_retrievable_and_marked() {
     );
 }
 
+// ========================================================================
+// GATE OUTCOME COUNTERS (wave 5): a refusal and a flag both leave a number.
+//
+// The store cannot answer these: a refused write stores nothing (that is the
+// point of the reject path), and a flag is only a column on a memory that was
+// written anyway. The registry has to be fed where the verdict is made, so the
+// tests drive the real write path and read the process-wide registry.
+//
+// Every assertion is "this kind moved" and never "this kind moved by exactly
+// one": the tests in this binary run in parallel and share one process, so both
+// a total and an exact delta would be statements about whichever tests happened
+// to run beside this one. A kind this write recorded can only have grown, so
+// growth is the claim being made; the exact count is not this test's to make.
+// ========================================================================
+
+/// Count one kind in a snapshot, for a before/after comparison.
+fn kind_count(counters: &vestige_core::storage::ProcessGateCounters, kind: &str) -> i64 {
+    counters
+        .rejected_by_kind
+        .iter()
+        .chain(counters.flagged_by_kind.iter())
+        .filter(|rule| rule.kind == kind)
+        .map(|rule| rule.count)
+        .sum()
+}
+
+/// Assert a kind grew between two snapshots.
+fn assert_kind_grew(
+    before: &vestige_core::storage::ProcessGateCounters,
+    after: &vestige_core::storage::ProcessGateCounters,
+    kind: &str,
+) {
+    assert!(
+        kind_count(after, kind) > kind_count(before, kind),
+        "`{kind}` did not move: before {before:?}, after {after:?}"
+    );
+}
+
+/// A refused write is the one outcome the store cannot remember, so the process
+/// that refused it has to. Without this the rejection rate §12.1 asks for is
+/// unmeasurable — `memory_quality` would report zero refusals forever.
+#[tokio::test]
+async fn a_refused_write_increments_the_process_rejection_counter() {
+    let (storage, dir) = test_storage().await;
+    let counters = vestige_core::storage::GateOutcomeCounters::global();
+    let before = counters.snapshot();
+
+    let content = "```rust\nfn merge(a: &[f32], b: &[f32]) -> Vec<f32> {\n    a.iter().chain(b).copied().collect()\n}\n```";
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({ "content": content, "forceCreate": true })),
+    )
+    .await
+    .expect("a refusal is an answer, not a transport error");
+    assert_eq!(value["decision"], "reject", "{value}");
+
+    let after = counters.snapshot();
+    let kind = value["findings"][0]["kind"]
+        .as_str()
+        .expect("the refusal names the rule that fired");
+    assert_eq!(kind, "derivable_from_repo", "{value}");
+    assert_kind_grew(&before, &after, kind);
+
+    // And the store really is untouched, which is why the counter had to exist.
+    assert_eq!(count_rows(&store_conn(&dir), "knowledge_nodes"), 0);
+}
+
+/// The refusal built outside `prepare`, because the gate never sees it: an empty
+/// batch item. Left uncounted it would be the one rejection the process forgets,
+/// and the batch path's own `rejected` tally would disagree with the registry
+/// forever.
+#[tokio::test]
+async fn an_empty_batch_item_increments_the_process_rejection_counter() {
+    let (storage, _dir) = test_storage().await;
+    let counters = vestige_core::storage::GateOutcomeCounters::global();
+    let before = counters.snapshot();
+
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({ "items": [{ "content": "   " }] })),
+    )
+    .await
+    .unwrap();
+    assert_eq!(value["results"][0]["decision"], "reject", "{value}");
+
+    let after = counters.snapshot();
+    // The kind is the answer plus a caveat: the refusal happened, and it
+    // happened *before* the gate, so it is not credited to `no_subject` — a
+    // verdict the gate reaches and never reached here.
+    let kinds: Vec<&str> = value["results"][0]["findings"]
+        .as_array()
+        .map(|findings| findings.iter().filter_map(|f| f["kind"].as_str()).collect())
+        .unwrap_or_default();
+    assert!(
+        kinds.is_empty(),
+        "a pre-gate refusal has no gate findings to name: {value}"
+    );
+    assert_kind_grew(&before, &after, "empty_content");
+}
+
+/// One refusal that fired two rules is one refusal and two flags — the numbers
+/// §12.1 splits "by kind" cannot be recovered from a single total.
+#[tokio::test]
+async fn a_flagged_write_increments_one_counter_per_finding() {
+    let (storage, _dir) = test_storage().await;
+    let counters = vestige_core::storage::GateOutcomeCounters::global();
+    let before = counters.snapshot();
+
+    // `probable_version_claim` is the kind this content is chosen for, and it is
+    // the one the assertions below follow. "Marek" supplies the subject, which
+    // keeps `no_subject` out of the same write.
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "content": "Marek notes that Postgres 16 changed the default for the migration lock",
+            "forceCreate": true,
+        })),
+    )
+    .await
+    .unwrap();
+
+    let kinds: Vec<String> = value["self_contained"]["findings"]
+        .as_array()
+        .expect("a flagged write reports its findings")
+        .iter()
+        .filter_map(|f| f["kind"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        kinds.iter().any(|k| k == "probable_version_claim"),
+        "the fixture must be flagged to begin with: {value}"
+    );
+
+    let after = counters.snapshot();
+    // Every rule the response reports, not only the chosen one: one write that
+    // fired several findings has to leave a number for each, or the breakdown
+    // §12.1 asks for cannot be reconstructed from the totals.
+    for kind in &kinds {
+        assert_kind_grew(&before, &after, kind);
+    }
+    // The memory itself was written, unlike the refusal above — the counter and
+    // the store disagree on purpose, because they answer different questions.
+    let node_id = value["nodeId"].as_str().unwrap();
+    assert!(storage.get_node(node_id).unwrap().is_some());
+
+    // The same flag reaches the report a later reader sees, which is the join
+    // between this write path and `memory_health`'s `quality` section.
+    let quality = storage.memory_quality(None).unwrap();
+    assert_eq!(
+        quality.containment.flagged, 1,
+        "a flagged write is a flagged row: {quality:?}"
+    );
+    assert!(
+        quality
+            .flagged_by_kind
+            .iter()
+            .any(|rule| rule.kind == "probable_version_claim"),
+        "the rule breakdown is read back off the stored findings: {quality:?}"
+    );
+}
+
 /// Wave 1 wrote `memory_revisions.actor` as NULL on every path because the
 /// layer holding the identity is this one. An audit trail that cannot say who
 /// wrote a version answers half the question it exists for.

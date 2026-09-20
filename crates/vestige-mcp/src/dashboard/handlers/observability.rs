@@ -126,6 +126,11 @@ pub(crate) fn health_status_code(status: HealthStatus) -> StatusCode {
 /// - `vestige_try_lock_skips_total{stage}` — cognitive-engine enrichments
 ///   dropped because `try_lock()` was contended, the one counter that says
 ///   "the engine is saturated and searches are running degraded",
+/// - `vestige_gate_outcomes_total{outcome,kind}` — self-containedness gate
+///   verdicts from **this process's lifetime**: writes it refused and memories
+///   it flagged before they were written anyway. A refused write stores nothing
+///   — that is the point of the reject path — so the store cannot remember it
+///   and this is the only witness; the numbers reset with a restart,
 /// - `vestige_websocket_subscribers`, `vestige_dashboard_uptime_seconds`.
 pub async fn metrics(State(state): State<AppState>) -> Result<Response, StatusCode> {
     let storage = state.storage.clone();
@@ -192,6 +197,19 @@ pub async fn metrics(State(state): State<AppState>) -> Result<Response, StatusCo
         ));
     }
 
+    // Process-lifetime counters, and the HELP says so: a refusal is stored
+    // nowhere by design, so a reader who mistook this for a store-wide rate
+    // would conclude that a restart erased the refusals — which it does.
+    body.push_str(
+        "# HELP vestige_gate_outcomes_total Self-containedness gate verdicts seen by this \
+         process since it started: writes refused (nothing was stored, so no other surface can \
+         report them) and memories flagged before being written anyway, broken down by rule.\n",
+    );
+    body.push_str("# TYPE vestige_gate_outcomes_total counter\n");
+    let gate = vestige_core::storage::GateOutcomeCounters::global().snapshot();
+    counter_by_kind(&mut body, "rejected", &gate.rejected_by_kind);
+    counter_by_kind(&mut body, "flagged", &gate.flagged_by_kind);
+
     gauge(
         &mut body,
         "vestige_websocket_subscribers",
@@ -236,6 +254,25 @@ fn escape_label_value(value: &str) -> String {
         }
     }
     escaped
+}
+
+/// Append one family's samples, one line per rule.
+///
+/// One series per `(outcome, kind)` rather than one total per outcome: the
+/// question §12.1 asks is *which rule* is firing, and a total that says "14
+/// refusals" cannot tell a gate that is too loud about `no_subject` from one
+/// catching copies of the repository. Zero-count kinds are simply absent — the
+/// registry only learns a kind by seeing it, and inventing rows for rules that
+/// never fired would make a fresh process look like it had measured something.
+fn counter_by_kind(body: &mut String, outcome: &str, rules: &[vestige_core::storage::RuleCount]) {
+    for rule in rules {
+        body.push_str(&format!(
+            "vestige_gate_outcomes_total{{outcome=\"{}\",kind=\"{}\"}} {}\n",
+            escape_label_value(outcome),
+            escape_label_value(&rule.kind),
+            rule.count
+        ));
+    }
 }
 
 /// Get retention distribution (for histogram + heatmap visualization).
@@ -557,5 +594,50 @@ mod tests {
         assert_eq!(escape_label_value("a\"b"), "a\\\"b");
         assert_eq!(escape_label_value("a\\b"), "a\\\\b");
         assert_eq!(escape_label_value("a\nb"), "a\\nb");
+    }
+
+    /// A refusal leaves nothing in the store, so the only place a scraper can
+    /// learn the rejection rate §12.1 asks for is this series. It is fed by the
+    /// process registry, and the test drives the registry directly because that
+    /// is exactly the seam: the write paths record, the endpoint renders.
+    #[tokio::test]
+    async fn metrics_expose_the_gate_outcome_counters_by_outcome_and_kind() {
+        let counters = vestige_core::storage::GateOutcomeCounters::global();
+        // A kind of its own, so the assertion is about the label pair the
+        // renderer produces rather than about a total other tests move.
+        counters.record_rejected("test_only_rule_rejected");
+        counters.record_flagged("test_only_rule_flagged");
+
+        let dir = TempDir::new().unwrap();
+        let storage = test_storage(&dir.path().join("gate-metrics.db"));
+        let response = get(storage, "/metrics").await;
+
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+
+        // Matched as whole sample lines, so the assertion is about the exact
+        // `{outcome,kind}` label pair and not about the two words appearing
+        // somewhere in the exposition. `metrics_are_prometheus_text_with_known_series`
+        // is the test that the body parses; this one is that the pair is there.
+        for line in [
+            "vestige_gate_outcomes_total{outcome=\"rejected\",kind=\"test_only_rule_rejected\"} 1",
+            "vestige_gate_outcomes_total{outcome=\"flagged\",kind=\"test_only_rule_flagged\"} 1",
+        ] {
+            assert!(
+                body.lines().any(|l| l == line),
+                "sample {line:?} missing from:\n{body}"
+            );
+        }
+        assert!(
+            body.contains("# TYPE vestige_gate_outcomes_total counter"),
+            "the family has to declare its type:\n{body}"
+        );
+        assert!(
+            body.contains("# HELP vestige_gate_outcomes_total") && body.contains("process"),
+            "the HELP text must say the numbers are process-lifetime, not a property of the \
+             store:\n{body}"
+        );
     }
 }

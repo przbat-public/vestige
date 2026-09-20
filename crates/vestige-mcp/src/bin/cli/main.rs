@@ -13,6 +13,7 @@ mod export;
 mod gc;
 mod health;
 mod ingest;
+mod quality;
 mod restore;
 mod serve;
 mod stats;
@@ -47,6 +48,17 @@ enum Commands {
 
     /// Run health check with warnings and recommendations
     Health,
+
+    /// Measure what was worth storing: self-containment, anchors, use, refusals
+    Quality {
+        /// Only memories recorded on or after this day (YYYY-MM-DD, UTC)
+        #[arg(long)]
+        since: Option<String>,
+
+        /// Print the report as JSON — the shape the A/B harness and CI read
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Run memory consolidation cycle
     Consolidate,
@@ -155,6 +167,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Stats { tagging, states } => stats::run_stats(tagging, states),
         Commands::Health => health::run_health(),
+        Commands::Quality { since, json } => quality::run_quality(since, json),
         Commands::Consolidate => consolidate::run_consolidate(),
         Commands::Restore { file } => restore::run_restore(file),
         Commands::Backup { output } => backup::run_backup(output),

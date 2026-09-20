@@ -39,6 +39,16 @@ pub(super) const KIND_NO_SUBJECT: &str = "no_subject";
 pub(super) const KIND_PROBABLE_VERSION_CLAIM: &str = "probable_version_claim";
 pub(super) const KIND_DERIVABLE_FROM_REPO: &str = "derivable_from_repo";
 
+/// The refusal a write path makes *before* this gate sees anything, for content
+/// that is empty or whitespace.
+///
+/// Not a gate rule and deliberately not called `no_subject`: the gate never ran,
+/// so crediting a rule the content never reached would make the rejection
+/// breakdown §12.1 asks for describe verdicts that were never made. It is here,
+/// beside the real kinds, because it lands in the same process counter and a
+/// reader of that counter has to be able to look up what fired.
+pub(super) const KIND_EMPTY_CONTENT: &str = "empty_content";
+
 /// What to do instead of saving a copy of the repository. One wording, used by
 /// every refusal, so an agent that reads one refusal knows what the next one
 /// means.
@@ -85,6 +95,22 @@ impl Report {
     /// True when the memory must not be written at all.
     pub(super) fn is_rejected(&self) -> bool {
         self.reject.is_some()
+    }
+
+    /// The rule that refused the content, for the process counter that has to
+    /// count it. `None` when the gate accepted the content.
+    ///
+    /// Read back off the report rather than passed alongside it: the kind is
+    /// part of the verdict, so a caller that could name it separately could name
+    /// one the report does not carry, and the rejection breakdown would then
+    /// describe writes that never happened.
+    pub(super) fn reject_kind(&self) -> Option<&'static str> {
+        self.reject.as_ref().map(|r| r.kind)
+    }
+
+    /// Every rule that flagged a memory which is going to be written anyway.
+    pub(super) fn flagged_kinds(&self) -> impl Iterator<Item = &'static str> {
+        self.findings.iter().map(|f| f.kind)
     }
 
     /// Everything the gate found, the refusal first when there is one.

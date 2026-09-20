@@ -57,7 +57,13 @@ pub(super) async fn execute_batch(
         // `skipped`. "Skipped" reads as a queue that may be drained later,
         // which is exactly the wrong expectation for content that must not be
         // stored at all.
+        //
+        // Refused before the gate rather than by it — there is nothing to
+        // analyse — which is also why the counter is fed here and fed a kind of
+        // its own: `prepare` counts the gate's verdicts, and this is not one of
+        // them. Left uncounted it would be the one rejection the process forgets.
         if item.content.trim().is_empty() {
+            super::write_preparation::record_rejection(super::self_contained::KIND_EMPTY_CONTENT);
             results.push(serde_json::json!({
                 "index": i,
                 "status": "rejected",

@@ -21,6 +21,7 @@
 //! `smart_ingest` marked every one of its own.
 
 use vestige_core::IngestAnchor;
+use vestige_core::storage::GateOutcomeCounters;
 
 use super::anchors;
 use super::args::AnchorArg;
@@ -114,6 +115,7 @@ pub fn prepare(content: &str, explicit: FileRefs<'_>, anchored_time: bool) -> Pr
     let anchored_paths = anchors::anchored_paths(&anchors);
 
     let self_contained = detect_with_anchors(content, anchored_time, &anchored_paths);
+    record_outcome(&self_contained);
 
     PreparedWrite {
         refusal: reject_response(&self_contained),
@@ -122,4 +124,47 @@ pub fn prepare(content: &str, explicit: FileRefs<'_>, anchored_time: bool) -> Pr
         anchors,
         self_contained,
     }
+}
+
+/// Count the verdict, where the verdict is made.
+///
+/// The store cannot answer either half of this. A refused write leaves nothing
+/// behind — that is the point of the reject path — and a flag is a column on a
+/// memory that was written anyway, so a store-wide flag count says how many
+/// memories still carry a marker, not how many rules fired. The registry is
+/// process-scoped and the report labels it as such.
+///
+/// Here rather than at the five write paths that call [`prepare`]: a counter
+/// incremented by each of them separately is a counter that eventually disagrees
+/// with the number of verdicts, and the response the caller sees would still say
+/// `decision: "reject"` while the rejection rate stayed at zero.
+///
+/// What it does not cover: the checks the write paths make *before* this runs.
+/// An empty `content` in single mode is refused by `execute` as a tool error —
+/// the sharper refusal of the two, and it never reaches a gate that would have
+/// nothing to read, so it is deliberately not this counter. An empty batch item
+/// *is* counted, one level up, by [`record_rejection`].
+fn record_outcome(report: &Report) {
+    let counters = GateOutcomeCounters::global();
+    if let Some(kind) = report.reject_kind() {
+        counters.record_rejected(kind);
+    }
+    // Once per finding, not once per flagged write: §12.1 asks for the
+    // rejection and flag rates "broken down by rule", and one memory can fire
+    // several. Collapsing them here would make the breakdown unrecoverable.
+    for kind in report.flagged_kinds() {
+        counters.record_flagged(kind);
+    }
+}
+
+/// Count a rejection decided outside [`prepare`], which has no report to read.
+///
+/// The one such path is an empty batch item: the gate would find nothing to
+/// analyse, so `execute_batch` refuses it in the same vocabulary (`rejected`,
+/// never `skipped`) and has to feed the same registry, or batch refusals would
+/// be the one kind of refusal the process never remembers. The kind it passes is
+/// [`KIND_EMPTY_CONTENT`](super::self_contained::KIND_EMPTY_CONTENT) rather than
+/// a gate rule, because no rule ran.
+pub(super) fn record_rejection(kind: &str) {
+    GateOutcomeCounters::global().record_rejected(kind);
 }
