@@ -7,7 +7,20 @@
 > **Podstawa:** synteza czterech badań (`docs/review/attachments/memory-quality-SYNTHESIS.md`)
 > i weryfikacja w tym repozytorium (odsyłacze `plik:linia` w tekście).
 >
-> **Status:** propozycja do zatwierdzenia. Nic z tego nie jest jeszcze wdrożone.
+> **Status:** zatwierdzony do wdrożenia. Fala 1 w toku.
+>
+> **Dwie decyzje podjęte przy starcie (z uzasadnieniem, do cofnięcia jeśli się nie zgodzisz):**
+> 1. **`recorded_at` jako osobna kolumna**, nie przemianowanie `created_at`. Semantyka `created_at`
+>    jest już nośna (kolejność, migracje, dashboard, `FreshnessKey`), a zmiana jest wtedy addytywna
+>    i odwracalna: nowa kolumna + backfill `= created_at`. Przemianowanie intencji bez zmiany nazwy
+>    byłoby tańsze, ale nie da się go cofnąć i nie widać go w schemacie.
+> 2. **Kwarantanna jest opt-in, nie domyślna.** Domyślne zachowanie przy nierozwiązanym odniesieniu:
+>    zapisz, **oznacz** (`self_contained: false`) i **pokaż ostrzeżenie w wyniku**, żeby czytelnik
+>    wiedział, że wpis wymaga kontekstu. Uzasadnienie wprost z naszych badań: wspomnienie ukryte jest
+>    **cichą porażką** — a jednym z najmocniejszych ustaleń całego przeglądu jest to, że cicha porażka
+>    jest gorsza od głośnej. Kwarantanna (wpis niewidoczny dla wyszukiwania, widoczny w audycie)
+>    zostaje dostępna dla wywołującego, który jej chce, ale nie jest domyślnym losem wspomnienia,
+>    o którego zapisanie użytkownik poprosił.
 
 ---
 
