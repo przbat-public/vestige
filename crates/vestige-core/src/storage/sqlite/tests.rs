@@ -11,7 +11,7 @@ use super::StorageError;
 use super::init::{
     ENCRYPTION_KEY_ENV, EncryptionConfig, REQUIRE_ENCRYPTION_ENV, VectorIndexSource,
 };
-use super::records::{ConnectionRecord, DreamHistoryRecord, InsightRecord};
+use super::records::{ConnectionRecord, DreamHistoryRecord, InsightRecord, MemoryStateRecord};
 
 fn create_test_storage() -> Storage {
     let dir = tempdir().unwrap();
@@ -1242,6 +1242,380 @@ fn snapshot_restore_imports_no_history_for_nodes_it_does_not_carry() {
     assert_eq!(
         orphans, 0,
         "no history row may outlive the memory it describes"
+    );
+}
+
+/// A merge that brings back the memories but not the edges between them leaves a
+/// store that looks restored and behaves like a pile of unrelated notes: spreading
+/// activation, hub and bridge detection and the graph view all walk
+/// `memory_connections`, and every one of them silently degrades to nothing. The
+/// count is the assertion rather than a sampled edge — a spot check passes on a
+/// partially restored graph, which is exactly the failure this guards.
+#[test]
+fn snapshot_round_trip_preserves_the_association_graph() {
+    use std::collections::HashSet;
+
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let hub = ingest_id(&source, "the hub memory");
+    let first = ingest_id(&source, "the first spoke");
+    let second = ingest_id(&source, "the second spoke");
+    connect(&source, &hub, &first);
+    connect(&source, &hub, &second);
+    connect(&source, &first, &second);
+    assert_eq!(
+        source.get_all_connections().unwrap().len(),
+        3,
+        "the fixture must really hold a graph, or the assertions below pass vacuously"
+    );
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+
+    assert_eq!(
+        report.connections_imported, 3,
+        "every association the snapshot attests to must arrive, and be counted"
+    );
+    assert_eq!(
+        target.get_all_connections().unwrap().len(),
+        3,
+        "the edge count is the whole point: a graph restored in part looks restored \
+         and answers every query as if the missing edges never existed"
+    );
+
+    // Direction travels with the edge. `(source_id, target_id)` is this table's
+    // primary key, so A -> B and B -> A are two edges, and a merge that made the
+    // graph symmetric would invent associations the snapshot never claimed.
+    let pairs: HashSet<(String, String)> = target
+        .get_all_connections()
+        .unwrap()
+        .into_iter()
+        .map(|c| (c.source_id, c.target_id))
+        .collect();
+    assert_eq!(pairs.len(), 3);
+    assert!(pairs.contains(&(hub.clone(), first.clone())));
+    assert!(pairs.contains(&(hub.clone(), second.clone())));
+    assert!(pairs.contains(&(first.clone(), second.clone())));
+    assert!(
+        !pairs.contains(&(first.clone(), hub.clone())),
+        "the reverse of an edge is not the edge"
+    );
+
+    // Present is not the same as usable: the traversal every graph feature is
+    // built on has to find its way across the restored edges.
+    assert!(
+        target
+            .find_path_between(&hub, &second, 3)
+            .unwrap()
+            .is_some(),
+        "a restored graph must answer the traversal built on it"
+    );
+}
+
+/// The merge rule for an edge both stores hold: the live row wins. `strength` and
+/// `activation_count` are what this store's own decay, pruning and spreading
+/// activation made of the edge after the backup was taken, so importing the
+/// snapshot's frozen numbers would rewind the edge to an older moment and could
+/// restore strength the store had already pruned. Winning has to mean putting the
+/// live row back, not merely declining to overwrite it: the node merge is
+/// `INSERT OR REPLACE`, and this table cascades on the id it replaces.
+#[test]
+fn snapshot_restore_keeps_the_edge_the_live_store_strengthened() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let a = ingest_id(&source, "the first memory");
+    let b = ingest_id(&source, "the second memory");
+    connect(&source, &a, &b);
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(target.get_all_connections().unwrap().len(), 1);
+
+    // What the store learned after the backup — the reason the edge is worth
+    // keeping at all.
+    assert!(target.strengthen_connection(&a, &b, 0.2).unwrap());
+
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+
+    assert_eq!(
+        report.connections_imported, 0,
+        "the pair is already here; only its numbers moved on"
+    );
+    let edges = target.get_all_connections().unwrap();
+    assert_eq!(edges.len(), 1, "one pair is one edge, not two");
+    assert!(
+        edges[0].strength > 0.8,
+        "the store's own strengthening must survive a restore of the older \
+         snapshot, got strength {}",
+        edges[0].strength
+    );
+    assert_eq!(
+        edges[0].activation_count, 1,
+        "an edge the store has used since the backup is not unused again"
+    );
+}
+
+/// The lifecycle row is this store's own record of what it did with a memory: how
+/// often it served it, when, and whether it is suppressed or has decayed out of
+/// reach. The snapshot's copy is frozen at backup time, so for a memory both stores
+/// hold the live row wins — otherwise a weekly restore would un-count a week of
+/// retrievals and could bring a suppressed memory back active. For a memory only
+/// the snapshot holds, the snapshot's row is the only claim there is and has to
+/// arrive, or the restored memory has no state until something happens to touch it.
+#[test]
+fn snapshot_restore_keeps_the_lifecycle_state_the_live_store_recorded() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let shared = ingest_id(&source, "a memory both stores end up holding");
+    let arriving = ingest_id(&source, "a memory only the snapshot holds");
+    let now = Utc::now();
+    source
+        .save_memory_state(&MemoryStateRecord {
+            memory_id: shared.clone(),
+            state: "dormant".to_string(),
+            last_access: now - Duration::days(2),
+            access_count: 1,
+            state_entered_at: now - Duration::days(2),
+            suppression_until: None,
+            suppressed_by: vec![],
+        })
+        .unwrap();
+    source
+        .save_memory_state(&MemoryStateRecord {
+            memory_id: arriving.clone(),
+            state: "silent".to_string(),
+            last_access: now - Duration::days(9),
+            access_count: 3,
+            state_entered_at: now - Duration::days(9),
+            suppression_until: None,
+            suppressed_by: vec![],
+        })
+        .unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    // The fresh store has no lifecycle rows, so the snapshot's are the only claim.
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(
+        report.states_imported, 2,
+        "a memory this store has never seen must arrive with the lifecycle the \
+         snapshot recorded for it"
+    );
+    let arriving_state = target.get_memory_state(&arriving).unwrap().unwrap();
+    assert_eq!(arriving_state.state, "silent");
+    assert_eq!(arriving_state.access_count, 3);
+
+    // What the store did with the shared memory after the backup: served it, then
+    // suppressed it. Neither is in the snapshot.
+    target.record_memory_access(&shared).unwrap();
+    let mut live = target.get_memory_state(&shared).unwrap().unwrap();
+    live.state = "suppressed".to_string();
+    live.access_count = 42;
+    live.state_entered_at = Utc::now();
+    target.save_memory_state(&live).unwrap();
+
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(
+        report.states_imported, 0,
+        "both memories already had a lifecycle row, so the snapshot added none"
+    );
+    let after = target.get_memory_state(&shared).unwrap().unwrap();
+    assert_eq!(
+        after.state, "suppressed",
+        "the state this store recorded after the backup may not be overwritten by \
+         the snapshot's older one"
+    );
+    assert_eq!(
+        after.access_count, 42,
+        "the accesses this store served are not the snapshot's to un-count"
+    );
+}
+
+/// A snapshot from before V17/V19 has no `memory_revisions` and no `code_refs`, but
+/// it does have the graph and the lifecycle rows, which have existed since the first
+/// schema. The merge must read every table the file does have and invent nothing for
+/// the ones it does not: no rows for the absent tables, and no lifecycle row for a
+/// memory that never had one.
+#[test]
+fn snapshot_without_the_newer_tables_brings_the_graph_and_the_lifecycle() {
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let touched = ingest_id(&source, "a memory the store has served");
+    let untouched = ingest_id(&source, "a memory nothing ever touched");
+    connect(&source, &touched, &untouched);
+    source.record_memory_access(&touched).unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    {
+        let conn = rusqlite::Connection::open(&snapshot).unwrap();
+        conn.execute_batch(
+            "DROP TABLE memory_revisions;
+             DROP TABLE code_refs;
+             UPDATE schema_version SET version = 16;",
+        )
+        .unwrap();
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' \
+                 AND name IN ('memory_revisions', 'code_refs')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 0, "the fixture must really lack both newer tables");
+    }
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+
+    assert_eq!(report.nodes_imported, 2, "the memories still arrive");
+    assert_eq!(
+        report.revisions_imported, 0,
+        "a file with no history table has no history to import"
+    );
+    assert_eq!(
+        report.code_refs_imported, 0,
+        "a file with no anchor table has no anchors to import"
+    );
+    assert_eq!(
+        report.connections_imported, 1,
+        "the graph predates V17 and must travel even from a pre-V17 file"
+    );
+    assert_eq!(
+        report.states_imported, 1,
+        "so does the lifecycle row of the memory that had one"
+    );
+
+    // Counted from the tables, not through a per-node read: a row invented for a
+    // table the file never had is exactly what a read path would hide.
+    let conn = rusqlite::Connection::open(dir.path().join("target.db")).unwrap();
+    let counts: (i64, i64, i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM memory_connections), \
+                    (SELECT COUNT(*) FROM memory_states), \
+                    (SELECT COUNT(*) FROM memory_revisions), \
+                    (SELECT COUNT(*) FROM code_refs)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        counts,
+        (1, 1, 0, 0),
+        "one edge, one lifecycle row, and nothing for the two absent tables"
+    );
+    assert!(
+        target.get_memory_state(&untouched).unwrap().is_none(),
+        "a memory that never had a lifecycle row must not gain one from the merge"
+    );
+}
+
+/// A failed merge must leave the store exactly as it was found. SQLite makes a
+/// statement atomic, not a sequence of them, so before the import ran in a
+/// transaction a constraint the snapshot's rows did not satisfy aborted in the
+/// middle: the nodes and the history were in the store, the anchors, graph and
+/// lifecycle rows were not, the full-text index had been rebuilt over the mixture,
+/// and the caller saw only an error — which reads as "nothing happened", so the
+/// natural next step is to retry on top of the partial state.
+#[test]
+fn snapshot_restore_failure_leaves_the_store_untouched() {
+    use crate::code_refs::{CodeAnchor, IngestAnchor};
+
+    let dir = tempdir().unwrap();
+    let source = Storage::new(Some(dir.path().join("source.db"))).unwrap();
+    let first = ingest_id(&source, "a memory that arrives before the failure");
+    let poisoned = source
+        .ingest(IngestInput {
+            content: "a memory whose anchor the target store rejects".to_string(),
+            node_type: "fact".to_string(),
+            anchors: vec![IngestAnchor::unchecked(CodeAnchor::new("src/poison.rs"))],
+            ..Default::default()
+        })
+        .unwrap();
+    connect(&source, &first, &poisoned.id);
+    source.record_memory_access(&first).unwrap();
+
+    let snapshot = dir.path().join("snapshot.db");
+    source.backup_to(&snapshot).unwrap();
+    drop(source);
+
+    let target = Storage::new(Some(dir.path().join("target.db"))).unwrap();
+
+    // The injection point is a table the merge writes after the nodes, so a merge
+    // that is not atomic has real work to leave behind.
+    {
+        let conn = rusqlite::Connection::open(dir.path().join("target.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_poison_anchor BEFORE INSERT ON code_refs
+             WHEN NEW.path = 'src/poison.rs'
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        )
+        .unwrap();
+    }
+
+    let err = target.restore_from_snapshot(&snapshot).unwrap_err();
+    assert!(
+        err.to_string().contains("injected failure"),
+        "the failure must be the injected one, or this test proves nothing: {err}"
+    );
+
+    let conn = rusqlite::Connection::open(dir.path().join("target.db")).unwrap();
+    let counts: (i64, i64, i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM knowledge_nodes), \
+                    (SELECT COUNT(*) FROM memory_revisions), \
+                    (SELECT COUNT(*) FROM memory_connections), \
+                    (SELECT COUNT(*) FROM memory_states)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        counts,
+        (0, 0, 0, 0),
+        "a failed restore may not leave any part of the merge behind"
+    );
+    assert!(
+        target
+            .keyword_search("arrives before the failure", 10, 0.0)
+            .unwrap()
+            .is_empty(),
+        "the full-text index must be as empty as the table it indexes"
+    );
+
+    // And the connection must not be left inside a transaction: the next write has
+    // to be visible, not parked until the process exits.
+    conn.execute_batch("DROP TRIGGER refuse_poison_anchor")
+        .unwrap();
+    drop(conn);
+
+    let report = target.restore_from_snapshot(&snapshot).unwrap();
+    assert_eq!(report.nodes_imported, 2);
+    assert_eq!(report.code_refs_imported, 1);
+    assert_eq!(report.connections_imported, 1);
+    assert_eq!(target.get_stats().unwrap().total_nodes, 2);
+    // Positive control for the emptiness check above: the same query has to find
+    // the memory once the restore succeeds, or that check proved nothing.
+    assert!(
+        !target
+            .keyword_search("arrives before the failure", 10, 0.0)
+            .unwrap()
+            .is_empty(),
+        "the index must be rebuilt over the merged store"
     );
 }
 

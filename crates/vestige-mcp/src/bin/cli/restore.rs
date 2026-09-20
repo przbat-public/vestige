@@ -18,9 +18,13 @@ pub(super) fn run_restore(backup_path: PathBuf) -> anyhow::Result<()> {
         let storage = Storage::new(None)?;
         let report = storage.restore_from_snapshot(&backup_path)?;
         println!(
-            "Imported {} of {} memories from the snapshot ({} vectors, {} awaiting re-embedding).",
+            "Imported {} of {} memories from the snapshot ({} history revisions, {} code anchors, {} associations, {} lifecycle states, {} vectors, {} awaiting re-embedding).",
             report.nodes_imported,
             report.nodes_in_snapshot,
+            report.revisions_imported,
+            report.code_refs_imported,
+            report.connections_imported,
+            report.states_imported,
             report.embeddings_imported,
             report.embeddings_reset
         );
