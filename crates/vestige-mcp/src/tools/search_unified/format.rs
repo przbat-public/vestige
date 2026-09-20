@@ -28,6 +28,10 @@ pub(super) fn format_search_result(r: &vestige_core::SearchResult, detail_level:
             "sentimentMagnitude": r.node.sentiment_magnitude,
             "createdAt": r.node.created_at.to_rfc3339(),
             "updatedAt": r.node.updated_at.to_rfc3339(),
+            // When we learned this, as opposed to when the row was created or when
+            // it was last touched: the reader needs the record time to judge how the
+            // picture has changed since.
+            "recordedAt": r.node.recorded_at.to_rfc3339(),
             "lastAccessed": r.node.last_accessed.to_rfc3339(),
             "nextReview": r.node.next_review.map(|dt| dt.to_rfc3339()),
             "stability": r.node.stability,
@@ -53,6 +57,10 @@ pub(super) fn format_search_result(r: &vestige_core::SearchResult, detail_level:
             "retentionStrength": r.node.retention_strength,
             "createdAt": r.node.created_at.to_rfc3339(),
             "updatedAt": r.node.updated_at.to_rfc3339(),
+            // When we learned this, as opposed to when the row was created or when
+            // it was last touched: the reader needs the record time to judge how the
+            // picture has changed since.
+            "recordedAt": r.node.recorded_at.to_rfc3339(),
             "epistemicStatus": r.node.epistemic_status().to_string(),
             "memorySystem": r.node.memory_system().to_string(),
         }),
@@ -82,6 +90,7 @@ pub fn format_node(node: &vestige_core::KnowledgeNode, detail_level: &str) -> Va
             "sentimentMagnitude": node.sentiment_magnitude,
             "createdAt": node.created_at.to_rfc3339(),
             "updatedAt": node.updated_at.to_rfc3339(),
+            "recordedAt": node.recorded_at.to_rfc3339(),
             "lastAccessed": node.last_accessed.to_rfc3339(),
             "nextReview": node.next_review.map(|dt| dt.to_rfc3339()),
             "stability": node.stability,

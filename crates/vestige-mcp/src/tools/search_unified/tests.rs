@@ -424,6 +424,12 @@ async fn test_search_detail_level_full_includes_timestamps() {
         let first = &results[0];
         // Full should have timestamps
         assert!(first["createdAt"].is_string());
+        // The record time is what tells a later reader when we learned this, as
+        // opposed to when the row was created or last touched.
+        assert!(
+            first["recordedAt"].is_string(),
+            "every result must carry when the memory was recorded"
+        );
         assert!(first["updatedAt"].is_string());
         assert!(first["content"].is_string());
         assert!(first["storageStrength"].is_number());
@@ -453,6 +459,12 @@ async fn test_search_detail_level_default_is_summary() {
         assert!(first["content"].is_string());
         assert!(first["id"].is_string());
         assert!(first["createdAt"].is_string());
+        // The record time is what tells a later reader when we learned this, as
+        // opposed to when the row was created or last touched.
+        assert!(
+            first["recordedAt"].is_string(),
+            "every result must carry when the memory was recorded"
+        );
     }
 }
 
