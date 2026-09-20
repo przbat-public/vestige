@@ -105,6 +105,7 @@ All MCP tool inputs are validated before they reach storage:
 - FTS5 handling: queries pass through `vestige_core::fts`, which drops boolean operators (`OR`/`AND`/`NOT`/`NEAR`), neutralises column targeting and unbalanced quotes, and enforces the character/term limits above.
 - All SQL uses parameterised queries (`params![]` macro) — no string interpolation.
 - `gc` defaults to `dry_run=true`; `dry_run=false` is rejected unless the call also passes `confirmed: true`. `restore` has **no dry-run mode** and requires `confirmed: true` on every call (`tools/restore.rs`), and `erase` follows the same pattern (`dry_run` defaults to `true`; the destructive pass needs `confirmed: true`).
+- `memory(action="delete")` is permanent (row, FSRS state, embedding and graph edges) and is rejected without `confirmed: true` (`tools/memory_unified/actions.rs`). Unlike `erase`, it does **not** purge everything referencing the memory: `memory_revisions` deliberately carries no foreign key, and `insights.source_memories` is a JSON array, so both survive it (`storage/sqlite/gdpr.rs`). `erase` is the path that removes them.
 - `restore`'s `path` is read as given (see [File Access](#file-access)); it is an operator-supplied path, not a sandboxed one. Treat it as "run this only with backups you trust".
 
 ### Dependencies

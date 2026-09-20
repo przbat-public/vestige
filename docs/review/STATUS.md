@@ -18,6 +18,32 @@
 
 ---
 
+## 0. Adendum — co domknięto po `a2dfbec` (dopisane 2026-09-20)
+
+> **Czym jest ta sekcja.** Ten dokument jest zapisem stanu na `HEAD = a2dfbec`. Poniższe pozycje
+> zostały domknięte **później** — w commitach spoza przypiętego zakresu (`a2dfbec..4338490e`,
+> 49 commitów) albo w drzewie roboczym. Adendum **nie przepisuje** istniejących wpisów ani ocen
+> weryfikatorów: dopisuje, co się zmieniło i gdzie. Wiersze w sekcjach 1–13 opisują stan na
+> `a2dfbec` i tak należy je czytać.
+
+| Pozycja (sekcja) | Stan w `a2dfbec` | Co jest dziś | Dowód / commit |
+|---|---|---|---|
+| `:83, :120` — ścieżka erasure nieosiągalna z żadnego interfejsu | prawdziwe: erasure istniało w rdzeniu, ale nie było wystawione | **domknięte** — trzy powierzchnie: narzędzie MCP `erase`, `POST /api/maintenance/erase`, `vestige erase --id\|--tag [--dry-run] [--confirm]` | `server/catalog.rs:266-274`; `dashboard/mod.rs:199`; `bin/cli/main.rs:98-113,173-178`; `22038070` |
+| `:126` — `memory(action="delete")` bez potwierdzenia | prawdziwe: `confirmed` nie występowało w `memory_unified/` na `a2dfbec` | **domknięte** — brak `confirmed: true` kończy się `missing_confirmation_error` | `tools/memory_unified/actions.rs:142-147`; `schema.rs:12,38`; `edeac324` |
+| `:84, :127, :281` — prefiksowy `LIKE '%"<tag>%'` w `erase_by_tag` | prawdziwe w `a2dfbec` (funkcja bez konsumenta) | **domknięte** — dokładne dopasowanie po `json_each`, więc `code` nie łapie `codebase` | `storage/sqlite/gdpr.rs:177`; `b06f35c0` |
+| `:127` — brak transakcji / fail-open | częściowo: `ae5849f` dał transakcję, ale nie wspólny cleanup | **domknięte** — jedna transakcja na cały batch + jeden cleanup | `gdpr.rs:46-109,161-185`; `b06f35c0` |
+| `:83` — erasure „nie usuwa treści" | erasure nie czyściło historii treści | **domknięte** — usuwane jest też `memory_revisions` (bez FK, więc nic go nie sprzątało) | `gdpr.rs:81-85` (`delete_revisions_for`) |
+| `:49, :51, :52, :159, :215` — „katalog 28 narzędzi" | prawdziwe na `a2dfbec` (katalog kończył się na `deep_reference`) | **nieaktualne** — katalog ma **29** narzędzi, a `mark_reviewed` nie jest już osobnym narzędziem: to akcja `memory(action="review")` z aliasem zgodności wstecznej | `server/catalog.rs` (`tool(` × 29, m.in. `:266-274`); `server/deprecated.rs:63`; `edeac324`, `22038070` |
+| `:83` — zmiana licznika 28 → 29 i tras 40 → 41 | zapowiedziane jako część fali | **domknięte i większe**: 29 narzędzi, 42 trasy (doszły `erase` i `/metrics`) | `dashboard/mod.rs` (`.route(` × 42); `22038070` |
+| `:128` — `memory(action="delete")` nie czyści sidecara HNSW | prawdziwe | **nadal otwarte** — `delete_node` usuwa wiersz, a kaskady FK sprzątają stan/embeddingi/krawędzie/access log; `memory_revisions` i `insights.source_memories` świadomie **nie** mają FK, więc przeżywają zwykłe `delete` i usuwa je dopiero `erase` | `storage/sqlite/nodes.rs:463-475`; `gdpr.rs:81-95` |
+
+**Czego to adendum nie rozstrzyga.** Liczby w wierszach `:11` (92/17/4/1) i w sekcji 1 pozostają
+stanem na `a2dfbec`; nie przeliczano ich ponownie. Pozycje `:127` i `:281` miały wówczas status
+„DO ZROBIENIA (przed wystawieniem erasure)" — warunek został spełniony, ale ocena weryfikatora
+w owym wierszu jest zapisem historycznym i nie jest tu zmieniana.
+
+---
+
 ## 1. Tabela zbiorcza
 
 | Wymiar | K | W | Ś | N | wdrożone | częściowo | w toku | odłożone | nieprawdziwe | do zrobienia |

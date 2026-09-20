@@ -50,10 +50,11 @@ vestige/
 │   ├── vestige-core/          # Cognitive engine, storage, embeddings, search, FSRS
 │   │   └── src/
 │   │       ├── storage/       # SQLite (sqlite/ submodules: nodes, states, history,
-│   │       │                  # intentions, maintenance, embeddings, fsrs_personalization,
-│   │       │                  # review, consolidation, search, graph, gdpr, temporal,
-│   │       │                  # smart_ingest, insights, records, stats),
-│   │       │                  # migrations v1–v18, WAL, FTS5
+│   │       │                  # revisions, intentions, maintenance, embeddings,
+│   │       │                  # fsrs_personalization, review, consolidation, search,
+│   │       │                  # graph, gdpr, temporal, smart_ingest, insights, records,
+│   │       │                  # stats, tags, connections, snapshot_restore),
+│   │       │                  # migrations v1–v19, WAL, FTS5
 │   │       ├── memory/        # Node types, FSRS strength, temporal, typed-memory MemoryKind
 │   │       ├── fsrs/          # Algorithm, scheduler, optimizer
 │   │       ├── embeddings/    # Nomic v1.5 local ONNX, hybrid, code embeddings
@@ -77,7 +78,7 @@ vestige/
 │   │       ├── main.rs        # CLI, init, startup sequence
 │   │       ├── lib.rs         # Public crate surface
 │   │       ├── server.rs      # McpServer — JSON-RPC dispatch, tool routing, event emission
-│   │       ├── server/        # catalog.rs — canonical 28-tool / 11-resource list
+│   │       ├── server/        # catalog.rs — canonical 29-tool / 11-resource list
 │   │       │                  # (b15 split, drift-guarded by check-version-and-tools.sh)
 │   │       ├── cognitive.rs   # CognitiveEngine wrapper
 │   │       ├── telemetry.rs   # OTLP scaffolding behind `telemetry` feature (no-op default)
@@ -146,6 +147,7 @@ vestige/
   3. Temporal anchoring ("by next Friday" → `valid_until` via `natural-date-rs`)
   4. Relation extraction (SVO triples: "John manages Auth Team" → knowledge graph edges)
   5. Provenance assembly (session_id, agent, derivation chain, preprocessing artifacts)
+- **Gate:** self-containedness check — content the repository already owns is refused (`decision: "reject"`, nothing written); a memory that needs the conversation is stored and flagged (`knowledge_nodes.self_contained=0` + `self_contained_findings`). Runs first, on the preprocessed content, and the verdict is persisted with the memory.
 - **Pre:** 4-channel importance scoring (novelty/arousal/reward/attention) + intent detection → auto-tag
 - **Store:** Prediction Error Gating — similarity >0.92 → UPDATE, 0.75-0.92 → UPDATE/SUPERSEDE, <0.75 → CREATE
 - **Post:** Synaptic tagging (Frey & Morris 1997, 9h backward + 2h forward) + hippocampal indexing + relation edge creation + cross-project recording
@@ -170,7 +172,7 @@ ImportanceTracker, ReconsolidationManager (Nader — 5-minute labile window), In
 
 **Search:** Reranker (Jina Reranker v2), TemporalSearcher, CompoundQueryDecomposer.
 
-> The exact module count drifts across releases as sub-modules split or merge — the canonical list lives in `crates/vestige-mcp/src/cognitive.rs::CognitiveEngine`. The CI metadata gate verifies the **MCP tool count** (28); module counts are intentionally not pinned.
+> The exact module count drifts across releases as sub-modules split or merge — the canonical list lives in `crates/vestige-mcp/src/cognitive.rs::CognitiveEngine`. The CI metadata gate verifies the **MCP tool count** (29); module counts are intentionally not pinned.
 
 ### Memory States
 

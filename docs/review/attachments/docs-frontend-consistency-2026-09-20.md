@@ -140,3 +140,78 @@ Deliberately **not** edited, because the wording would have to be invented or th
 - **`docs/launch/**` intent for the one factually false line** (`blog-post.md:112` "Memories are never hard-deleted"). The freeze notice covers stale numbers explicitly but not a false capability claim; flagged for the owner.
 - **Whether `/metrics` is meant to be user-facing.** It is absent from every doc except `ARCHITECTURE.md`; the route comment (`dashboard/mod.rs:199-202`) says it is "the process talking to the monitoring system", which may make the omission deliberate.
 - **Dashboard copy in Polish.** I checked `pl.json` for the four frontend items above (tutorial birth `:959`, FAQ a1 `:1111`, changelog title `:347`) but did not audit the rest of `pl.json` string-by-string for the same claims.
+
+---
+
+## Root docs — resolved
+
+**Added 2026-09-20 by the follow-up docs pass.** Every row below was re-verified in source before the edit, not taken from §1.1/§1.3 on trust. Line numbers are the *pre-edit* ones this audit cites. Behaviour changed again while this pass ran — see the closing note.
+
+### `crates/vestige-mcp/README.md` — the security-relevant one
+
+The core defect was worse than "stale text": the table annotated five tools `read-only, idempotent` while the catalog marks them `readOnlyHint:false`. MCP clients use those hints for **auto-approval**, so the document contradicted the contract a client is supposed to trust.
+
+| Mismatch | Change |
+|---|---|
+| `:42` `## Available Tools (28)` | → `(29)`; the documented name set is now byte-identical to the catalog's `tool(` entries (diffed programmatically: 29 vs 29, no extras, no omissions) |
+| no `erase` row (table jumped `gc` → `restore`) | added an `erase` row between them: exact-tag semantics, the derived-data list **including content history (`memory_revisions`)**, the `dry_run`/`confirmed` gate, `destructive, idempotent` |
+| `:49` `search` "read-only, idempotent" | → `mutating (retrieval strengthens FSRS state), not idempotent` |
+| `:54` `session_context` "read-only, idempotent" | → same |
+| `:63` `deep_reference` "read-only, idempotent" | → same |
+| `:68` `reflect` "read-only, idempotent" | → same |
+| `:86` `export` "read-only, idempotent" | → `mutating (writes a file to disk), not idempotent` |
+| — | added a paragraph under the heading stating the rule the five share, so the correction is not just five isolated cells |
+
+**Verification.** A script extracted each tool's `ToolAnnotations` helper from `catalog.rs` (`read_only_safe` / `retrieval_mutating` / `mutating(idem)` / `destructive(idem)`) and compared it cell-by-cell against the README — 29/29 rows now agree. This caught one the audit did *not* list: `export` is `mutating("Export memories", false)`, i.e. **not** idempotent, so the audit's suggested fix (`mutating`) was incomplete. `temporal` was re-checked and is correct as written (`destructive(…, true)`).
+
+### Root prose
+
+| Mismatch | Change |
+|---|---|
+| `README.md:15` dead `[Tools](#-28-mcp-tools)` | → `#-29-mcp-tools` |
+| `README.md:446` `# Should return {"status":"healthy",...}` | → `# 200 = healthy/degraded/empty; 503 = critical (avg retention < 0.3) — the body carries the same health JSON either way` |
+| `README.md:323` erase derived-data list | inserted `content history (memory_revisions)` |
+| `README.md:276` `memory` row (not in the audit) | added: `delete` is permanent and needs `confirmed: true` — a call without it is refused |
+| `ARCHITECTURE.md:173` gate verifies tool count `(28)` | → `(29)` |
+| `ARCHITECTURE.md:52-55` sqlite submodules omit `revisions` | added `revisions` plus the modules the list was also missing (`tags`, `connections`, `snapshot_restore`) |
+| `ARCHITECTURE.md:141-151` ingest pipeline has no gate stage | inserted a `**Gate:**` stage before `**Pre:**`, naming the refusal (`decision:"reject"`, nothing written) and the flag (`self_contained=0` + `self_contained_findings`) |
+| `CONTRIBUTING.md:182` tools `(28)` | → `(29)` |
+| `CONTRIBUTING.md:173` sqlite submodule list | added `revisions`, `tags`, `connections`, `snapshot_restore` |
+| `SECURITY.md:103-107` gate paragraph | added the `memory(action="delete")` requirement **and** what it does *not* purge. The second half departs from the audit's wording on purpose: `delete_node` deletes only `knowledge_nodes`, and CASCADE removes state/embeddings/edges/access-log — but `memory_revisions` and `insights.source_memories` have no FK, so they are what actually survive. Saying "erase additionally removes content history" alone would still have let a reader believe a delete was complete. |
+| `CLAUDE.md.template:40-41` `Solution:` + `Files:` | → `Lesson: [the rule to apply next time]`, `Files:` deleted, plus the rule that paths live in `source`/`code_refs` |
+| `CLAUDE.md.template:118` `health_check` | → `system_status` (noting `health_check` survives as a deprecated alias) |
+| `CLAUDE.md.template:108-140` no erasure / no gate guidance | added an **Erasure (GDPR Art. 17)** block (three surfaces, exact-tag semantics, derived data, dry-run first) and a **Reading a Save Response** block (unflagged / flagged / `decision:"reject"`) |
+| `CLAUDE.md.template:94` `promote_memory` (not in the audit) | → `memory(action="promote")`; `promote_memory` is a deprecated alias (`server/deprecated.rs:51`) and is not in the 29-tool catalog |
+
+### `packages/*/README.md`
+
+One mismatch, as in §1.3 — no others exist: `grep -nE '[0-9]+ ?(MCP )?tools|migration|v1[0-9]|route' packages/*/README.md` returns exactly one hit, and it is the already-corrected SQLite page-size note.
+
+| Mismatch | Change |
+|---|---|
+| `packages/vestige-mcp-npm/README.md:53-60` CLI block | added `vestige erase --id <uuid> \| --tag <tag> [--dry-run] [--confirm]` with the gate and the derived-data note; the install table row now reads "stats, health checks, maintenance, and GDPR erasure" |
+
+The brief for this pass expected four package mismatches; the code says one. `packages/vestige-mcpb/README.md` (63 lines) makes no tool-count or save-behaviour claim, and `packages/vestige-init/` ships no README at all. Reported rather than padded.
+
+### `docs/review/STATUS.md`
+
+Conclusions were **not** rewritten. A new `## 0. Adendum — co domknięto po \`a2dfbec\`` section was inserted after the status legend (Polish, matching the document), with a table mapping each stale entry to its current state and evidence, and an explicit note that sections 1–13 describe the `a2dfbec` snapshot and that verifier ratings there are historical.
+
+| Entry | Now |
+|---|---|
+| `:83`, `:120` erasure unreachable | implemented — three surfaces (`server/catalog.rs:266-274`, `dashboard/mod.rs:199`, `bin/cli/main.rs:98-113,173-178`), `22038070` |
+| `:126` `memory(action="delete")` ungated | implemented — `tools/memory_unified/actions.rs:142-147`, `edeac324`. Confirmed by source archaeology, not by the commit message: `git show a2dfbec:crates/vestige-mcp/src/tools/memory_unified/*.rs \| grep confirmed` is empty, so the entry was accurate when written |
+| `:84`, `:127`, `:281` prefix `LIKE` tag matching | implemented — exact `json_each` match at `storage/sqlite/gdpr.rs:177`, `b06f35c0`; the "DO ZROBIENIA before exposing erasure" precondition is satisfied |
+| `:83`, `:127` erase/backup notes | content history is now deleted too (`gdpr.rs:81-85`); batch is transactional (`gdpr.rs:161-185`) |
+| `:49, :51, :52, :159, :215` "28 narzędzi" | not rewritten; the addendum records that the catalog now has 29 and that `mark_reviewed` became `memory(action="review")` with a back-compat alias |
+| `:128` delete does not clean the HNSW sidecar | still open — recorded as still open in the addendum, with the FK analysis explaining why `memory_revisions`/`insights` survive `delete` |
+
+### Note for whoever reads this next: the migration range moved again
+
+While this pass was running, an uncommitted **V19** (`code_refs`) appeared in `crates/vestige-core/src/storage/migrations/registry.rs:98-103`, so every "v1–vN" claim in these files was corrected to **v1–v19**, not to the v1–v18 this audit's §0 assumed. `./scripts/check-version-and-tools.sh` is what caught it.
+
+### Out of scope, reported
+
+- **`AGENTS.md` still advertises `v1–v18`** (and `CLAUDE.md`/`GEMINI.md` are symlinks to it). It is the one file the metadata gate still fails on. It was left untouched here by instruction; the parent agent owns it.
+- The audit's §1.2 items (`docs/STORAGE.md`, the erasure FAQ entry, `/metrics` documentation) were not in this pass's writable set either, and remain as the audit left them.
+

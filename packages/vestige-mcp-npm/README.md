@@ -17,7 +17,7 @@ This automatically downloads the correct binary for your platform (macOS, Linux,
 | Command | Description |
 |---------|-------------|
 | `vestige-mcp` | MCP server for Claude integration |
-| `vestige` | CLI for stats, health checks, and maintenance |
+| `vestige` | CLI for stats, health checks, maintenance, and GDPR erasure |
 
 ### Verify installation
 
@@ -57,6 +57,10 @@ vestige stats          # Memory statistics
 vestige stats --states # Cognitive state distribution
 vestige health         # System health check
 vestige consolidate    # Run memory maintenance cycle
+vestige erase --id <uuid> | --tag <tag> [--dry-run] [--confirm]
+                       # GDPR Art. 17 hard-delete. Previews by default; --confirm
+                       # is required to actually delete. Also removes content
+                       # history and other data derived from the memory.
 ```
 
 ## Features

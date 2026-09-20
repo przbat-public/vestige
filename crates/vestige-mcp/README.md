@@ -39,19 +39,21 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 To pin a custom database location, pass `--data-dir <PATH>` (or `--data-dir=<PATH>`) in the `args` array; without it the server uses the platform-default directory listed below.
 
-## Available Tools (28)
+## Available Tools (29)
 
 The catalog is built in [`server/catalog.rs`](src/server/catalog.rs); every entry ships an `inputSchema`, a `title`, and behavior `annotations`. Every tool is local-only (`openWorldHint=false`).
+
+Annotation wording below mirrors the catalog exactly. In particular, the retrieval tools (`search`, `session_context`, `deep_reference`, `reflect`) and `export` are **not** read-only: every search path strengthens what it returns (the Testing Effect writes FSRS state), and `export` writes a file to disk. Repeated identical calls keep stacking retrieval strength, so they are not idempotent either (`catalog.rs::retrieval_mutating`).
 
 ### Core memory
 | Tool | Actions | Annotations |
 |------|---------|-------------|
-| `search` | hybrid retrieval + 8-stage cognitive pipeline | read-only, idempotent |
+| `search` | hybrid retrieval + 8-stage cognitive pipeline | mutating (retrieval strengthens FSRS state), not idempotent |
 | `smart_ingest` | single (`content`) or batch (`items`, max 20) ingestion with Prediction Error Gating + Content Intelligence Pipeline | mutating, can SUPERSEDE → destructive |
 | `memory` | `get`, `get_batch` (≤20 ids), `state`, `promote`, `demote`, `edit`, `delete` | destructive (delete + edit live alongside reads) |
 | `codebase` | `remember_pattern`, `remember_decision`, `remember_decision_v2` (structured Decision Matrix), `get_context` | mutating, additive |
 | `intention` | `set`, `check`, `update` (complete/snooze/cancel), `list` | mutating, additive |
-| `session_context` | one-call session bootstrap (search + status + intentions + predictions + codebase) | read-only, idempotent |
+| `session_context` | one-call session bootstrap (search + status + intentions + predictions + codebase) | mutating (retrieval strengthens FSRS state), not idempotent |
 
 ### Cognitive engine
 | Tool | What it does | Annotations |
@@ -60,12 +62,12 @@ The catalog is built in [`server/catalog.rs`](src/server/catalog.rs); every entr
 | `explore_connections` | `chain` (reasoning paths) / `associations` (spreading activation) / `bridges` / `causal_chain` (BFS along persisted causal edges for `why?` questions) | read-only, idempotent |
 | `predict` | proactive retrieval based on context + activity history | read-only, idempotent |
 | `precompute_for_context` | sleep-time compute — pre-fetch and summarise top-K memories for an upcoming topic, store as a `precomputed_summary` with TTL (1–168h) so the next session hits a warm cache | mutating, additive |
-| `deep_reference` | full reasoning engine — hybrid retrieval + FSRS trust + intent classification + temporal supersession + contradiction analysis + dream-insight integration. `cross_reference` is a backward-compatible alias. | read-only, idempotent |
+| `deep_reference` | full reasoning engine — hybrid retrieval + FSRS trust + intent classification + temporal supersession + contradiction analysis + dream-insight integration. `cross_reference` is a backward-compatible alias. | mutating (retrieval strengthens FSRS state), not idempotent |
 
 ### Metacognitive (v3.1+)
 | Tool | What it does | Annotations |
 |------|--------------|-------------|
-| `reflect` | self-examination — contradictions, gaps, stale decisions, overconfident memories, pattern clusters | read-only, idempotent |
+| `reflect` | self-examination — contradictions, gaps, stale decisions, overconfident memories, pattern clusters | mutating (retrieval strengthens FSRS state), not idempotent |
 | `temporal` | fact versioning — `current` / `expired` / `history` / `invalidate` | destructive (`invalidate`), idempotent |
 | `confidence` | calibration — `score` / `audit` / `calibrate` | read-only, idempotent |
 
@@ -83,8 +85,9 @@ The catalog is built in [`server/catalog.rs`](src/server/catalog.rs); every entr
 | `split_memories` | locate compound multi-topic memories that should be split (default `dry_run=true`) | destructive when `dry_run=false` |
 | `regenerate_embeddings` | backfill or rebuild embeddings (e.g. after model upgrade) | mutating, idempotent |
 | `backup` | create a SQLite snapshot file | mutating, additive |
-| `export` | JSON/JSONL dump (filter by tag/date) | read-only, idempotent |
+| `export` | JSON/JSONL dump (filter by tag/date) | mutating (writes a file to disk), not idempotent |
 | `gc` | garbage collect below a retention threshold (default `dry_run=true`; `dry_run=false` also requires `confirmed: true`) | destructive, idempotent |
+| `erase` | **GDPR Art. 17** irreversible hard-delete — `memory` (one `id`) or `tag` (every memory carrying that exact tag; `code` never matches `codebase`). Unlike `memory(action="delete")`/`gc` it also removes the derived data: connections, embeddings, access log, state history, **content history** (`memory_revisions`) and every insight derived from the memory. `dry_run=true` by default and reports the count + ids; the destructive pass also requires `confirmed: true` | destructive, idempotent |
 | `restore` | restore from JSON backup (MCP wrapper / RecallResult / direct array formats) — no dry-run mode, `confirmed: true` is mandatory | destructive |
 
 ## Available Resources (11)

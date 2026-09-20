@@ -170,7 +170,7 @@ The cognitive engine. Key modules:
 | `preprocessing/` | Content Intelligence Pipeline — entity / coref / temporal / relation / provenance |
 | `search/` | Hybrid search (BM25 + semantic), HyDE, Jina Reranker v2, temporal search, compound query decomposition |
 | `embeddings/` | fastembed (Nomic Embed v1.5), ONNX inference, Matryoshka 768D → 384D truncation |
-| `storage/sqlite/` | Per-concern split: nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats. Migrations v1–v18. |
+| `storage/sqlite/` | Per-concern split: nodes, states, history, revisions, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats, tags, connections, snapshot_restore. Migrations v1–v19. |
 
 ### vestige-mcp
 
@@ -179,7 +179,7 @@ The MCP server and dashboard. Key modules:
 | Module | Purpose |
 |--------|---------|
 | `protocol/` | stdio + HTTP MCP transports, JSON-RPC messages, auth, timeout |
-| `server/catalog.rs` | Canonical list of MCP tools (28) and resources (11). CI guards drift. |
+| `server/catalog.rs` | Canonical list of MCP tools (29) and resources (11). CI guards drift. |
 | `cognitive.rs` | `CognitiveEngine` wrapper |
 | `tools/` | One file (or sub-module) per MCP tool |
 | `dashboard/wire/` | ts-rs DTOs — the wire contract, single source of truth |

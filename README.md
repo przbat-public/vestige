@@ -12,7 +12,7 @@
 
 Built on memory research from Ebbinghaus (1885) to FSRS-6 — spaced repetition, prediction error gating, synaptic tagging, spreading activation, memory dreaming — all running in a single Rust binary with a 3D neural visualization dashboard. 100% local. Zero cloud.
 
-[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-28-mcp-tools) | [Docs](docs/)
+[Quick Start](#quick-start) | [Dashboard](#-3d-memory-dashboard) | [How It Works](#-the-cognitive-science-stack) | [Tools](#-29-mcp-tools) | [Docs](docs/)
 
 </div>
 
@@ -209,7 +209,7 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 │  Storage Layer                                      │
 │  SQLite + FTS5 · USearch HNSW · Nomic Embed v1.5    │
 │  Jina Reranker v2 · RRF · Active Forgetting         │
-│  Migrations v1–v18 · WAL · optional SQLCipher       │
+│  Migrations v1–v19 · WAL · optional SQLCipher       │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -273,7 +273,7 @@ The canonical catalog lives in [`crates/vestige-mcp/src/server/catalog.rs`](crat
 |------|-------------|
 | `search` | 8-stage cognitive search — compound query decomposition + triple hybrid (BM25 + semantic + RRF) + Jina v2 reranking + temporal + competition + spreading activation |
 | `smart_ingest` | Intelligent storage with CREATE/UPDATE/SUPERSEDE via Prediction Error Gating. Runs the Content Intelligence Pipeline (entity extraction, coreference, temporal anchoring, relation extraction, provenance). Batch mode for session-end saves |
-| `memory` | Get, batch get (up to 20 ids in one call), edit, delete, check state, promote (thumbs up), demote (thumbs down) |
+| `memory` | Get, batch get (up to 20 ids in one call), edit, delete, check state, promote (thumbs up), demote (thumbs down). `delete` is permanent and needs `confirmed: true` — a call without it is refused |
 | `codebase` | Remember code patterns and architectural decisions per-project. `remember_decision_v2` writes a structured Decision Matrix (question + choices + criteria + 1–5 scoring + optional `validUntil`) — `reflect` auto-flags decisions whose window has passed |
 | `intention` | Prospective memory — "remind me to X when Y happens" |
 
@@ -320,7 +320,7 @@ The canonical catalog lives in [`crates/vestige-mcp/src/server/catalog.rs`](crat
 | `regenerate_embeddings` | Backfill or rebuild embeddings (e.g. after a model upgrade, a long offline stretch, or any change to the embedding space — after upgrading to a build with a new embedding-space version run it with `force: true`, otherwise vectors from the old and new spaces coexist and semantic ranking degrades silently) |
 | `backup` / `export` / `gc` | Database backup, JSON export, garbage collection (`gc` is dry-run by default; the destructive pass needs `confirmed: true`) |
 | `restore` | Restore from JSON backup — no dry-run mode; every call must pass `confirmed: true` |
-| `erase` | **GDPR Art. 17 hard-deletion** of one memory (`action: "memory", id`) or of every memory carrying an exact tag (`action: "tag", tag` — `code` never matches `codebase`). Unlike `memory(action="delete")`/`gc`, it also removes the derived data: connections, embeddings, access log, state history and every insight derived from the memory. `dry_run: true` by default; the destructive pass needs `confirmed: true`. Also available as `POST /api/maintenance/erase` and `vestige erase` |
+| `erase` | **GDPR Art. 17 hard-deletion** of one memory (`action: "memory", id`) or of every memory carrying an exact tag (`action: "tag", tag` — `code` never matches `codebase`). Unlike `memory(action="delete")`/`gc`, it also removes the derived data: connections, embeddings, access log, state history, content history (`memory_revisions`) and every insight derived from the memory. `dry_run: true` by default; the destructive pass needs `confirmed: true`. Also available as `POST /api/maintenance/erase` and `vestige erase` |
 
 ---
 
@@ -443,7 +443,7 @@ Cache: macOS `~/Library/Caches/vestige.vestige/fastembed` | Linux `~/.cache/vest
 The dashboard starts automatically on port 3927 when the MCP server runs. Check:
 ```bash
 curl http://localhost:3927/api/health
-# Should return {"status":"healthy",...}
+# 200 = healthy/degraded/empty; 503 = critical (avg retention < 0.3) — the body carries the same health JSON either way
 ```
 </details>
 

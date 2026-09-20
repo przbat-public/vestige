@@ -35,12 +35,15 @@ Every search strengthens memory (Testing Effect). Search liberally.
 ### After Solving a Bug or Error
 Save IMMEDIATELY with `smart_ingest`:
 ```
-"BUG FIX: [error message]
-Root cause: [why it happened]
-Solution: [how we fixed it]
-Files: [affected files]"
+"BUG FIX: [what broke]
+Root cause: [why it broke]
+Lesson: [the rule to apply next time]"
 Tags: ["bug-fix", "project-name"]
 ```
+
+File paths and line numbers stay **out of the content** — put them in `source`/`code_refs`
+instead. `Solution: [the diff]` is not a memory either: the diff is in the repository, and
+the lesson is the part that is nowhere else.
 
 ### After the User Corrects You
 Save the correction as a preference — they're teaching you:
@@ -88,7 +91,7 @@ Tags: ["decision", "topic-name"]
 | "Don't forget" | `smart_ingest` with tags: ["important"] |
 | "I always..." / "I never..." | Save as preference |
 | "I prefer..." / "I like..." | Save as preference |
-| "This is important" | `smart_ingest` + `promote_memory` |
+| "This is important" | `smart_ingest` + `memory(action="promote")` |
 | "Remind me..." | Create `intention` with trigger |
 | "Next time we..." | Create `intention` with context trigger |
 | "When I'm working on X..." | Create `intention` with codebase trigger |
@@ -115,9 +118,32 @@ Act on feedback immediately — don't ask permission to promote/demote.
 
 ### Proactive Health Checks
 If you notice degraded recall or a user mentions memory issues:
-1. Run `health_check` — check overall system status
+1. Run `system_status` — check overall system status (`health_check` still works as a deprecated alias)
 2. If `averageRetention < 0.5` → suggest running `consolidate`
 3. If `dueForReview > 50` → mention that some memories need review
+
+### Erasure (GDPR Art. 17)
+When the user asks you to remove everything about a subject, `memory(action="delete")` is the
+wrong tool — it needs `confirmed: true` and still leaves the memory's history behind. Use `erase`:
+```json
+{ "action": "tag", "tag": "gdpr-subject", "dry_run": true }
+```
+`dry_run: true` is the default and reports the count plus up to 100 ids. **Always show the user
+that preview first**; the destructive pass additionally requires `confirmed: true` and is
+irreversible. Unlike `memory(action="delete")` and `gc`, `erase` also removes the derived data —
+connections, embeddings, access log, state history, content history (`memory_revisions`) and every
+insight that named the memory. `action: "tag"` matches the exact tag only (`code` never matches
+`codebase`). Same operation: `POST /api/maintenance/erase`, `vestige erase --id|--tag`.
+
+### Reading a Save Response
+Every `smart_ingest` write is checked before it is stored. Three outcomes, three responses:
+- **no `self_contained` key** — the gate found nothing. Nothing to do.
+- **`self_contained: { requiresContext: true, findings: [...] }`** — the memory *was* written but
+  leans on the conversation that produced it. Rewrite it: each finding names the `kind`, the exact
+  `span`, and a `hint`. Do not delete a flagged memory — silent loss is worse than a flagged entry.
+- **`decision: "reject"`, `stored: false`** — nothing was written. The content is something the
+  repository already owns (a diff, a code block, a version number). Read `reason`/`findings` and
+  save the lesson or the decision instead. Do not retry the same text.
 
 ### Consolidation
 Run `consolidate` when:
