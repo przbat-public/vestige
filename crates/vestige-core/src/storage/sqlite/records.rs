@@ -87,6 +87,83 @@ pub struct ConnectionRecord {
     pub activation_count: i32,
 }
 
+/// What a [`MemoryRevision`] records about a memory's life.
+///
+/// The set is closed: the `kind` column carries a `CHECK` constraint, so a new
+/// variant needs a migration and not just an enum arm — the history table is
+/// the audit trail, and a value SQLite never validated would make it
+/// unqueryable in the one place it matters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RevisionKind {
+    /// The memory was first written down.
+    Create,
+    /// Its text was replaced; `old_content` holds the previous wording.
+    Edit,
+    /// A newer memory took its place.
+    Supersede,
+    /// It was marked no-longer-valid without being replaced.
+    Invalidate,
+    /// It was deferred out of retrieval (unresolved reference, failed gate).
+    Quarantine,
+}
+
+impl RevisionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Create => "create",
+            Self::Edit => "edit",
+            Self::Supersede => "supersede",
+            Self::Invalidate => "invalidate",
+            Self::Quarantine => "quarantine",
+        }
+    }
+
+    /// Parse a stored `kind`. An unrecognised value yields `None` rather than
+    /// an error so one row written by a newer build cannot make the whole
+    /// history of a memory unreadable.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "create" => Some(Self::Create),
+            "edit" => Some(Self::Edit),
+            "supersede" => Some(Self::Supersede),
+            "invalidate" => Some(Self::Invalidate),
+            "quarantine" => Some(Self::Quarantine),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for RevisionKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// One row of a memory's content history — append-only.
+///
+/// This is what makes "how did the picture change over time" answerable: a
+/// memory's current text says nothing about what it used to say, and the
+/// life-cycle tables (`state_transitions`, `consolidation_history`) record
+/// scheduling, never content.
+///
+/// `old_content` / `new_content` are free-form TEXT and their meaning depends
+/// on `kind`: for `invalidate` they hold the previous and new `valid_until`
+/// values, because that is the state the operation actually changed. The
+/// alternative — a JSON payload column — would make the common case (an edit's
+/// before/after text) unreadable in SQL.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MemoryRevision {
+    pub id: i64,
+    pub node_id: String,
+    pub recorded_at: DateTime<Utc>,
+    pub kind: RevisionKind,
+    pub old_content: Option<String>,
+    pub new_content: Option<String>,
+    pub reason: Option<String>,
+    pub actor: Option<String>,
+}
+
 /// Memory state record
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MemoryStateRecord {
@@ -231,6 +308,34 @@ impl Storage {
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
             activation_count: row.get("activation_count").unwrap_or(0),
+        })
+    }
+
+    pub(super) fn row_to_memory_revision(row: &rusqlite::Row) -> rusqlite::Result<MemoryRevision> {
+        let recorded_at: String = row.get("recorded_at")?;
+        let kind: String = row.get("kind")?;
+
+        Ok(MemoryRevision {
+            id: row.get("id")?,
+            node_id: row.get("node_id")?,
+            // A revision with an unparseable timestamp cannot be placed on a
+            // timeline, which is its entire purpose — surface it instead of
+            // silently stamping it with the current time.
+            recorded_at: Storage::parse_timestamp(&recorded_at, "recorded_at")?,
+            kind: RevisionKind::parse(&kind).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("unknown memory_revisions.kind '{kind}'"),
+                    )),
+                )
+            })?,
+            old_content: row.get("old_content")?,
+            new_content: row.get("new_content")?,
+            reason: row.get("reason")?,
+            actor: row.get("actor")?,
         })
     }
 }

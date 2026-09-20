@@ -11,7 +11,7 @@ mod sqlite;
 
 pub use sqlite::{
     ConnectionRecord, ConsolidationHistoryRecord, DEFAULT_HYBRID_KEYWORD_WEIGHT,
-    DEFAULT_HYBRID_SEMANTIC_WEIGHT, DreamHistoryRecord, InsightRecord, IntentionRecord, Result,
-    SmartIngestResult, SnapshotRestoreReport, StateTransitionRecord, Storage, StorageError,
-    default_hybrid_weights,
+    DEFAULT_HYBRID_SEMANTIC_WEIGHT, DreamHistoryRecord, InsightRecord, IntentionRecord,
+    MemoryRevision, Result, RevisionKind, SmartIngestResult, SnapshotRestoreReport,
+    StateTransitionRecord, Storage, StorageError, default_hybrid_weights,
 };

@@ -767,3 +767,54 @@ CREATE INDEX IF NOT EXISTS idx_nodes_waking_tag
 
 UPDATE schema_version SET version = 16, applied_at = datetime('now');
 "#;
+
+/// V17: record time and content history — the two things a reader needs to see
+/// how the picture changed over time.
+///
+/// 1. `knowledge_nodes.recorded_at` — *when we wrote this memory down*, kept
+///    apart from `created_at` (row birth) and `last_accessed` (refreshed by
+///    every search, so it can carry no claim about age). Additive on purpose:
+///    dropping the column restores the previous schema exactly.
+///
+///    SQLite cannot `ADD COLUMN ... NOT NULL` without a constant default, so the
+///    column is added nullable and backfilled in the same migration. Writers
+///    always supply it and no writer ever updates it.
+///
+/// 2. `memory_revisions` — append-only content history. Until now
+///    `update_node_content` overwrote a memory with no trace, and the schema
+///    held life-cycle tables (`state_transitions`, `consolidation_history`,
+///    `dream_history`, `retention_snapshots`) but nothing about *content*: the
+///    previous wording of a memory was simply gone, so "what did we believe on
+///    day X" was unanswerable.
+///
+/// `node_id` deliberately carries **no** foreign key. `knowledge_nodes` rows are
+/// hard-deleted by GDPR Article 17 erasure, and a `REFERENCES ... ON DELETE
+/// CASCADE` would make the erasure's own history table a silent deletion path
+/// that depends on `PRAGMA foreign_keys` being on for whichever connection
+/// performs the delete. Erasure names every child table explicitly instead
+/// (see `storage/sqlite/gdpr.rs`), which is auditable; the trade-off is that a
+/// plain node delete must also delete its revisions by hand.
+pub(super) const MIGRATION_V17_UP: &str = r#"
+ALTER TABLE knowledge_nodes ADD COLUMN recorded_at TEXT;
+
+-- Backfill: for a row that predates record time, the row's creation *is* the
+-- only record time we can honestly claim.
+UPDATE knowledge_nodes SET recorded_at = created_at WHERE recorded_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS memory_revisions (
+    id INTEGER PRIMARY KEY,
+    node_id TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('create', 'edit', 'supersede', 'invalidate', 'quarantine')),
+    old_content TEXT,
+    new_content TEXT,
+    reason TEXT,
+    actor TEXT
+);
+
+-- Every read is "the history of one memory, newest first".
+CREATE INDEX IF NOT EXISTS idx_memory_revisions_node
+    ON memory_revisions(node_id, recorded_at);
+
+UPDATE schema_version SET version = 17, applied_at = datetime('now');
+"#;

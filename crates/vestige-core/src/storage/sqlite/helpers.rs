@@ -166,6 +166,16 @@ impl Storage {
         let updated_at = Self::parse_timestamp(&updated_at, "updated_at")?;
         let last_accessed = Self::parse_timestamp(&last_accessed, "last_accessed")?;
 
+        // Record time (V17). Tolerant on purpose: a NULL means a row written by
+        // a build that predates the column, and `created_at` is the only
+        // honest claim available for it. Falling back keeps a reader from
+        // seeing a 1970 epoch (the `Default` for `DateTime`) as a record time,
+        // which would read as a much older memory than it is.
+        let recorded_at = match row.get::<_, Option<String>>("recorded_at") {
+            Ok(Some(value)) => Self::parse_timestamp(&value, "recorded_at")?,
+            _ => created_at,
+        };
+
         let next_review = next_review.and_then(|s| {
             DateTime::parse_from_rfc3339(&s)
                 .map(|dt| dt.with_timezone(&Utc))
@@ -197,6 +207,7 @@ impl Storage {
             created_at,
             updated_at,
             last_accessed,
+            recorded_at,
             stability: row.get("stability")?,
             difficulty: row.get("difficulty")?,
             reps: row.get("reps")?,

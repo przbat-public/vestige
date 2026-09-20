@@ -85,4 +85,9 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "Narrow FTS update trigger to content/tags; partial index for waking-tag replay",
         up: MIGRATION_V16_UP,
     },
+    Migration {
+        version: 17,
+        description: "Record time (recorded_at) and append-only content history (memory_revisions)",
+        up: MIGRATION_V17_UP,
+    },
 ];

@@ -335,3 +335,141 @@ fn v15_rebuilds_the_index_for_rows_written_before_the_upgrade() {
         .unwrap();
     assert_eq!(nodes, 2, "the migration must not add or drop memories");
 }
+
+// ============================================================================
+// V17 — record time + content history
+// ============================================================================
+
+/// The registry must stay contiguous and reach v17 on a fresh database. A gap
+/// (say v16 → v18) would be applied by the runner anyway, since it only
+/// compares numbers — the missing version's schema would simply never exist.
+#[test]
+fn v17_fresh_database_reaches_version_17_with_a_contiguous_registry() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_migrations(&conn).unwrap();
+
+    assert_eq!(get_current_version(&conn).unwrap(), 17);
+
+    let versions: Vec<u32> = MIGRATIONS.iter().map(|m| m.version).collect();
+    let expected: Vec<u32> = (1..=17).collect();
+    assert_eq!(
+        versions, expected,
+        "migration versions must stay contiguous and end at 17"
+    );
+}
+
+/// An existing V16 database must be migrated *and* backfilled: a pre-existing
+/// memory's record time can only honestly be its `created_at`, and a NULL
+/// `recorded_at` would make every historical memory look like it was learned at
+/// the epoch the moment a reader forgot the column is nullable.
+#[test]
+fn v17_migrates_a_v16_database_with_recorded_at_equal_to_created_at() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_pending(&conn, &MIGRATIONS[..16], 0).unwrap();
+    assert_eq!(get_current_version(&conn).unwrap(), 16);
+
+    conn.execute(
+        "INSERT INTO knowledge_nodes (id, content, node_type, created_at, updated_at, last_accessed, tags)
+         VALUES ('legacy-1', 'learned before record time existed', 'fact',
+                 '2026-03-04T05:06:07+00:00', '2026-03-04T05:06:07+00:00',
+                 '2026-04-01T00:00:00+00:00', '[]')",
+        [],
+    )
+    .unwrap();
+
+    let applied = apply_pending(&conn, &MIGRATIONS[..17], 16).unwrap();
+    assert_eq!(applied, 1, "only V17 is pending after V16");
+    assert_eq!(get_current_version(&conn).unwrap(), 17);
+
+    let recorded_at: String = conn
+        .query_row(
+            "SELECT recorded_at FROM knowledge_nodes WHERE id = 'legacy-1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        recorded_at, "2026-03-04T05:06:07+00:00",
+        "a row that predates the column must be backfilled from created_at"
+    );
+
+    // The column is deliberately nullable in SQLite (it cannot be added with a
+    // non-constant NOT NULL default), so the enforced invariant is "no row
+    // lacks a record time". Pin it here: a later migration or writer that
+    // leaves NULL behind fails this.
+    let missing: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM knowledge_nodes WHERE recorded_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(missing, 0, "every row must carry a record time after V17");
+
+    // The history table exists and rejects an unknown kind — the audit trail is
+    // useless if a typo can write a category nobody queries.
+    conn.execute(
+        "INSERT INTO memory_revisions (node_id, recorded_at, kind, new_content)
+         VALUES ('legacy-1', '2026-03-04T05:06:07+00:00', 'create', 'learned before record time existed')",
+        [],
+    )
+    .unwrap();
+    assert!(
+        conn.execute(
+            "INSERT INTO memory_revisions (node_id, recorded_at, kind) VALUES ('legacy-1', '2026-03-04T05:06:07+00:00', 'rewritten')",
+            [],
+        )
+        .is_err(),
+        "memory_revisions.kind must be constrained to the five known kinds"
+    );
+}
+
+/// V17 must roll back like any other migration. It touches two schemas (a
+/// column on `knowledge_nodes` and a new table), so a failure half-way used to
+/// leave the store with a `recorded_at` column and no history table — a shape
+/// no later `INSERT` would understand.
+#[test]
+fn v17_rolls_back_when_a_statement_fails() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_pending(&conn, &MIGRATIONS[..16], 0).unwrap();
+
+    let broken = [Migration {
+        version: 17,
+        description: "test: V17 shape with a failing tail",
+        up: "ALTER TABLE knowledge_nodes ADD COLUMN recorded_at TEXT;
+             CREATE TABLE IF NOT EXISTS memory_revisions (id INTEGER PRIMARY KEY);
+             INVALID SQL HERE;",
+    }];
+    let err = apply_pending(&conn, &broken, 16).unwrap_err();
+    assert!(
+        err.to_string().contains("syntax error"),
+        "expected the SQL error to surface, got: {err}"
+    );
+
+    assert_eq!(
+        get_current_version(&conn).unwrap(),
+        16,
+        "a failed V17 must not bump the schema version"
+    );
+
+    let has_column: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('knowledge_nodes') WHERE name = 'recorded_at'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        !has_column,
+        "the added column survived the rollback — the migration was not atomic"
+    );
+
+    let has_table: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE name = 'memory_revisions'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!has_table, "the new table survived the rollback");
+}

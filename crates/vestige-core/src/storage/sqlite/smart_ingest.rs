@@ -21,9 +21,10 @@
 #![cfg(all(feature = "embeddings", feature = "vector-search"))]
 
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use super::Storage;
+use super::records::RevisionKind;
 use crate::memory::IngestInput;
 use crate::storage::{ConnectionRecord, Result, SmartIngestResult, StorageError};
 
@@ -256,20 +257,90 @@ impl Storage {
                 supersede_reason,
                 prediction_error,
             } => {
-                // Demote the old memory and mark it as temporally invalidated (Graphiti pattern)
+                // Supersede changes the old memory's *standing* without touching
+                // its text, so the revision is the only record of what replaced
+                // what. Two rows rather than one, because the successor's id
+                // cannot exist before its own INSERT: the first row records the
+                // retirement (the text that was retired, and the validity
+                // window it had — `unbounded` when it had none), the second
+                // names the replacement. Collapsing them into one row would
+                // force the first to either claim a successor that was never
+                // stored, or drop the window transition.
+                let replacement_reason =
+                    format!("Superseded by new memory: {:?}", supersede_reason);
+
+                // Rank the old memory down first (its own FSRS write), then
+                // retire it and record why in one transaction.
                 self.demote_memory(&old_memory_id)?;
+
                 {
-                    let writer = self
+                    let mut writer = self
                         .writer
                         .lock()
                         .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-                    writer.execute(
+                    let tx = super::helpers::begin_write_transaction(&mut writer)?;
+
+                    let (content, previous_valid_until): (String, Option<String>) = tx
+                        .query_row(
+                            "SELECT content, valid_until FROM knowledge_nodes WHERE id = ?1",
+                            params![&old_memory_id],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()?
+                        .ok_or_else(|| StorageError::NotFound(old_memory_id.clone()))?;
+
+                    // Mark it temporally invalidated (Graphiti pattern). Same
+                    // transaction as the revision: the two cannot disagree
+                    // about whether the memory was actually superseded.
+                    tx.execute(
                         "UPDATE knowledge_nodes SET valid_until = ?1 WHERE id = ?2",
-                        params![Utc::now().to_rfc3339(), old_memory_id],
+                        params![Utc::now().to_rfc3339(), &old_memory_id],
                     )?;
+
+                    Storage::record_revision(
+                        &tx,
+                        &old_memory_id,
+                        RevisionKind::Supersede,
+                        Some(content.as_str()),
+                        Some(previous_valid_until.as_deref().unwrap_or("unbounded")),
+                        Some(replacement_reason.as_str()),
+                        None,
+                    )?;
+
+                    tx.commit()?;
                 }
 
+                // The replacement is written after the old memory is retired,
+                // so an ingest failure leaves one demoted memory rather than
+                // losing the fact that a successor was promised.
                 let node = self.ingest_with_embedding(input, &new_embedding)?;
+
+                // Name the successor now that its id exists. A second revision
+                // rather than an UPDATE of the first: the table is append-only,
+                // and "the old memory was retired" and "here is what replaced
+                // it" are two moments, each with its own record time.
+                //
+                // `old_content` is left empty here so the pair reads as a
+                // sequence — the retirement row carries the text and the
+                // window, this row carries the successor. Repeating the text
+                // would make the second row look like a second supersede.
+                {
+                    let mut writer = self
+                        .writer
+                        .lock()
+                        .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
+                    let tx = super::helpers::begin_write_transaction(&mut writer)?;
+                    Storage::record_revision(
+                        &tx,
+                        &old_memory_id,
+                        RevisionKind::Supersede,
+                        None,
+                        Some(node.id.as_str()),
+                        Some(replacement_reason.as_str()),
+                        None,
+                    )?;
+                    tx.commit()?;
+                }
 
                 Ok(SmartIngestResult {
                     decision: "supersede".to_string(),
@@ -277,7 +348,7 @@ impl Storage {
                     superseded_id: Some(old_memory_id),
                     similarity: Some(similarity),
                     prediction_error: Some(prediction_error),
-                    reason: format!("New memory supersedes old: {:?}", supersede_reason),
+                    reason: replacement_reason,
                     neighbor_ids: neighbor_ids.clone(),
                 })
             }

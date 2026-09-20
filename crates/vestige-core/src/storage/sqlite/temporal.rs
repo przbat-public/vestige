@@ -27,6 +27,7 @@ use crate::fsrs::{
 };
 use crate::memory::KnowledgeNode;
 
+use super::records::RevisionKind;
 use super::{Result, Storage, StorageError};
 
 impl Storage {
@@ -133,16 +134,71 @@ impl Storage {
     ///
     /// Returns `Ok(true)` if a row was actually updated, `Ok(false)` if the
     /// memory_id didn't match any node (caller should surface a clear error).
+    ///
+    /// Delegates to [`Self::invalidate_with_revision`], so the invalidation is
+    /// always accompanied by its history row.
     pub fn set_valid_until(&self, id: &str, when: DateTime<Utc>) -> Result<bool> {
-        let writer = self
+        self.invalidate_with_revision(id, when, None)
+    }
+
+    /// [`Self::set_valid_until`] with the caller's reason recorded on the
+    /// `invalidate` revision.
+    ///
+    /// The revision carries the *previous* `valid_until` in `old_content` and
+    /// the new one in `new_content`. The new value alone would not answer "how
+    /// did the picture change": a memory can be invalidated once and then
+    /// re-anchored, and only the pair shows whether this call shortened,
+    /// extended or first set the validity window. `None` in `old_content`
+    /// means the window was unbounded before — the state the timestamp is
+    /// replacing.
+    pub fn invalidate_with_revision(
+        &self,
+        id: &str,
+        when: DateTime<Utc>,
+        reason: Option<&str>,
+    ) -> Result<bool> {
+        let mut writer = self
             .writer
             .lock()
             .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-        let n = writer.execute(
+        let tx = super::helpers::begin_write_transaction(&mut writer)?;
+
+        // Read the old window inside the write transaction so a concurrent
+        // invalidation cannot slip between the read and the write and make the
+        // revision describe a state that never existed.
+        let previous: Option<Option<String>> = tx
+            .query_row(
+                "SELECT valid_until FROM knowledge_nodes WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let Some(previous) = previous else {
+            // No row touched, so there is no change to record: committing an
+            // `invalidate` revision here would put a change in the timeline
+            // that never happened.
+            return Ok(false);
+        };
+
+        let new_value = when.to_rfc3339();
+        tx.execute(
             "UPDATE knowledge_nodes SET valid_until = ?1 WHERE id = ?2",
-            params![when.to_rfc3339(), id],
+            params![new_value, id],
         )?;
-        Ok(n > 0)
+
+        Self::record_revision(
+            &tx,
+            id,
+            RevisionKind::Invalidate,
+            previous.as_deref(),
+            Some(new_value.as_str()),
+            reason,
+            None,
+        )?;
+
+        tx.commit()?;
+        Ok(true)
     }
 
     /// Apply FSRS-6 decay to all memories using batched pagination to avoid OOM.

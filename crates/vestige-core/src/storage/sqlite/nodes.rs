@@ -18,6 +18,7 @@ use crate::fsrs::{DEFAULT_MAX_SENTIMENT_BOOST, apply_sentiment_boost};
 use crate::fts::sanitize_fts5_query;
 use crate::memory::{IngestInput, KnowledgeNode};
 
+use super::records::RevisionKind;
 use super::{Result, Storage, StorageError, normalize_tags};
 
 impl Storage {
@@ -112,13 +113,29 @@ impl Storage {
             .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "null".to_string()));
 
         {
-            let writer = self
+            let mut writer = self
                 .writer
                 .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-            writer.execute(
+            let tx = super::helpers::begin_write_transaction(&mut writer)?;
+
+            // The genesis of the timeline, in the same transaction as the row
+            // it describes — a memory with no `create` revision would have a
+            // history that starts mid-story. Recorded before the INSERT because
+            // the insert consumes `input.content`.
+            Self::record_revision(
+                &tx,
+                &id,
+                RevisionKind::Create,
+                None,
+                Some(input.content.as_str()),
+                input.source.as_deref(),
+                None,
+            )?;
+
+            tx.execute(
                 "INSERT INTO knowledge_nodes (
-                    id, content, node_type, created_at, updated_at, last_accessed,
+                    id, content, node_type, created_at, updated_at, last_accessed, recorded_at,
                     stability, difficulty, reps, lapses, learning_state,
                     storage_strength, retrieval_strength, retention_strength,
                     sentiment_score, sentiment_magnitude, next_review, scheduled_days,
@@ -127,14 +144,14 @@ impl Storage {
                     memory_kind, subject, predicate, object, episodic_at, procedural_frequency,
                     extra_json
                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6,
-                    ?7, ?8, ?9, ?10, ?11,
-                    ?12, ?13, ?14,
-                    ?15, ?16, ?17, ?18,
-                    ?19, ?20, ?21, ?22, ?23, ?24,
-                    ?25,
-                    ?26, ?27, ?28, ?29, ?30, ?31,
-                    ?32
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                    ?8, ?9, ?10, ?11, ?12,
+                    ?13, ?14, ?15,
+                    ?16, ?17, ?18, ?19,
+                    ?20, ?21, ?22, ?23, ?24, ?25,
+                    ?26,
+                    ?27, ?28, ?29, ?30, ?31, ?32,
+                    ?33
                 )",
                 params![
                     id,
@@ -142,6 +159,10 @@ impl Storage {
                     input.node_type,
                     now.to_rfc3339(),
                     now.to_rfc3339(),
+                    now.to_rfc3339(),
+                    // Record time. Immutable for the life of the row; callers
+                    // that need "when was this true in the world" use
+                    // `valid_from` instead.
                     now.to_rfc3339(),
                     boosted_initial_stability,
                     fsrs_state.difficulty,
@@ -173,6 +194,8 @@ impl Storage {
                     extra_json_str,
                 ],
             )?;
+
+            tx.commit()?;
         }
 
         // Generate or reuse the embedding. When a caller supplies a
@@ -263,7 +286,31 @@ impl Storage {
     /// Failing closed (no content write, no index change, `Err`) keeps the
     /// stored text and the vector that indexes it in agreement; a caller that
     /// sees the error can retry once the backend is back.
+    ///
+    /// The previous wording is preserved in `memory_revisions` — see
+    /// [`Self::update_node_content_with_revision`], which this delegates to.
     pub fn update_node_content(&self, id: &str, new_content: &str) -> Result<()> {
+        self.update_node_content_with_revision(id, new_content, None)
+    }
+
+    /// [`Self::update_node_content`] with the reason for the edit recorded on
+    /// the revision.
+    ///
+    /// Both the content write and its `edit` revision happen inside one
+    /// transaction, so the history cannot gain an entry for an edit that was
+    /// rolled back, and an edit cannot land without the entry that preserves
+    /// what the memory used to say. The embedding is written after the commit
+    /// (it is an index, not the record) — a failed re-embed therefore leaves
+    /// the new text and its revision committed and only the vector stale,
+    /// which is what `regenerate_embeddings` exists to repair. The reverse
+    /// order used to lose the edit itself: the embed errors out, and the text
+    /// the caller thought they saved was never written.
+    pub fn update_node_content_with_revision(
+        &self,
+        id: &str,
+        new_content: &str,
+        reason: Option<&str>,
+    ) -> Result<()> {
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
         let embedding = self.embed_text(new_content).map_err(|e| {
             StorageError::Init(format!(
@@ -275,14 +322,43 @@ impl Storage {
         let now = Utc::now();
 
         {
-            let writer = self
+            let mut writer = self
                 .writer
                 .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-            writer.execute(
+            let tx = super::helpers::begin_write_transaction(&mut writer)?;
+
+            // Read the previous text inside the write transaction: reading it
+            // through the reader pool first would let a concurrent edit land in
+            // between, and the revision would then claim the wrong "before".
+            let previous: Option<String> = tx
+                .query_row(
+                    "SELECT content FROM knowledge_nodes WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let previous = previous.ok_or_else(|| StorageError::NotFound(id.to_string()))?;
+
+            tx.execute(
                 "UPDATE knowledge_nodes SET content = ?1, updated_at = ?2 WHERE id = ?3",
                 params![new_content, now.to_rfc3339(), id],
             )?;
+
+            // `recorded_at` is absent from that SET list on purpose: it is the
+            // record time of the memory, not of its latest wording. Moving it
+            // here would make an edited memory look newly learned.
+            Self::record_revision(
+                &tx,
+                id,
+                RevisionKind::Edit,
+                Some(previous.as_str()),
+                Some(new_content),
+                reason,
+                None,
+            )?;
+
+            tx.commit()?;
         }
 
         // `store_embedding_for_node` upserts both `node_embeddings` and the
@@ -334,13 +410,23 @@ impl Storage {
     /// consolidation and by the startup rebuild, so a deleted UUID stayed in
     /// `vestige.hnsw` and — once unrelated ingests brought the row count back
     /// to what the meta recorded — could be loaded again on the next boot.
+    ///
+    /// The node's revisions go with it, in the same transaction. Deleting a
+    /// memory while leaving its history behind would keep the erased text
+    /// readable in `memory_revisions` after every other query agreed the node
+    /// was gone — the failure GDPR erasure exists to prevent, reached through
+    /// the plain delete path instead.
     pub fn delete_node(&self, id: &str) -> Result<bool> {
         let rows = {
-            let writer = self
+            let mut writer = self
                 .writer
                 .lock()
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
-            writer.execute("DELETE FROM knowledge_nodes WHERE id = ?1", params![id])?
+            let tx = super::helpers::begin_write_transaction(&mut writer)?;
+            Self::delete_revisions_for(&tx, id)?;
+            let rows = tx.execute("DELETE FROM knowledge_nodes WHERE id = ?1", params![id])?;
+            tx.commit()?;
+            rows
         };
 
         // Clean up vector index to prevent stale search results

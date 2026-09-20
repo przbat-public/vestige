@@ -60,6 +60,9 @@
 //!   `system_status` MCP tool.
 //! - `records`: persistence-layer record structs (one per SQLite table)
 //!   and the `pub(super)` row mappers shared by the per-domain modules.
+//! - `revisions`: append-only content history (`memory_revisions`) — the
+//!   `record_revision` writer every mutating path funnels through, and the
+//!   `get_memory_revisions` reader.
 
 mod connections;
 mod consolidation;
@@ -77,6 +80,7 @@ mod maintenance;
 mod nodes;
 mod records;
 mod review;
+mod revisions;
 mod search;
 #[cfg(all(feature = "embeddings", feature = "vector-search"))]
 mod smart_ingest;
@@ -92,11 +96,14 @@ mod tests;
 #[cfg(test)]
 mod tests_retention;
 
+#[cfg(test)]
+mod tests_revisions;
+
 pub use error::{Result, SmartIngestResult, StorageError};
 pub use init::Storage;
 pub use records::{
     ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,
-    IntentionRecord, MemoryStateRecord, StateTransitionRecord,
+    IntentionRecord, MemoryRevision, MemoryStateRecord, RevisionKind, StateTransitionRecord,
 };
 pub use search::{
     DEFAULT_HYBRID_KEYWORD_WEIGHT, DEFAULT_HYBRID_SEMANTIC_WEIGHT, default_hybrid_weights,

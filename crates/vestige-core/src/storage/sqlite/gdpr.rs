@@ -1,7 +1,8 @@
 //! GDPR Article 17 erasure paths.
 //!
 //! Hard-deletion of a memory and every trace it left behind: connections,
-//! embeddings, access logs, state transitions. Two entry points:
+//! embeddings, access logs, state transitions, and its content history
+//! (`memory_revisions`). Two entry points:
 //!
 //! - [`Storage::right_to_erasure`]: single memory by id.
 //! - [`Storage::erase_by_tag`]: bulk wipe of everything carrying a tag.
@@ -10,6 +11,13 @@
 //! deleted here. If you add a new memory-keyed table to a migration, also add
 //! a cascading `DELETE` below — otherwise GDPR audits will catch us with
 //! orphan rows referencing erased subjects.
+//!
+//! This list is why `memory_revisions` deliberately carries **no** foreign key:
+//! `REFERENCES knowledge_nodes(id) ON DELETE CASCADE` would work only on
+//! connections that have `PRAGMA foreign_keys = ON`, and would put the
+//! deletion of the content history outside the statement sequence an auditor
+//! can read here. An explicit `DELETE` in the same transaction is auditable and
+//! cannot be silently disabled by a connection setting.
 
 use rusqlite::params;
 
@@ -69,6 +77,12 @@ impl Storage {
             "DELETE FROM memory_states WHERE memory_id = ?1",
             params![id],
         )? as i64;
+
+        // The content history is the one table that stores the memory's *text*
+        // a second time, so it is the one that decides whether "erased" is
+        // true. `memory_revisions.node_id` has no foreign key (V17 explains
+        // why), so nothing deletes these rows implicitly.
+        erased += Storage::delete_revisions_for(&tx, id)? as i64;
 
         // `insights.source_memories` is a JSON array of node ids with no
         // foreign key, so the cascade never reaches it: an erased subject

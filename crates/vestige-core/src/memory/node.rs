@@ -191,6 +191,15 @@ pub struct KnowledgeNode {
     pub updated_at: DateTime<Utc>,
     /// When the node was last accessed/reviewed
     pub last_accessed: DateTime<Utc>,
+    /// When this memory was *recorded* — when we wrote it down.
+    ///
+    /// Distinct from `created_at` (row birth) and from `last_accessed`
+    /// (refreshed by every search hit, so it carries no claim about age).
+    /// Immutable by contract: no update path, and no strengthening, decay or
+    /// consolidation pass may move it, because "when did we learn this" is the
+    /// only anchor a reader has for how the picture changed over time.
+    #[serde(default = "Utc::now")]
+    pub recorded_at: DateTime<Utc>,
 
     // ========== FSRS-6 State (21 parameters) ==========
     /// Memory stability (days until 90% forgetting probability)
@@ -316,6 +325,7 @@ impl Default for KnowledgeNode {
             created_at: now,
             updated_at: now,
             last_accessed: now,
+            recorded_at: now,
             stability: 2.5,
             difficulty: 5.0,
             reps: 0,
