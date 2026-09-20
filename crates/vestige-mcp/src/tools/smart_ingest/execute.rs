@@ -396,6 +396,16 @@ pub async fn execute(
         if let Some(marker) = prepared.response_marker() {
             response["self_contained"] = marker;
         }
+        // A reported contradiction travels with the response, or the writer never
+        // learns that the memory it just saved may deny one it already had. The
+        // report names the memory, how similar the two are, how strong the
+        // evidence is, what fired it and what to do — because the one thing the
+        // write path deliberately did not do is retire anything.
+        if let Some(contradiction) = &result.contradiction
+            && let Ok(report) = serde_json::to_value(contradiction)
+        {
+            response["contradiction"] = report;
+        }
         // Near-duplicate advisory threshold.
         //
         // The prediction-error gate stores anything above 0.75 cosine as its own

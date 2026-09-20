@@ -50,6 +50,11 @@ pub struct SmartIngestResult {
     pub prediction_error: Option<f32>,
     /// Human-readable explanation of the decision
     pub reason: String,
+    /// A possible contradiction with an existing memory, reported rather than
+    /// acted on. Present only when the evidence cleared the gate's confidence
+    /// floor; the existing memory's text and validity are untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contradiction: Option<ContradictionReport>,
     /// Nearest neighbours considered by the prediction-error gate, ordered by
     /// similarity (highest first). Exposed so callers — typically the MCP
     /// layer that wires the new node into the cognitive engine — can avoid
@@ -57,4 +62,26 @@ pub struct SmartIngestResult {
     /// just to learn what was nearby.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub neighbor_ids: Vec<String>,
+}
+
+/// A contradiction the write path noticed and did not act on.
+///
+/// It exists so the writer can judge the signal: an id to look at, how similar
+/// the two memories are, how strong the evidence was, and what fired it. The
+/// decision to retire the older memory stays with the caller, because only the
+/// caller knows whether the new text replaces the old claim or merely mentions
+/// the same subject.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContradictionReport {
+    /// The memory the new content may deny.
+    pub existing_id: String,
+    /// Similarity between the two memories (0.0 - 1.0).
+    pub similarity: f32,
+    /// Confidence of the contradiction evidence (0.0 - 1.0).
+    pub confidence: f32,
+    /// The detector's evidence, each finding naming the rule and the text.
+    pub evidence: Vec<crate::advanced::prediction_error::GateFinding>,
+    /// What to do about it, worded for the agent that wrote the memory.
+    pub hint: String,
 }

@@ -755,13 +755,73 @@ fn similar_content_is_stored_separately_and_linked_to_its_neighbour() {
         "no append marker may be injected into an existing memory"
     );
 
-    let connections = storage
-        .get_connections_for_memory(&result.node.id)
-        .unwrap();
+    let connections = storage.get_connections_for_memory(&result.node.id).unwrap();
     assert!(
         connections
             .iter()
             .any(|c| c.target_id == existing.id || c.source_id == existing.id),
         "the two memories must be linked; a reader has no other way to see they belong together"
+    );
+}
+
+// ============================================================================
+// A possible contradiction is reported, never enforced
+// ============================================================================
+
+/// Retirement is a claim about the past — `valid_until` tells every later reader
+/// that the memory stopped being true at that instant — and the detector that
+/// would authorize it is a lexical rule. Replayed against a real thirteen-memory
+/// store it marked 39 of 156 ordered pairs as corrections, because two memories
+/// about one project negate different things with the same words.
+///
+/// So the write path stores the new memory, records the disagreement as an edge,
+/// and leaves the older memory exactly as it was. The caller retires it
+/// deliberately or not at all.
+#[test]
+#[cfg(all(feature = "embeddings", feature = "vector-search"))]
+fn a_contradiction_is_reported_and_leaves_the_older_memory_untouched() {
+    let storage = create_test_storage();
+    if !storage.embedding_service_ready() {
+        eprintln!("embedding service not ready — the contradiction path is unreachable");
+        return;
+    }
+
+    let existing = ingest(
+        &storage,
+        "We use synchronous code for the payment callback because it is simpler to reason about.",
+    );
+    let existing_before = storage.get_node(&existing.id).unwrap().unwrap();
+
+    let result = storage
+        .smart_ingest(IngestInput {
+            content: "Don't use synchronous code for the payment callback; it blocks the worker."
+                .to_string(),
+            node_type: "fact".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let report = result.contradiction.as_ref().unwrap_or_else(|| {
+        panic!("test premise: expected a reported contradiction, got {result:?}")
+    });
+    assert_eq!(report.existing_id, existing.id);
+
+    let existing_after = storage.get_node(&existing.id).unwrap().unwrap();
+    assert_eq!(
+        existing_after.valid_until, existing_before.valid_until,
+        "a reported contradiction must not date the older memory"
+    );
+    assert!(
+        existing_after.valid_until.is_none(),
+        "nothing was retired, so nothing acquired an end date"
+    );
+    assert_eq!(existing_after.content, existing_before.content);
+
+    let connections = storage.get_connections_for_memory(&result.node.id).unwrap();
+    assert!(
+        connections
+            .iter()
+            .any(|c| c.target_id == existing.id && c.link_type == "contradiction"),
+        "the disagreement must be readable from the graph: {connections:?}"
     );
 }

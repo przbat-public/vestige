@@ -383,3 +383,48 @@ testy failują z powodów, których w wersji bazowej nie ma. Objaw: ten sam hash
 który powstał w współdzielonym `target/`, jest nieważny do czasu powtórzenia — dotyczy to również
 wcześniejszych napraw w tym projekcie, gdzie komunikat błędu (`no such column`, `no such table`)
 był zgodny z rzeczywistym stanem bazy, ale sam mechanizm był narażony na to samo zakłócenie.
+
+---
+
+## 14. Dopisane po wdrożeniu: automat nigdy nie wycofuje wspomnienia
+
+Ten dokument zakładał, że bramka predykcyjna może sama oznaczyć starsze wspomnienie jako
+nieaktualne (`Supersede` → `valid_until = now()`), a §11.3 proponowało dodać do `GateDecision`
+wariant `Reject`. Oba są wdrożone, ale pierwsze z nich **zostało wycofane po pomiarze** — wart
+odnotowania, bo zmienia kontrakt zapisu.
+
+**Pomiar.** Przegląd trzynastu wspomnień z żywego magazynu (2026-09-20) pokazał sześć zdarzeń
+`supersede` na trzech wspomnieniach, w tym na dwóch decyzjach, z `valid_until` ustawionym ~1,3 s
+po zapisaniu. Odtworzenie par przez detektor dało werdykt „sprzeczność" we wszystkich trzech
+przypadkach, mimo że wspomnienia mówiły rzeczy zgodne („kompilator nie utrzyma zmiennej plikowej
+w rejestrze" przeciw decyzji o trzymaniu rejestrów w zmiennych lokalnych). Po zaostrzeniu reguł
+(m.in. wymóg wspólnego orzeczenia zamiast wspólnego rzeczownika, pominięcie kontrastu w zdaniu
+i zdań warunkowych, rozpoznanie podwójnego przeczenia) baseline NLP poprawił się z F1 0,955 do
+0,985, ale **odtworzenie całego magazynu parami nadal dawało 39 fałszywych wycofań na 156 par**:
+dwa wspomnienia o jednym projekcie negują różne rzeczy tymi samymi słowami.
+
+**Wniosek.** Reguła leksykalna nie jest dowodem, na którym wolno oprzeć twierdzenie o przeszłości.
+`valid_until` mówi każdemu późniejszemu czytelnikowi „to przestało być prawdą w tym momencie" —
+i to twierdzenie zostaje w magazynie na zawsze, więc nie może powstawać w tle.
+
+**Kontrakt po zmianie.** `GateDecision` zna teraz `Create`, `Update`, `Supersede`, `Merge`,
+`Reject` **oraz `Contradiction { existing_id, similarity, confidence, evidence }`**. Gałąź
+sprzeczności w bramce zwraca `Contradiction`, a nie `Supersede`:
+
+- nowe wspomnienie zostaje zapisane jako osobne,
+- powstaje krawędź `contradicts` o sile równej pewności dowodu,
+- starsze wspomnienie zachowuje treść, okno ważności i pozycję,
+- odpowiedź niesie `contradiction { existingId, similarity, confidence, evidence, hint }`,
+- `SmartIngestResult.contradiction` (`ContradictionReport`) jest tym nośnikiem.
+
+Wycofanie jest więc jawne: `temporal(action="invalidate")`, zapis z `supersedes`, albo gałąź
+`Improvement` — jedyna automatyczna, jaka została. Ona także zasługuje na przegląd: wymaga
+`similarity ≥ 0.75` przeciw wspomnieniu z `retrieval_strength < 0.3`, a ten próg osiąga również
+**automatyczny decay** (`review.rs`, `retrieval_strength = MAX(0.05, retrieval_strength * ?)`),
+nie tylko świadome `demote`. `Improvement` potrafi więc nadać `valid_until` wspomnieniu, o którym
+nikt nie powiedział, że jest błędne — tyle że staremu i nieodwiedzanemu. Do rozstrzygnięcia: oprzeć
+„zdemotowane" na jawnym śladzie (znacznik zapisany przez `demote`, nie na liczbie, którą zjada
+decay) albo usunąć tę gałąź tak samo jak `Correction`.
+
+Weryfikacja: odtworzenie trzynastu wspomnień parami przez nową bramkę daje `supersede = 0`,
+`merge = 0` (przy samym zaostrzeniu detektora: 39 fałszywych `Correction`).

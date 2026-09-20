@@ -9,7 +9,9 @@ use super::constants::{
     CORRECTION_MIN_CONFIDENCE, CORRECTION_THRESHOLD, DEFAULT_SIMILARITY_THRESHOLD,
     MAX_UPDATE_CANDIDATES, NEAR_IDENTICAL_THRESHOLD,
 };
-use super::decision::{CreateReason, GateDecision, MergeStrategy, SupersedeReason, UpdateType};
+use super::decision::{
+    CreateReason, GateDecision, GateFinding, MergeStrategy, SupersedeReason, UpdateType,
+};
 use super::similarity::cosine_similarity;
 use super::stats::GateStats;
 
@@ -17,6 +19,33 @@ use super::stats::GateStats;
 /// config serialized before the field existed still deserializes.
 fn default_correction_min_confidence() -> f32 {
     CORRECTION_MIN_CONFIDENCE
+}
+
+/// Turn the detector's evidence into the shape a response carries.
+///
+/// The hint is the part the writer needs and the detector cannot know: what to
+/// do about a signal that is deliberately not acted on. It says "check", not
+/// "retire", because the retirement decision belongs to the caller.
+fn contradiction_findings(result: &crate::nlp::DetectionResult) -> Vec<GateFinding> {
+    result
+        .evidence
+        .iter()
+        .map(|evidence| GateFinding {
+            kind: evidence.kind.as_str().to_string(),
+            span: evidence.snippet.clone(),
+            hint: match evidence.kind {
+                crate::nlp::EvidenceKind::CorrectionPhrase => {
+                    "the new text reads as a correction of this memory; if it replaces it, retire \
+                     this memory explicitly instead of leaving both to be read as current"
+                }
+                _ => {
+                    "the new text negates a phrase this memory also contains; check whether it \
+                     denies the same claim before retiring anything"
+                }
+            }
+            .to_string(),
+        })
+        .collect()
 }
 
 /// Configuration for the prediction error gate
@@ -133,6 +162,7 @@ impl PredictionErrorGate {
                     semantic_overlap: similarity, // Simplified; could use more sophisticated measure
                     appears_contradictory: contradiction.positive,
                     contradiction_confidence: contradiction.confidence,
+                    contradiction_evidence: contradiction_findings(&contradiction),
                 }
             })
             .collect();
@@ -161,20 +191,22 @@ impl PredictionErrorGate {
         // Monday"), so testing similarity first swallowed every correction into
         // `Update { Reinforce }` and left `correction_threshold` unreachable.
         //
-        // The confidence floor applies here and nowhere else: this is the branch
-        // that retires a memory, and retirement is a claim about the past ("this
-        // stopped being true then"), not a note about the present.
+        // What the contradiction branch may do is bounded: it *reports*. Retiring a
+        // memory is a claim about the past that every later reader inherits, and no
+        // lexical rule here is strong enough to make it — see
+        // `GateDecision::Contradiction`. The confidence floor is the bar for even
+        // reporting, so a lone mid-confidence signal stays out of the response.
         if let Some(best) = top_candidates.first() {
             if best.appears_contradictory
                 && best.contradiction_confidence >= self.config.correction_min_confidence
                 && best.similarity >= self.config.correction_threshold
             {
-                self.stats.supersedes += 1;
-                return GateDecision::Supersede {
-                    old_memory_id: best.memory_id.clone(),
+                self.stats.contradictions += 1;
+                return GateDecision::Contradiction {
+                    existing_id: best.memory_id.clone(),
                     similarity: best.similarity,
-                    supersede_reason: SupersedeReason::Correction,
-                    prediction_error: best.prediction_error,
+                    confidence: best.contradiction_confidence,
+                    evidence: best.contradiction_evidence.clone(),
                 };
             }
 

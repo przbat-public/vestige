@@ -323,3 +323,48 @@ Osiem znalezisk wysokich/krytycznych weryfikator potwierdził **częściowo** (�
 6. **Domyślne uprawnienia `GITHUB_TOKEN`** — część korekty do `ci #4`/`security #5` zależy od ustawień repozytorium w GitHubie, a nie od kodu; weryfikator nie mógł tego ustalić z drzewa.
 7. **Zmierzony limit bazy SQLite** — rozbieżność między weryfikacją (migracja V7 ustawia `page_size = 8192`) a pomiarem żywej bazy (`page_size = 4096`, bo `PRAGMA` nie działa w WAL) rozstrzygnie dopiero test na WAL-owym połączeniu z realnym `VACUUM`/przebudową pliku — to bug kodu odnotowany w dokumentacji, nie liczba do przepisania.
 8. **Playwright dashboardu w CI** — `dashboard #8`/`tests #11` są wykonalne w repozytorium (konfiguracja portów i tokenu przez env + start serwera na tymczasowej bazie), ale wymagają runnera z przeglądarką i serwerem MCP; dziś spec celuje w żywą bazę użytkownika, więc uruchomienie go w obecnej postaci niszczyłoby dane.
+
+---
+
+## 14. Przegląd żywego magazynu wspomnień i naprawy tej samej klasy (2026-09-20)
+
+Trzynaście wspomnień zapisanych w żywym magazynie (`~/Library/Application Support/com.vestige.core/vestige.db`)
+posłużyło jako pierwszy materiał, na którym można było sprawdzić kryteria jakości z
+`docs/SELF-CONTAINED-MEMORY-DESIGN.md` zamiast ich opisywać. Przegląd i dowody:
+`docs/review/2026-09-20-memory-store-review.md`.
+
+Cztery ustalenia z danych, każde potwierdzone odtworzeniem, nie lekturą kodu:
+
+1. **Fałszywe „Correction" wycofywało wspomnienia.** Sześć zdarzeń `supersede` na trzech
+   wspomnieniach (w tym dwóch decyzjach), każde z `valid_until` ustawionym ~1,3 s po zapisaniu.
+   Detektor na prawdziwych parach mylił się 3/3: „w rzeczywistości" jest w leksykonie jako fraza
+   korekty, a dwa razy zapalił `NegationScope` na przeczeniu mówiącym, czego *kompilator nie
+   potrafi*, oraz na przeciwstawieniu w jednym zdaniu.
+2. **Ciche scalanie doklejało obcą treść.** Trzy wspomnienia z `[Updated 2026-09-20]`, w tym
+   wzorzec o diagnostyce zawieszonego emulatora z doklejoną lekcją o narzędziu do wgrywania,
+   która miała własne wspomnienie. `memory_connections` = 0, więc nic nie wskazywało następcy.
+3. **Bramka samoistności nie obejmowała połowy drzwi zapisu.** `self_contained` = `NULL` dla
+   dokładnie tych 6 wspomnień, które przyszły przez `codebase`; `NULL` znaczy „nie sprawdzono".
+4. **Pola identyfikujące nie docierały do czytelnika.** `source` było widoczne tylko przy
+   `detail_level: "full"`, a dashboard nie renderował go nigdzie — siedem wspomnień mówiło
+   „panel", „płytka", „emulator" i nic więcej.
+
+Naprawy (kod, nie dane użytkownika):
+
+| Naprawa | Commit |
+|---|---|
+| Detektor: wspólne orzeczenie zamiast wspólnego rzeczownika; kontrast w zdaniu, zdania warunkowe i podwójne przeczenie rozpoznane | `210974ba` |
+| Bramka: próg pewności dla decyzji niszczącej, koniec z przepisywaniem sąsiada, `prefer_updates` usunięty, `similarity` raportowane na ścieżce `create` | `5191d29a` |
+| Odczyt: `source` w widoku `summary` i w dashboardzie (nagłówek, stopka, wiersz listy) | `f904f1e8` |
+| **Ścieżka automatyczna przestała wycofywać wspomnienia w ogóle** — `GateDecision::Contradiction`, krawędź `contradicts`, `valid_until` tylko na wyraźne żądanie | ten sam strumień |
+
+Pomiar po ostatniej zmianie: odtworzenie trzynastu wspomnień wszystkimi 156 parami daje
+`supersede = 0` i `merge = 0` (przy samym zaostrzeniu detektora było 39 fałszywych `Correction`).
+Baseline NLP poprawiony: `contradiction_v1` F1 0,955 → 0,985 przy recall 1,000, polski slice
+P/R/F1 = 1,000.
+
+**Otwarte:** (a) gałąź `Improvement` nadal potrafi nadać `valid_until`, bo próg `retrieval_strength < 0.3`
+osiąga też automatyczny decay — do rozstrzygnięcia, czy oprzeć „zdemotowane" na jawnym śladzie;
+(b) trzy wspomnienia w magazynie użytkownika nadal noszą fałszywe `valid_until` — wymaga zgody na
+zapis do danych (poza zakresem tej sesji); (c) `memory_timeline` grupuje po `created_at`, nie po
+`recorded_at`.

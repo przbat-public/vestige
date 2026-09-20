@@ -13,6 +13,8 @@ pub struct GateStats {
     pub updates: usize,
     /// Decisions to supersede
     pub supersedes: usize,
+    /// Decisions that flagged a possible contradiction without acting on it
+    pub contradictions: usize,
     /// Decisions to merge
     pub merges: usize,
 }

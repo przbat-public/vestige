@@ -39,6 +39,30 @@ pub enum GateDecision {
         prediction_error: f32,
     },
 
+    /// The new content may deny something an existing memory records, and the
+    /// evidence is strong enough to say so — and not strong enough to act on it.
+    ///
+    /// The memory is written and linked to the one it may contradict; the older
+    /// memory keeps its text and its standing, because retiring it means writing
+    /// `valid_until`, a claim about the past that every later reader inherits,
+    /// and a lexical heuristic cannot support that claim. Measured on a real
+    /// thirteen-memory store, the strictest automatic rule still marked 39 of
+    /// 156 ordered pairs as corrections: two memories about one project negate
+    /// different things with the same words ("pseudocode does not compile"
+    /// against "each teaching stage compiles cleanly"). Retirement is therefore
+    /// explicit — `temporal(action="invalidate")`, or a write that passes
+    /// `supersedes`.
+    Contradiction {
+        /// ID of the memory that may be contradicted.
+        existing_id: String,
+        /// Similarity to that memory (0.0 - 1.0).
+        similarity: f32,
+        /// Confidence of the contradiction evidence (0.0 - 1.0).
+        confidence: f32,
+        /// What fired the detector, for the caller to judge.
+        evidence: Vec<GateFinding>,
+    },
+
     /// Merge with multiple existing memories
     Merge {
         /// IDs of memories to merge with
@@ -97,6 +121,10 @@ impl GateDecision {
             Self::Supersede {
                 prediction_error, ..
             } => *prediction_error,
+            // A flagged contradiction says "these two look like they disagree",
+            // which is a near-miss: the closer the content, the smaller the
+            // prediction error, exactly as for an update.
+            Self::Contradiction { similarity, .. } => 1.0 - similarity,
             Self::Merge { avg_similarity, .. } => 1.0 - avg_similarity,
             // A rejected candidate is never compared with anything — the reject
             // is decided from the content alone, before the similarity probe. A
@@ -121,11 +149,17 @@ impl GateDecision {
         matches!(self, Self::Reject { .. })
     }
 
+    /// Check if this decision flags a possible contradiction without acting on it.
+    pub fn is_contradiction(&self) -> bool {
+        matches!(self, Self::Contradiction { .. })
+    }
+
     /// Get target ID if updating or superseding
     pub fn target_id(&self) -> Option<&str> {
         match self {
             Self::Update { target_id, .. } => Some(target_id),
             Self::Supersede { old_memory_id, .. } => Some(old_memory_id),
+            Self::Contradiction { existing_id, .. } => Some(existing_id),
             _ => None,
         }
     }

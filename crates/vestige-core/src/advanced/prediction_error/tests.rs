@@ -1,7 +1,7 @@
 //! Tests for the prediction-error gate pipeline.
 
 use super::candidate::CandidateMemory;
-use super::decision::{CreateReason, GateDecision, SupersedeReason, UpdateType};
+use super::decision::{CreateReason, GateDecision, UpdateType};
 use super::gate::{EvaluationIntent, PredictionErrorGate};
 use super::similarity::cosine_similarity;
 
@@ -148,8 +148,11 @@ fn test_contradiction_detection() {
     let gate = PredictionErrorGate::new();
 
     assert!(
-        gate.detect_contradiction("Don't use synchronous code", "Use synchronous code for simplicity")
-            .positive
+        gate.detect_contradiction(
+            "Don't use synchronous code",
+            "Use synchronous code for simplicity"
+        )
+        .positive
     );
 
     assert!(
@@ -230,33 +233,43 @@ fn test_stats() {
 }
 
 #[test]
-fn near_identical_correction_supersedes_instead_of_reinforcing() {
+fn near_identical_contradiction_is_reported_instead_of_reinforced() {
     let mut gate = PredictionErrorGate::new();
     let embedding = make_embedding(1.0);
 
     // Identical embedding → similarity 1.0, i.e. above `near_identical_threshold`.
     // A correction is by construction very similar to the memory it corrects, so
     // similarity alone must not decide. Regression: the near-identical short-circuit
-    // used to run first and returned `Update { Reinforce }`, leaving the stale
-    // memory in place and `correction_threshold` unreachable.
+    // used to run first and returned `Update { Reinforce }`, leaving the two
+    // versions of the same claim side by side with nothing said about it.
     // The content pair is the one `test_contradiction_detection` pins as a
     // contradiction, so this test fails for the ordering bug and nothing else.
+    //
+    // What it must *not* do is retire the older memory: `Supersede` writes
+    // `valid_until`, and no lexical rule is strong enough to date a belief. The
+    // report carries the evidence instead, and the caller decides.
     let mut candidate = make_candidate("mem-1", 1.0);
     candidate.embedding = embedding.clone();
     candidate.content = "Use synchronous code for simplicity".to_string();
 
     let decision = gate.evaluate("Don't use synchronous code", &embedding, &[candidate]);
 
-    assert!(
-        matches!(
-            decision,
-            GateDecision::Supersede {
-                supersede_reason: SupersedeReason::Correction,
-                ..
-            }
-        ),
-        "a near-identical contradiction must supersede, got {decision:?}"
-    );
+    match decision {
+        GateDecision::Contradiction {
+            existing_id,
+            confidence,
+            evidence,
+            ..
+        } => {
+            assert_eq!(existing_id, "mem-1");
+            assert!(confidence >= 0.8, "got {confidence}");
+            assert!(
+                evidence.iter().any(|f| f.kind == "negation_scope"),
+                "the report must name what fired: {evidence:?}"
+            );
+        }
+        other => panic!("expected a reported contradiction, got {other:?}"),
+    }
 }
 
 /// Regression, real pair from a production store (2026-09-20).

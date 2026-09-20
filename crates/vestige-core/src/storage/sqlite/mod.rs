@@ -106,7 +106,7 @@ mod tests_retention;
 #[cfg(test)]
 mod tests_revisions;
 
-pub use error::{Result, SmartIngestResult, StorageError};
+pub use error::{ContradictionReport, Result, SmartIngestResult, StorageError};
 pub use init::Storage;
 pub use records::{
     CodeRef, ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,

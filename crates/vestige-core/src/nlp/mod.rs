@@ -217,6 +217,23 @@ pub enum EvidenceKind {
     FutureMarker,
 }
 
+impl EvidenceKind {
+    /// Stable identifier for callers and payloads.
+    ///
+    /// Spelled out rather than derived from `Debug`: this string travels in a
+    /// tool response, so renaming a variant must not silently rename the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AsymmetricNegation => "asymmetric_negation",
+            Self::NegationScope => "negation_scope",
+            Self::CorrectionPhrase => "correction_phrase",
+            Self::OpinionFrame => "opinion_frame",
+            Self::Hedge => "hedge",
+            Self::FutureMarker => "future_marker",
+        }
+    }
+}
+
 fn clamp_to_boundary(text: &str, mut idx: usize) -> usize {
     if idx > text.len() {
         idx = text.len();

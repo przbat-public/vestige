@@ -10,9 +10,9 @@ pub(crate) mod migrations;
 mod sqlite;
 
 pub use sqlite::{
-    CodeRef, ConnectionRecord, ConsolidationHistoryRecord, DEFAULT_HYBRID_KEYWORD_WEIGHT,
-    DEFAULT_HYBRID_SEMANTIC_WEIGHT, DreamHistoryRecord, InsightRecord, IntentionRecord,
-    MemoryRevision, RETRACTION_KINDS, REVISION_CONTENT_CHAR_LIMIT, Result, RevisionKind,
-    SmartIngestResult, SnapshotRestoreReport, StateTransitionRecord, Storage, StorageError,
-    default_hybrid_weights,
+    CodeRef, ConnectionRecord, ConsolidationHistoryRecord, ContradictionReport,
+    DEFAULT_HYBRID_KEYWORD_WEIGHT, DEFAULT_HYBRID_SEMANTIC_WEIGHT, DreamHistoryRecord,
+    InsightRecord, IntentionRecord, MemoryRevision, RETRACTION_KINDS, REVISION_CONTENT_CHAR_LIMIT,
+    Result, RevisionKind, SmartIngestResult, SnapshotRestoreReport, StateTransitionRecord, Storage,
+    StorageError, default_hybrid_weights,
 };

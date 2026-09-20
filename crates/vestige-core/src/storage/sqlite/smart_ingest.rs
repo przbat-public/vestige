@@ -26,7 +26,9 @@ use rusqlite::{OptionalExtension, params};
 use super::Storage;
 use super::records::RevisionKind;
 use crate::memory::IngestInput;
-use crate::storage::{ConnectionRecord, Result, SmartIngestResult, StorageError};
+use crate::storage::{
+    ConnectionRecord, ContradictionReport, Result, SmartIngestResult, StorageError,
+};
 
 impl Storage {
     /// Smart ingest with Prediction Error Gating.
@@ -58,6 +60,7 @@ impl Storage {
                 similarity: None,
                 prediction_error: Some(1.0),
                 reason: "Embeddings not available, falling back to regular ingest".to_string(),
+                contradiction: None,
                 neighbor_ids: Vec::new(),
             });
         }
@@ -170,6 +173,7 @@ impl Storage {
                             reason, related_memory_ids
                         )
                     },
+                    contradiction: None,
                     neighbor_ids: neighbor_ids.clone(),
                 })
             }
@@ -191,9 +195,16 @@ impl Storage {
                         similarity: Some(similarity),
                         prediction_error: Some(prediction_error),
                         reason: "Content nearly identical - reinforced existing memory".to_string(),
+                        contradiction: None,
                         neighbor_ids: neighbor_ids.clone(),
                     })
                 }
+                // Kept for callers that ask for an append explicitly, but no
+                // automatic decision reaches it any more: this is the branch that
+                // produced compound memories, because "similar" was read as "the
+                // same claim" and the new text landed under the old heading. The
+                // gate now returns `Create { DifferentDomain }` for similar
+                // content, which stores it separately and links it.
                 UpdateType::Merge | UpdateType::Append => {
                     let existing = self
                         .get_node(&target_id)?
@@ -230,6 +241,7 @@ impl Storage {
                         similarity: Some(similarity),
                         prediction_error: Some(prediction_error),
                         reason: "Merged with existing similar memory".to_string(),
+                        contradiction: None,
                         neighbor_ids: neighbor_ids.clone(),
                     })
                 }
@@ -252,6 +264,7 @@ impl Storage {
                         similarity: Some(similarity),
                         prediction_error: Some(prediction_error),
                         reason: "Replaced existing memory with new content".to_string(),
+                        contradiction: None,
                         neighbor_ids: neighbor_ids.clone(),
                     })
                 }
@@ -281,6 +294,7 @@ impl Storage {
                         similarity: Some(similarity),
                         prediction_error: Some(prediction_error),
                         reason: "Added new content as context to existing memory".to_string(),
+                        contradiction: None,
                         neighbor_ids: neighbor_ids.clone(),
                     })
                 }
@@ -383,6 +397,7 @@ impl Storage {
                     similarity: Some(similarity),
                     prediction_error: Some(prediction_error),
                     reason: replacement_reason,
+                    contradiction: None,
                     neighbor_ids: neighbor_ids.clone(),
                 })
             }
@@ -419,7 +434,65 @@ impl Storage {
                         memory_ids.len(),
                         strategy
                     ),
+                    contradiction: None,
                     neighbor_ids,
+                })
+            }
+            // A contradiction is reported, never enforced. The new memory is
+            // stored and linked to the one it may deny; the older memory keeps its
+            // text, its validity window and its standing, because retiring it would
+            // write `valid_until` — a claim about the past — on the strength of a
+            // lexical rule that marked 39 of 156 ordered pairs in a real
+            // thirteen-memory store. Retirement stays explicit:
+            // `temporal(action="invalidate")`, or a write carrying `supersedes`.
+            GateDecision::Contradiction {
+                existing_id,
+                similarity,
+                confidence,
+                evidence,
+            } => {
+                let node = self.ingest_with_embedding(input, &new_embedding)?;
+
+                let now = Utc::now();
+                let conn = ConnectionRecord {
+                    source_id: node.id.clone(),
+                    target_id: existing_id.clone(),
+                    strength: confidence as f64,
+                    // The edge type the rest of the system already knows: the search
+                    // pipeline penalises a pair joined by a `contradiction` edge so
+                    // both claims stop surfacing as if they agreed, and dream writes
+                    // the same kind. A second spelling ("contradicts") would have been
+                    // invisible to that rule and left two names for one relation.
+                    link_type: crate::memory::EdgeType::Contradiction.to_string(),
+                    created_at: now,
+                    last_activated: now,
+                    activation_count: 1,
+                };
+                let _ = self.save_connection(&conn);
+
+                Ok(SmartIngestResult {
+                    decision: "create".to_string(),
+                    node,
+                    superseded_id: None,
+                    similarity: Some(similarity),
+                    prediction_error: Some(1.0 - similarity),
+                    reason: format!(
+                        "Created new memory. Possible contradiction with {} (confidence {:.2}) \
+                         was reported, not acted on",
+                        existing_id, confidence
+                    ),
+                    contradiction: Some(ContradictionReport {
+                        existing_id,
+                        similarity,
+                        confidence,
+                        evidence,
+                        hint: "If this memory replaces the older one, retire it explicitly — \
+                               temporal(action=\"invalidate\"), or a write passing `supersedes`. \
+                               Nothing was retired automatically, so both read as current until \
+                               you decide."
+                            .to_string(),
+                    }),
+                    neighbor_ids: neighbor_ids.clone(),
                 })
             }
             // The one decision that must not write. `PredictionErrorGate::evaluate`

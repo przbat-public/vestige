@@ -331,6 +331,19 @@ Every write is checked against one question: will this still be readable by some
 | `self_contained: { requiresContext: true, findings: [...] }` | **Written, and flagged.** The memory exists and is searchable, but it leans on something it does not carry. | Rewrite it: each finding names the `kind` (which rule fired), the `span` (the exact text) and a `hint` (what to write instead). Name the antecedent of a pronoun, say what "the fix" was, replace "next week" with a date. Do **not** delete it — silent loss is worse than a flagged entry. Note the marker records the gate's verdict at write time: editing the memory does not clear it, so a rewritten memory stays listed until the gate is re-run on it. |
 | `decision: "reject"`, `stored: false` | **Nothing was written.** The content is something the repository already owns — a code block, a directory tree, copied source, a coverage figure, a version number — or there was nothing in it. | Read `reason` and `findings`, then save the lesson or the decision it was meant to carry. Do not retry the same text. If that knowledge genuinely is not in the repository yet, put it there first: then it does not need to be remembered. Nothing fixable is ever rejected — a fixable memory is written and flagged. |
 
+The gate runs on the `codebase` path too, so a refused decision or pattern means the same thing: nothing was stored, and the `files` you passed became a code anchor instead of text.
+
+### What the ingest gate will not do
+
+Two outcomes look like failures and are not. Knowing them saves you from re-saving what already happened.
+
+| What you see | What it means | What to do |
+|---|---|---|
+| `decision: "create"` with high `similarity`, and `near_duplicate_warning` | The content resembles a memory you already have but asserts something different. It was stored as its own memory and linked to the neighbour; no existing memory was rewritten. | If you meant to replace or extend that memory, do it explicitly — `memory(action="edit")`, or `codebase`/`smart_ingest` with `supersedes`. The link is what ties the two together, and the older text is untouched on purpose: a rewrite under somebody else's heading is how a memory ends up carrying a paragraph that contradicts its own title. |
+| `contradiction: { existingId, similarity, confidence, evidence, hint }` | The new memory may deny something an existing memory records. **Nothing was retired**, and nothing was flagged in the older memory either: retirement writes `valid_until`, which tells every later reader the old memory stopped being true at that instant, and a lexical rule cannot support that claim. Replayed against a real thirteen-memory store, the strictest automatic rule marked 39 of 156 ordered pairs as corrections — two memories about one project negate different things with the same words. | Read the evidence. If the new memory really does replace the old one, retire it deliberately: `temporal(action="invalidate")`, or write the replacement with `supersedes`. If it only mentions the same subject, do nothing — the `contradicts` edge already records that the two are related. Never re-save text hoping the gate changes its mind. |
+
+Nothing in the write path rewrites a stored memory's text. The only automatic retirement left is `Improvement`: content similar to a memory whose retrieval strength has fallen below 0.3 is treated as its replacement. Everything else dates a memory only when you say so.
+
 ---
 
 ## Trigger Words — Auto-Save

@@ -40,10 +40,13 @@ pub struct SimilarityResult {
     /// detector's signals.
     ///
     /// Carried separately from [`Self::appears_contradictory`] because the two
-    /// are held to different bars: `Supersede` retires a memory — it claims the
-    /// old text is no longer true — so it must clear
-    /// `PredictionErrorConfig::correction_min_confidence`, while merely
-    /// *noticing* a possible contradiction is cheap and stays available at any
-    /// confidence.
+    /// are held to different bars: flagging a memory as possibly contradicted is
+    /// cheap, while the caller that reports it to the writer wants to know how
+    /// much the report is worth.
     pub contradiction_confidence: f32,
+    /// What fired the detector, in the shape a response can carry.
+    ///
+    /// A bare "these disagree" is not actionable: the writer has to see which
+    /// rule fired and on what text to judge whether the claim really is denied.
+    pub contradiction_evidence: Vec<super::decision::GateFinding>,
 }
