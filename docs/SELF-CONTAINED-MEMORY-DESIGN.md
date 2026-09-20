@@ -317,7 +317,11 @@ i zostaje zapisane — inaczej bramka zamieniłaby jeden problem (śmieci) na go
 3. „Deploy dopiero w przyszłym tygodniu" bez kotwicy → `relative_time`; ta sama treść z
    `valid_from` → brak ostrzeżenia.
 4. „Zawartość `Cargo.toml` to \[…\]" → `derivable_from_repo` → **`Reject`**, nic nie zapisane.
-5. „Postgres 16" → `derivable_from_repo` (wersja starzeje się z każdym commitem).
+5. „Postgres 16" → **ostrzeżenie `probable_version_claim`, nie odrzucenie** (wersja starzeje się
+   z każdym commitem, ale wzorzec „nazwa + liczba" nie odróżnia jej od „Sali 101"/„punktu 3", więc
+   odrzucanie kosztowałoby utratę prawdziwego wspomnienia przez fałszywy alarm). Jawnie zapisane
+   wersje — `v1.2.3`, `1.2.3`, `version 1.2` — są nadal odrzucane, a „version 2024-11-05" nie,
+   bo to etykieta datowa, a nie twierdzenie o produkcie.
 6. „Nie symuluj bazy w testach integracyjnych, bo testy przechodziły, a migracja padła" → **brak**
    ostrzeżeń (to wzorcowe wspomnienie: lekcja, nie opis).
 7. Wpis z `code_ref` (fala 3) i nazwanym podmiotem → brak ostrzeżeń.

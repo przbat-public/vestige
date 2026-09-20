@@ -36,6 +36,7 @@ pub(super) const KIND_UNRESOLVED_PRONOUN: &str = "unresolved_pronoun";
 pub(super) const KIND_RELATIVE_TIME: &str = "relative_time";
 pub(super) const KIND_BARE_CODE_REFERENCE: &str = "bare_code_reference";
 pub(super) const KIND_NO_SUBJECT: &str = "no_subject";
+pub(super) const KIND_PROBABLE_VERSION_CLAIM: &str = "probable_version_claim";
 pub(super) const KIND_DERIVABLE_FROM_REPO: &str = "derivable_from_repo";
 
 /// What to do instead of saving a copy of the repository. One wording, used by
@@ -410,6 +411,19 @@ pub(super) fn detect(content: &str, has_anchored_time: bool) -> Report {
         }
     }
 
+    // Refused content never reaches here, so this only ever adds a warning to a
+    // memory that is going to be written anyway.
+    if !report.is_rejected()
+        && let Some(span) = product_version_claim(content)
+    {
+        report.findings.push(Finding {
+            kind: KIND_PROBABLE_VERSION_CLAIM,
+            span,
+            hint: "if this is a product version it is stale after the next release; if it is \
+                   a name, add context so a reader does not read it as one",
+        });
+    }
+
     if let Some(span) = bare_code_reference(content) {
         report.findings.push(Finding {
             kind: KIND_BARE_CODE_REFERENCE,
@@ -585,38 +599,82 @@ fn derivable_reason(content: &str) -> Option<Reject> {
             "a coverage figure — stale after the next commit",
         );
     }
-    if let Some(token) = version_like(content) {
+    if let Some(token) = version_string(content) {
         return reject(token, "a version number — stale after the next release");
     }
 
     None
 }
 
-/// `v1.2.3` or `Name 16` — a version claim that will be wrong soon.
+/// An explicit version string: `1.2.3`, `v1.2.3`, `version 1.2`, `wersja 1.2`.
 ///
-/// Returns the token that made the claim, so a refusal can point at it.
-fn version_like(content: &str) -> Option<String> {
+/// These are refused, because a version claim copied out of the repository is
+/// stale after the next release and the repository is where it belongs.
+fn version_string(content: &str) -> Option<String> {
+    let lower = content.to_lowercase();
     let tokens: Vec<&str> = content.split_whitespace().collect();
     for (i, token) in tokens.iter().enumerate() {
         let cleaned = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '.');
-        let parts: Vec<&str> = cleaned.split('.').collect();
+        // The `v` prefix is stripped before the digits are checked: keeping it in
+        // the first part made every `v1.2.3` fail the all-digits test, so the most
+        // common spelling of a version was the one form the rule let through.
+        let (body, prefixed) = match cleaned.strip_prefix(['v', 'V']) {
+            Some(rest) => (rest, true),
+            None => (cleaned, false),
+        };
+        let parts: Vec<&str> = body.split('.').collect();
         if parts.len() >= 2
             && parts
                 .iter()
                 .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
-            && (cleaned.starts_with('v') || i > 0)
+            && (prefixed || i > 0)
         {
             return Some(cleaned.to_string());
         }
-        // "Postgres 16" — a capitalised product followed by a bare number.
-        if i > 0
-            && cleaned.chars().all(|c| c.is_ascii_digit())
-            && tokens[i - 1]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase())
+    }
+    // "version 1.2" / "wersja 1.2" — the word plus a dotted number. The dotted
+    // shape is required: "version 2024-11-05" is a date-stamped revision label,
+    // and a memory about which protocol revision a server speaks is knowledge,
+    // not a stale product claim. Refusing on the bare word would lose it.
+    for word in ["version ", "wersja "] {
+        if let Some(rest) = lower.split(word).nth(1)
+            && let Some(candidate) = rest.split_whitespace().next()
         {
-            return Some(format!("{} {}", tokens[i - 1], cleaned));
+            let body = candidate.trim_start_matches(['v', 'V']);
+            let parts: Vec<&str> = body.split('.').collect();
+            if parts.len() >= 2
+                && parts
+                    .iter()
+                    .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+            {
+                return Some(format!("{word}{candidate}"));
+            }
+        }
+    }
+    None
+}
+
+/// `Postgres 16`, `Room 101`, `Item 3` — a capitalised name followed by a bare
+/// number.
+///
+/// Deliberately a **warning, not a refusal**. "Postgres 16" is a version claim
+/// that will rot, but "Room 101" and "Item 3" are names, and the pattern cannot
+/// tell them apart. Refusing on it would discard a real memory over a false
+/// alarm, which is a worse outcome than flagging one that deserves it — the same
+/// trade this whole gate is built around: nothing fixable is silently lost.
+fn product_version_claim(content: &str) -> Option<String> {
+    let tokens: Vec<&str> = content.split_whitespace().collect();
+    for (i, token) in tokens.iter().enumerate() {
+        if i == 0 {
+            continue;
+        }
+        let cleaned = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '.');
+        if cleaned.is_empty() || !cleaned.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let previous = tokens[i - 1].trim_matches(|c: char| !c.is_alphanumeric());
+        if previous.chars().next().is_some_and(|c| c.is_uppercase()) {
+            return Some(format!("{previous} {cleaned}"));
         }
     }
     None
@@ -689,11 +747,22 @@ mod tests {
         let dump = detect("```rust\nfn main() { println!(\"hi\"); }\n```", false);
         assert!(dump.is_rejected());
 
-        let version = detect("The stack is Postgres 16 with Redis 7", false);
+        // An explicit version string is still refused...
+        let explicit = detect("Vestige pipeline v1.2.3 broke the merge", false);
         assert!(
-            version.is_rejected(),
-            "a version number is stale after the next release"
+            explicit.is_rejected(),
+            "a version string is stale after the next release"
         );
+
+        // ...but a bare name-plus-number is only flagged: "Room 101" and "Item 3"
+        // are names, and refusing them would discard a real memory over a false
+        // alarm.
+        let ambiguous = detect("The migration ran fine on Room 101", false);
+        assert!(
+            !ambiguous.is_rejected(),
+            "a name followed by a number must not be refused: {ambiguous:?}"
+        );
+        assert!(kinds(&ambiguous).contains(&KIND_PROBABLE_VERSION_CLAIM));
 
         let tree = detect("Layout:\n├── src\n└── tests", false);
         assert!(tree.is_rejected());
