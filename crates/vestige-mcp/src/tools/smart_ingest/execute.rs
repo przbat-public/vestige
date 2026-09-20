@@ -15,6 +15,7 @@ use super::compound::detect_compound_content;
 #[cfg(feature = "preprocessing")]
 use super::post_ingest::create_relation_edges;
 use super::post_ingest::{run_post_ingest, run_post_ingest_with_neighbors};
+use super::self_contained::detect as detect_self_containment;
 
 pub async fn execute(
     storage: &Arc<Storage>,
@@ -130,6 +131,17 @@ pub async fn execute(
     ) = (Vec::new(), None, None, None);
     #[cfg(not(feature = "preprocessing"))]
     let pp_relations: Vec<()> = Vec::new();
+
+    // Self-containedness gate. Runs on the PREPROCESSED content on purpose:
+    // coreference rewriting has already replaced every pronoun it could resolve,
+    // so a pronoun still present here is one it could not — exactly the case a
+    // write-time rewrite cannot repair. Anchored time likewise suppresses the
+    // relative-time rule, because "tomorrow" with an absolute valid_from is a
+    // solved problem rather than a dangling one.
+    let self_contained = detect_self_containment(
+        &content,
+        pp_valid_from.is_some() || pp_valid_until.is_some(),
+    );
 
     // Merge auto-tags from preprocessing with user-provided tags
     tags.extend(pp_tags);
@@ -248,6 +260,9 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
+        if self_contained.requires_context() || self_contained.is_rejected() {
+            response["self_contained"] = self_contained.to_json();
+        }
         if let Some(sim) = nearest_sim
             && sim > 0.9
         {
@@ -327,6 +342,9 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
+        if self_contained.requires_context() || self_contained.is_rejected() {
+            response["self_contained"] = self_contained.to_json();
+        }
         // Near-duplicate advisory threshold.
         //
         // The prediction-error gate routes anything with cosine >= 0.75 to
@@ -382,6 +400,9 @@ pub async fn execute(
         });
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
+        }
+        if self_contained.requires_context() || self_contained.is_rejected() {
+            response["self_contained"] = self_contained.to_json();
         }
         Ok(response)
     }

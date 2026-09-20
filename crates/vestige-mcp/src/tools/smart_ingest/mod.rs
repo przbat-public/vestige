@@ -21,6 +21,10 @@ mod execute;
 mod post_ingest;
 mod schema;
 
+/// Self-containedness gate: notices when a memory will not be understandable
+/// without the conversation that produced it.
+mod self_contained;
+
 #[cfg(test)]
 mod tests;
 
