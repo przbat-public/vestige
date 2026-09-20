@@ -80,6 +80,16 @@ o zaimkach, bez wymogu samodzielności, bez zakazu uogólnień. Polecenie „jak
 mówiącej, co czyni krótką frazę zrozumiałą, to udokumentowany generator klasy wspomnień, którą
 zgłaszasz. ([prompts.py](https://raw.githubusercontent.com/BAI-LAB/MemoryOS/main/memoryos-chromadb/prompts.py))
 
+**Jedyny mechanizm, który nie przepisuje tekstu, ale zmienia moment decyzji (i jedyny, który
+zmniejsza liczbę złych wspomnień zamiast je opisywać).** MemReader/MemOS traktuje nierozwiązywalne
+odniesienie jako powód, żeby **jeszcze nie zapisywać**, a nie żeby zapisać zły wpis. Prompt nauczyciela
+(ReAct), dosłownie z aneksu pracy: *„When encountering ambiguous information (e.g., »he«, »that
+thing«), you MUST prioritize `search` to try and find the answer in the history"*, *„Only choose
+`buffer` when `search` cannot resolve the issue, or when it is obvious the user hasn't finished
+speaking"*, *„Do not choose `buffer` out of laziness."* Cztery wyniki: `add` / `buffer` / `ignore` /
+`search`. ([arXiv 2604.07877](https://arxiv.org/abs/2604.07877), aneks B.1 — **nie** z pliku promptów,
+który tej treści nie zawiera)
+
 **Czego nie robi żaden z ośmiu zbadanych systemów:** żaden nie zamienia **nagiej ścieżki pliku**
 w zdanie samodzielne. Cognee traktuje nazwy plików jako klucze zapytań, MemOS trzyma `doc_path`
 wyłącznie jako proweniencję. To jest dokładnie luka, w którą wpada skarga o „plik i linia" — i dlatego
@@ -171,9 +181,20 @@ Wszystkie punkty to **bramki na istniejącej maszynerii**, nie nowe podsystemy.
    `coref.rs` rozwiązuje **zaimki wewnątrz wklejonej treści** — a zgłaszany przypadek to brak
    poprzednika w tekście, czego żaden regex zapisu nie naprawi. Do tego lista odmów dla treści
    wyprowadzalnych z repo (zawartość plików, architektura, opis katalogów), wskazująca na `AGENTS.md`.
-4. **Rozszerzenie „expandable" z budżetowego na wyzwalane porażką** — gdy odniesienie nie da się
+4. **Odroczenie zapisu zamiast serwowania skrawka (największy zysk, jeśli chodzi o liczbę złych
+   wpisów).** Dziś ścieżka zapisu Vestige ma dwa wyjścia — zapisz albo zapisz i ostrzeż — a **oba
+   zapisują**. Gdy bramka z punktu 3 zgłosi zwisające odniesienie, zrób to, co robi MemReader:
+   najpierw **ograniczone wyszukiwanie** brakującego poprzednika w już zapisanej pamięci, a jeśli się
+   znajdzie — przepisz i zapisz; jeśli nie — odłóż wpis do **kwarantanny**: audytowalnej, ale
+   wyłączonej z wyszukiwania, zamiast oddawać skrawek jako fakt. To jedyna znana praktyka, która
+   **zmniejsza** liczbę złych wspomnień, a nie tylko je oznacza.
+   *Zastrzeżenie, które trzeba zapisać razem z tym:* gdyby powstał kiedyś walidator „wszystko musi być
+   ugruntowane w tekście", musi mieć **wyjątek na znaczniki czasu** — absolutna data nigdy nie występuje
+   dosłownie w transkrypcji (powstaje z metadanych), więc bez wyjątku walidator uzna każde poprawnie
+   zakotwiczone „valid_until" za halucynację. Inaczej dwie nasze funkcje zaczną ze sobą walczyć.
+5. **Rozszerzenie „expandable" z budżetowego na wyzwalane porażką** — gdy odniesienie nie da się
    rozwiązać, wynik powinien sam poprosić o rozwinięcie, zamiast oddawać niezrozumiały skrawek.
-5. **Pomiar `dream`/`reflect` przed/po wskaźniku samodzielności**, zanim uznamy je za pomocne.
+6. **Pomiar `dream`/`reflect` przed/po wskaźniku samodzielności**, zanim uznamy je za pomocne.
    Świadomie **nie** dodawać wygaszania po wieku ani „większego streszczacza" — dane mówią, że to
    właśnie ten rodzaj konsolidacji szkodzi.
 

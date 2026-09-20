@@ -353,16 +353,30 @@ The relevant lesson is architectural rather than prompt-level: MemoryOS keeps th
 
 ## 2. Does anyone explicitly solve "the memory refers to something outside itself"?
 
-Yes — four distinct strategies appear, and they are not equivalent.
+Yes — five distinct strategies appear, and they are not equivalent.
 
 ### (i) Rewrite it away — pronoun/antecedent substitution
 
 - **Mem0**: `Replace all pronouns with specific names or "User."`
 - **Graphiti**: `Pronoun references ... should be disambiguated to the names of the reference entities.` Plus a list of antecedents that must be *attached* rather than resolved: bare kinship and pet terms become `"Nisha's dad"`, `"Jordan's dog"`.
 - **Cognee**: Coreference Resolution section, `always use the most complete identifier for that entity throughout the knowledge graph`.
+- **MemReader / MemOS**: the most thorough statement of this rule found, and it is systemic across that project's prompt variants rather than a single lucky line — [`mem_reader_prompts.py`](https://raw.githubusercontent.com/MemTensor/MemOS/main/src/memos/templates/mem_reader_prompts.py):
+  ```
+  2. Resolve all time, person, and event references clearly:
+     - Convert relative time expressions (e.g., "yesterday," "next Friday") into absolute dates using the message timestamp if possible.
+     - Clearly distinguish between event time and message time.
+     - If uncertainty exists, state it explicitly (e.g., "around June 2025," "exact date unclear").
+     - Include specific locations if mentioned.
+     - Resolve all pronouns, aliases, and ambiguous references into full names or identities.
+     - Disambiguate people with the same name if applicable.
+  3. Always write from a third-person perspective, referring to user as
+  "The user" or by name if name mentioned, rather than using first-person ("I", "me", "my").
+  For example, write "The user felt exhausted..." instead of "I felt exhausted...".
+  ```
+  with the required output field `"value": <A detailed, self-contained, and unambiguous memory statement ...>`. The named failure modes are the strongest part: `clearly distinguish between event time and message time`, `disambiguate people with the same name`, and — importantly — an **explicit uncertainty escape hatch** (`"around June 2025", "exact date unclear"`) so the model is not forced to fabricate a definite date in order to satisfy an absolutization rule. The two core rules (`Resolve all pronouns, aliases, and ambiguous references into full names or identities` and third-person-only writing) recur verbatim in the doc-reader and general-string-reader variants in the same file, so this is a project-wide policy rather than one prompt.
 - **Vestige already does this** for the third-person case.
 
-Critical observation: **all of these operate within a single extraction window.** Mem0 supplies "Last k Messages (up to 20) preceding New Messages. Use to resolve references and pronouns in New Messages." Graphiti supplies `<PREVIOUS_MESSAGES>` with the constraint `You may use information from the PREVIOUS MESSAGES only to disambiguate references or support continuity.` So the antecedent must be *inside the window*. Nothing in any of these systems handles an antecedent that only exists in the agent's own head, in a tool result that scrolled out of the window, or in an earlier session's unextracted tail.
+Critical observation: **all of these operate within a single extraction window.** Mem0 supplies "Last k Messages (up to 20) preceding New Messages. Use to resolve references and pronouns in New Messages." Graphiti supplies `<PREVIOUS_MESSAGES>` with the constraint `You may use information from the PREVIOUS MESSAGES only to disambiguate references or support continuity.` MemReader scopes the rule to `the message timestamp`. So the antecedent must be *inside the window*. Nothing in any of these systems handles an antecedent that only exists in the agent's own head, in a tool result that scrolled out of the window, or in an earlier session's unextracted tail.
 
 ### (ii) Forbid the reference by requiring an explicit subject and a "read alone later" test
 
@@ -389,10 +403,62 @@ Each extracted fact carries an anchor into the raw dialogue it came from, so ret
 
 The design lesson for a code memory: a memory that says `foo.rs:412` is *using* strategy (iv) but with a pointer that rots. Strategy (iv) is correct; the anchor choice is what's broken.
 
+### (v) Defer the write, or repair it afterwards — the strategies Vestige most lacks
+
+Two mechanisms that appear in none of the systems above, both from MemReader/MemOS, and worth distinguishing carefully because they change *when* the problem is handled rather than *how* the text is phrased.
+
+**Deferral — search instead of guessing.** MemReader's teacher (ReAct) prompt, quoted from the paper's appendix ([arXiv:2604.07877](https://ar5iv.labs.arxiv.org/html/2604.07877), Appendix B.1) — *not* from the prompt file linked above, which does not contain it:
+
+```
+# Principles:
+- Do not distinguish between the user or the assistant; extract if it has long-term value.
+- References must be explicit; do not use "I" or "me"; must include specific names or roles.
+- Normalize time (combine with current time {session_time}) and facts.
+
+# Preferences:
+- Do not be hasty to `add`. If there is potential background information that needs to be supplemented, prioritize `search`.
+- When encountering ambiguous information (e.g., "he", "that thing"), you MUST prioritize `search` to try and find the answer in the history.
+- Only choose `buffer` when `search` cannot resolve the issue, or when it is obvious the user hasn't finished speaking (a new topic).
+- Do not choose `buffer` out of laziness. If you can complete the information via `search` and `add` immediately, that is the highest priority behavior.
+```
+
+The served memory-management prompt states the same policy more compactly: `Process the dialogue and decide: add (extract), buffer (wait), ignore, or search for context.` and `Prioritize search when encountering ambiguous info ("he", "that thing")` / `Do NOT buffer out of laziness`.
+
+The design: when a reference cannot be resolved from the current window, **do not write a memory containing that reference**. Run a retrieval against history first; write only if the antecedent is found; otherwise *buffer* (hold the item) rather than commit a scrap. `SIMPLE_STRUCT_ADD_BEFORE_SEARCH_PROMPT` in the prompt file is the related guard that evaluates candidate memories against existing ones before an add. This is the only *deferral* design found, and it is conceptually different from (i)–(iv): it treats an unresolvable reference as a reason to **not write yet**, which is the right response when the alternative is a permanently uninterpretable memory. Vestige's write path is synchronous and always-commit, so it has no equivalent.
+
+**Repair — a post-write validating rewriter.** The same project ships a validation pass:
+
+```
+You are a strict, language-preserving memory validator and rewriter.
+
+Your task is to eliminate hallucinations and tighten memories by grounding them strictly in the user's
+explicit messages. Memories must be factual, unambiguous, and free of any inferred or speculative content.
+```
+
+with an explicit source-attribution requirement:
+
+```
+3. **Source Attribution Requirement**:
+   - Every memory must be clearly traceable to its source:
+     - If a fact appears **only in [assistant] messages** and **is not affirmed by [user]**, label it as "[assistant] memory".
+     - If [assistant] states something and [user] explicitly contradicts or denies it, label it as
+       "[assistant] memory, but [user] [brief quote or summary of denial]".
+```
+
+and — the subtle, load-bearing part — an exception protecting legitimate temporal grounding:
+
+```
+4. **Timestamp Exception**: Memories may include timestamps (e.g., "On December 19, 2026") derived from
+conversation metadata. If such a date likely reflects the conversation time (even if not in the `messages`
+list), do NOT treat it as hallucinated
+```
+
+That exception exists because a naive "ground everything in the source text" validator flags every correctly-absolutized date as hallucinated — the absolute date never literally appears in the transcript. Any repair pass that insists on **both** strict grounding **and** absolute dates must carve out exactly this exception, or the two rules destroy each other. This is a concrete, non-obvious interaction that only shows up once you try to build the pass, and it is worth copying deliberately rather than rediscovering.
+
 ### What is *not* solved anywhere
 
 No system found handles:
-- an antecedent that was never in the extraction window (tool output, earlier session, agent's own reasoning);
+- an antecedent that was never in the extraction window (tool output, earlier session, agent's own reasoning) — MemReader's deferral is the closest thing, and it defers rather than resolves;
 - a reference to a mutable external artefact (file, line, symbol, commit) with a staleness model — except `legendary-mcp`, see §5;
 - the requirement that a stored item be understandable to a reader who has **neither** the conversation **nor** the linked memories, i.e. checking resolvability of the links themselves. Mem0's `linked_memory_ids` and A-MEM's `L_i` create links but no prompt requires that the link target be present at read time.
 
@@ -856,6 +922,10 @@ Concretely: give each node type a sentence of the form *"a `decision` records wh
 
 **G. Route interpretability-critical memories into an always-visible tier.** Letta's architectural answer to complaint (b) is not a prompt at all — it is to keep the memories that must be understood without provenance *pinned in context*, so the question of whether they stand alone never arises. Vestige has the primitive (`session_context` returns a markdown context block; `precompute_for_context` builds topic digests with a TTL). The gap is that nothing distinguishes "a memory that must be readable with no lookups" from "a memory that is fine as a retrieval candidate". A `standalone_critical` flag — set by the §7.1-A gate on the memories that *pass* it, for the small set that keep coming back in retrieval — would let `session_context` pin exactly those and stop pinning the scraps. This is the one intervention that makes the problem structurally impossible rather than merely detected.
 
+**H. Give the write path a *defer* outcome, not just commit-or-warn.** MemReader's deferral mechanism (§2-v) is the design with no analogue in Vestige, and it addresses the highest-value case the gate in (A) cannot fix: a memory that fails the standalone test and whose antecedent is genuinely recoverable from history. Today Vestige's options are "warn and store" or "split and store" — both commit. A third outcome is available: on a `dangling_reference` warning, run a bounded retrieval for the missing antecedent (Vestige already has the search stack and the entities), rewrite if found, and if not found, store the memory **quarantined** — present for audit, excluded from retrieval — rather than serving a scrap. The `buffer` state in MemReader is the same idea. This is what converts (A) from a detector into a fix, and it is the one change here that plausibly reduces the number of bad memories rather than merely labelling them.
+
+Two cautions if (A) and (H) are built together: apply MemReader's uncertainty escape hatch, and its timestamp exception. A strict "ground everything / no inference" validator will flag every correctly-absolutized date as hallucinated, because the absolute date is not literally in the transcript. The repair pass must explicitly exempt metadata-derived dates or it will undo Vestige's temporal anchoring.
+
 ### 7.2 Reconsider — evidence contradicts the current default
 
 **Granularity.** Vestige enforces one fact per memory and warns on compound content, citing "compound content degrades search recall by 40-60%". The two most mature write paths found both moved *away* from this: Mem0's current prompt says `"Contextually Rich, Not Atomic"` and `"split into multiple focused memories rather than compressing details away"` only when detail-rich; LangMem says `"Prefer dense, complete memories over overlapping ones."` TriMem stores three granularities simultaneously and reports that the atomic-only layer loses 14.5% of reference-answer tokens.
@@ -869,7 +939,8 @@ This does not mean the atomic rule is wrong — it is well-suited to a store wit
 1. **A dangling-reference gate at write time** (§7.1-A), reusing the existing `compound_content_warning` return path. This is the smallest change that addresses complaint (b) directly, and it turns an invisible defect into a visible one. It also produces the baseline metric for (i) above at zero extra cost.
 2. **A code anchor of `{file, symbol, content_hash}` with a three-state freshness verdict rendered into the retrieved text** (§7.1-C), replacing any current practice of storing a bare path (or path + line). This addresses complaint (a) and is the only intervention in this review with a documented, shipped design behind it.
 3. **`node_type` descriptions in the `smart_ingest` schema, plus a `standalone_critical` flag that `session_context` pins** (§7.1-F, §7.1-G). These are two strings-and-a-boolean changes that give the writing agent a formulation target and give retrieval a way to distinguish a memory that stands alone from one that only works as a candidate. Together they are the cheapest structural answer to complaint (b).
-4. **A reformulation pass over memories written at `SESSION_END`** (§7.1-E), running the gate from (1) and rewriting or quarantining the failures. This addresses the *cause* — writes made under pressure — rather than the symptom, and it uses consolidation machinery Vestige already runs on a schedule. Listed fourth only because it depends on (1) existing first.
+4. **A defer/quarantine outcome on the write path when the gate fires** (§7.1-H), with a retrieval attempt to recover the antecedent first. This is the only practice here that reduces the number of bad memories rather than labelling them, but it depends on (1) existing and on a retrieval budget being available at write time.
+5. **A reformulation pass over memories written at `SESSION_END`** (§7.1-E), running the gate from (1) and rewriting or quarantining the failures. This addresses the *cause* — writes made under pressure — rather than the symptom, and it uses consolidation machinery Vestige already runs on a schedule.
 
 ---
 
@@ -891,6 +962,7 @@ This does not mean the atomic rule is wrong — it is well-suited to a store wit
 - MemGPT/Letta tool docstrings: [base.py @ pinned commit](https://raw.githubusercontent.com/letta-ai/letta/28514da5df44570002cc4a2fa8384fd74f75101f/memgpt/functions/function_sets/base.py)
 - MemoryOS extraction prompts: [memoryos-chromadb/prompts.py](https://raw.githubusercontent.com/BAI-LAB/MemoryOS/main/memoryos-chromadb/prompts.py) *(negative example — "Use the shortest possible phrases")*
 - MemoryOS eviction code (LFU, contradicting the paper): [memoryos-chromadb/mid_term.py](https://raw.githubusercontent.com/BAI-LAB/MemoryOS/main/memoryos-chromadb/mid_term.py)
+- MemReader/MemOS extraction, deferral and repair prompts: [mem_reader_prompts.py](https://raw.githubusercontent.com/MemTensor/MemOS/main/src/memos/templates/mem_reader_prompts.py) — pronoun/third-person rules, `search`-on-ambiguity deferral, and the timestamp-exception repair pass
 - Cognee BEAM eval report (declines the ablation): [eval_framework/beam/REPORT.md](https://raw.githubusercontent.com/topoteretes/cognee/main/cognee/eval_framework/beam/REPORT.md)
 
 **Primary — papers:**
@@ -903,6 +975,7 @@ This does not mean the atomic rule is wrong — it is well-suited to a store wit
 - [Diagnosing Retrieval vs. Utilization Bottlenecks in LLM Agent Memory](https://ar5iv.labs.arxiv.org/html/2603.02473) (ICLR 2026 workshop)
 - [LongMemEval](https://arxiv.org/abs/2410.10813) (ICLR 2025) — knowledge-update and abstention abilities
 - [MINJA: Memory Injection Attacks on LLM Agents via Query-Only Interaction](https://arxiv.org/abs/2503.03704) (2025, rev. 2026)
+- [MemReader: From Passive to Active Extraction for Long-Term Agent Memory](https://ar5iv.labs.arxiv.org/html/2604.07877) (2026) — defers writes on ambiguity via `search`/`buffer`; Appendix B.1 carries the teacher prompt
 
 **Primary — official docs:**
 - [Letta memory blocks (core memory)](https://docs.letta.com/v1-sdk/memory/memory-blocks) — block schema, the `description` field as a write contract, always-in-context vs retrieval tradeoff
