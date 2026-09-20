@@ -31,10 +31,90 @@ different people, different platforms.
 ### Rank 1 — Indiscriminate capture: the store fills with things that were never worth keeping
 
 The single most-reported failure, and the one every other failure is downstream of. Reported by
-**six independent sources across four ecosystems**.
+**seven independent sources across four ecosystems**.
 
-**FIRST-HAND**, the clearest account anywhere. `TRON4R`, Mem0 discussion #4289, March 2026 — a user
-running mem0 against OpenClaw on their own VPS:
+#### The strongest single source in this report: a full audit of 10,134 entries
+
+**FIRST-HAND, with a published method and full dataset.** `jamebobob`, mem0 issue #4573, March 2026 —
+32 days of production mem0 + Qdrant, one agent and one human. They pulled the entire collection and
+audited it: keyword/hash triage, then a cosine-similarity duplicate pass, then **reading all 6,264
+remaining entries one by one across eight batches.**
+
+> "224 entries survived the full process. Out of 10,134. That's 97.8% junk across the entire
+> collection. And of those 224 survivors, 186 had to be deleted and rewritten from scratch because
+> the originals were partial or malformed. **Only 38 entries in the entire collection were clean
+> enough to keep as-is.**"
+
+Their junk taxonomy — note how many of these are things nobody would defend as memories:
+
+| Category | ~Count | % of junk | Example |
+|---|---|---|---|
+| Boot file / system prompt restating | 3,200 | 52.7% | "Operator prefers Telegram" appeared **200+ times** |
+| Heartbeat / cron / system noise | 700 | 11.5% | Cron output, `NO_REPLY` markers, boot sequences |
+| System architecture dumps | 500 | 8.2% | Tool configs and deployment pipelines; one entry 4,000+ words |
+| Transient task state | 450 | 7.4% | "Complete proposal by Friday." |
+| Hallucinated user profiles | 315 | 5.2% | Fabricated employers and demographics for people who don't exist |
+| Identity confusion | 200 | 3.3% | Model confused agent with operator, hostnames with user names |
+| **Security / privacy leaks** | 130 | 2.1% | **"IP addresses, chat IDs, file paths**, and in 2 cases sensitive configuration values that should never have reached the vector store" |
+| Wrong locations / fabricated lifestyle / other | 275 | 4.6% | Fabricated cities for "an entity with no physical body" |
+
+With the duplicate passes folded in, the boot-file-restating category alone accounts for **more than
+5,500 entries — over half the entire collection.**
+
+**Two findings from this audit deserve to be pulled out, because they invert conventional advice.**
+
+**(1) A better extraction model makes it worse.** They switched from `gemma2:2b` (local) to Claude
+Sonnet 4.6 on day 21 and expected the junk to stop. Across the six gemma-era batches the junk rate
+was 95.4–98.5%; the Sonnet batch came in at **89.6%** — it moved by a few points, not by an order of
+magnitude, and the failure mode changed shape rather than shrinking:
+
+> "when we switched to Sonnet on day 21, the junk rate barely moved. The hallucinations stopped.
+> Sonnet didn't invent fictional people. Instead, **it faithfully followed the permissive extraction
+> prompt and stored everything it could see**: complete system architectures, every tool
+> configuration, every transient task status. All accurate. None of it memory."
+
+> "**A better model follows the extraction prompt more faithfully, which means it extracts more
+> indiscriminately. The extraction prompt is the bottleneck, not the model.**"
+
+This is independently corroborated in spirit by `TRON4R` in mem0 #4289, who upgraded his decision
+model from `gpt-4.1-nano` to `gpt-4.1-mini` and reported it *"didn't really make a noticeable
+difference deciding which information is worth to be stored and which to be ignored"* — while
+doubling response times. Two independent production reports agreeing that model quality is not the
+lever is a genuinely counterintuitive and report-worthy result, and it means "use a smarter
+extractor" is not an available fix.
+
+**(2) The extraction pipeline re-ingests its own recalled memory — a feedback loop.** This is the
+mechanism behind the whole Rank 7 (self-referential memory) category, measured:
+
+> "808 entries asserting 'User prefers Vim.' 191 exact copies of one sentence. **Nobody in the system
+> uses Vim.** The 2B model hallucinated it once. It got stored. Next session, it appeared in recall
+> context. The extraction model treated it as ground truth and extracted it again. The next session
+> amplified it further."
+
+> "The model caused the initial hallucination, but **the pipeline caused it to multiply.** There's no
+> mechanism to distinguish recalled memories from new conversation content during extraction. **Any
+> hallucination that gets stored once will be re-extracted indefinitely.** A better model prevents the
+> initial seed, but the amplification architecture remains."
+
+Their five proposed fixes, in their own priority order, are notable for matching this report's
+recommendations almost exactly: (1) feedback-loop prevention — mark recalled memories so extraction
+doesn't re-extract them; (2) **a quality gate between extraction and storage**; (3) negative few-shot
+examples ("the prompt teaches what to extract but never what to skip"); (4) **a REJECT action in the
+update-decision prompt** — *"Currently the pipeline can ADD, UPDATE, DELETE, or NONE. There is no way
+to say 'this fact is not worth storing'";* (5) identity-aware extraction.
+
+They also cite Harvard D3's selective-recall research for the claim that *"indiscriminate memory
+storage performs worse than using no memory at all"* and that pre-storage filtering gave a 10%
+performance gain — *cited by the issue author; I have not read that paper directly, so treat the
+figure as second-hand.* Their own conclusion: *"After removing the junk, recall quality improved
+immediately."*
+
+[github.com/mem0ai/mem0/issues/4573](https://github.com/mem0ai/mem0/issues/4573)
+
+---
+
+**FIRST-HAND**, the same failure on a smaller scale. `TRON4R`, Mem0 discussion #4289, March 2026 — a
+user running mem0 against OpenClaw on their own VPS:
 
 > "after feeding the current MEMORY.md into its new database (producing 26 memories) and happily
 > exchanging a few prompts with my OpenClaw agent, I checked the mem0 memory and found that it
@@ -60,8 +140,11 @@ exploration" — which the user also had to delete. The user's quoted complaint:
 
 [github.com/anthropics/claude-code/issues/95079](https://github.com/anthropics/claude-code/issues/95079)
 
-**FIRST-HAND (audited)**. Theo Browne, "Turn off Claude Code's Memory", audited his own machines in
-August 2026 and published the breakdown of his 45 memory files:
+**FIRST-HAND (audited), but accessed second-hand — read the caveat.** Theo Browne, "Turn off Claude
+Code's Memory", audited his own machines in August 2026 and published the breakdown of his 45 memory
+files. *I did not access the podcast episode itself; the figures below come from a detailed news
+write-up of it, and neither that write-up nor the episode was independently reproduced. Treat the
+exact counts as reported-by-a-secondary-source rather than as verified data.*
 
 | Category | Count | His assessment |
 |---|---|---|
@@ -213,6 +296,27 @@ quantitative finding in this whole report. Across 43 real context compactions in
 *Disclosure: this commenter maintains `deja-vu`, a competing tool. The number is self-reported.*
 [github.com/anthropics/claude-code/issues/75334](https://github.com/anthropics/claude-code/issues/75334)
 
+**FIRST-HAND**. `cruffle_duffle` on HN, "Writing a good Claude.md" — the cleanest illustration in the
+corpus of a memory that was only ever meaningful inside the conversation that produced it:
+
+> "Turns out it is an awful judge of things to remember. Like it would make memories like **'cruffle
+> is trying to make pepper soup with chicken stock'**! Which it would then parrot back to me at some
+> point **4 months later** and I'd be like 'WTF I figured it out'. … I'd rather have it over-index on
+> my own forceful memories than random shit it decided."
+
+He also names the propagation mechanism, which is the same stickiness the mem0 audit measured:
+
+> "how much it 'picks up and propagates' random shit it finds in some document it wrote. It will echo
+> back something it wrote that 'stood out' and I'll forget where it got that and ask 'find where you
+> found that info so we can remove it.' And it will do so but somehow mysteriously pick it up again
+> and it will be because of some git commit message or something. **It's like a tune stuck in its
+> head** or something only it's sticky for LLMs not humans."
+
+Note the diagnosis embedded there: the *solved task state* ("trying to make pepper soup") was stored
+as though it were a durable fact, and the memory preserved the **problem** rather than the
+**resolution**. Four months later the agent resurrected a question the human had already closed.
+[news.ycombinator.com/item?id=46101657](https://news.ycombinator.com/item?id=46101657)
+
 **Honest gap:** I found **no** source that reports the *file-and-line* variant of this failure as a
 distinct, named problem. See §3 — that absence is itself a finding.
 
@@ -222,7 +326,8 @@ distinct, named problem. See §3 — that absence is itself a finding.
 
 Reported by **three independent sources**, with the hardest numbers in the corpus.
 
-**FIRST-HAND (audited)**. Theo Browne's audit is the reference measurement:
+**FIRST-HAND (audited), accessed second-hand — see the caveat in Rank 1.** Theo Browne's audit is the
+reference measurement:
 
 > Across 355 sessions on one machine, only 19 sessions ever *read* a memory file, while 80 sessions
 > *wrote* or edited them. Of the 45 memories, 26 had never been read once.
@@ -543,6 +648,18 @@ stating plainly.**
 for one specifically and did not find it. What exists instead is three indirect controls, none of
 which names the problem:
 
+**Before those, one framing finding that matters for the user's complaint.** In the 10,134-entry mem0
+audit (§1, Rank 1), **file paths do not appear as a staleness problem — they appear inside the
+"Security / privacy leaks" category**, alongside IP addresses and chat IDs, and are counted as junk at
+a 2.1% rate (130 entries, including *"in 2 cases sensitive configuration values that should never have
+reached the vector store"*). The auditor's own remedy list treats this category as a *filtering*
+failure, not a freshness one. The practical consequence: a store that auto-extracts file paths is
+accumulating an internal-topology map of the machine, and the people auditing such stores classify
+that as leakage rather than as noise. For Vestige — which derives `entity:*` tags from file paths by
+default — this is a second, independent reason to keep paths out of stored content, and it is not the
+reason the user gave.
+[github.com/mem0ai/mem0/issues/4573](https://github.com/mem0ai/mem0/issues/4573)
+
 **(a) The "derivable content" rule subsumes it.** `soul-sol`'s rule — *"Don't store what the
 repository already records. Anything derivable from the code or git history is noise"* — covers file
 paths, line numbers, and function names without mentioning them. This is the only rule in the corpus
@@ -748,7 +865,37 @@ appending every prompt and response to one JSONL file and querying it with `jq` 
 vector database, no memory system — just a log and a query tool."*
 [finance.biggo.com/news/bb1b56f140ee671f](https://finance.biggo.com/news/bb1b56f140ee671f)
 
-### 5.2 Cursor removed the feature outright — maintainer statement
+### 5.2 The clearest statement of the conclusion: "auto-memory is actively harmful"
+
+**FIRST-HAND**, filed in Anthropic's official tracker with 6 upvotes. `arthurworsley`,
+anthropics/claude-code issue #23544, "Need ability to disable auto-memory (MEMORY.md)", Feb 2026:
+
+> "**For users who manage their own context systems, auto-memory is actively harmful.**"
+
+The five numbered reasons are a precise, reusable indictment — and notably they are about *control and
+duplication*, not about retrieval quality:
+
+1. **Shadow state** — "a parallel memory system outside the user's control. The user can't easily view, audit, or understand what's been stored."
+2. **Not git-tracked** — "It can't be committed, reviewed in PRs, or versioned alongside the codebase. This is a significant regression from keeping context in repo-local files like `CLAUDE.md`."
+3. **Not portable across CLIs** — a Claude-only silo when the user maintains shared `AGENTS.md`.
+4. **Context bloat** — "For users who already have well-structured `CLAUDE.md` and skill files, this is redundant context that displaces useful working memory."
+5. **No opt-out** — "Even deleting the files doesn't prevent Claude from recreating them."
+
+In-thread first-hand corroboration, all the same day:
+
+- `banagale`: *"Given just how serious folks are about managing context using skills, agents and docs this feature is at best an anti-pattern and worst infantilization."*
+- `perhmm` — the redundancy failure mode, described from workflow: *"every time I initiate a discussion like that it just unprompted writes it to memory. 'Remember to not do x' which most of the times do not solve the problem and **repeats instructions that already exists in the Claude.md or my command and skill documents.** As it is right now with my workflow this feature seems completely useless."*
+- `ANogin` — a stale memory actively degrading a plan: *"Just had Claude come up with a plan, where the verification step said 'Pre-existing failures listed in MEMORY.md are unrelated and may still fail', which was **both outdated and a misunderstanding to begin with**, and could have caused unfortunate issues if I did not catch it… Last thing we need is to give Claude more excuses to ignore test failures!"*
+
+**Resolution, for accuracy:** the issue was closed as completed after users found an undocumented
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` env var and a `/memory` toggle. The "no opt-out" complaint was
+therefore fixed; the quality complaints in the thread were not addressed by that fix, and `perhmm`
+confirmed the flag made Claude write to `CLAUDE.md` instead. **The lesson for Vestige is the shape of
+the fix: the community's accepted remedy was to route durable knowledge back into the versioned,
+reviewable repo file.**
+[github.com/anthropics/claude-code/issues/23544](https://github.com/anthropics/claude-code/issues/23544)
+
+### 5.3 Cursor removed the feature outright — maintainer statement
 
 `Dean Rie` (Cursor staff), Nov 2025, replying to a user who found their memories gone in 2.1.32:
 
@@ -776,7 +923,7 @@ and prevents them from becoming stale as code changes"* — and list under "What
 code."* Note the shape: the *pointer* is the durable artefact and the *copy* is what rots.
 [cursor.com/docs/rules](https://cursor.com/docs/rules)
 
-### 5.3 `TRON4R` abandoned mem0 — with a harvest ratio worth quoting
+### 5.4 `TRON4R` abandoned mem0 — with a harvest ratio worth quoting
 
 After months of use, including routine cleanups, he migrated back to OpenClaw's default memory:
 
@@ -797,7 +944,7 @@ His stated general rule afterwards is its own small finding about adoption cost:
 
 [github.com/mem0ai/mem0/discussions/4289](https://github.com/mem0ai/mem0/discussions/4289)
 
-### 5.4 `brtkwr` — switched off, but kept a triaged third (the nuanced case)
+### 5.5 `brtkwr` — switched off, but kept a triaged third (the nuanced case)
 
 He disagreed with Theo on deletion but not on diagnosis: *"The audit agreed with him: most of what
 auto-memory had written was stale project state I never asked for."* He triaged rather than deleted,
@@ -808,7 +955,23 @@ that the result is no longer a memory system:
 > "**Nothing lives in unversioned local state.** … If a fact is worth keeping, it is worth putting
 > somewhere with history and review."
 
-### 5.5 Smaller voices, same direction (code-agent context specifically)
+### 5.6 Smaller voices, same direction (code-agent context specifically)
+
+**FIRST-HAND**. `JohnMakin` on HN, "Agent memory as a file format" (191 points, Aug 2026) — while
+endorsing a markdown-plus-SQLite memory service he built himself, he rejects harness-managed memory
+outright. The most useful part is that he describes the *symptom an operator actually notices*:
+
+> "**'harness managed' memory is utter garbage, I am convinced, and I disable it immediately.** The
+> major problem being over time it degrades and sneaks in conflicting or outright false information.
+> Then one day you'll swear it's drunk, and every time I got to this state and investigated, auto
+> managed memory was *always* the problem."
+
+[news.ycombinator.com/item?id=49512238](https://news.ycombinator.com/item?id=49512238)
+(thread: [item?id=49508317](https://news.ycombinator.com/item?id=49508317))
+Note the shape of the claim: the user cannot attribute the degradation to memory from the outside.
+The failure is *illegible* until investigated — which is the same complaint as `bushido`'s "most of it
+is hidden" in §1, Rank 8. This is worth weighing for Vestige's dashboard work: attribution of bad
+behaviour to a specific memory is a product feature, not a nicety.
 
 All **FIRST-HAND**, HN thread 47524704:
 
@@ -866,6 +1029,21 @@ products and are the opposite of the requested angle. Where a vendor appears abo
 (a) a maintainer answering a bug report (Cursor's Dean Rie), (b) a merged maintainer fix (n8n,
 hermes-agent, orchestkit), or (c) a study with a published method (Augment) — each labelled.
 
+**Also unverifiable by me, and therefore not used as evidence:**
+
+6. **Theo Browne's raw counts.** My access is a secondary news write-up, not the episode — flagged
+   inline at both places the figures appear.
+7. **Reddit threads.** `r/ClaudeAI` and `old.reddit.com` both return a JavaScript shell to
+   non-browser clients, so thread bodies could not be retrieved. A thread on auto-memory drift
+   (`/r/ClaudeAI/comments/1thyy3k/`) is frequently cited by secondary sources, but **no Reddit quote
+   appears anywhere in this report as evidence**, and the anecdotes attributed to it elsewhere should
+   be treated as unconfirmed until someone reads the thread in a browser.
+8. **A mem0 maintainer concession.** I found claims that a mem0 maintainer acknowledged the #4573
+   audit's precision concern in a later issue. I did not retrieve that comment, so I make no such
+   claim. What I can verify is narrower: the #4573 audit is detailed, methodologically explicit, and
+   was still open and unrefuted at the time of writing, and it has been independently corroborated in
+   direction by `TRON4R`'s separate production experience in #4289.
+
 ---
 
 ## 7. What this implies for Vestige
@@ -892,6 +1070,15 @@ complaining about:
    ignore write quality. That's backwards"* (Cropsly). Vestige's dedup gate prevents *duplicates*; it
    does nothing about the far larger volume of *originally-worthless* entries. `TRON4R` ran routine
    cleanups for months and still harvested two useful memories out of hundreds.
+
+   The 10,134-entry audit (§1, Rank 1) is the empirical form of this argument, and it is the reason to
+   treat the write gate as *the* lever rather than one lever among several. Dedup and consolidation
+   were not what failed there: the audit ran hash-dedup and cosine-dedup passes and still found
+   **96.9% of the surviving entries were junk on manual read**. Their single highest-priority
+   recommendation is not a better retriever or a bigger model — it is *"a quality gate between
+   extraction and storage"*, and their second is *"a REJECT action in the update-decision prompt …
+   There is no way to say 'this fact is not worth storing.'"* Vestige's `smart_ingest` has
+   `forceCreate` but no reject path; adding one is the highest-leverage change available.
 
 The good news is that Vestige already has the primitives the field says are missing: `valid_from` /
 `valid_until`, `contradiction detection`, `temporal invalidate`, coreference rewriting, entity
