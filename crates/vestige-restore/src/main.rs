@@ -119,11 +119,49 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The first `n` **bytes** of `s`, floored to a character boundary, plus an
+/// ellipsis when anything was dropped.
+///
+/// `&s[..n]` panics when byte `n` lands inside a multi-byte character, and
+/// restore prints the content of every memory it wrote — so a single Polish
+/// memory longer than `n` bytes could abort a restore that had already written
+/// rows, halfway through the file. The cut is floored rather than the limit
+/// changed: the cap is for the console, not for the data.
 fn truncate(s: &str, n: usize) -> String {
     if s.len() <= n {
         s.to_string()
     } else {
-        format!("{}...", &s[..n])
+        format!("{}...", &s[..s.floor_char_boundary(n)])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate;
+
+    /// The restore path printed its way into a panic: `&content[..60]` with a
+    /// multi-byte character at byte 60 took the process down (with
+    /// `panic = "abort"` in the release profile there is no unwinding to catch).
+    #[test]
+    fn a_long_memory_is_shortened_without_splitting_a_character() {
+        let polish =
+            "Objaw: emulowana gra nie wchodziła do poziomu, tylko w kółko odtwarzała intro.";
+        assert!(polish.len() > 60 && !polish.is_char_boundary(60));
+
+        let shortened = truncate(polish, 60);
+        assert!(shortened.ends_with("..."));
+        let kept = shortened.trim_end_matches('.');
+        assert!(
+            polish.starts_with(kept),
+            "only a prefix may survive: {kept:?}"
+        );
+        assert!(kept.len() <= 60);
+    }
+
+    #[test]
+    fn a_short_memory_is_printed_whole() {
+        assert_eq!(truncate("krótko", 60), "krótko");
+        assert_eq!(truncate("", 60), "");
     }
 }
 

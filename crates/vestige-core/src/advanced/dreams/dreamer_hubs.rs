@@ -190,6 +190,11 @@ fn first_sentence(content: &str) -> String {
             break;
         }
     }
+    // The 160-byte cap can land inside a multi-byte character, and
+    // `trimmed[..cut]` panics when it does — the dream pass died on a Polish
+    // memory whose 160th byte was inside 'ł'. A sentence mark found above is
+    // already a boundary, so this is a no-op in that case.
+    let cut = trimmed.floor_char_boundary(cut);
     trimmed[..cut].replace(['\n', '\r'], " ")
 }
 
@@ -197,6 +202,28 @@ fn first_sentence(content: &str) -> String {
 mod tests {
     use super::*;
     use chrono::Duration;
+
+    /// The hub excerpt is capped at 160 **bytes**, and a multi-byte character
+    /// can straddle that cap. The pre-fix `trimmed[..cut]` panicked on exactly
+    /// that, taking the dream pass down; the cap must floor to a character
+    /// boundary instead. Polish memories are the ones that hit it.
+    #[test]
+    fn a_hub_excerpt_never_splits_a_character() {
+        let content = format!("{}ł oraz dalszy ciąg bez kropki", "a".repeat(159));
+        assert!(
+            !content.is_char_boundary(160),
+            "test needs a split inside 'ł'"
+        );
+
+        let excerpt = first_sentence(&content);
+
+        assert!(excerpt.starts_with(&"a".repeat(159)));
+        assert!(
+            !excerpt.contains('ł'),
+            "the straddling character is dropped"
+        );
+        assert!(excerpt.len() <= 160);
+    }
 
     fn mem(id: &str, content: &str, tags: &[&str], days_ago: i64) -> DreamMemory {
         DreamMemory {

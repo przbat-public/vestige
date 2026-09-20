@@ -286,9 +286,13 @@ mod tests {
     fn a_summary_never_splits_a_character() {
         // The regression: byte 60 sits inside 'ł' in this content, and the
         // pre-fix `&content[..60]` panicked on it.
-        let polish = "Objaw: emulowana gra nie wchodziła do poziomu, tylko w kółko odtwarzała intro.";
+        let polish =
+            "Objaw: emulowana gra nie wchodziła do poziomu, tylko w kółko odtwarzała intro.";
         assert!(polish.len() > 60);
-        assert!(!polish.is_char_boundary(60), "test needs a split inside 'ł'");
+        assert!(
+            !polish.is_char_boundary(60),
+            "test needs a split inside 'ł'"
+        );
         let summary = summary_of(polish, 60);
         assert!(polish.starts_with(summary));
         assert!(summary.len() <= 60 && !summary.is_empty());
