@@ -75,6 +75,23 @@ pub struct NegationScope {
     pub trigger: String,
     /// The scope text, with surrounding whitespace trimmed.
     pub scope_text: String,
+    /// Whether a contrastive coordinator immediately precedes the trigger
+    /// ("a nie X", "rather than X", "zamiast X").
+    ///
+    /// A contrast inside one sentence is a statement about *that sentence's*
+    /// alternatives — "the bottleneck is transmission, not emulation" — and not
+    /// a denial of what a different memory claims. Consumers that compare two
+    /// memories must be able to tell the two apart.
+    pub contrastive_prefix: bool,
+    /// Whether a conditional marker opens the clause the trigger sits in
+    /// ("if we don't deploy by Friday", "jeśli nie wdrożymy").
+    ///
+    /// A negation inside a condition is not an assertion about the world: it
+    /// describes a branch that may never be taken, so it cannot contradict a
+    /// memory that records what actually is. The clause boundary is what keeps
+    /// this narrow — a marker in the *previous* sentence ("We shipped. If…")
+    /// does not reach a trigger in the next one.
+    pub hypothetical_prefix: bool,
 }
 
 /// Find all negation scopes in `text` for the given `language`.
@@ -164,6 +181,10 @@ pub fn find_negation_scopes(text: &str, language: Language) -> Vec<NegationScope
                 scope_end,
                 trigger: trigger_token,
                 scope_text,
+                contrastive_prefix: i > 0
+                    && contrastive_coordinators_for(language)
+                        .contains(&normalize_token(words[i - 1].2).as_str()),
+                hypothetical_prefix: opens_a_condition(&words, i, language, text),
             });
 
             i += consumed_for_bigram;
@@ -240,6 +261,143 @@ fn triggers_for(language: Language) -> &'static [&'static str] {
         Language::English => en.as_slice(),
         Language::Polish => pl.as_slice(),
         Language::Unknown => all.as_slice(),
+    }
+}
+
+/// Coordinators that turn a negation into an intra-sentential contrast.
+///
+/// Deliberately small: these are the forms that introduce the *rejected*
+/// alternative in one clause ("…, a nie X", "…, rather than X"). A word that
+/// merely precedes a negation ("i nie wiem") is not a contrast marker, so
+/// leaving it out keeps the flag meaningful.
+fn contrastive_coordinators_for(language: Language) -> &'static [&'static str] {
+    static EN: OnceLock<Vec<&'static str>> = OnceLock::new();
+    static PL: OnceLock<Vec<&'static str>> = OnceLock::new();
+    static ALL: OnceLock<Vec<&'static str>> = OnceLock::new();
+
+    let en = EN.get_or_init(|| vec!["rather", "instead", "than"]);
+    let pl = PL.get_or_init(|| vec!["a", "ale", "lecz", "niż", "ani", "zamiast"]);
+
+    match language {
+        Language::English => en.as_slice(),
+        Language::Polish => pl.as_slice(),
+        Language::Unknown => ALL.get_or_init(|| {
+            let mut all = en.clone();
+            all.extend(pl.iter().copied());
+            all
+        }),
+    }
+}
+
+/// Whether the negation in `scope` negates a negative — litotes, "not impossible".
+///
+/// "It's not impossible to fix" asserts that a fix is possible; reading it as a
+/// denial inverts the sentence. The check looks at the first content word of the
+/// scope, because that is where the negated adjective sits in both languages
+/// ("not **impossible**", "nie **niemożliwe**").
+pub fn negates_a_negative(scope: &NegationScope, language: Language) -> bool {
+    let markers = negative_polarity_markers_for(language);
+    scope
+        .scope_text
+        .split(|c: char| !c.is_alphanumeric())
+        .find(|w| w.len() > 2)
+        .map(|head| markers.contains(&normalize_token(head).as_str()))
+        .unwrap_or(false)
+}
+
+/// Words whose own meaning is negative, so negating them asserts the positive.
+fn negative_polarity_markers_for(language: Language) -> &'static [&'static str] {
+    static EN: OnceLock<Vec<&'static str>> = OnceLock::new();
+    static PL: OnceLock<Vec<&'static str>> = OnceLock::new();
+    static ALL: OnceLock<Vec<&'static str>> = OnceLock::new();
+
+    let en = EN.get_or_init(|| {
+        vec![
+            "impossible",
+            "unlikely",
+            "unnecessary",
+            "untrue",
+            "incorrect",
+            "unusable",
+            "unavailable",
+        ]
+    });
+    let pl = PL.get_or_init(|| {
+        vec![
+            "niemożliwe",
+            "niemożliwy",
+            "nieprawdopodobne",
+            "niepotrzebne",
+            "nieprawdziwe",
+            "niesłuszne",
+            "nieuniknione",
+        ]
+    });
+
+    match language {
+        Language::English => en.as_slice(),
+        Language::Polish => pl.as_slice(),
+        Language::Unknown => ALL.get_or_init(|| {
+            let mut all = en.clone();
+            all.extend(pl.iter().copied());
+            all
+        }),
+    }
+}
+
+/// Whether a conditional marker opens the clause containing `words[trigger]`.
+///
+/// Looks back at most `CONDITIONAL_LOOKBACK_WORDS` tokens and stops at a
+/// sentence break, so the marker has to be in the same clause as the trigger.
+fn opens_a_condition(
+    words: &[(usize, usize, &str)],
+    trigger: usize,
+    language: Language,
+    text: &str,
+) -> bool {
+    let markers = conditional_markers_for(language);
+    let mut clause_start = trigger.saturating_sub(CONDITIONAL_LOOKBACK_WORDS);
+
+    for idx in (clause_start..trigger).rev() {
+        if has_sentence_break(text, words[idx].1, words[idx + 1].0) {
+            clause_start = idx + 1;
+            break;
+        }
+    }
+
+    words[clause_start..trigger]
+        .iter()
+        .any(|(_, _, word)| markers.contains(&normalize_token(word).as_str()))
+}
+
+/// How far back a conditional marker may sit and still open the trigger's clause.
+///
+/// Eight covers the framing both languages put in front of a condition
+/// ("if we don't deploy by Friday", "jeśli w piątek nie wdrożymy") without
+/// reaching into a previous sentence, which the sentence-break check also stops.
+const CONDITIONAL_LOOKBACK_WORDS: usize = 8;
+
+/// Markers that turn the clause they open into a condition rather than a claim.
+fn conditional_markers_for(language: Language) -> &'static [&'static str] {
+    static EN: OnceLock<Vec<&'static str>> = OnceLock::new();
+    static PL: OnceLock<Vec<&'static str>> = OnceLock::new();
+    static ALL: OnceLock<Vec<&'static str>> = OnceLock::new();
+
+    let en = EN.get_or_init(|| vec!["if", "unless", "whether", "suppose", "assuming"]);
+    let pl = PL.get_or_init(|| {
+        vec![
+            "jeśli", "jeżeli", "gdyby", "gdy", "chyba", "zakładając", "przypuśćmy",
+        ]
+    });
+
+    match language {
+        Language::English => en.as_slice(),
+        Language::Polish => pl.as_slice(),
+        Language::Unknown => ALL.get_or_init(|| {
+            let mut all = en.clone();
+            all.extend(pl.iter().copied());
+            all
+        }),
     }
 }
 
@@ -341,6 +499,35 @@ mod tests {
             "scope_text {:?} should contain {:?}",
             scope.scope_text,
             expected_scope_contains
+        );
+    }
+
+    /// A contrast inside one sentence and a denial of another memory's claim
+    /// look identical to the scope finder; the only thing that separates them
+    /// is the coordinator in front of the trigger. The contradiction detector
+    /// skips the flagged scopes, so this flag is what keeps "the bottleneck is
+    /// transmission, a nie emulacja procesora" from retiring a memory about the
+    /// emulator.
+    #[test]
+    fn contrastive_coordinator_before_the_trigger_is_flagged() {
+        let scopes = find_negation_scopes(
+            "Wąskim gardłem okazała się transmisja obrazu, a nie emulacja procesora.",
+            Language::Polish,
+        );
+        assert_eq!(scopes.len(), 1, "got {scopes:?}");
+        assert!(
+            scopes[0].contrastive_prefix,
+            "'a nie' introduces the rejected alternative of this sentence"
+        );
+
+        let scopes = find_negation_scopes(
+            "Kompilator nie może utrzymać zmiennej plikowej w rejestrze.",
+            Language::Polish,
+        );
+        assert_eq!(scopes.len(), 1);
+        assert!(
+            !scopes[0].contrastive_prefix,
+            "a plain negation denies a claim instead of contrasting alternatives"
         );
     }
 

@@ -21,9 +21,12 @@
 //!
 //! 2. **Negation-scope overlap.** Find all negation scopes in `new`
 //!    (e.g. "don't deploy on Friday" → scope = "deploy on Friday").
-//!    For each scope, check whether the *content of the scope* shares
-//!    ≥1 substantive (non-stopword) token with `old`. If yes, the new
-//!    memory is negating something the old memory asserts.
+//!    For each scope, check whether the *negated predicate* overlaps with
+//!    `old`: a shared head token (one of the first content words after the
+//!    trigger) or ≥2 shared content words anywhere in the scope. If yes, the
+//!    new memory is negating something the old memory asserts. A single
+//!    shared noun is deliberately not enough — memories about the same
+//!    project share domain nouns whether or not they disagree.
 //!
 //! 3. **Asymmetric negation.** Cover the legacy bool — a negation
 //!    trigger in `new` that's absent from `old`. This catches cases
@@ -53,7 +56,7 @@
 use std::sync::OnceLock;
 
 use super::language::{Language, detect_language};
-use super::negation::find_negation_scopes;
+use super::negation::{find_negation_scopes, negates_a_negative};
 use super::{DetectionResult, Evidence, EvidenceKind};
 
 // ---------------------------------------------------------------------------
@@ -82,6 +85,26 @@ pub const NEGATION_SCOPE_CONFIDENCE: f32 = 0.85;
 /// Low signal kept for recall on cases where scope-overlap misses
 /// (paraphrased negated noun phrase, etc.).
 pub const ASYMMETRIC_NEGATION_CONFIDENCE: f32 = 0.45;
+
+/// How many content words after a negation trigger count as the negated
+/// predicate for the scope-overlap rule.
+///
+/// One — the content word immediately after the trigger ("do not **deploy** on
+/// Friday", "a nie **emulacja** procesora"). Widening the window to two reaches
+/// into the object noun phrase, which is exactly where the shared domain
+/// vocabulary lives, and re-admits the false positive this rule exists to stop.
+/// Inflected predicates that the tokenizer cannot match are covered by
+/// [`NEGATION_SCOPE_MIN_OVERLAP`] instead.
+const NEGATION_SCOPE_HEAD_WORDS: usize = 1;
+
+/// How many shared tokens anywhere in the scope make the overlap count even
+/// when none of them is in the head.
+///
+/// Two, because Polish inflection breaks exact matching on the predicate
+/// itself ("używaj" vs "używamy"): a scope that shares two content words with
+/// the other memory is about the same proposition, a scope that shares one is
+/// usually about the same subject matter.
+const NEGATION_SCOPE_MIN_OVERLAP: usize = 2;
 
 /// Interface for contradiction detection between two pieces of text.
 ///
@@ -165,16 +188,48 @@ impl ContradictionDetector for HeuristicContradictionDetector {
         }
 
         // 2. Negation scope overlap.
+        //
+        // The scope must share the *negated predicate* with `old`, not merely a
+        // noun. Two memories about the same project always share domain nouns
+        // ("procesor", "rejestr", "panel"), so a single shared noun says nothing
+        // about disagreement — it is the vocabulary of the subject matter. Two
+        // shapes therefore count:
+        //
+        //   * a shared head token: the first content word after the trigger, i.e.
+        //     what is actually negated ("do not **deploy** on Friday" → "deploy"),
+        //     matched with inflection tolerance so "don't **commit**" still meets
+        //     "we **committed**";
+        //   * two or more exactly shared tokens anywhere in the scope, which
+        //     covers paraphrased predicates.
+        //
+        // Two scopes are skipped outright: a contrast inside one sentence
+        // ("the bottleneck is transmission, a nie emulacja procesora") compares
+        // that sentence's own alternatives rather than denying another memory,
+        // and a negation inside a condition ("if we don't deploy by Friday")
+        // describes a branch that may never be taken rather than what is.
         let scopes = find_negation_scopes(new, language);
         let old_tokens = significant_tokens(&old_lower);
 
         for scope in &scopes {
-            let scope_tokens = significant_tokens(&scope.scope_text.to_lowercase());
+            if scope.contrastive_prefix
+                || scope.hypothetical_prefix
+                || negates_a_negative(scope, language)
+            {
+                continue;
+            }
+
+            let scope_lower = scope.scope_text.to_lowercase();
+            let scope_tokens = significant_tokens(&scope_lower);
             let overlap = scope_tokens
                 .iter()
                 .filter(|t| old_tokens.contains(*t))
                 .count();
-            if overlap >= 1 {
+            let head_overlap = significant_tokens_in_order(&scope_lower)
+                .into_iter()
+                .take(NEGATION_SCOPE_HEAD_WORDS)
+                .any(|t| token_or_its_inflection_is_shared(&t, &old_tokens));
+
+            if head_overlap || overlap >= NEGATION_SCOPE_MIN_OVERLAP {
                 evidence.push(Evidence {
                     kind: EvidenceKind::NegationScope,
                     span_start: scope.trigger_start,
@@ -289,11 +344,59 @@ fn correction_phrases() -> &'static [(&'static str, Language)] {
     })
 }
 
+/// Whether `token` appears in `old_tokens`, exact or as the same word inflected.
+///
+/// English and Polish both inflect the word that carries the negation's
+/// meaning: "don't **commit**" against "we **committed**". Only short suffixes
+/// count, because a short suffix is inflection while a long one derives a new
+/// word and usually a new part of speech — "deploy" vs "deployments" is a
+/// different topic, and treating it as the same predicate is how a negation
+/// leaks past its own clause. The count of shared tokens elsewhere stays exact,
+/// so inflection can never inflate it.
+fn token_or_its_inflection_is_shared(
+    token: &str,
+    old_tokens: &std::collections::HashSet<String>,
+) -> bool {
+    old_tokens
+        .iter()
+        .any(|candidate| candidate == token || differ_by_a_short_suffix(token, candidate))
+}
+
+/// Whether the two words are one word plus an inflectional suffix (≤4 chars).
+///
+/// Four is enough for the forms both languages use on verbs and nouns
+/// ("commit"+"ted", "używa"+"my", "rejestr"+"ów") and too little for the
+/// derivational endings that change what the word means.
+fn differ_by_a_short_suffix(a: &str, b: &str) -> bool {
+    let (short, long) = if a.chars().count() <= b.chars().count() {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let short_len = short.chars().count();
+    let long_len = long.chars().count();
+
+    long_len > short_len
+        && long_len - short_len <= MAX_INFLECTION_SUFFIX_CHARS
+        && long.chars().take(short_len).eq(short.chars())
+}
+
+/// Longest suffix that still counts as inflection rather than derivation.
+const MAX_INFLECTION_SUFFIX_CHARS: usize = 4;
+
 /// Extract the set of "significant" tokens from a lowercased string.
 ///
 /// Drops stopwords (high-frequency function words that don't carry the
 /// negated meaning) and very short tokens (≤ 2 chars, mostly noise).
 fn significant_tokens(lowered: &str) -> std::collections::HashSet<String> {
+    significant_tokens_in_order(lowered).into_iter().collect()
+}
+
+/// Same filter as [`significant_tokens`], but preserving order and repeats.
+///
+/// The negation-scope rule needs the *first* content word after the trigger —
+/// the negated predicate — so a set (which loses order) cannot answer it.
+fn significant_tokens_in_order(lowered: &str) -> Vec<String> {
     let stopwords = stopword_set();
     lowered
         .split(|c: char| !c.is_alphanumeric())
@@ -570,6 +673,82 @@ mod tests {
             r.evidence
                 .iter()
                 .any(|e| matches!(e.kind, EvidenceKind::NegationScope))
+        );
+    }
+
+    /// Regression, real pair from a production store (2026-09-20).
+    ///
+    /// Two Polish memories about the same project share the domain noun
+    /// "procesor"/"rejestr" but assert *compatible* things: the older one
+    /// records that the emulator keeps the CPU registers in real local
+    /// variables, the newer one records that the compiler cannot keep a
+    /// *file-scope* variable in a register. The negation scope of "nie może
+    /// utrzymać …" contains the shared noun, and the old overlap rule fired on
+    /// that one noun alone — so saving the second memory retired the first as a
+    /// "Correction" (`valid_until` = the moment of the next save). A shared
+    /// domain noun is not a shared predicate.
+    #[test]
+    fn shared_domain_noun_alone_is_not_a_correction() {
+        const DECISION_DIDACTIC: &str = "# Decision: Kod dydaktyczny powstaje obok produkcyjnego.\n\n\
+            ## Context\n\nOptymalizacje w działającym emulatorze są celowe i nie da się ich \
+            usunąć bez utraty wydajności: rejestry emulowanego procesora trzymane w prawdziwych \
+            zmiennych lokalnych przez makra, renderowanie wprost do bufora obrazu, pomijanie \
+            niezmienionych pasm.";
+        const EVENT_REGISTERS: &str = "Objaw: próba przyspieszenia emulacji przez przeniesienie \
+            rejestrów emulowanego procesora do zmiennych plikowych nie dała żadnego zysku. \
+            Przyczyna: kompilator nie może utrzymać zmiennej plikowej w rejestrze procesora przez \
+            wywołanie, które sięga do pamięci, więc rejestry były zapisywane i wczytywane przy \
+            każdym dostępie.";
+        const CONCEPT_BANDWIDTH: &str = "Wniosek z pomiarów emulatora NES na mikrokontrolerze z \
+            panelem na jednym przewodzie: wąskim gardłem okazała się transmisja obrazu, a nie \
+            emulacja procesora.";
+
+        let registers_vs_decision = detector().detect(EVENT_REGISTERS, DECISION_DIDACTIC);
+        assert!(
+            !registers_vs_decision.positive,
+            "a shared domain noun was read as a correction: {:?}",
+            registers_vs_decision.evidence
+        );
+
+        let bandwidth_vs_registers = detector().detect(CONCEPT_BANDWIDTH, EVENT_REGISTERS);
+        assert!(
+            !bandwidth_vs_registers.positive,
+            "a contrast inside one sentence was read as a correction of another memory: {:?}",
+            bandwidth_vs_registers.evidence
+        );
+    }
+
+    /// "not impossible" asserts that a fix is possible, so the sentence agrees
+    /// with a memory saying the same thing. The dataset example this pins is
+    /// `en_neg_double_negative`: a false positive at 0.85 confidence, which is
+    /// the band the destructive path treats as strong evidence.
+    #[test]
+    fn litotes_is_not_a_denial() {
+        let r = detector().detect(
+            "It's not impossible to fix in this sprint.",
+            "We can fix this in the current sprint.",
+        );
+        assert!(
+            !r.positive,
+            "a double negative was read as a denial: {:?}",
+            r.evidence
+        );
+    }
+
+    /// A negation inside a condition describes a branch that may never be
+    /// taken, so it cannot deny a memory recording what actually is. Without
+    /// this rule the pair is caught only because "deploying" and "deploy" are
+    /// spelled differently — an accident, not a decision.
+    #[test]
+    fn negation_inside_a_condition_does_not_deny_a_memory() {
+        let r = detector().detect(
+            "If we don't deploy by Friday, we'll miss the release window.",
+            "We're deploying on Thursday this week.",
+        );
+        assert!(
+            !r.positive,
+            "a conditional was read as an assertion: {:?}",
+            r.evidence
         );
     }
 
