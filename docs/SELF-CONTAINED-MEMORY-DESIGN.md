@@ -227,8 +227,8 @@ Zakres migracji w dokumentacji i w bramce metadanych przechodzi na **v1–v17**.
 
 | Kryterium | Jak zmierzyć |
 |---|---|
-| Wskaźnik samodzielności | odsetek nowych wpisów bez ostrzeżenia bramki — **zmierzyć przed wdrożeniem**, żeby mieć punkt odniesienia |
-| Rozwiązywalność kotwic | odsetek `code_refs` w stanie `fresh` po 30 dniach |
+| Wskaźnik samodzielności | odsetek nowych wpisów bez ostrzeżenia bramki — **zmierzyć przed wdrożeniem**, żeby mieć punkt odniesienia. Odczyt: `vestige quality --json` → `rates.selfContainment` (mianownik to `clean + flagged`, nigdy `unchecked`) |
+| Rozwiązywalność kotwic | odsetek `code_refs` w stanie `fresh` po 30 dniach. Odczyt: `vestige quality --json` → `rates.anchorResolvability` po przebiegu audytu rot (consolidation go wykonuje); `anchors.unchecked` stoi obok wskaźnika, nie w nim |
 | Niemutowalność czasu zapisu | test: 100 wyszukiwań + strengthen + decay → `recorded_at` bez zmian |
 | Odtwarzalność obrazu | dla losowego wspomnienia: pełna linia czasu z `memory_revisions` (treść przed i po) |
 | Erasure | po `erase` nie zostaje ani treść, ani rewizje, ani kotwice |
@@ -369,6 +369,59 @@ konsolidacji). Dlatego:
   identyczny wynik na wersji sprzed zmiany obalił pokusę przypisania sobie poprawy.
 
 ---
+
+### 12.4 Implementacja (fala 5) — kontrakt
+
+**Jedno źródło liczb.** `Storage::memory_quality(since) -> MemoryQualityReport`
+(`crates/vestige-core/src/storage/sqlite/quality.rs`) liczy cztery miary jednym czytnikiem, żeby
+wszystkie opisywały tę samą chwilę — inaczej zapis wpadający między zapytania sprawia, że raport
+przestaje być audytowalny. Okno jest zawsze po `recorded_at` (`windowBasis` w payloadzie), bo
+pytanie brzmi „co w tym okresie zapisaliśmy", a nie „co powstało".
+
+**Trzy pułapki §12.1 są w kształcie danych, nie w komentarzu:**
+
+- `containment` ma trzy kategorie: `clean` / `flagged` / `unchecked` (`NULL` = bramka nie chodziła).
+  Wskaźnik `rates.selfContainment` liczy się **tylko** z `clean + flagged`; `unchecked` nigdy nie
+  wchodzi do licznika ani do mianownika.
+- `anchors.unchecked` (brak repozytorium lub rewizji = awaria środowiska) stoi **obok**
+  `rates.anchorResolvability`, która liczy się z `fresh + stale + orphaned`. Osobno raportowany jest rozkład,
+  bo `orphaned` to awaria kodu, a nie środowiska.
+- Puste okno zwraca `null`, nie `0.0` — brak pomiaru to nie zero procent.
+
+**Trzy wskaźniki jadą w payloadzie, nie w głowie czytelnika.** `rates.selfContainment`,
+`rates.anchorResolvability` i `rates.retrieval` liczy jedno miejsce w kodzie, bo pytanie „czy
+`unchecked` wchodzi do mianownika" jest dokładnie tą pomyłką, przed którą ostrzega §12.1 —
+konsument, który dzieli sam, może ją popełnić na własny rachunek. `null` znaczy „nie było przez co
+dzielić".
+
+**Użycie to dwie liczby, nie jedna.** `retrievedAtLeastOnce` liczy wspomnienia z wpisem
+`search_hit` w `memory_access_log` po czasie zapisu (pobranie), a `everAccessed` — dotknięte
+czymkolwiek, z logu **albo** z `memory_states.access_count` (bo `memory get` zapisuje tylko to
+drugie). Promocja nie jest pobraniem, a pobranie jest dostępem; te dwa zdania są w kodzie
+rozdzielone, bo scalone dają liczbę, której nie da się zinterpretować. Miary użycia **nie** są
+podłączone do wygaszania (§12.1).
+
+**Odrzucenia zna tylko proces.** Odrzucony zapis nic nie zostawia — to jest sens ścieżki `Reject` —
+więc liczy je rejestr `GateOutcomeCounters` (`rejected` / `flagged` w rozbiciu na `kind`),
+raportowany jako `process.*` z jawnym zastrzeżeniem, że opisuje **ten proces, nie magazyn**.
+Wystawiony też jako seria Prometheus `vestige_gate_outcomes_total{outcome,kind}`.
+
+**Powierzchnie.** Agenci czytają te liczby z `memory_health` (sekcja `quality`), skrypty i harness
+A/B — z `vestige quality [--since DATE] [--json]`.
+
+**Harness A/B (`benchmarks/dream-ab/`).** Uczciwość §12.2 jest w konstrukcji, nie w opisie:
+
+1. **Nigdy na żywym magazynie.** Kopia do katalogu tymczasowego; serwer widzi ją dzięki `HOME`
+   wskazującemu na katalog tymczasowy (ścieżka magazynu pochodzi z `directories::ProjectDirs`),
+   na własnym, losowym porcie.
+2. **Dwie próby na tym samym korpusie**: `control` (bez przebiegu) i `treatment` (z przebiegiem),
+   ta sama kopia, ten sam wsad.
+3. **Kontrola determinizmu**: dwa przebiegi bez zmian na dwóch identycznych kopiach muszą dać
+   identyczne raporty. Jeśli nie dają, harness to zgłasza, a nie uśrednia — `dream`/`reflect` nie
+   mają źródła losowości, więc rozjazd znaczy, że coś innego jest niedeterministyczne.
+4. **Trzy przebiegi, ten sam kierunek** — inaczej raport mówi „nierozstrzygnięte". Wynik negatywny
+   jest wynikiem i tak samo trafia do `RESULTS.md`: „nic nie zaszkodziło" to nie „pomogło".
+5. Każda liczba w `RESULTS.md` niesie komendę, którą powstała, oraz kolumnę kontrolną (§12.3).
 
 ## 13. Nota procesowa: jak weryfikować „test failuje przed zmianą"
 

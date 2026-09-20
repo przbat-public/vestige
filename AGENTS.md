@@ -298,6 +298,20 @@ restore: { "path": "/path/to/backup.json", "confirmed": true }     // no dry-run
 erase: { "action": "memory", "id": "uuid", "dry_run": true }       // GDPR Art. 17; "action":"tag" + "tag" for bulk. dry_run:false additionally requires "confirmed": true
 ```
 
+### Reading the four quality measures
+
+`memory_health` returns a `quality` object, and `vestige quality --json` prints the same numbers: self-containment, anchor resolvability, use, and the rejection/flag breakdown (`docs/SELF-CONTAINED-MEMORY-DESIGN.md` §12). Three of its fields are the ones people misread, so read them as they are written:
+
+| Field | What it means, and what it does not |
+|---|---|
+| `containment.unchecked` | The gate **never ran** on those memories (`self_contained IS NULL`). It is not a synonym for clean and is excluded from `rates.selfContainment`. A store that was never checked reports a rate over nothing, not 100%. |
+| `anchors.unchecked` | Nobody could check those anchors — no repository, or no revision recorded. It sits beside `rates.anchorResolvability`, not inside it, because that is an environment failure and `orphaned` is a code one. |
+| `useCounts` | Value, not retention: nothing decays because of these numbers. `retrievedAtLeastOnce` counts real retrievals (`search_hit` after the memory was written); `everAccessed` also counts a promotion or an explicit read. |
+| `rates.*` | `selfContainment`, `anchorResolvability`, `retrieval` — computed in one place so no consumer picks its own denominator. `null` means there was nothing to divide by. |
+| `process.*` | Counters from **this process**: a refused write stores nothing, so the store cannot remember it. A window-scoped rate is a property of the store; this one is a property of the run. |
+
+A rate of `null` means the window was empty — no measurement, not zero — and every empty window is a bug in the question you asked, not a clean store.
+
 ### erase — GDPR Article 17 Erasure
 ```json
 { "action": "memory", "id": "uuid" }

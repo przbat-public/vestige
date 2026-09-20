@@ -82,6 +82,7 @@ mod insights;
 mod intentions;
 mod maintenance;
 mod nodes;
+mod quality;
 mod records;
 mod review;
 mod revisions;
@@ -108,6 +109,10 @@ mod tests_revisions;
 
 pub use error::{ContradictionReport, Result, SmartIngestResult, StorageError};
 pub use init::Storage;
+pub use quality::{
+    AnchorCounts, ContainmentCounts, GateOutcomeCounters, MemoryQualityReport, ProcessGateCounters,
+    QUALITY_WINDOW_BASIS, QualityRates, RuleCount, UseCounts,
+};
 pub use records::{
     CodeRef, ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,
     IntentionRecord, MemoryRevision, MemoryStateRecord, RevisionKind, StateTransitionRecord,

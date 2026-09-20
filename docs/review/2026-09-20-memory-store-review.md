@@ -216,3 +216,30 @@ F7 jest jedyną pozycją dotykającą danych użytkownika; F1–F6 to kod i test
 - Tagi: 38 tematycznych, 21 `entity:*`.
 - Sonda detektora (usunięta po diagnozie) na trzech parach z magazynu: 3/3 `positive`,
   confidence 0,6 / 0,85 / 0,85 — werdykty i dowody w §3/U1.
+
+---
+
+## 6. Pomiar bazowy fali 5 (na kopii magazynu, 2026-09-20T17:28Z)
+
+`Storage::memory_quality(None)` na kopii magazynu (nigdy na żywym pliku; kopia z `-wal`/`-shm`).
+To jest liczba „przed", której wymaga §12 — bez niej każda późniejsza poprawa jest anegdotą.
+
+```json
+{"containment": {"clean": 7, "flagged": 0, "unchecked": 6, "total": 13},
+ "anchors":     {"fresh": 0, "stale": 0, "orphaned": 0, "unchecked": 0, "total": 0},
+ "useCounts":   {"retrievedAtLeastOnce": 8, "everAccessed": 10, "total": 13},
+ "process":     {"rejected": 0, "flagged": 0}}
+```
+
+Co z tego wynika — i czego **nie** wynika:
+
+- **Wskaźnik samoistności to 1,0, ale nad siedmioma wspomnieniami.** Sześć z trzynastu
+  (`unchecked`) nigdy nie widziało bramki, bo przyszły przez `codebase` — dokładnie ta luka, którą
+  domknęła fala 4/5. To jest pułapka §12.1 w działaniu: gdyby `NULL` wliczyć do „czystych",
+  magazyn, którego połowy nikt nie sprawdził, raportowałby 100% jakości.
+- **Rozwiązywalności kotwic nie da się zmierzyć: `total = 0`.** Te wspomnienia powstały przed falą 3,
+  więc nie niosą ani jednej kotwicy. Kryterium „odsetek `fresh` po 30 dniach" jest dla tego magazynu
+  **niemierzalne do czasu, aż powstaną wspomnienia z kotwicami** — i tak to trzeba raportować, a nie
+  wpisywać 0%.
+- **Użycie: 8 z 13 pobranych (61,5%), 10 z 13 dotkniętych.** Miara wartości, nie retencji; nic na jej
+  podstawie nie wygasa.
