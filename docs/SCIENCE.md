@@ -22,7 +22,9 @@ Vestige is **inspired by** memory research. Here's what's actually implemented:
 
 ## Prediction Error Gating
 
-When you call `smart_ingest`, Vestige compares new content against existing memories:
+Before any comparison, every write passes the self-containedness gate. Content the repository already owns — a code block, a directory tree, copied source, a coverage figure, a version number — is refused outright (`decision: "reject"`, `stored: false`, nothing written), and a memory that would not be readable without the conversation that produced it is stored but flagged (`self_contained.requiresContext` plus `findings[]` naming the offending `kind`, `span` and a `hint`). See [AGENTS.md → Reading the self-containedness gate](../AGENTS.md).
+
+Only then does `smart_ingest` compare new content against existing memories:
 
 | Similarity | Action | Why |
 |------------|--------|-----|

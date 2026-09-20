@@ -26,7 +26,7 @@ At the start of every conversation, call `session_context` (one MCP call replace
 Then act on `automationTriggers` in the response:
 - `needsDream` → call `dream`
 - `needsBackup` → call `backup`
-- `needsGc` → call `gc` with `dry_run: true`, review, then delete
+- `needsGc` → call `gc` with `dry_run: true`, review, then run it again with `confirmed: true` to actually delete
 
 Operate in proactive memory mode — save important info via `smart_ingest` without being asked.
 ```
@@ -66,8 +66,9 @@ Then check `automationTriggers` in the response and act on them silently.
 
 ### After Solving a Bug or Error
 IMMEDIATELY save with `smart_ingest`:
-- Content: "BUG FIX: [error message] | Root cause: [why] | Solution: [how]"
+- Content: "BUG FIX: [what broke] | Root cause: [why it broke] | Lesson: [the rule to apply next time]"
 - Tags: ["bug-fix", "project-name"]
+- File paths and line numbers stay **out of the content** (a stored path breaks silently in both directions) — put them in `source` instead. The diff is already in the repository; the lesson is the part that is nowhere else.
 
 ### After Learning User Preferences
 Save preferences without asking:
@@ -110,6 +111,12 @@ Use `codebase` → `remember_pattern`:
 **Promote** when: User confirms helpful, solution worked, info was accurate
 **Demote** when: User corrects mistake, info was wrong, memory led to bad outcome
 **Never save**: Secrets/API keys, temporary debug info, trivial information
+**State the future decision this changes, or do not save.** If you cannot name the decision a memory would alter, it is a description — and descriptions of the code belong in the repository, where they cannot go stale unnoticed.
+
+**Read the write response.** Every save is checked for readability without the conversation, and there are three outcomes:
+- no `self_contained` key — the gate found nothing;
+- `self_contained: { requiresContext: true, findings: [...] }` — **written and flagged**; rewrite it using each finding's `kind`, `span` and `hint`, and do not delete it;
+- `decision: "reject"` with `stored: false` — **nothing was written**; the content is something the repository already owns. Save the lesson or the decision instead; do not retry the same text.
 
 ---
 

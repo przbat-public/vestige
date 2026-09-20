@@ -44,7 +44,7 @@ EOF
 
 **Step 3:** Restart Xcode.
 
-That's it. Type `/context` in the Agent panel and you'll see 23 Vestige tools loaded alongside Xcode's built-in tools.
+That's it. Type `/context` in the Agent panel and you'll see 29 Vestige tools loaded alongside Xcode's built-in tools.
 
 ## What Happened Next
 

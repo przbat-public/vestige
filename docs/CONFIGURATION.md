@@ -91,9 +91,13 @@ vestige stats --tagging          # Retention distribution by tag
 vestige stats --states           # Cognitive state breakdown
 vestige health                   # System health check
 vestige consolidate              # Run FSRS-6 consolidation now
+vestige erase --tag <tag> --dry-run   # GDPR Art. 17: preview an erasure
+vestige erase --tag <tag> --confirm   # …and perform it (irreversible)
 vestige dashboard                # Open the 3D dashboard in your browser
 vestige-restore <file.json>     # Restore from a JSON backup (separate binary)
 ```
+
+`vestige erase` takes exactly one target (`--id <uuid>` or `--tag <tag>`) and refuses without `--confirm`, mirroring the MCP `erase` tool and `POST /api/maintenance/erase`; it is the only path that also removes the memory's content history and derived data (see [AGENTS.md → erase](../AGENTS.md)).
 
 `vestige-restore` is shipped as its own crate so it builds without the fastembed/USearch dependency tree.
 

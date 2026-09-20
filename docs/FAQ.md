@@ -242,6 +242,7 @@ In Vestige: Both strengths are tracked separately and factor into search ranking
 
 The killer feature. When you call `smart_ingest`, Vestige doesn't just blindly add memories:
 
+0. **Refuses first.** Every write is checked for readability without the conversation that produced it. Content the repository already owns — a code block, a directory tree, copied source, a coverage figure, a version number — comes back as `decision: "reject"` / `stored: false` and **nothing is written**; a memory that leans on the conversation is written but flagged (`self_contained.requiresContext`, with `findings[]` naming the exact `span` and what to write instead). See [AGENTS.md → Reading the self-containedness gate](../AGENTS.md).
 1. **Compares** new content against all existing memories (via semantic similarity)
 2. **Decides** based on how novel/redundant it is:
 
