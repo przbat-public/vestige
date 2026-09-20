@@ -533,3 +533,89 @@ fn supersede_records_a_revision_naming_the_replacement() {
         retired.retrieval_strength
     );
 }
+
+// ============================================================================
+// V18: the self-containedness marker
+// ============================================================================
+
+/// The marker has to survive the mapper, not only the INSERT: a reader that
+/// cannot see it cannot act on it, and the whole reason to persist it is that
+/// someone will look at this memory months later.
+#[test]
+fn the_self_contained_marker_round_trips_through_the_node_mapper() {
+    let storage = create_test_storage();
+
+    let flagged = storage
+        .ingest(IngestInput {
+            content: "BUG FIX: naprawiłem to, co omawialiśmy".to_string(),
+            node_type: "fact".to_string(),
+            self_contained: Some(false),
+            self_contained_findings: Some(serde_json::json!([
+                { "kind": "discourse_deixis", "span": "omawialiśmy", "hint": "nazwij, co było omawiane" }
+            ])),
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(flagged.self_contained, Some(false));
+    let findings = flagged
+        .self_contained_findings
+        .as_ref()
+        .and_then(|v| v.as_array())
+        .expect("the findings must come back with the marker");
+    assert_eq!(findings[0]["kind"], "discourse_deixis");
+}
+
+/// The distinction the column exists for: a row no gate has seen is not a row
+/// that passed. Defaulting the unchecked case to `true` would let an audit
+/// report a clean store it never checked.
+#[test]
+fn a_memory_no_gate_has_seen_is_unmarked_not_clean() {
+    let storage = create_test_storage();
+    let node = ingest(&storage, "A memory written by a path that runs no gate");
+
+    assert_eq!(
+        node.self_contained, None,
+        "NULL means 'not checked'; claiming a pass would be a fabricated verdict"
+    );
+    assert_eq!(node.self_contained_findings, None);
+}
+
+/// Wave 1 recorded `actor` as NULL on every path. The edit path is the one a
+/// tool drives, so it is the one where the identity has to reach the row.
+#[test]
+fn an_edit_records_the_actor_it_was_given() {
+    let storage = create_test_storage();
+    let node = ingest(&storage, "The deploy window is Thursday at 09:00 UTC");
+
+    storage
+        .update_node_content_with_revision_as(
+            &node.id,
+            "The deploy window is Friday at 09:00 UTC",
+            Some("corrected after the freeze moved"),
+            Some(r#"{"agent":"cursor","session_id":"session-42"}"#),
+        )
+        .unwrap();
+
+    let revisions = storage.get_memory_revisions(&node.id, 10).unwrap();
+    let edit = revisions
+        .iter()
+        .find(|r| r.kind == RevisionKind::Edit)
+        .expect("the edit must be in the history");
+    assert_eq!(
+        edit.actor.as_deref(),
+        Some(r#"{"agent":"cursor","session_id":"session-42"}"#),
+        "the revision must carry the actor it was handed, verbatim"
+    );
+
+    // The old signature still works and still leaves the column NULL, because
+    // the callers that use it have no identity to supply.
+    storage
+        .update_node_content(&node.id, "The deploy window is Saturday at 09:00 UTC")
+        .unwrap();
+    let revisions = storage.get_memory_revisions(&node.id, 10).unwrap();
+    assert_eq!(
+        revisions[0].actor, None,
+        "a caller that knows no actor must not have one invented for it"
+    );
+}

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rusqlite::params;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 
@@ -19,6 +20,25 @@ async fn test_storage() -> (Arc<Storage>, TempDir) {
     let dir = TempDir::new().unwrap();
     let storage = Storage::new(Some(dir.path().join("test.db"))).unwrap();
     (Arc::new(storage), dir)
+}
+
+/// A direct connection to the store file, for assertions about what was
+/// written.
+///
+/// Deliberately not a `Storage` read: "was anything written?" asked through the
+/// same layer that would have done the writing can be answered by a cache or a
+/// filter, and the claim under test is about the file. The `Storage` writer is
+/// still open in WAL mode, which permits a second reader.
+fn store_conn(dir: &TempDir) -> rusqlite::Connection {
+    rusqlite::Connection::open(dir.path().join("test.db")).unwrap()
+}
+
+/// Row count straight from a table, no read path in between.
+fn count_rows(conn: &rusqlite::Connection, table: &str) -> i64 {
+    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+        row.get(0)
+    })
+    .unwrap_or_else(|e| panic!("counting {table}: {e}"))
 }
 
 #[tokio::test]
@@ -428,8 +448,10 @@ async fn test_batch_ingest() {
     assert_eq!(value["summary"]["total"], 2);
 }
 
+/// An empty item is refused, not "skipped": a skip reads as work deferred to
+/// later, and this content must never be stored at all.
 #[tokio::test]
-async fn test_batch_skips_empty_content() {
+async fn test_batch_rejects_empty_content() {
     let (storage, _dir) = test_storage().await;
     let result = execute(
         &storage,
@@ -445,7 +467,10 @@ async fn test_batch_skips_empty_content() {
     .await;
     assert!(result.is_ok());
     let value = result.unwrap();
-    assert_eq!(value["summary"]["skipped"], 1);
+    assert_eq!(value["summary"]["rejected"], 1);
+    assert_eq!(value["summary"]["skipped"], 0);
+    assert_eq!(value["results"][1]["decision"], "reject");
+    assert_eq!(value["results"][1]["stored"], false);
 }
 
 #[tokio::test]
@@ -490,7 +515,7 @@ async fn test_batch_exactly_20_items_succeeds() {
 }
 
 #[tokio::test]
-async fn test_batch_skips_whitespace_only_content() {
+async fn test_batch_rejects_whitespace_only_content() {
     let (storage, _dir) = test_storage().await;
     let result = execute(
         &storage,
@@ -505,7 +530,7 @@ async fn test_batch_skips_whitespace_only_content() {
     .await;
     assert!(result.is_ok());
     let value = result.unwrap();
-    assert_eq!(value["summary"]["skipped"], 1);
+    assert_eq!(value["summary"]["rejected"], 1);
     assert_eq!(value["summary"]["created"], 1);
 }
 
@@ -567,12 +592,14 @@ async fn test_batch_results_array_matches_items() {
     assert_eq!(results.len(), 3);
     assert_eq!(results[0]["index"], 0);
     assert_eq!(results[1]["index"], 1);
-    assert_eq!(results[1]["status"], "skipped");
+    assert_eq!(results[1]["status"], "rejected");
     assert_eq!(results[2]["index"], 2);
 }
 
+/// A batch that refuses every item is not a failed batch: the gate did its job,
+/// and `success` tracks transport/ingest errors, not refusals.
 #[tokio::test]
-async fn test_batch_success_true_when_only_skipped() {
+async fn test_batch_success_true_when_only_rejected() {
     let (storage, _dir) = test_storage().await;
     let result = execute(
         &storage,
@@ -586,9 +613,9 @@ async fn test_batch_success_true_when_only_skipped() {
     )
     .await;
     let value = result.unwrap();
-    assert_eq!(value["success"], true); // skipped ≠ errors
+    assert_eq!(value["success"], true); // refused ≠ errors
     assert_eq!(value["summary"]["errors"], 0);
-    assert_eq!(value["summary"]["skipped"], 2);
+    assert_eq!(value["summary"]["rejected"], 2);
 }
 
 #[tokio::test]
@@ -774,4 +801,198 @@ async fn test_no_compound_warning_for_atomic() {
         value.get("compound_content_warning").is_none()
             || value["compound_content_warning"].is_null()
     );
+}
+
+// ========================================================================
+// WRITE GATE (wave 2): refusal writes nothing, a flag is persisted, and a
+// tool-driven write says who wrote it.
+// ========================================================================
+
+/// The refusal, checked against the store rather than the response.
+///
+/// A test that only asserted `decision == "reject"` would pass while the memory
+/// sat in `knowledge_nodes`, in the FTS index and in the embed queue — which is
+/// exactly what the pre-wave-2 code did with this content: it wrote it and
+/// labelled it. So every write path is attempted here and every table the write
+/// would have touched is counted afterwards.
+#[tokio::test]
+async fn refused_content_is_not_written_anywhere() {
+    let (storage, dir) = test_storage().await;
+    let cognitive = test_cognitive();
+    // A code block: the repository already stores this, so a copy of it is
+    // wrong after the next commit with nothing to signal it.
+    let content = "```rust\nfn merge(a: &[f32], b: &[f32]) -> Vec<f32> {\n    a.iter().chain(b).copied().collect()\n}\n```";
+
+    // Both doors into the write path: the prediction-error path and the
+    // force_create path that bypasses it.
+    for force in [false, true] {
+        let result = execute(
+            &storage,
+            &cognitive,
+            Some(serde_json::json!({ "content": content, "forceCreate": force })),
+        )
+        .await
+        .expect("a refusal is an answer, not a transport error");
+
+        assert_eq!(
+            result["decision"], "reject",
+            "forceCreate={force}: {result}"
+        );
+        assert_eq!(result["success"], false, "forceCreate={force}: {result}");
+        assert_eq!(
+            result["stored"], false,
+            "the refusal must state that nothing was written: {result}"
+        );
+        assert!(
+            result["nodeId"].is_null(),
+            "a refused memory has no id to hand back: {result}"
+        );
+        assert_eq!(
+            result["findings"][0]["kind"], "derivable_from_repo",
+            "the refusal must name the rule that fired: {result}"
+        );
+        assert!(
+            result["guidance"]
+                .as_str()
+                .is_some_and(|g| g.contains("AGENTS.md")),
+            "the refusal must say what to do instead: {result}"
+        );
+    }
+
+    let conn = store_conn(&dir);
+    assert_eq!(
+        count_rows(&conn, "knowledge_nodes"),
+        0,
+        "a refused memory must not exist"
+    );
+    assert_eq!(
+        count_rows(&conn, "memory_revisions"),
+        0,
+        "a memory that was never written has no history"
+    );
+    assert_eq!(
+        count_rows(&conn, "node_embeddings"),
+        0,
+        "a refused memory must not be embedded"
+    );
+    assert_eq!(
+        count_rows(&conn, "knowledge_fts"),
+        0,
+        "a refused memory must not be searchable"
+    );
+
+    let stats = storage.get_stats().unwrap();
+    assert_eq!(stats.total_nodes, 0);
+    assert_eq!(stats.nodes_with_embeddings, 0);
+    assert!(
+        storage.keyword_search("merge", 5, 0.0).unwrap().is_empty(),
+        "a refused memory must not be reachable through search"
+    );
+}
+
+/// The gate's other outcome, and the one the design makes the default: a
+/// fixable memory is written and flagged. The flag has to outlive the response,
+/// or nobody can find the memory later to fix it.
+#[tokio::test]
+async fn a_flagged_memory_is_stored_retrievable_and_marked() {
+    let (storage, dir) = test_storage().await;
+    let content = "BUG FIX: naprawiłem to, co omawialiśmy; Files: src/search.rs:112";
+    let result = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({ "content": content, "forceCreate": true })),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result["self_contained"]["requiresContext"], true,
+        "a fixable memory is flagged, never refused: {result}"
+    );
+    assert_eq!(result["self_contained"]["rejected"], false);
+    let node_id = result["nodeId"]
+        .as_str()
+        .expect("a flagged memory is still a memory");
+
+    // Stored and readable.
+    let node = storage
+        .get_node(node_id)
+        .unwrap()
+        .expect("the flagged memory must be retrievable by id");
+    assert_eq!(node.content, content);
+
+    // Marked, in the file rather than in the mapper: 0 is "flagged", NULL
+    // would be "never checked", and the difference is the whole point.
+    let conn = store_conn(&dir);
+    let (marker, findings): (Option<i64>, Option<String>) = conn
+        .query_row(
+            "SELECT self_contained, self_contained_findings FROM knowledge_nodes WHERE id = ?1",
+            params![node_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(marker, Some(0), "the flag must be persisted");
+    let findings: serde_json::Value =
+        serde_json::from_str(&findings.expect("the reason must be persisted with it")).unwrap();
+    assert!(
+        findings.as_array().is_some_and(|f| !f.is_empty()),
+        "a marker without its findings is unforgeable only in the bad sense: {findings}"
+    );
+
+    // Still searchable: flagging is not quarantine.
+    let hits = storage.keyword_search("naprawiłem", 5, 0.0).unwrap();
+    assert!(
+        hits.iter().any(|hit| hit.id == node_id),
+        "a flagged memory must stay in the index"
+    );
+}
+
+/// Wave 1 wrote `memory_revisions.actor` as NULL on every path because the
+/// layer holding the identity is this one. An audit trail that cannot say who
+/// wrote a version answers half the question it exists for.
+#[tokio::test]
+async fn a_tool_driven_write_records_who_wrote_it() {
+    let (storage, _dir) = test_storage().await;
+    let cognitive = test_cognitive();
+
+    let single = execute(
+        &storage,
+        &cognitive,
+        Some(serde_json::json!({
+            "content": "Vestige records the writer on every revision it appends",
+            "agent": "cursor",
+            "session_id": "session-42",
+        })),
+    )
+    .await
+    .unwrap();
+    let single_id = single["nodeId"].as_str().unwrap();
+
+    let batch = execute(
+        &storage,
+        &cognitive,
+        Some(serde_json::json!({
+            "items": [{ "content": "A batch memory written by the same agent" }],
+            "agent": "cursor",
+            "session_id": "session-42",
+        })),
+    )
+    .await
+    .unwrap();
+    let batch_id = batch["results"][0]["nodeId"].as_str().unwrap();
+
+    for (label, node_id) in [("single", single_id), ("batch", batch_id)] {
+        let revisions = storage.get_memory_revisions(node_id, 10).unwrap();
+        let create = revisions
+            .first()
+            .unwrap_or_else(|| panic!("{label}: a memory starts with a create revision"));
+        let actor = create
+            .actor
+            .as_deref()
+            .unwrap_or_else(|| panic!("{label}: the actor must be recorded, not left NULL"));
+        assert!(
+            actor.contains("cursor") && actor.contains("session-42"),
+            "{label}: the revision must name the agent and the conversation, got {actor}"
+        );
+    }
 }

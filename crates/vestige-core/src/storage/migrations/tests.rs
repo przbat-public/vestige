@@ -340,21 +340,28 @@ fn v15_rebuilds_the_index_for_rows_written_before_the_upgrade() {
 // V17 — record time + content history
 // ============================================================================
 
-/// The registry must stay contiguous and reach v17 on a fresh database. A gap
-/// (say v16 → v18) would be applied by the runner anyway, since it only
-/// compares numbers — the missing version's schema would simply never exist.
+/// The registry must stay contiguous and apply through its last entry on a
+/// fresh database. A gap (say v16 → v18) would be applied by the runner anyway,
+/// since it only compares numbers — the missing version's schema would simply
+/// never exist.
+///
+/// Written against `MIGRATIONS.last()` rather than a literal: the invariant is
+/// contiguity, and pinning the number here as well as in the per-migration
+/// tests turned every new migration into a two-place edit whose failure said
+/// nothing about the registry.
 #[test]
-fn v17_fresh_database_reaches_version_17_with_a_contiguous_registry() {
+fn fresh_database_reaches_the_last_registered_version_with_a_contiguous_registry() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_migrations(&conn).unwrap();
 
-    assert_eq!(get_current_version(&conn).unwrap(), 17);
+    let last = MIGRATIONS.last().unwrap().version;
+    assert_eq!(get_current_version(&conn).unwrap(), last);
 
     let versions: Vec<u32> = MIGRATIONS.iter().map(|m| m.version).collect();
-    let expected: Vec<u32> = (1..=17).collect();
+    let expected: Vec<u32> = (1..=last).collect();
     assert_eq!(
         versions, expected,
-        "migration versions must stay contiguous and end at 17"
+        "migration versions must stay contiguous through {last}"
     );
 }
 
@@ -472,4 +479,58 @@ fn v17_rolls_back_when_a_statement_fails() {
         )
         .unwrap();
     assert!(!has_table, "the new table survived the rollback");
+}
+
+// ============================================================================
+// V18 — the self-containedness marker
+// ============================================================================
+
+/// V18 adds the marker columns and deliberately does **not** backfill them.
+///
+/// A memory written before the gate existed has not passed it, and a backfill
+/// to `1` would make the one query this column exists for — "which memories
+/// need their conversation?" — report a clean store it never checked.
+#[test]
+fn v18_leaves_rows_written_before_it_unmarked() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_pending(&conn, &MIGRATIONS[..17], 0).unwrap();
+    assert_eq!(get_current_version(&conn).unwrap(), 17);
+
+    conn.execute(
+        "INSERT INTO knowledge_nodes (id, content, node_type, created_at, updated_at, last_accessed, tags)
+         VALUES ('legacy-1', 'written before the gate existed', 'fact',
+                 '2026-03-04T05:06:07+00:00', '2026-03-04T05:06:07+00:00',
+                 '2026-04-01T00:00:00+00:00', '[]')",
+        [],
+    )
+    .unwrap();
+
+    apply_pending(&conn, &MIGRATIONS[..18], 17).unwrap();
+    assert_eq!(get_current_version(&conn).unwrap(), 18);
+
+    let (marker, findings): (Option<i64>, Option<String>) = conn
+        .query_row(
+            "SELECT self_contained, self_contained_findings FROM knowledge_nodes WHERE id = 'legacy-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        marker, None,
+        "an unchecked row must stay NULL, not be backfilled to 'clean'"
+    );
+    assert_eq!(findings, None);
+
+    let has_index: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master
+             WHERE type = 'index' AND name = 'idx_nodes_flagged_self_contained'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        has_index,
+        "the partial index is what keeps 'find the flagged memories' off a full scan"
+    );
 }

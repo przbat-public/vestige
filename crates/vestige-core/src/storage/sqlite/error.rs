@@ -21,6 +21,14 @@ pub enum StorageError {
     /// Initialization error
     #[error("Initialization error: {0}")]
     Init(String),
+    /// A write the gate refused to perform.
+    ///
+    /// Separate from the variants above because it is not a defect in the
+    /// store: the caller asked to remember something that must not be
+    /// remembered, and the answer is "no, and here is why". Reporting it as
+    /// `Init` or `Database` would make an audited refusal look like a bug.
+    #[error("Write refused: {0}")]
+    Rejected(String),
 }
 
 /// Storage result type

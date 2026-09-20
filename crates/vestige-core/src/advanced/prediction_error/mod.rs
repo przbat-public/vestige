@@ -12,7 +12,7 @@
 //!
 //! - `constants` — tunable thresholds (similarity, correction, candidate cap)
 //! - `decision` — `GateDecision`, `CreateReason`, `UpdateType`,
-//!   `SupersedeReason`, `MergeStrategy`
+//!   `SupersedeReason`, `MergeStrategy`, `GateFinding`
 //! - `candidate` — `CandidateMemory`, `SimilarityResult`
 //! - `stats` — `GateStats`
 //! - `similarity` — `cosine_similarity` helper
@@ -37,7 +37,9 @@ mod stats;
 mod tests;
 
 pub use candidate::{CandidateMemory, SimilarityResult};
-pub use decision::{CreateReason, GateDecision, MergeStrategy, SupersedeReason, UpdateType};
+pub use decision::{
+    CreateReason, GateDecision, GateFinding, MergeStrategy, SupersedeReason, UpdateType,
+};
 pub use gate::{EvaluationIntent, PredictionErrorConfig, PredictionErrorGate};
 pub use similarity::cosine_similarity;
 pub use stats::GateStats;

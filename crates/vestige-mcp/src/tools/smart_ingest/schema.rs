@@ -11,6 +11,24 @@ const NODE_TYPES: [&str; 8] = [
     "fact", "concept", "event", "person", "place", "note", "pattern", "decision",
 ];
 
+/// What every memory has to satisfy, stated in the schema because a model reads
+/// the schema before it writes: one fact, understandable without the
+/// conversation, and worth a future decision.
+///
+/// The last two sentences are not style advice — the write gate enforces them
+/// (`self_contained` warning, `decision: "reject"`), so a caller that has not
+/// read them spends a call on content that is flagged or refused.
+const CONTENT_CONTRACT: &str = "The content to remember. MUST be atomic: one fact, one decision, one event per call. \
+     MUST stand alone: name what and whom it is about (not \"the fix\", \"as discussed\", \"he\"), \
+     and give absolute dates instead of \"yesterday\" or \"next week\". \
+     State the future decision this changes; if it only describes the code, the repository is a \
+     better place for it. File paths and line numbers stay out of the content — pass them in \
+     `source` instead, because a stored path rots silently. \
+     Content the repository already owns (a code block, a directory tree, copied source, a version \
+     number, a coverage figure) is refused with decision=\"reject\" and nothing is written; \
+     everything fixable is written and flagged with a self_contained warning. \
+     Multi-topic content triggers compound_content_warning — split it into batch items.";
+
 /// Input schema for smart_ingest tool
 ///
 /// Supports two modes:
@@ -22,7 +40,7 @@ pub fn schema() -> Value {
         "properties": {
             "content": {
                 "type": "string",
-                "description": "The content to remember. MUST be atomic: one fact, one decision, one event per call. Multi-topic content triggers compound_content_warning — split into batch items instead. (Single mode)"
+                "description": format!("{} (Single mode)", CONTENT_CONTRACT)
             },
             "node_type": {
                 "type": "string",
@@ -62,7 +80,7 @@ pub fn schema() -> Value {
                     "properties": {
                         "content": {
                             "type": "string",
-                            "description": "The content to remember"
+                            "description": format!("{} Each refused item comes back with status \"rejected\" and is not written.", CONTENT_CONTRACT)
                         },
                         "tags": {
                             "type": "array",
@@ -133,5 +151,35 @@ mod tests {
         // Mirrors the runtime check (`items.len() > 20` -> error), so a model can
         // see the cap before spending a call on it.
         assert_eq!(schema()["properties"]["items"]["maxItems"], 20);
+    }
+
+    /// The content contract is the part of the schema a caller has to obey, and
+    /// the gate enforces it. Dropping it would leave a model discovering the
+    /// rules by having its memories refused, so if someone trims these
+    /// descriptions back to "The content to remember", this fails.
+    #[test]
+    fn both_modes_state_the_content_contract() {
+        let schema = schema();
+        let single = schema["properties"]["content"]["description"]
+            .as_str()
+            .expect("single-mode content description");
+        let batch = schema["properties"]["items"]["items"]["properties"]["content"]["description"]
+            .as_str()
+            .expect("batch item content description");
+
+        for (mode, description) in [("single", single), ("batch", batch)] {
+            for required in [
+                "atomic",
+                "stand alone",
+                "decision",
+                "reject",
+                "self_contained",
+            ] {
+                assert!(
+                    description.contains(required),
+                    "{mode} mode content description must state '{required}': {description}"
+                );
+            }
+        }
     }
 }

@@ -90,4 +90,9 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "Record time (recorded_at) and append-only content history (memory_revisions)",
         up: MIGRATION_V17_UP,
     },
+    Migration {
+        version: 18,
+        description: "Self-containedness marker on knowledge_nodes (self_contained + findings)",
+        up: MIGRATION_V18_UP,
+    },
 ];

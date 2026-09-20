@@ -240,6 +240,7 @@ pub use advanced::{
     EmbeddingStrategy,
     EvaluationIntent,
     GateDecision,
+    GateFinding,
     GateStats,
     // Topic Hub candidate (Proposal A) — draft hub emitted by MemoryDreamer
     HubCandidate,
@@ -506,6 +507,7 @@ pub mod prelude {
         CrossProjectLearner,
         EvaluationIntent,
         GateDecision,
+        GateFinding,
         ImportanceTracker,
         IntentDetector,
         LabileState,

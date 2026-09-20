@@ -9,13 +9,13 @@ use vestige_core::{ContentType, ImportanceContext, IngestInput, Storage};
 
 use crate::cognitive::CognitiveEngine;
 
-use super::args::SmartIngestArgs;
+use super::args::{SmartIngestArgs, actor_of};
 use super::batch::execute_batch;
 use super::compound::detect_compound_content;
 #[cfg(feature = "preprocessing")]
 use super::post_ingest::create_relation_edges;
 use super::post_ingest::{run_post_ingest, run_post_ingest_with_neighbors};
-use super::self_contained::detect as detect_self_containment;
+use super::self_contained::{detect as detect_self_containment, reject_response};
 
 pub async fn execute(
     storage: &Arc<Storage>,
@@ -27,10 +27,15 @@ pub async fn execute(
         None => return Err("Missing arguments".to_string()),
     };
 
+    // Who is writing. Built before any field of `args` is consumed, and used for
+    // every revision this call appends — the actor is a property of the write,
+    // not of each individual step of it.
+    let actor = actor_of(args.agent.as_deref(), args.session_id.as_deref());
+
     // Detect mode: batch (items present) vs single (content present)
     if let Some(items) = args.items {
         let global_force = args.force_create.unwrap_or(false);
-        return execute_batch(storage, cognitive, items, global_force).await;
+        return execute_batch(storage, cognitive, items, global_force, actor.as_deref()).await;
     }
 
     // Single mode: content is required
@@ -38,9 +43,19 @@ pub async fn execute(
         "Missing 'content' field. Provide 'content' for single mode or 'items' for batch mode.",
     )?;
 
-    // Validate content
+    // Validate content. Empty content is refused here rather than turned into a
+    // `Reject` decision: it never reaches the gate (there is nothing to
+    // analyse), and the transport already carries it as a tool error, which is
+    // the louder refusal of the two. The message still names the alternative,
+    // because "Content cannot be empty" alone invites the caller to pad the
+    // string until it is accepted.
     if content.trim().is_empty() {
-        return Err("Content cannot be empty".to_string());
+        return Err(
+            "Content cannot be empty — there is nothing to remember, and nothing was written. \
+             Save the lesson or the decision this was meant to record instead (see AGENTS.md, \
+             Mandatory Save Gates)."
+                .to_string(),
+        );
     }
 
     if content.len() > 1_000_000 {
@@ -143,6 +158,16 @@ pub async fn execute(
         pp_valid_from.is_some() || pp_valid_until.is_some(),
     );
 
+    // The gate's one non-negotiable outcome, and the only place it can be
+    // enforced correctly: three write paths leave this function below (forced
+    // create, prediction-error `smart_ingest`, the no-embeddings fallback), and
+    // a check inside any single one of them would leave the other two free to
+    // store a copy of the repository. Nothing has been written yet — the first
+    // write is the storage call after this return.
+    if let Some(refusal) = reject_response(&self_contained) {
+        return Ok(refusal);
+    }
+
     // Merge auto-tags from preprocessing with user-provided tags
     tags.extend(pp_tags);
 
@@ -168,6 +193,13 @@ pub async fn execute(
         valid_from: pp_valid_from,
         valid_until: pp_valid_until,
         provenance: provenance_with_importance,
+        // The gate ran on this content, so the verdict is recorded with the
+        // memory instead of only in a response the caller may not keep. Without
+        // it, a memory that needs its conversation is indistinguishable from one
+        // that stands alone the moment the response is gone.
+        self_contained: Some(self_contained.marker()),
+        self_contained_findings: self_contained.findings_json(),
+        actor,
         ..Default::default()
     };
 
@@ -260,7 +292,9 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
-        if self_contained.requires_context() || self_contained.is_rejected() {
+        // Attached only when the gate found something: `ok: true` on every
+        // response would be noise that hides the flagged ones.
+        if self_contained.requires_context() {
             response["self_contained"] = self_contained.to_json();
         }
         if let Some(sim) = nearest_sim
@@ -342,7 +376,9 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
-        if self_contained.requires_context() || self_contained.is_rejected() {
+        // Attached only when the gate found something: `ok: true` on every
+        // response would be noise that hides the flagged ones.
+        if self_contained.requires_context() {
             response["self_contained"] = self_contained.to_json();
         }
         // Near-duplicate advisory threshold.
@@ -401,7 +437,9 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
-        if self_contained.requires_context() || self_contained.is_rejected() {
+        // Attached only when the gate found something: `ok: true` on every
+        // response would be noise that hides the flagged ones.
+        if self_contained.requires_context() {
             response["self_contained"] = self_contained.to_json();
         }
         Ok(response)

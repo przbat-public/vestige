@@ -11,17 +11,23 @@ use crate::cognitive::CognitiveEngine;
 
 use super::args::BatchItem;
 use super::post_ingest::run_post_ingest;
+use super::self_contained::{detect as detect_self_containment, reject_response};
 
 /// Execute batch mode: process up to 20 items, each with full cognitive pipeline.
 ///
 /// Unlike the old `session_checkpoint` tool, batch mode runs the full cognitive
 /// pre-ingest (importance scoring, intent detection) and post-ingest (synaptic
 /// tagging, novelty update, hippocampal indexing) pipelines per item.
+///
+/// `actor` is the caller-supplied identity (`agent` / `session_id`) recorded on
+/// every revision the batch appends, so a memory written by a batch carries the
+/// same "who wrote this" as one written singly.
 pub(super) async fn execute_batch(
     storage: &Arc<Storage>,
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     items: Vec<BatchItem>,
     global_force_create: bool,
+    actor: Option<&str>,
 ) -> Result<Value, String> {
     if items.is_empty() {
         return Err("Items array cannot be empty".to_string());
@@ -43,16 +49,25 @@ pub(super) async fn execute_batch(
     let mut updated = 0u32;
     let mut skipped = 0u32;
     let mut errors = 0u32;
+    let mut rejected = 0u32;
 
     for (i, item) in items.into_iter().enumerate() {
-        // Skip empty content
+        // An empty item is the gate's second refusal case, and it is refused
+        // here in the same vocabulary as the first: `rejected`, never
+        // `skipped`. "Skipped" reads as a queue that may be drained later,
+        // which is exactly the wrong expectation for content that must not be
+        // stored at all.
         if item.content.trim().is_empty() {
             results.push(serde_json::json!({
                 "index": i,
-                "status": "skipped",
-                "reason": "Empty content"
+                "status": "rejected",
+                "decision": "reject",
+                "stored": false,
+                "reason": "Empty content — there is nothing to remember",
+                "guidance": "Nothing was written. Save the lesson or the decision this was meant \
+                             to record instead (see AGENTS.md, Mandatory Save Gates)."
             }));
-            skipped += 1;
+            rejected += 1;
             continue;
         }
 
@@ -140,6 +155,22 @@ pub(super) async fn execute_batch(
 
         tags.extend(batch_pp_tags);
 
+        // The same gate the single-item path runs, on the preprocessed text and
+        // for the same reason: a pronoun that survived coreference rewriting is
+        // one the rewriter could not resolve. It has to run here as well, or
+        // batch mode would be an open door past the one refusal that exists.
+        let self_contained = detect_self_containment(
+            &item_content,
+            batch_pp_from.is_some() || batch_pp_until.is_some(),
+        );
+        if let Some(mut refusal) = reject_response(&self_contained) {
+            refusal["index"] = serde_json::json!(i);
+            refusal["status"] = serde_json::json!("rejected");
+            results.push(refusal);
+            rejected += 1;
+            continue;
+        }
+
         let provenance_with_importance = batch_pp_prov.map(|mut p| {
             if let Some(obj) = p.as_object_mut() {
                 obj.insert(
@@ -160,6 +191,9 @@ pub(super) async fn execute_batch(
             valid_from: batch_pp_from,
             valid_until: batch_pp_until,
             provenance: provenance_with_importance,
+            self_contained: Some(self_contained.marker()),
+            self_contained_findings: self_contained.findings_json(),
+            actor: actor.map(str::to_string),
             ..Default::default()
         };
 
@@ -314,6 +348,11 @@ pub(super) async fn execute_batch(
             "created": created,
             "updated": updated,
             "skipped": skipped,
+            // Refusals are reported separately from `skipped` (too large) and
+            // from `errors`: a refusal is the gate doing its job, so a batch of
+            // one good item and one refusal is a success with a rejected item,
+            // not a failure.
+            "rejected": rejected,
             "errors": errors
         },
         "results": results

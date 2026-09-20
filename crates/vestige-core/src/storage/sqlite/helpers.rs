@@ -274,6 +274,19 @@ impl Storage {
                 .get::<_, Option<String>>("procedural_frequency")
                 .ok()
                 .flatten(),
+            // V18 self-containedness marker. Absent on a pre-V18 database and
+            // NULL on a row no gate has seen; both read as `None`, which is the
+            // honest answer ("not checked") rather than a passing grade.
+            self_contained: row
+                .get::<_, Option<i32>>("self_contained")
+                .ok()
+                .flatten()
+                .map(|v| v == 1),
+            self_contained_findings: row
+                .get::<_, Option<String>>("self_contained_findings")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
         })
     }
 

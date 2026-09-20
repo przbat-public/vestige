@@ -34,10 +34,12 @@ impl Storage {
     /// Returns the new row id. See the module docs for why this takes a
     /// `Transaction` instead of opening its own.
     ///
-    /// `actor` is recorded verbatim when supplied. It is `None` on every path
-    /// in this crate today — the call sites that know which agent or user is
-    /// acting live one layer up (MCP tools), and wave 2 threads them through
-    /// rather than guessing here.
+    /// `actor` is recorded verbatim when supplied. It arrives on
+    /// [`crate::memory::IngestInput::actor`], because the layer that knows which
+    /// agent and which conversation is writing is the tool layer above this
+    /// crate; a caller that does not know passes `None`, which leaves the
+    /// column NULL rather than inventing an identity. Reads never consult it —
+    /// it exists so a human auditing the timeline can see who wrote a version.
     #[allow(
         clippy::too_many_arguments,
         reason = "One positional argument per column of `memory_revisions`; bundling them into a struct would hide at the call site which field is which, and the reason/old/new triple is exactly what a reader of the timeline needs to see."

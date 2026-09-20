@@ -315,11 +315,21 @@ Hard-deletes the memory (or every memory carrying that exact tag — `code` does
 
 | Gate | Trigger | Action |
 |------|---------|--------|
-| **BUG_FIX** | After any error is resolved | `smart_ingest` with content: `"BUG FIX: [error]\nRoot cause: [why]\nSolution: [fix]\nFiles: [paths]"`, tags: `["bug-fix", "project"]`, node_type: `"fact"` |
-| **DECISION** | After any architectural/design choice | `codebase` with action: `"remember_decision"` |
-| **CODE_CHANGE** | After >20 lines or new pattern | `codebase` with action: `"remember_pattern"` |
+| **BUG_FIX** | After any error is resolved | `smart_ingest` with content: `"BUG FIX: [what broke]\nRoot cause: [why it broke]\nLesson: [the rule to apply next time]"`, tags: `["bug-fix", "project"]`, node_type: `"fact"`. File paths and line numbers stay **out of the content** — a stored path breaks silently in both directions (it keeps resolving to an old copy after a version bump, and vanishes without a word when the target is deleted), and only `code_refs`/`source` may carry them. `Solution: [the diff]` is not a memory: the diff is in the repository. The lesson is the part that is nowhere else. |
+| **DECISION** | After any architectural/design choice | `codebase` with action: `"remember_decision"`, stating the question and the future decision it settles. To replace an earlier decision, pass `supersedes: [ids]` and, when the answer expires, `validUntil` — never overwrite it. A decision that silently disappears takes the record of what we believed with it. |
+| **CODE_CHANGE** | After >20 lines or new pattern | `codebase` with action: `"remember_pattern"` — the rule the pattern encodes (when to use it, when not to), not the diff. Touched files go in `files`, never in `description`. |
 | **SESSION_END** | Before stopping or compaction | `smart_ingest` batch with tags: `["session-end"]` |
 | **FACT_CHANGED** | When a previously stored fact becomes outdated | `temporal` with action: `"invalidate"`, then `smart_ingest` with the corrected fact |
+
+### Reading the self-containedness gate
+
+Every write is checked against one question: will this still be readable by someone who was not in the conversation that produced it? There are three answers, and each needs a different response.
+
+| Response | Meaning | What to do |
+|---|---|---|
+| no `self_contained` key | The gate found nothing. | Nothing. |
+| `self_contained: { requiresContext: true, findings: [...] }` | **Written, and flagged.** The memory exists and is searchable, but it leans on something it does not carry. | Rewrite it: each finding names the `kind` (which rule fired), the `span` (the exact text) and a `hint` (what to write instead). Name the antecedent of a pronoun, say what "the fix" was, replace "next week" with a date. Do **not** delete it — silent loss is worse than a flagged entry. Note the marker records the gate's verdict at write time: editing the memory does not clear it, so a rewritten memory stays listed until the gate is re-run on it. |
+| `decision: "reject"`, `stored: false` | **Nothing was written.** The content is something the repository already owns — a code block, a directory tree, copied source, a coverage figure, a version number — or there was nothing in it. | Read `reason` and `findings`, then save the lesson or the decision it was meant to carry. Do not retry the same text. If that knowledge genuinely is not in the repository yet, put it there first: then it does not need to be remembered. Nothing fixable is ever rejected — a fixable memory is written and flagged. |
 
 ---
 
@@ -340,8 +350,9 @@ Hard-deletes the memory (or every memory carrying that exact tag — `code` does
 - **Promote** when user confirms helpful, solution worked, info was accurate.
 - **Demote** when user corrects mistake, info was wrong, led to bad outcome.
 - **Never save:** secrets, API keys, passwords, temporary debugging state, trivial info.
-- **When in doubt, save.** Prediction Error Gating handles dedup. Lost knowledge is permanent.
+- **State the future decision this changes, or do not save.** If you cannot name the decision a memory would alter, it is a description — and descriptions of the code belong in the repository, where they cannot go stale unnoticed. Prediction Error Gating removes duplicates; it cannot tell that a memory was never worth having.
 - **If `compound_content_warning` appears in response:** delete the compound memory, split content into atomic pieces, re-ingest as batch.
+- **If `self_contained` appears in response or `decision` is `"reject"`:** see *Reading the self-containedness gate* above — rewrite a flagged memory, replace a refused one.
 
 ---
 
@@ -366,7 +377,7 @@ Hard-deletes the memory (or every memory carrying that exact tag — `code` does
 - **NLP detectors:** `vestige_core::nlp` exposes three traits — `ContradictionDetector`, `OpinionDetector`, `FutureRelevanceDetector` — and **three factory functions** that return the process-wide default implementation: `default_contradiction_detector()`, `default_opinion_detector()`, `default_future_relevance_detector()`. Call sites (`PredictionErrorGate::detect_contradiction`, `DreamEngine::categorize_memory`, `tools::confidence::is_opinion`) MUST go through the factories — never construct `HeuristicXDetector` directly. To plug an ONNX or LLM backend behind a feature flag, edit `nlp::mod.rs` (one file) instead of every call site. Defaults today are pure-Rust heuristics (NegEx scope + EN/PL lexicons + custom language detection). Per-signal confidence weights are `pub const` (e.g. `NEGATION_SCOPE_CONFIDENCE = 0.85`) so the eval baseline can pin them. Eval harness lives in `nlp/eval/` with hand-curated EN+PL datasets; baselines enforced by `tests/nlp_baseline.rs` (`cargo test -p vestige-core --test nlp_baseline -- --nocapture`). Contradiction detector returns `negative` when *either* side is empty/whitespace (regression: empty `old` previously triggered the asymmetric fallback on every `new` containing a negation trigger).
 - **Bench:** `cargo bench -p vestige-core`
 - **Architecture:** `McpServer` → `Arc<Storage>` + `Arc<Mutex<CognitiveEngine>>`
-- **Storage:** SQLite WAL mode, `Mutex<Connection>` reader/writer split, FTS5 full-text search. Implementation split across `storage/sqlite/` per concern (nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats). Migrations v1–v17.
+- **Storage:** SQLite WAL mode, `Mutex<Connection>` reader/writer split, FTS5 full-text search. Implementation split across `storage/sqlite/` per concern (nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats). Migrations v1–v18.
 - **Embeddings:** nomic-embed-text-v1.5 (768D → 384D Matryoshka, 8K context) via fastembed (local ONNX, no API; ~547 MB download). The reduction is the model card's exact order — `layer_norm` over the full 768 dims → slice to 384 → L2 — and the card-mandated `search_document:`/`search_query:` task prefixes are applied on the default path. Do not reorder those steps, and do not slice before normalising: the two orders select different directions in the 384-dim space.
 - **Embedding space version:** `vestige_core::embeddings::EMBEDDING_SPACE_VERSION` (currently `2`) identifies the vectors the embedding function produces; `embedding_space_fingerprint()` is the derived string a cache must key on, and `embedding_model_tag()` is the per-memory tag in `knowledge_nodes.embedding_model` (`nomic-embed-text-v1.5+v2+prefix`, or `...+v2` in the legacy raw regime). Bump the version whenever the same text would produce a different vector. v1 = slice→L2 with optional prefixes (every earlier build); v2 = LayerNorm before the slice plus prefixes on by default, so every v1 vector is in a different space.
 - **Re-embedding:** `regenerate_embeddings` with `force: true` re-embeds every memory from its content, and is the only supported migration after an embedding-space change; until it runs, old and new vectors coexist and retrieval degrades silently. The HNSW sidecar is NOT version-aware: its meta validates only `(COUNT(*), MAX(created_at))` (`Storage::embeddings_fingerprint`, `crates/vestige-core/src/storage/sqlite/init.rs`), so an upgraded binary reloads a pre-v2 sidecar unless the store has been re-embedded.

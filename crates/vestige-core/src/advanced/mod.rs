@@ -61,9 +61,9 @@ pub use dreams::{
 pub use importance::{ImportanceDecayConfig, ImportanceScore, ImportanceTracker, UsageEvent};
 pub use intent::{ActionType, DetectedIntent, IntentDetector, MaintenanceType, UserAction};
 pub use prediction_error::{
-    CandidateMemory, CreateReason, EvaluationIntent, GateDecision, GateStats, MergeStrategy,
-    PredictionErrorConfig, PredictionErrorGate, SimilarityResult, SupersedeReason, UpdateType,
-    cosine_similarity,
+    CandidateMemory, CreateReason, EvaluationIntent, GateDecision, GateFinding, GateStats,
+    MergeStrategy, PredictionErrorConfig, PredictionErrorGate, SimilarityResult, SupersedeReason,
+    UpdateType, cosine_similarity,
 };
 pub use reconsolidation::{
     AccessContext, AccessTrigger, AppliedModification, ChangeSummary, LabileState, MemorySnapshot,

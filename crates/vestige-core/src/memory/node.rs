@@ -313,6 +313,24 @@ pub struct KnowledgeNode {
     /// versions may parse into a structured Frequency enum.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub procedural_frequency: Option<String>,
+
+    // ========== Self-containedness (V18) ==========
+    /// What the write-time self-containedness gate said about this memory:
+    /// `Some(true)` it ran and the memory stands on its own, `Some(false)` it
+    /// ran and flagged the memory as needing the conversation it came from.
+    ///
+    /// `None` is not "clean": it means no gate ran (a row written before V18, or
+    /// by a writer that is not `smart_ingest`). The distinction is the whole
+    /// point of the column — a memory that needs context must be findable later,
+    /// and a store that reports "no flags" must not be reporting on rows it
+    /// never checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_contained: Option<bool>,
+    /// The findings behind a `self_contained: false`, verbatim as the gate
+    /// reported them, so a reader learns what to fix and not only that
+    /// something is wrong.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_contained_findings: Option<serde_json::Value>,
 }
 
 impl Default for KnowledgeNode {
@@ -356,6 +374,8 @@ impl Default for KnowledgeNode {
             object: None,
             episodic_at: None,
             procedural_frequency: None,
+            self_contained: None,
+            self_contained_findings: None,
         }
     }
 }
@@ -515,6 +535,22 @@ pub struct IngestInput {
     /// Frequency descriptor for procedural memories ("weekly", "every Tuesday").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub procedural_frequency: Option<String>,
+
+    // ========== Write-time gate results ==========
+    /// What the self-containedness gate said about this content, persisted with
+    /// the memory so a flagged entry stays findable after the response is gone.
+    /// `None` means the gate did not run, which is not the same as "passed".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_contained: Option<bool>,
+    /// The findings behind a `false` marker, verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_contained_findings: Option<serde_json::Value>,
+    /// Who is writing, recorded on the `memory_revisions` row this write
+    /// appends. The storage layer knows the *what*; only the caller (an MCP
+    /// tool holding `agent` and `session_id`) knows the *who*, so it travels
+    /// with the write request instead of being guessed back out of provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
 }
 
 impl Default for IngestInput {
@@ -536,6 +572,9 @@ impl Default for IngestInput {
             object: None,
             episodic_at: None,
             procedural_frequency: None,
+            self_contained: None,
+            self_contained_findings: None,
+            actor: None,
         }
     }
 }

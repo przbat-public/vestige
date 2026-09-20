@@ -170,7 +170,7 @@ The cognitive engine. Key modules:
 | `preprocessing/` | Content Intelligence Pipeline — entity / coref / temporal / relation / provenance |
 | `search/` | Hybrid search (BM25 + semantic), HyDE, Jina Reranker v2, temporal search, compound query decomposition |
 | `embeddings/` | fastembed (Nomic Embed v1.5), ONNX inference, Matryoshka 768D → 384D truncation |
-| `storage/sqlite/` | Per-concern split: nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats. Migrations v1–v17. |
+| `storage/sqlite/` | Per-concern split: nodes, states, history, intentions, maintenance, embeddings, review, consolidation, search, graph, gdpr, temporal, smart_ingest, insights, records, stats. Migrations v1–v18. |
 
 ### vestige-mcp
 

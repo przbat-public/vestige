@@ -43,6 +43,12 @@ impl Storage {
             CandidateMemory, GateDecision, PredictionErrorGate, UpdateType,
         };
 
+        // Who is writing, lifted out before `input` is consumed by the ingest
+        // branches below. Every revision this call appends — the edit inside an
+        // update, both halves of a supersede — carries it, so the timeline does
+        // not answer "who" differently depending on which decision the gate took.
+        let actor = input.actor.clone();
+
         if !self.embedding_service.is_ready() {
             let node = self.ingest(input)?;
             return Ok(SmartIngestResult {
@@ -194,7 +200,12 @@ impl Storage {
                         input.content
                     );
 
-                    self.update_node_content(&target_id, &merged_content)?;
+                    self.update_node_content_with_revision_as(
+                        &target_id,
+                        &merged_content,
+                        Some("smart_ingest: merged with similar memory"),
+                        actor.as_deref(),
+                    )?;
                     self.strengthen_on_access(&target_id)?;
 
                     let node = self
@@ -212,7 +223,12 @@ impl Storage {
                     })
                 }
                 UpdateType::Replace => {
-                    self.update_node_content(&target_id, &input.content)?;
+                    self.update_node_content_with_revision_as(
+                        &target_id,
+                        &input.content,
+                        Some("smart_ingest: replaced with new content"),
+                        actor.as_deref(),
+                    )?;
                     let node = self
                         .get_node(&target_id)?
                         .ok_or_else(|| StorageError::NotFound(target_id.clone()))?;
@@ -235,7 +251,12 @@ impl Storage {
                     let merged_content =
                         format!("{}\n\n---\nContext: {}", existing.content, input.content);
 
-                    self.update_node_content(&target_id, &merged_content)?;
+                    self.update_node_content_with_revision_as(
+                        &target_id,
+                        &merged_content,
+                        Some("smart_ingest: added as context"),
+                        actor.as_deref(),
+                    )?;
                     let node = self
                         .get_node(&target_id)?
                         .ok_or_else(|| StorageError::NotFound(target_id.clone()))?;
@@ -304,7 +325,7 @@ impl Storage {
                         Some(content.as_str()),
                         Some(previous_valid_until.as_deref().unwrap_or("unbounded")),
                         Some(replacement_reason.as_str()),
-                        None,
+                        actor.as_deref(),
                     )?;
 
                     tx.commit()?;
@@ -337,7 +358,7 @@ impl Storage {
                         None,
                         Some(node.id.as_str()),
                         Some(replacement_reason.as_str()),
-                        None,
+                        actor.as_deref(),
                     )?;
                     tx.commit()?;
                 }
@@ -388,6 +409,12 @@ impl Storage {
                     neighbor_ids,
                 })
             }
+            // The one decision that must not write. `PredictionErrorGate::evaluate`
+            // never returns it — a reject is decided from the content alone, one
+            // layer up, before this call — so this arm exists so that if a future
+            // gate ever does produce one, the write path refuses instead of
+            // silently falling through to an arm that stores it.
+            GateDecision::Reject { reason, .. } => Err(StorageError::Rejected(reason)),
         }
     }
 }

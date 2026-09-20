@@ -818,3 +818,32 @@ CREATE INDEX IF NOT EXISTS idx_memory_revisions_node
 
 UPDATE schema_version SET version = 17, applied_at = datetime('now');
 "#;
+
+/// V18: the self-containedness marker, so a memory that was written but
+/// flagged stays findable after the response that flagged it is gone.
+///
+/// `self_contained` is deliberately nullable and **not** backfilled. NULL means
+/// "the gate never ran on this row" (anything written before this migration, and
+/// anything written by a path that is not `smart_ingest`), 1 means it ran and
+/// found nothing, 0 means it ran and flagged the memory. Backfilling 1 would
+/// claim a check that never happened for every existing memory — the audit this
+/// column exists to support would then report a clean store it cannot vouch for.
+///
+/// `self_contained_findings` holds the findings behind a 0 as JSON, verbatim as
+/// the gate reported them. Without it the marker says "this needs context" and
+/// loses *what* needed it, which is the part a reader has to act on; the column
+/// is NULL for a clean row rather than `[]`, so "nothing to say" and "checked,
+/// clean" stay distinguishable.
+///
+/// The partial index serves the only query that needs to be cheap: which
+/// memories the gate flagged.
+pub(super) const MIGRATION_V18_UP: &str = r#"
+ALTER TABLE knowledge_nodes ADD COLUMN self_contained INTEGER;
+ALTER TABLE knowledge_nodes ADD COLUMN self_contained_findings TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_nodes_flagged_self_contained
+    ON knowledge_nodes(self_contained)
+    WHERE self_contained = 0;
+
+UPDATE schema_version SET version = 18, applied_at = datetime('now');
+"#;

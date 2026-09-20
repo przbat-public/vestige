@@ -18,11 +18,17 @@
 //!   target fails as total silent loss. It breaks into wrongness or into
 //!   nothing, never into an error.
 //!
-//! Deliberately conservative: the gate warns, it does not hide. Only content
-//! that the repository already owns is rejected (`Reject`), because trading junk
-//! for silent loss would be a worse failure than the one being fixed.
+//! Deliberately conservative: the gate warns, it does not hide. Content the
+//! repository already owns is refused outright — `Report::reject_decision`
+//! turns it into `GateDecision::Reject` and the caller writes nothing — because
+//! a copy of the repository is the one class of memory that cannot age well:
+//! it is wrong after the next commit and nothing signals it. Everything
+//! fixable (deixis, a pronoun, relative time, a bare path) is written and
+//! flagged, because trading junk for silent loss would be the worse failure.
 
 use serde_json::json;
+use vestige_core::GateDecision;
+use vestige_core::GateFinding;
 
 /// Rule identifiers, stable because they are part of the tool response.
 pub(super) const KIND_DISCOURSE_DEIXIS: &str = "discourse_deixis";
@@ -30,6 +36,27 @@ pub(super) const KIND_UNRESOLVED_PRONOUN: &str = "unresolved_pronoun";
 pub(super) const KIND_RELATIVE_TIME: &str = "relative_time";
 pub(super) const KIND_BARE_CODE_REFERENCE: &str = "bare_code_reference";
 pub(super) const KIND_NO_SUBJECT: &str = "no_subject";
+pub(super) const KIND_DERIVABLE_FROM_REPO: &str = "derivable_from_repo";
+
+/// What to do instead of saving a copy of the repository. One wording, used by
+/// every refusal, so an agent that reads one refusal knows what the next one
+/// means.
+const REJECT_HINT: &str =
+    "read it from the repository, or save the lesson or decision it changes — not the code";
+
+/// Why a candidate is refused rather than stored.
+///
+/// A content-level verdict: the whole text is derivable, so unlike a
+/// [`Finding`] there is no single span that is *the* problem — `span` names the
+/// text that fired the rule (the fence, the tree glyph, the version token) so
+/// the caller can see the evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Reject {
+    pub kind: &'static str,
+    pub span: String,
+    pub reason: &'static str,
+    pub hint: &'static str,
+}
 
 /// One reason a memory will not stand on its own, with the text that triggered it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,11 +68,11 @@ pub(super) struct Finding {
 }
 
 /// Outcome of the gate. `findings` means "written, but will need context";
-/// `reject` means "this should not be stored at all".
+/// `reject` means "this must not be stored at all".
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Report {
     pub findings: Vec<Finding>,
-    pub reject: Option<&'static str>,
+    pub reject: Option<Reject>,
 }
 
 impl Report {
@@ -59,27 +86,114 @@ impl Report {
         self.reject.is_some()
     }
 
+    /// Everything the gate found, the refusal first when there is one.
+    ///
+    /// The reject is a finding too: it has a rule (`derivable_from_repo`), the
+    /// text that fired it and a hint, and a caller that only reads `findings`
+    /// must not be able to conclude "no reason given" about a refusal.
+    fn all_findings(&self) -> Vec<GateFinding> {
+        self.reject
+            .iter()
+            .map(|r| GateFinding {
+                kind: r.kind.to_string(),
+                span: r.span.clone(),
+                hint: r.hint.to_string(),
+            })
+            .chain(self.findings.iter().map(|f| GateFinding {
+                kind: f.kind.to_string(),
+                span: f.span.clone(),
+                hint: f.hint.to_string(),
+            }))
+            .collect()
+    }
+
+    /// The refusal as a gate decision — the same typed shape as
+    /// create/update/supersede/merge, so the one outcome that writes nothing is
+    /// not a sentence the caller assembles by hand. `None` when the gate
+    /// accepted the content.
+    pub(super) fn reject_decision(&self) -> Option<GateDecision> {
+        self.reject.as_ref().map(|r| GateDecision::Reject {
+            reason: r.reason.to_string(),
+            findings: self.all_findings(),
+        })
+    }
+
+    /// What to persist with a written memory: `true` when the gate found
+    /// nothing, `false` when it flagged the memory as needing its conversation.
+    ///
+    /// A rejected memory is never written and so never carries a marker; the
+    /// stored column stays NULL for it by absence, not by value, which is why
+    /// this is only reachable after the reject path has returned.
+    pub(super) fn marker(&self) -> bool {
+        !self.requires_context()
+    }
+
+    /// The findings to persist next to the marker, so the reason a memory was
+    /// flagged outlives the response that carried it. `None` when there is
+    /// nothing to record.
+    pub(super) fn findings_json(&self) -> Option<serde_json::Value> {
+        if self.findings.is_empty() {
+            return None;
+        }
+        Some(serde_json::Value::Array(
+            self.findings
+                .iter()
+                .map(|f| json!({ "kind": f.kind, "span": f.span, "hint": f.hint }))
+                .collect(),
+        ))
+    }
+
     /// Wire shape. Kept as an object rather than a sentence so a caller can act
     /// on individual findings instead of parsing prose.
-    ///
-    /// The reject field is named `rejectRecommended` on purpose: this commit
-    /// computes and reports the recommendation, while enforcement (the gate
-    /// refusing to write) is a separate change. A field called `rejected` that
-    /// is set on a memory which was in fact written would be exactly the kind of
-    /// false claim this whole review set out to remove.
     pub(super) fn to_json(&self) -> serde_json::Value {
         json!({
             "ok": !self.requires_context() && !self.is_rejected(),
             "requiresContext": self.requires_context(),
-            "rejectRecommended": self.is_rejected(),
-            "rejectReason": self.reject,
+            "rejected": self.is_rejected(),
+            "rejectReason": self.reject.as_ref().map(|r| r.reason),
             "findings": self
-                .findings
+                .all_findings()
                 .iter()
                 .map(|f| json!({ "kind": f.kind, "span": f.span, "hint": f.hint }))
                 .collect::<Vec<_>>(),
         })
     }
+}
+
+/// The response for content the gate refuses to store.
+///
+/// `None` when the gate accepted the content: a caller that asks for a refusal
+/// response for a memory that was in fact stored has a bug, and answering it
+/// with a refusal would be the exact false claim this gate exists to prevent.
+///
+/// The response answers the three questions a refusal has to answer — what
+/// happened (`decision`, `stored`), why (`reason`, `findings`) and what to do
+/// instead (`guidance`) — because a refusal that only says "no" gets retried.
+pub(super) fn reject_response(report: &Report) -> Option<serde_json::Value> {
+    let GateDecision::Reject { reason, findings } = report.reject_decision()? else {
+        // `reject_decision` builds this variant and no other.
+        return None;
+    };
+
+    Some(json!({
+        "success": false,
+        "decision": "reject",
+        // Stated as its own field because it is the claim that matters: an
+        // agent that reads only `success` cannot tell "refused" from "failed
+        // halfway", and this one is checkable.
+        "stored": false,
+        "reason": reason,
+        "guidance": format!(
+            "Nothing was written. This content is already in the repository (or has nothing to \
+             remember), and a copy of it would be wrong after the next commit with nothing to \
+             signal that. {} — see AGENTS.md, Mandatory Save Gates.",
+            REJECT_HINT
+        ),
+        "findings": findings
+            .iter()
+            .map(|f| json!({ "kind": f.kind, "span": f.span, "hint": f.hint }))
+            .collect::<Vec<_>>(),
+    }))
 }
 
 /// Phrases that point at something outside the memory itself. These are noun
@@ -235,8 +349,8 @@ pub(super) fn detect(content: &str, has_anchored_time: bool) -> Report {
     let subject = has_named_subject(content);
     let rule_shaped = RULE_MARKERS.iter().any(|m| lower.contains(m));
 
-    if let Some(reason) = derivable_reason(content) {
-        report.reject = Some(reason);
+    if let Some(reject) = derivable_reason(content) {
+        report.reject = Some(reject);
     }
 
     for (phrase, hint) in DISCOURSE_DEIXIS_STRONG {
@@ -406,44 +520,82 @@ fn bare_code_reference(content: &str) -> Option<String> {
 }
 
 /// Statements the repository already owns, which must not be copied into memory.
-fn derivable_reason(content: &str) -> Option<&'static str> {
+///
+/// Returns the rule, the text that fired it, why the content must not be stored
+/// and what to write instead. The text matters: a refusal an agent cannot trace
+/// back to a phrase in its own input is a refusal it will retry unchanged.
+fn derivable_reason(content: &str) -> Option<Reject> {
     let lower = content.to_lowercase();
 
+    let reject = |span: String, reason: &'static str| {
+        Some(Reject {
+            kind: KIND_DERIVABLE_FROM_REPO,
+            span,
+            reason,
+            hint: REJECT_HINT,
+        })
+    };
+
     if content.contains("```") {
-        return Some("a code block — the repository already stores the code");
+        return reject(
+            "```".to_string(),
+            "a code block — the repository already stores the code",
+        );
     }
     if content.contains("├──") || content.contains("└──") {
-        return Some("a directory tree — derivable from the repository");
+        return reject(
+            if content.contains("├──") {
+                "├──".to_string()
+            } else {
+                "└──".to_string()
+            },
+            "a directory tree — derivable from the repository",
+        );
     }
 
-    let code_lines = content
+    // Two code-shaped lines, not one: a single `let …` or `const …` line can be
+    // prose about code, and refusing on one line would refuse memories that
+    // merely quote an identifier.
+    let code_lines: Vec<&str> = content
         .lines()
         .filter(|l| {
             let t = l.trim_start();
             CODE_LINE_PREFIXES.iter().any(|p| t.starts_with(p))
         })
-        .count();
-    if code_lines >= 2 {
-        return Some("copied source code — the repository already stores it");
+        .collect();
+    if code_lines.len() >= 2 {
+        return reject(
+            // The first line is the evidence a caller can find in its own input.
+            first_words(code_lines[0], 6),
+            "copied source code — the repository already stores it",
+        );
     }
 
-    if DERIVABLE_MARKERS.iter().any(|m| lower.contains(m)) {
-        return Some("a description of the codebase — derivable from the repository");
+    if let Some(marker) = DERIVABLE_MARKERS.iter().find(|m| lower.contains(*m)) {
+        return reject(
+            (*marker).to_string(),
+            "a description of the codebase — derivable from the repository",
+        );
     }
 
     // Version strings and metrics rot with every commit.
     if lower.contains("coverage") && lower.contains('%') {
-        return Some("a coverage figure — stale after the next commit");
+        return reject(
+            "coverage …%".to_string(),
+            "a coverage figure — stale after the next commit",
+        );
     }
-    if version_like(content) {
-        return Some("a version number — stale after the next release");
+    if let Some(token) = version_like(content) {
+        return reject(token, "a version number — stale after the next release");
     }
 
     None
 }
 
 /// `v1.2.3` or `Name 16` — a version claim that will be wrong soon.
-fn version_like(content: &str) -> bool {
+///
+/// Returns the token that made the claim, so a refusal can point at it.
+fn version_like(content: &str) -> Option<String> {
     let tokens: Vec<&str> = content.split_whitespace().collect();
     for (i, token) in tokens.iter().enumerate() {
         let cleaned = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '.');
@@ -454,7 +606,7 @@ fn version_like(content: &str) -> bool {
                 .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
             && (cleaned.starts_with('v') || i > 0)
         {
-            return true;
+            return Some(cleaned.to_string());
         }
         // "Postgres 16" — a capitalised product followed by a bare number.
         if i > 0
@@ -464,10 +616,10 @@ fn version_like(content: &str) -> bool {
                 .next()
                 .is_some_and(|c| c.is_uppercase())
         {
-            return true;
+            return Some(format!("{} {}", tokens[i - 1], cleaned));
         }
     }
-    false
+    None
 }
 
 fn first_words(content: &str, count: usize) -> String {
@@ -612,9 +764,50 @@ mod tests {
 
         assert_eq!(value["ok"], false);
         assert_eq!(value["requiresContext"], true);
-        assert_eq!(value["rejectRecommended"], false);
+        assert_eq!(value["rejected"], false);
         assert!(value["findings"].as_array().is_some_and(|a| !a.is_empty()));
         assert!(value["findings"][0]["kind"].is_string());
         assert!(value["findings"][0]["hint"].is_string());
+    }
+
+    /// A refusal has to be actionable: the rule that fired, the text that fired
+    /// it, and what to do instead. A refusal without those gets retried
+    /// unchanged, which is how a gate turns into a loop.
+    #[test]
+    fn a_refusal_names_its_rule_its_evidence_and_the_alternative() {
+        let report = detect("```rust\nfn main() {}\n```", false);
+        let rejection = reject_response(&report).expect("a rejection must produce a refusal");
+
+        assert_eq!(rejection["success"], false);
+        assert_eq!(rejection["decision"], "reject");
+        assert_eq!(rejection["stored"], false, "nothing was written");
+        assert!(
+            rejection["reason"].as_str().is_some_and(|r| !r.is_empty()),
+            "a refusal must say why: {rejection}"
+        );
+        assert!(
+            rejection["guidance"]
+                .as_str()
+                .is_some_and(|g| g.contains("AGENTS.md")),
+            "a refusal must point at where the knowledge belongs instead: {rejection}"
+        );
+        assert_eq!(rejection["findings"][0]["kind"], KIND_DERIVABLE_FROM_REPO);
+        assert_eq!(rejection["findings"][0]["span"], "```");
+        assert!(rejection["findings"][0]["hint"].is_string());
+    }
+
+    /// The refusal and the flag are two different outcomes, and the response
+    /// builder must never confuse them: asking for a refusal response about a
+    /// memory the gate accepted has to come back empty-handed.
+    #[test]
+    fn an_accepted_memory_has_no_refusal() {
+        let accepted = detect(
+            "Marek prefers the migration to run before the deploy",
+            false,
+        );
+        assert!(
+            reject_response(&accepted).is_none(),
+            "an accepted memory must not get a refusal response: {accepted:?}"
+        );
     }
 }

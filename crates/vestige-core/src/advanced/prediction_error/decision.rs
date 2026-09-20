@@ -48,6 +48,40 @@ pub enum GateDecision {
         /// Merge strategy
         strategy: MergeStrategy,
     },
+
+    /// Refuse the candidate: nothing is written.
+    ///
+    /// Deliberately narrow. It exists for content the repository already owns —
+    /// a code block, a directory tree, copied source, a coverage figure, a
+    /// version number — because storing a copy buys a second source of truth
+    /// that rots with the next commit. Everything *fixable* (a dangling
+    /// reference, a relative date, a bare path) is written and flagged instead:
+    /// trading junk for silent loss would be the worse failure, and a memory
+    /// nobody can see is a silent loss.
+    Reject {
+        /// Why this content must not be stored, worded for the caller to show.
+        reason: String,
+        /// The findings behind the refusal, if the detector reported any. A
+        /// content-level refusal names no single span, so `reason` carries it
+        /// and this may be empty.
+        findings: Vec<GateFinding>,
+    },
+}
+
+/// One reason a candidate was refused before it reached storage.
+///
+/// The same shape the write-time gate reports, repeated here so a decision can
+/// be serialized and audited without borrowing the detector's tables: `kind`
+/// names the rule, `span` is the text that fired it, `hint` says what to write
+/// instead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateFinding {
+    /// Stable rule identifier (e.g. `derivable_from_repo`).
+    pub kind: String,
+    /// The exact text that fired the rule.
+    pub span: String,
+    /// What to write instead.
+    pub hint: String,
 }
 
 impl GateDecision {
@@ -64,6 +98,11 @@ impl GateDecision {
                 prediction_error, ..
             } => *prediction_error,
             Self::Merge { avg_similarity, .. } => 1.0 - avg_similarity,
+            // A rejected candidate is never compared with anything — the reject
+            // is decided from the content alone, before the similarity probe. A
+            // number here would be read as a measurement, so this is NaN, which
+            // is "no value" and stays loud if a caller ever aggregates it.
+            Self::Reject { .. } => f32::NAN,
         }
     }
 
@@ -75,6 +114,11 @@ impl GateDecision {
     /// Check if this is an update decision
     pub fn is_update(&self) -> bool {
         matches!(self, Self::Update { .. })
+    }
+
+    /// Check if this decision refuses to write anything.
+    pub fn is_reject(&self) -> bool {
+        matches!(self, Self::Reject { .. })
     }
 
     /// Get target ID if updating or superseding

@@ -111,6 +111,13 @@ impl Storage {
             .extra_json
             .as_ref()
             .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "null".to_string()));
+        // Serialized out here rather than inline in the `params!` list so the
+        // NULL/`[]` distinction stays visible: a clean row has no findings and
+        // stores NULL, a flagged row stores the array it was given.
+        let self_contained_findings_json = input
+            .self_contained_findings
+            .as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string()));
 
         {
             let mut writer = self
@@ -123,6 +130,10 @@ impl Storage {
             // it describes — a memory with no `create` revision would have a
             // history that starts mid-story. Recorded before the INSERT because
             // the insert consumes `input.content`.
+            //
+            // The actor travels with it: the revision is the only place a reader
+            // can learn which agent and which conversation wrote this memory,
+            // and a NULL there is unrecoverable later.
             Self::record_revision(
                 &tx,
                 &id,
@@ -130,7 +141,7 @@ impl Storage {
                 None,
                 Some(input.content.as_str()),
                 input.source.as_deref(),
-                None,
+                input.actor.as_deref(),
             )?;
 
             tx.execute(
@@ -142,7 +153,8 @@ impl Storage {
                     source, tags, valid_from, valid_until, has_embedding, embedding_model,
                     provenance,
                     memory_kind, subject, predicate, object, episodic_at, procedural_frequency,
-                    extra_json
+                    extra_json,
+                    self_contained, self_contained_findings
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7,
                     ?8, ?9, ?10, ?11, ?12,
@@ -151,7 +163,8 @@ impl Storage {
                     ?20, ?21, ?22, ?23, ?24, ?25,
                     ?26,
                     ?27, ?28, ?29, ?30, ?31, ?32,
-                    ?33
+                    ?33,
+                    ?34, ?35
                 )",
                 params![
                     id,
@@ -192,6 +205,11 @@ impl Storage {
                     input.episodic_at.map(|t| t.to_rfc3339()),
                     input.procedural_frequency.as_deref(),
                     extra_json_str,
+                    // Self-containedness verdict (V18). NULL when the caller
+                    // did not run the gate: an unmarked row must stay
+                    // distinguishable from a checked-clean one.
+                    input.self_contained.map(|ok| if ok { 1 } else { 0 }),
+                    self_contained_findings_json,
                 ],
             )?;
 
@@ -311,6 +329,23 @@ impl Storage {
         new_content: &str,
         reason: Option<&str>,
     ) -> Result<()> {
+        self.update_node_content_with_revision_as(id, new_content, reason, None)
+    }
+
+    /// [`Self::update_node_content_with_revision`] with the actor recorded too.
+    ///
+    /// A separate method rather than a fourth parameter on the existing one,
+    /// because the existing signature is public API and every current caller
+    /// passes no actor: widening it would break them for a field most of them
+    /// cannot supply. The `smart_ingest` update paths — the ones a tool drives,
+    /// and therefore the ones where an actor exists — call this.
+    pub fn update_node_content_with_revision_as(
+        &self,
+        id: &str,
+        new_content: &str,
+        reason: Option<&str>,
+        actor: Option<&str>,
+    ) -> Result<()> {
         #[cfg(all(feature = "embeddings", feature = "vector-search"))]
         let embedding = self.embed_text(new_content).map_err(|e| {
             StorageError::Init(format!(
@@ -355,7 +390,7 @@ impl Storage {
                 Some(previous.as_str()),
                 Some(new_content),
                 reason,
-                None,
+                actor,
             )?;
 
             tx.commit()?;
