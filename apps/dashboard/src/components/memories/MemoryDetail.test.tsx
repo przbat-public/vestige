@@ -66,6 +66,15 @@ describe('MemoryDetail', () => {
     expect(screen.getByText('beta')).toBeInTheDocument();
   });
 
+  // A memory reading "the panel showed horizontal bands" identifies nothing on
+  // its own; the project name is the only field that says what it is about, and
+  // the dashboard accepted it on write and never showed it — a human reader was
+  // worse off than an API caller, whose payload carries `source`.
+  it('names the source so a reader knows what the memory is about', () => {
+    renderDetail({ memory: { ...baseMemory, source: 'nes-emulator-stm32' } });
+    expect(screen.getByText('nes-emulator-stm32')).toBeInTheDocument();
+  });
+
   it('enters edit mode when Edit is clicked and shows form fields', async () => {
     const user = userEvent.setup();
     renderDetail();

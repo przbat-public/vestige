@@ -354,7 +354,8 @@
       "validRelative": "Valid for {{days}}d",
       "titleTooltip": "After this date, the memory is treated as expired and no longer surfaces as a current fact in searches."
     },
-    "reviewsTooltip": "Total number of times you (or an agent) recalled this memory."
+    "reviewsTooltip": "Total number of times you (or an agent) recalled this memory.",
+    "source": "Source"
   },
   "nodeTypes": {
     "fact": "Fact",

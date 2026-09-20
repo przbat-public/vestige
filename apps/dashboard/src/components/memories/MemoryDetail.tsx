@@ -113,9 +113,20 @@ export function MemoryDetail({ memory: listSnapshot, onUpdate, onClose }: Memory
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <Badge color={NODE_TYPE_COLORS[memory.nodeType]}>
-          {t(`nodeTypes.${memory.nodeType}`, { defaultValue: memory.nodeType })}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge color={NODE_TYPE_COLORS[memory.nodeType]}>
+            {t(`nodeTypes.${memory.nodeType}`, { defaultValue: memory.nodeType })}
+          </Badge>
+          {/* Identity, not decoration: without it a memory about "the panel"
+              names nothing, and the reader has no way to ask which project it
+              belongs to. It sits beside the type because that is where a reader
+              looks to place what they are reading. */}
+          {memory.source && (
+            <Badge variant="outline" title={t('memories.source')}>
+              {memory.source}
+            </Badge>
+          )}
+        </div>
         {!editing && (
           <MemoryActions
             onEdit={() => setEditing(true)}

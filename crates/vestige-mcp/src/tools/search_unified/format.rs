@@ -113,6 +113,11 @@ pub(super) fn format_search_result(
             "nodeType": r.node.node_type,
             "tags": r.node.tags,
             "retentionStrength": r.node.retention_strength,
+            // What the memory is *about*, in the one field that names it. A memory
+            // reading "the panel showed horizontal bands" identifies nothing on its
+            // own; the project name lives here, and the reader at the default detail
+            // level used to be the one reader who could not see it.
+            "source": r.node.source,
             "createdAt": r.node.created_at.to_rfc3339(),
             "updatedAt": r.node.updated_at.to_rfc3339(),
             // When we learned this, as opposed to when the row was created or when
@@ -241,6 +246,9 @@ pub fn format_node(node: &vestige_core::KnowledgeNode, detail_level: &str) -> Va
             "nodeType": node.node_type,
             "tags": node.tags,
             "retentionStrength": node.retention_strength,
+            // Same reason as in `format_search_result`: without it, a memory that
+            // names no subject cannot be placed by the reader.
+            "source": node.source,
         }),
     }
 }

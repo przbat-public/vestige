@@ -129,6 +129,15 @@ function MemoryListItemRow({
           <span className="text-muted-foreground">
             {t(`nodeTypes.${memory.nodeType}`, { defaultValue: memory.nodeType })}
           </span>
+          {/* The list is where a reader scans many memories at once, and one that
+              names no subject cannot be placed there. Truncated rather than
+              dropped: the row keeps its height and the full value is in the
+              tooltip. */}
+          {memory.source && (
+            <span className="text-muted-foreground/70 truncate" title={memory.source}>
+              {memory.source}
+            </span>
+          )}
           {memory.epistemicStatus && (
             <span className="text-xs" style={{ color: EPISTEMIC_STATUS_COLORS[memory.epistemicStatus] || '#8B95A5' }}>
               {t(`epistemic.${memory.epistemicStatus}`)}

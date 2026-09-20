@@ -60,6 +60,14 @@ export function MemoryMetadataFooter({ memory }: Props) {
       </div>
 
       <div className="text-xs text-muted-foreground space-y-1">
+        {/* Identity first, then the clocks: "which project is this about" is the
+            question a reader has before "when did we write it down", and the
+            field was write-only in this interface until now. */}
+        {memory.source && (
+          <div>
+            {t('memories.source')}: {memory.source}
+          </div>
+        )}
         <div>
           {t('memories.created')}: {formatDateTime(memory.createdAt, i18n.language)}
         </div>

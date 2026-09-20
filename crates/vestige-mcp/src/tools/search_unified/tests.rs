@@ -598,6 +598,40 @@ fn scores(results: &[SearchResult]) -> Vec<f32> {
     results.iter().map(|r| r.combined_score).collect()
 }
 
+/// A reader who cannot name the subject cannot judge the claim.
+///
+/// The summary view is the default read path, and it carried every date and
+/// score but not `source` — the one field that says which project, repository or
+/// system a memory belongs to. In a real store, seven memories said "the panel",
+/// "the board", "the emulator" and nothing else; the name lived only in
+/// `source`, so an agent reading at the default detail level could not tell what
+/// they were about. `source` now travels with the content it identifies, and a
+/// memory that has none reports the absence rather than an invented name.
+#[test]
+fn summary_view_names_the_source_of_a_memory() {
+    let mut named = fixture(
+        "mem-1",
+        "Objaw: na panelu pojawiały się poziome pasy będące kopią tego, co wyżej.",
+        1.0,
+        "2026-09-20T15:37:51Z",
+    );
+    named.node.source = Some("nes-emulator-stm32".to_string());
+
+    let formatted = super::format::format_search_result(&named, "summary", &[], None);
+    assert_eq!(
+        formatted["source"],
+        serde_json::json!("nes-emulator-stm32")
+    );
+
+    let anonymous = fixture("mem-2", "no source on this one", 1.0, "2026-09-20T15:37:51Z");
+    let formatted = super::format::format_search_result(&anonymous, "summary", &[], None);
+    assert_eq!(
+        formatted["source"],
+        serde_json::Value::Null,
+        "a memory with no source must not be given one"
+    );
+}
+
 fn assert_monotonic(results: &[SearchResult]) {
     let s = scores(results);
     assert!(

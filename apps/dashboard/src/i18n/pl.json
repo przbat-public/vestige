@@ -394,7 +394,8 @@
       "validRelative": "Ważne przez kolejne {{days}} dni",
       "titleTooltip": "Po tej dacie wspomnienie jest traktowane jako wygasłe i przestaje pojawiać się w wynikach jako aktualne."
     },
-    "reviewsTooltip": "Łączna liczba powtórzeń wykonanych przez Ciebie lub agenta."
+    "reviewsTooltip": "Łączna liczba powtórzeń wykonanych przez Ciebie lub agenta.",
+    "source": "Źródło"
   },
   "briefing": {
     "title": "Poranny briefing",
