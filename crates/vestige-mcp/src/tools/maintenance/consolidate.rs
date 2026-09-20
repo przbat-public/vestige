@@ -38,5 +38,17 @@ pub async fn execute_consolidate(
         "activationsComputed": result.activations_computed,
         "w20Optimized": result.w20_optimized,
         "durationMs": result.duration_ms,
+        // Report-only, and reported: the code-anchor rot audit re-checked this
+        // many anchors and found this many whose text no longer matches. A count
+        // nobody can read is the same as not running the audit, and nothing here
+        // was repaired — `stale` and `orphaned` are a queue for a human.
+        "codeAnchorAudit": {
+            "checked": result.code_anchor_audit.checked,
+            "fresh": result.code_anchor_audit.fresh,
+            "stale": result.code_anchor_audit.stale,
+            "orphaned": result.code_anchor_audit.orphaned,
+            "unchecked": result.code_anchor_audit.unchecked,
+            "needingReview": result.code_anchor_audit.needing_review(),
+        },
     }))
 }

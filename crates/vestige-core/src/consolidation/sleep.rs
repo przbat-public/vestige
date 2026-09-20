@@ -192,6 +192,7 @@ impl ConsolidationRun {
             neighbors_reinforced: 0,
             activations_computed: 0,
             w20_optimized: None,
+            code_anchor_audit: crate::code_refs::CodeAnchorAudit::default(),
         }
     }
 }

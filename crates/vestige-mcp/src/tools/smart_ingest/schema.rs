@@ -23,11 +23,24 @@ const CONTENT_CONTRACT: &str = "The content to remember. MUST be atomic: one fac
      and give absolute dates instead of \"yesterday\" or \"next week\". \
      State the future decision this changes; if it only describes the code, the repository is a \
      better place for it. File paths and line numbers stay out of the content — pass them in \
-     `source` instead, because a stored path rots silently. \
+     `codeRefs` instead, because a stored path rots silently: it keeps resolving to an old copy, \
+     or vanishes without a word. Any path left in the content is anchored automatically from it, \
+     with symbol=null, so it can at least be checked. \
      Content the repository already owns (a code block, a directory tree, copied source, a version \
      number, a coverage figure) is refused with decision=\"reject\" and nothing is written; \
      everything fixable is written and flagged with a self_contained warning. \
      Multi-topic content triggers compound_content_warning — split it into batch items.";
+
+/// The anchor contract, stated once and reused by both modes.
+const CODE_REF_CONTRACT: &str = "Code this memory is about, as a checkable reference rather than a path in the text. \
+     Each entry is either the string \"path@commit#symbol\" (the commit and the symbol are what \
+     make it re-checkable; a bare \"path\", or \"path:line\", is accepted and stored without a \
+     revision, which means it can never be verified) or an object {path, commit, symbol, line, \
+     repo}. The symbol is resolved against the recorded commit and the hash of ITS body is \
+     stored — not the file's — so the anchor survives a refactor that moved it and still reports \
+     when the code it names changed. Verdicts (fresh/stale/orphaned/unchecked) appear in search \
+     results. Pass paths you know the revision of; paths named in the content are anchored \
+     automatically but can only carry what the text says.";
 
 /// Input schema for smart_ingest tool
 ///
@@ -61,6 +74,26 @@ pub fn schema() -> Value {
                 "type": "boolean",
                 "description": "Force creation of a new memory even if similar content exists",
                 "default": false
+            },
+            "codeRefs": {
+                "type": "array",
+                "description": format!("{} (Single mode)", CODE_REF_CONTRACT),
+                "items": {
+                    "oneOf": [
+                        { "type": "string" },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "path": { "type": "string" },
+                                "commit": { "type": "string", "description": "Revision SHA the memory was written against" },
+                                "symbol": { "type": "string", "description": "Fully-qualified symbol, e.g. Storage::embeddings_fingerprint" },
+                                "line": { "type": "integer", "description": "Where the symbol sat — a hint, never a locator" },
+                                "repo": { "type": "string", "description": "Remote URL or local path of the repository" }
+                            },
+                            "required": ["path"]
+                        }
+                    ]
+                }
             },
             "session_id": {
                 "type": "string",
@@ -101,6 +134,26 @@ pub fn schema() -> Value {
                             "type": "boolean",
                             "description": "Force creation of this item even if similar content exists",
                             "default": false
+                        },
+                        "codeRefs": {
+                            "type": "array",
+                            "description": CODE_REF_CONTRACT,
+                            "items": {
+                                "oneOf": [
+                                    { "type": "string" },
+                                    {
+                                        "type": "object",
+                                        "properties": {
+                                            "path": { "type": "string" },
+                                            "commit": { "type": "string" },
+                                            "symbol": { "type": "string" },
+                                            "line": { "type": "integer" },
+                                            "repo": { "type": "string" }
+                                        },
+                                        "required": ["path"]
+                                    }
+                                ]
+                            }
                         }
                     },
                     "required": ["content"]

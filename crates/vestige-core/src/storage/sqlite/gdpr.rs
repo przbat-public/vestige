@@ -1,8 +1,8 @@
 //! GDPR Article 17 erasure paths.
 //!
 //! Hard-deletion of a memory and every trace it left behind: connections,
-//! embeddings, access logs, state transitions, and its content history
-//! (`memory_revisions`). Two entry points:
+//! embeddings, access logs, state transitions, its content history
+//! (`memory_revisions`), and its code anchors (`code_refs`). Two entry points:
 //!
 //! - [`Storage::right_to_erasure`]: single memory by id.
 //! - [`Storage::erase_by_tag`]: bulk wipe of everything carrying a tag.
@@ -83,6 +83,12 @@ impl Storage {
         // true. `memory_revisions.node_id` has no foreign key (V17 explains
         // why), so nothing deletes these rows implicitly.
         erased += Storage::delete_revisions_for(&tx, id)? as i64;
+
+        // The anchors (V19) are the record of *which files this subject's
+        // memories touched*. Erasure that leaves them behind leaves a map of the
+        // subject's work — the same class of leak as leaving the text, which is
+        // why the table exists in this list and not only in the schema.
+        erased += Storage::delete_code_refs_for(&tx, id)? as i64;
 
         // `insights.source_memories` is a JSON array of node ids with no
         // foreign key, so the cascade never reaches it: an erased subject

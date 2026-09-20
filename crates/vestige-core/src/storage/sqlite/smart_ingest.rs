@@ -206,6 +206,11 @@ impl Storage {
                         Some("smart_ingest: merged with similar memory"),
                         actor.as_deref(),
                     )?;
+                    // The text this update absorbed carries its own citations.
+                    // The node's earlier anchors stay: they describe text the
+                    // memory still holds in its history, and a verdict — not a
+                    // deletion — is how a reader learns they no longer apply.
+                    self.attach_code_anchors(&target_id, &input.anchors)?;
                     self.strengthen_on_access(&target_id)?;
 
                     let node = self
@@ -229,6 +234,7 @@ impl Storage {
                         Some("smart_ingest: replaced with new content"),
                         actor.as_deref(),
                     )?;
+                    self.attach_code_anchors(&target_id, &input.anchors)?;
                     let node = self
                         .get_node(&target_id)?
                         .ok_or_else(|| StorageError::NotFound(target_id.clone()))?;
@@ -257,6 +263,7 @@ impl Storage {
                         Some("smart_ingest: added as context"),
                         actor.as_deref(),
                     )?;
+                    self.attach_code_anchors(&target_id, &input.anchors)?;
                     let node = self
                         .get_node(&target_id)?
                         .ok_or_else(|| StorageError::NotFound(target_id.clone()))?;

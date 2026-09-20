@@ -95,4 +95,9 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "Self-containedness marker on knowledge_nodes (self_contained + findings)",
         up: MIGRATION_V18_UP,
     },
+    Migration {
+        version: 19,
+        description: "Code anchors (code_refs): revision + symbol + content hash, with a verdict",
+        up: MIGRATION_V19_UP,
+    },
 ];

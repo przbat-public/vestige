@@ -63,7 +63,11 @@
 //! - `revisions`: append-only content history (`memory_revisions`) — the
 //!   `record_revision` writer every mutating path funnels through, and the
 //!   `get_memory_revisions` reader.
+//! - `code_refs`: a memory's anchors into code (`code_refs`) — the write that
+//!   keeps an anchor in the same transaction as its memory, the batched read the
+//!   search path uses, and the report-only rot audit that re-resolves them.
 
+mod code_refs;
 mod connections;
 mod consolidation;
 mod embeddings;
@@ -94,6 +98,9 @@ mod temporal;
 mod tests;
 
 #[cfg(test)]
+mod tests_code_refs;
+
+#[cfg(test)]
 mod tests_retention;
 
 #[cfg(test)]
@@ -102,7 +109,7 @@ mod tests_revisions;
 pub use error::{Result, SmartIngestResult, StorageError};
 pub use init::Storage;
 pub use records::{
-    ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,
+    CodeRef, ConnectionRecord, ConsolidationHistoryRecord, DreamHistoryRecord, InsightRecord,
     IntentionRecord, MemoryRevision, MemoryStateRecord, RevisionKind, StateTransitionRecord,
 };
 pub use search::{

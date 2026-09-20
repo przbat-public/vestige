@@ -98,6 +98,7 @@
 // MODULES
 // ============================================================================
 
+pub mod code_refs;
 pub mod consolidation;
 pub mod fsrs;
 pub mod fts;
@@ -145,6 +146,19 @@ pub mod nlp;
 // PUBLIC API RE-EXPORTS
 // ============================================================================
 
+// Code anchors: a memory's references to code, and whether they still hold.
+#[rustfmt::skip] // one-symbol-per-line keeps additions diff-friendly
+pub use code_refs::{
+    AnchorResolution,
+    AnchorVerdict,
+    CodeAnchor,
+    CodeAnchorAudit,
+    IngestAnchor,
+    PathCandidate,
+    parse_anchor_text,
+    path_candidates,
+};
+
 // Memory types
 #[rustfmt::skip] // one-symbol-per-line keeps additions diff-friendly
 pub use memory::{
@@ -187,7 +201,7 @@ pub use fsrs::{
 
 // Storage layer
 pub use storage::{
-    ConnectionRecord, ConsolidationHistoryRecord, DEFAULT_HYBRID_KEYWORD_WEIGHT,
+    CodeRef, ConnectionRecord, ConsolidationHistoryRecord, DEFAULT_HYBRID_KEYWORD_WEIGHT,
     DEFAULT_HYBRID_SEMANTIC_WEIGHT, DreamHistoryRecord, InsightRecord, IntentionRecord,
     MemoryRevision, Result, RevisionKind, SmartIngestResult, SnapshotRestoreReport,
     StateTransitionRecord, Storage, StorageError, default_hybrid_weights,

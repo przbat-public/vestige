@@ -534,3 +534,87 @@ fn v18_leaves_rows_written_before_it_unmarked() {
         "the partial index is what keeps 'find the flagged memories' off a full scan"
     );
 }
+
+// ============================================================================
+// V19 — code anchors
+// ============================================================================
+
+/// V19 exists, applies on top of V18 without touching `knowledge_nodes`, and
+/// constrains `verdict` to the four states the resolver can produce. The
+/// `CHECK` matters: every query in the feature groups by verdict, so a typo
+/// would create a category nobody reads instead of failing.
+#[test]
+fn v19_adds_the_code_anchor_table_with_its_indexes_and_verdict_constraint() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_pending(&conn, &MIGRATIONS[..18], 0).unwrap();
+    assert_eq!(get_current_version(&conn).unwrap(), 18);
+
+    let applied = apply_pending(&conn, &MIGRATIONS[..19], 18).unwrap();
+    assert_eq!(applied, 1, "only V19 is pending after V18");
+    assert_eq!(get_current_version(&conn).unwrap(), 19);
+
+    let columns: Vec<String> = conn
+        .prepare("SELECT name FROM pragma_table_info('code_refs')")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+    for expected in [
+        "id",
+        "node_id",
+        "repo_remote",
+        "commit_sha",
+        "path",
+        "symbol",
+        "hint_line",
+        "content_hash",
+        "resolved_at",
+        "verdict",
+    ] {
+        assert!(
+            columns.iter().any(|c| c == expected),
+            "code_refs is missing {expected}: {columns:?}"
+        );
+    }
+
+    // Both indexes the read path and the audit depend on.
+    for index in ["idx_code_refs_node", "idx_code_refs_verdict"] {
+        let present: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                rusqlite::params![index],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(present, "{index} is what keeps its query off a full scan");
+    }
+
+    // The table carries no foreign key, for the reason V17 gives: erasure names
+    // every child table explicitly so the deletion stays auditable.
+    let create_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name = 'code_refs'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        !create_sql.to_uppercase().contains("REFERENCES"),
+        "a cascading foreign key would put the delete behind PRAGMA foreign_keys: {create_sql}"
+    );
+
+    conn.execute(
+        "INSERT INTO code_refs (node_id, path, verdict) VALUES ('n1', 'src/lib.rs', 'fresh')",
+        [],
+    )
+    .unwrap();
+    assert!(
+        conn.execute(
+            "INSERT INTO code_refs (node_id, path, verdict) VALUES ('n1', 'src/lib.rs', 'repaired')",
+            [],
+        )
+        .is_err(),
+        "code_refs.verdict must be constrained to the four states"
+    );
+}

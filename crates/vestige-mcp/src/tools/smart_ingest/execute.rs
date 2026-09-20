@@ -9,20 +9,21 @@ use vestige_core::{ContentType, ImportanceContext, IngestInput, Storage};
 
 use crate::cognitive::CognitiveEngine;
 
+use super::anchors;
 use super::args::{SmartIngestArgs, actor_of};
 use super::batch::execute_batch;
 use super::compound::detect_compound_content;
 #[cfg(feature = "preprocessing")]
 use super::post_ingest::create_relation_edges;
 use super::post_ingest::{run_post_ingest, run_post_ingest_with_neighbors};
-use super::self_contained::{detect as detect_self_containment, reject_response};
+use super::self_contained::{detect_with_anchors, reject_response};
 
 pub async fn execute(
     storage: &Arc<Storage>,
     cognitive: &Arc<Mutex<CognitiveEngine>>,
     args: Option<Value>,
 ) -> Result<Value, String> {
-    let args: SmartIngestArgs = match args {
+    let mut args: SmartIngestArgs = match args {
         Some(v) => serde_json::from_value(v).map_err(|e| format!("Invalid arguments: {}", e))?,
         None => return Err("Missing arguments".to_string()),
     };
@@ -37,6 +38,14 @@ pub async fn execute(
         let global_force = args.force_create.unwrap_or(false);
         return execute_batch(storage, cognitive, items, global_force, actor.as_deref()).await;
     }
+
+    // Anchors are collected before the gate runs, because the gate's
+    // `bare_code_reference` rule fires on a path *without* an anchor and has to
+    // see the anchors this write is actually going to store. Collected from the
+    // caller's explicit references first and from the content second; resolved
+    // (and hashed) before the ingest so no repository walk happens inside the
+    // SQLite write transaction.
+    let explicit_anchors = std::mem::take(&mut args.code_refs);
 
     // Single mode: content is required
     let content = args.content.ok_or(
@@ -147,15 +156,23 @@ pub async fn execute(
     #[cfg(not(feature = "preprocessing"))]
     let pp_relations: Vec<()> = Vec::new();
 
+    // Anchors for the text that is actually stored: the preprocessed content,
+    // which is what a reader will see and what the paths in it refer to.
+    let anchors = anchors::resolve(anchors::collect(&explicit_anchors, &content));
+    let anchored_paths = anchors::anchored_paths(&anchors);
+
     // Self-containedness gate. Runs on the PREPROCESSED content on purpose:
     // coreference rewriting has already replaced every pronoun it could resolve,
     // so a pronoun still present here is one it could not — exactly the case a
     // write-time rewrite cannot repair. Anchored time likewise suppresses the
     // relative-time rule, because "tomorrow" with an absolute valid_from is a
-    // solved problem rather than a dangling one.
-    let self_contained = detect_self_containment(
+    // solved problem rather than a dangling one. `anchored_paths` does the same
+    // job for code: a path this write turned into an anchor is no longer a bare
+    // reference, so the finding that exists to demand an anchor must not fire.
+    let self_contained = detect_with_anchors(
         &content,
         pp_valid_from.is_some() || pp_valid_until.is_some(),
+        &anchored_paths,
     );
 
     // The gate's one non-negotiable outcome, and the only place it can be
@@ -200,6 +217,7 @@ pub async fn execute(
         self_contained: Some(self_contained.marker()),
         self_contained_findings: self_contained.findings_json(),
         actor,
+        anchors,
         ..Default::default()
     };
 
@@ -292,6 +310,7 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
+        attach_anchors(&mut response, &input.anchors);
         // Attached only when the gate found something: `ok: true` on every
         // response would be noise that hides the flagged ones.
         if self_contained.requires_context() {
@@ -376,6 +395,7 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
+        attach_anchors(&mut response, &input.anchors);
         // Attached only when the gate found something: `ok: true` on every
         // response would be noise that hides the flagged ones.
         if self_contained.requires_context() {
@@ -437,6 +457,7 @@ pub async fn execute(
         if let Some(warning) = &compound_warning {
             response["compound_content_warning"] = serde_json::json!(warning);
         }
+        attach_anchors(&mut response, &input.anchors);
         // Attached only when the gate found something: `ok: true` on every
         // response would be noise that hides the flagged ones.
         if self_contained.requires_context() {
@@ -444,4 +465,18 @@ pub async fn execute(
         }
         Ok(response)
     }
+}
+
+/// Report the anchors this write stored, and how they checked out.
+///
+/// Only when there are any: an `anchors: []` on every response would be noise,
+/// and the caller's question is "did my reference land, and is it already
+/// broken" — which an empty array does not answer any better than silence.
+/// A non-`fresh` verdict here is the one moment the writer can still fix the
+/// memory, so it is reported rather than left for a reader to discover.
+fn attach_anchors(response: &mut Value, anchors: &[vestige_core::IngestAnchor]) {
+    if anchors.is_empty() {
+        return;
+    }
+    response["anchors"] = anchors::response_anchors(anchors);
 }

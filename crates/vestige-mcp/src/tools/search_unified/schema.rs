@@ -34,7 +34,7 @@ pub fn schema() -> Value {
             },
             "detail_level": {
                 "type": "string",
-                "description": "Level of detail in results. 'brief' = id/type/tags/score only (saves tokens). 'summary' = default 8-field response. 'full' = all fields including FSRS state, timestamps, and provenance metadata.",
+                "description": "Level of detail in results. 'brief' = id/type/tags/score only (saves tokens). 'summary' = default 8-field response. 'full' = all fields including FSRS state, timestamps, and provenance metadata. Every level carries `codeRefs` for a memory that cites code: each entry names the path, symbol and revision, and carries a verdict (fresh/stale/orphaned/unchecked) plus a one-line reason — a stale anchor means the code the memory describes has changed since it was written, so check before trusting it.",
                 "enum": ["brief", "summary", "full"],
                 "default": "summary"
             },

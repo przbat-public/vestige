@@ -228,7 +228,7 @@ semantic, temporal, causal, spatial, part_of, user_defined — each with strengt
 
 ### REST API Endpoints
 
-42 route registrations total (`dashboard/mod.rs`): 36 of them sit under `/api/*` and cover **34 distinct REST paths** (`/api/memories/{id}` is registered three times — GET/DELETE/PATCH), plus 4 page/SPA routes (`/dashboard`, `/dashboard/{*path}`, `/`, `/graph`), 1 WebSocket route (`/ws`) and 1 Prometheus scrape endpoint (`/metrics`). Every response body is a `Json<T>` of a ts-rs DTO from `dashboard/wire/`, except `/metrics`, which is Prometheus text exposition v0.0.4; the dashboard re-validates the five highest-blast-radius endpoints with Zod at runtime.
+43 route registrations total (`dashboard/mod.rs`): 37 of them sit under `/api/*` and cover **35 distinct REST paths** (`/api/memories/{id}` is registered three times — GET/DELETE/PATCH), plus 4 page/SPA routes (`/dashboard`, `/dashboard/{*path}`, `/`, `/graph`), 1 WebSocket route (`/ws`) and 1 Prometheus scrape endpoint (`/metrics`). Every response body is a `Json<T>` of a ts-rs DTO from `dashboard/wire/`, except `/metrics`, which is Prometheus text exposition v0.0.4; the dashboard re-validates the five highest-blast-radius endpoints with Zod at runtime.
 
 **Memory CRUD**
 

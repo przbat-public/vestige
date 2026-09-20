@@ -38,10 +38,18 @@ pub(in crate::tools::search_unified) async fn run(
     strengthen_on_access(storage, &scoring).await;
     record_side_effects(storage, cognitive, args, &scoring).await;
 
+    let code_refs = load_code_refs(storage, &scoring.results).await;
+
     let formatted: Vec<Value> = scoring
         .results
         .iter()
-        .map(|r| format_search_result(r, config.detail_level))
+        .map(|r| {
+            let anchors = code_refs
+                .get(&r.node.id)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            format_search_result(r, config.detail_level, anchors)
+        })
         .collect();
 
     let (formatted, budget_expandable, budget_tokens_used) =
@@ -94,6 +102,40 @@ pub(in crate::tools::search_unified) async fn run(
     record_metacognition(cognitive, args, &scoring.results, &mut response).await;
 
     Ok(response)
+}
+
+// ---------------------------------------------------------------------------
+// Code anchors for the result page
+// ---------------------------------------------------------------------------
+/// Fetch the anchors of every result in one query.
+///
+/// One query for the page rather than one per result: this runs on every search,
+/// and a per-result lookup would put a statement inside a loop that is already
+/// the expensive part of the pipeline.
+///
+/// The verdicts are reported as stored — a search does not re-resolve them. That
+/// is the design: resolution is reading a repository, which the read path must
+/// not do, and the consolidation audit is what keeps the stored verdicts honest.
+async fn load_code_refs(
+    storage: &Arc<Storage>,
+    results: &[SearchResult],
+) -> std::collections::HashMap<String, Vec<vestige_core::CodeRef>> {
+    if results.is_empty() {
+        return std::collections::HashMap::new();
+    }
+    let storage = storage.clone();
+    let ids: Vec<String> = results.iter().map(|r| r.node.id.clone()).collect();
+    tokio::task::spawn_blocking(move || storage.code_refs_for_nodes(&ids))
+        .await
+        .ok()
+        .and_then(|result| {
+            result
+                .inspect_err(
+                    |e| tracing::warn!(error = %e, "could not load code anchors for results"),
+                )
+                .ok()
+        })
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------

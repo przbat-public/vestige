@@ -18,6 +18,39 @@ pub(super) struct SmartIngestArgs {
     pub session_id: Option<String>,
     /// Agent identifier for provenance tracking (e.g. "cursor", "claude")
     pub agent: Option<String>,
+    /// Explicit code anchors for this memory: `path@commit#symbol`, or an object
+    /// with `path` / `commit` / `symbol` / `line` / `repo`.
+    ///
+    /// Paths and line numbers belong here and not in `content`: a path inside
+    /// the text keeps resolving to whatever it means today and nothing signals
+    /// when that changes. An anchor carries the revision and the symbol, so the
+    /// store can re-check it and a reader can see the verdict.
+    #[serde(default, alias = "code_refs")]
+    pub code_refs: Vec<AnchorArg>,
+}
+
+/// One explicit anchor, in either accepted shape.
+///
+/// Untagged on purpose: the short form is what a caller writes by hand, and the
+/// object form is what a caller writes when it has the parts separately. Making
+/// them two fields would mean two code paths that must agree about precedence.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(super) enum AnchorArg {
+    /// `path`, `path:line`, `path@sha`, or `path@sha#symbol`.
+    Text(String),
+    /// The parts, spelled out.
+    Full {
+        path: String,
+        #[serde(default, alias = "commitSha", alias = "sha")]
+        commit: Option<String>,
+        #[serde(default)]
+        symbol: Option<String>,
+        #[serde(default)]
+        line: Option<u32>,
+        #[serde(default, alias = "repoRemote", alias = "remote")]
+        repo: Option<String>,
+    },
 }
 
 /// A single item in batch mode
@@ -31,6 +64,9 @@ pub(super) struct BatchItem {
     pub source: Option<String>,
     #[serde(alias = "force_create")]
     pub force_create: Option<bool>,
+    /// Explicit anchors for this item, in the same two shapes as single mode.
+    #[serde(default, alias = "code_refs")]
+    pub code_refs: Vec<AnchorArg>,
 }
 
 /// Who is writing, as `memory_revisions.actor` records it.

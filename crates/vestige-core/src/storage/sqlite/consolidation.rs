@@ -44,6 +44,7 @@ impl Storage {
     /// 12. Connection Graph Maintenance
     /// 13–14. FTS5 + PRAGMA optimize
     /// 15–17. Autonomic (auto-promote, retention target GC, snapshot)
+    /// 18. Code-anchor rot audit (report only — re-resolve, never repair)
     pub fn run_consolidation(&self) -> Result<ConsolidationResult> {
         let start = std::time::Instant::now();
 
@@ -336,6 +337,36 @@ impl Storage {
             let _ = self.save_retention_snapshot(avg_retention, total, below_target, gc_triggered);
         }
 
+        // 18. Code-anchor rot audit — report only, never repair.
+        //
+        // A memory that cites code is only as good as the citation: the stored
+        // path keeps resolving to whatever that path means today, so "this is
+        // stale" and "this is gone" are facts nothing else in the cycle can
+        // discover. The audit re-resolves each anchor against the revision the
+        // memory recorded and writes the verdict back; it does NOT rewrite a
+        // reference, because inventing a new pointer is worse than reporting a
+        // broken one. Routed through `unwrap_or_default` so a broken anchor
+        // store can never fail a consolidation cycle that has already committed
+        // fifteen other steps.
+        let code_anchor_audit = self
+            .audit_code_anchors(super::code_refs::CODE_ANCHOR_AUDIT_BATCH)
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    error = %e,
+                    "Code-anchor audit failed; anchors keep their previous verdicts"
+                );
+                crate::code_refs::CodeAnchorAudit::default()
+            });
+        if code_anchor_audit.stale + code_anchor_audit.orphaned > 0 {
+            tracing::warn!(
+                stale = code_anchor_audit.stale,
+                orphaned = code_anchor_audit.orphaned,
+                checked = code_anchor_audit.checked,
+                "Code anchors no longer match the revision their memories recorded — \
+                 reported only, nothing was rewritten"
+            );
+        }
+
         let duration = start.elapsed().as_millis() as i64;
 
         // Record consolidation history
@@ -369,6 +400,7 @@ impl Storage {
             neighbors_reinforced: 0,
             activations_computed,
             w20_optimized,
+            code_anchor_audit,
         })
     }
 

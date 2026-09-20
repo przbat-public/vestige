@@ -996,3 +996,167 @@ async fn a_tool_driven_write_records_who_wrote_it() {
         );
     }
 }
+
+// ============================================================================
+// Code anchors at write time
+// ============================================================================
+
+/// A path in the content is anchored, and the finding that exists to demand an
+/// anchor stops firing.
+///
+/// This is the wiring the design asks for: `bare_code_reference` warns about a
+/// path with no `code_ref`, so a write that has just created one must not be
+/// warned about the same path. The two used to be unconnected — the gate looked
+/// at the text and the anchors did not exist at all.
+#[tokio::test]
+async fn a_path_in_the_content_is_anchored_and_stops_being_a_bare_reference() {
+    let (storage, dir) = test_storage().await;
+    // A path that is not in the checkout the tests run from, so the verdict is
+    // the honest `unchecked` rather than a `fresh` earned against whatever
+    // repository happens to be the working directory. The version that *does*
+    // observe a revision is covered against a throwaway repository in
+    // `vestige_core::code_refs`.
+    let content =
+        "BUG FIX: the merge dropped a sub-query in crates/vestige-mcp/src/tools/absent_probe.rs";
+
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({ "content": content, "agent": "test" })),
+    )
+    .await
+    .unwrap();
+
+    let node_id = value["nodeId"].as_str().unwrap().to_string();
+    let anchors = value["anchors"]
+        .as_array()
+        .expect("the write must report the anchors it stored");
+    assert_eq!(anchors.len(), 1, "{value}");
+    assert_eq!(
+        anchors[0]["path"],
+        "crates/vestige-mcp/src/tools/absent_probe.rs"
+    );
+    assert!(
+        anchors[0]["symbol"].is_null(),
+        "a symbol is never invented from prose: {value}"
+    );
+    assert_eq!(anchors[0]["verdict"], "unchecked");
+
+    // The stored row, read straight from the file.
+    let conn = store_conn(&dir);
+    let (path, symbol, verdict): (String, Option<String>, String) = conn
+        .query_row(
+            "SELECT path, symbol, verdict FROM code_refs WHERE node_id = ?1",
+            params![node_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(path, "crates/vestige-mcp/src/tools/absent_probe.rs");
+    assert_eq!(symbol, None);
+    assert_eq!(verdict, "unchecked");
+
+    let kinds: Vec<String> = value["self_contained"]["findings"]
+        .as_array()
+        .map(|findings| {
+            findings
+                .iter()
+                .filter_map(|f| f["kind"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        !kinds.iter().any(|k| k == "bare_code_reference"),
+        "the path has an anchor now, so the rule demanding one must not fire: {value}"
+    );
+}
+
+/// Without the anchor the same text is flagged, which is what makes the test
+/// above a statement about the wiring rather than about the rule being dead.
+#[tokio::test]
+async fn a_path_that_is_not_anchored_is_still_flagged() {
+    let (storage, _dir) = test_storage().await;
+    // A URL is the control: it looks like a reference but is not a checkout
+    // path, so nothing anchors it and the gate has nothing to suppress.
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "content": "The report lives at https://example.invalid/report.json and Marek read it"
+        })),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        value.get("anchors").is_none(),
+        "a URL is not a checkout reference: {value}"
+    );
+}
+
+/// The explicit form is preferred over whatever the prose says, including its
+/// revision and its symbol.
+#[tokio::test]
+async fn an_explicit_anchor_wins_over_the_path_in_the_content() {
+    let (storage, dir) = test_storage().await;
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "content": "The retry loop in src/search.rs was the wrong layer",
+            "codeRefs": ["src/search.rs@1cfdf45#run_retry_loop"]
+        })),
+    )
+    .await
+    .unwrap();
+
+    let node_id = value["nodeId"].as_str().unwrap().to_string();
+    let anchors = value["anchors"].as_array().unwrap();
+    assert_eq!(anchors.len(), 1, "one path, one anchor: {value}");
+    assert_eq!(anchors[0]["commit"], "1cfdf45");
+    assert_eq!(anchors[0]["symbol"], "run_retry_loop");
+
+    let conn = store_conn(&dir);
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM code_refs WHERE node_id = ?1 AND path = 'src/search.rs'",
+            params![node_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        count, 1,
+        "the derived and explicit forms must not both land"
+    );
+}
+
+/// Batch items carry their own anchors, and the gate sees them there too.
+#[tokio::test]
+async fn batch_items_store_their_own_anchors() {
+    let (storage, dir) = test_storage().await;
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({
+            "items": [
+                { "content": "Marek prefers the migration to run before the deploy in scripts/deploy.sh" }
+            ]
+        })),
+    )
+    .await
+    .unwrap();
+
+    let node_id = value["results"][0]["nodeId"].as_str().unwrap().to_string();
+    let conn = store_conn(&dir);
+    let path: String = conn
+        .query_row(
+            "SELECT path FROM code_refs WHERE node_id = ?1",
+            params![node_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(path, "scripts/deploy.sh");
+    assert!(
+        value["results"][0]["anchors"].is_array(),
+        "a batch item reports its anchors like the single mode does: {value}"
+    );
+}

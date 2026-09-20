@@ -1055,3 +1055,139 @@ async fn compound_query_returns_the_same_union_and_order_on_every_run() {
         "reported score must be non-increasing: {reported:?}"
     );
 }
+
+// ========================================================================
+// CODE ANCHORS IN RESULTS
+// ========================================================================
+
+/// A reader has to learn that an anchor is stale *from the result* — that is the
+/// whole point of the verdict. A memory whose citation silently points at an old
+/// copy is exactly the failure a stored path already has.
+#[tokio::test]
+async fn a_result_with_a_stale_anchor_says_so() {
+    use vestige_core::{AnchorVerdict, CodeAnchor, IngestAnchor};
+
+    let (storage, _dir) = test_storage().await;
+    let mut anchor = CodeAnchor::new("crates/vestige-core/src/search/mmr.rs");
+    anchor.commit_sha = Some("1cfdf45aa".to_string());
+    anchor.symbol = Some("mmr_rerank".to_string());
+    anchor.hint_line = Some(112);
+    anchor.content_hash = Some("deadbeef".to_string());
+
+    let node_id = storage
+        .ingest(IngestInput {
+            content: "The re-rank stage drops results whose score ties at the cut-off".to_string(),
+            anchors: vec![IngestAnchor {
+                anchor,
+                verdict: AnchorVerdict::Stale,
+                resolved_at: Some(chrono::Utc::now()),
+            }],
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({ "query": "re-rank stage ties at the cut-off", "limit": 5 })),
+    )
+    .await
+    .unwrap();
+
+    let result = value["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == serde_json::json!(node_id))
+        .expect("the memory must be retrievable");
+
+    let anchors = result["codeRefs"]
+        .as_array()
+        .expect("a memory with anchors must carry them in the result");
+    assert_eq!(anchors.len(), 1, "{result}");
+    assert_eq!(anchors[0]["verdict"], "stale");
+    assert_eq!(
+        anchors[0]["reference"],
+        "crates/vestige-core/src/search/mmr.rs@1cfdf45aa#mmr_rerank"
+    );
+    assert_eq!(anchors[0]["hintLine"], 112);
+    assert!(
+        anchors[0]["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("text has changed")),
+        "the note is the part a reader acts on: {result}"
+    );
+    assert_eq!(anchors[0]["commit"], "1cfdf45aa");
+}
+
+/// A memory with no anchors must not grow an empty `codeRefs` array: the field
+/// means "this memory cites code", and an empty list would say that about every
+/// result.
+#[tokio::test]
+async fn a_result_with_no_anchors_carries_no_code_refs_field() {
+    let (storage, _dir) = test_storage().await;
+    ingest_test_content(
+        &storage,
+        "Marek prefers the migration to run before the deploy",
+    )
+    .await;
+
+    let value = execute(
+        &storage,
+        &test_cognitive(),
+        Some(serde_json::json!({ "query": "migration before the deploy", "limit": 5 })),
+    )
+    .await
+    .unwrap();
+
+    for result in value["results"].as_array().unwrap() {
+        assert!(
+            result.get("codeRefs").is_none(),
+            "no anchors means no field: {result}"
+        );
+    }
+}
+
+/// `brief` is the level a reader scans first, so the verdict has to be there
+/// too — a warning that only appears at `full` is a warning most readers never
+/// reach.
+#[tokio::test]
+async fn every_detail_level_carries_the_verdict() {
+    use vestige_core::{AnchorVerdict, CodeAnchor, IngestAnchor};
+
+    let (storage, _dir) = test_storage().await;
+    let mut anchor = CodeAnchor::new("src/lib.rs");
+    anchor.commit_sha = Some("1cfdf45aa".to_string());
+    storage
+        .ingest(IngestInput {
+            content: "The anchor verdict must survive every detail level".to_string(),
+            anchors: vec![IngestAnchor {
+                anchor,
+                verdict: AnchorVerdict::Orphaned,
+                resolved_at: None,
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+
+    for level in ["brief", "summary", "full"] {
+        let value = execute(
+            &storage,
+            &test_cognitive(),
+            Some(serde_json::json!({
+                "query": "anchor verdict detail level",
+                "detail_level": level,
+                "limit": 5
+            })),
+        )
+        .await
+        .unwrap();
+
+        let result = &value["results"][0];
+        assert_eq!(
+            result["codeRefs"][0]["verdict"], "orphaned",
+            "detail_level={level}: {value}"
+        );
+    }
+}

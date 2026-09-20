@@ -551,6 +551,15 @@ pub struct IngestInput {
     /// with the write request instead of being guessed back out of provenance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor: Option<String>,
+    /// Code anchors: where this memory's claims about code can be re-checked.
+    ///
+    /// Paths and line numbers belong here and **not** in `content`, because a
+    /// path inside the text is read as fact forever while it silently drifts to
+    /// an old copy or to nothing. An anchor carries the revision and the symbol
+    /// that make the reference checkable, and the verdict travels with it
+    /// because the write path already resolved it to compute the content hash.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchors: Vec<crate::code_refs::IngestAnchor>,
 }
 
 impl Default for IngestInput {
@@ -575,6 +584,7 @@ impl Default for IngestInput {
             self_contained: None,
             self_contained_findings: None,
             actor: None,
+            anchors: vec![],
         }
     }
 }

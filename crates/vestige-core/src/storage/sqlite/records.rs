@@ -164,6 +164,24 @@ pub struct MemoryRevision {
     pub actor: Option<String>,
 }
 
+/// One row of `code_refs`: a memory's reference to code, plus the last verdict
+/// a resolver reached about it.
+///
+/// The anchor is kept as a nested [`CodeAnchor`] rather than as nine loose
+/// fields because the resolver takes exactly that value; flattening it here
+/// would mean rebuilding it at every call site, which is how a field gets
+/// dropped on the way to a check.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeRef {
+    pub id: i64,
+    pub node_id: String,
+    pub anchor: crate::code_refs::CodeAnchor,
+    /// Last time the anchor was checked. `None` means it never was.
+    pub resolved_at: Option<DateTime<Utc>>,
+    pub verdict: crate::code_refs::AnchorVerdict,
+}
+
 /// Memory state record
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MemoryStateRecord {

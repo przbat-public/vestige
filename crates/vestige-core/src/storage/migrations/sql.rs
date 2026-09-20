@@ -847,3 +847,61 @@ CREATE INDEX IF NOT EXISTS idx_nodes_flagged_self_contained
 
 UPDATE schema_version SET version = 18, applied_at = datetime('now');
 "#;
+
+/// V19: code anchors — a memory's references to code as *checkable* citations
+/// instead of as prose.
+///
+/// Why the schema needed this: `CodeEntity.line_number` records a **position**,
+/// and a position is not an identity. A memory that says "line 112 of
+/// search.rs" is wrong the first time anyone inserts a line above it, and one
+/// that says "search.rs" keeps resolving to whatever that path means today —
+/// after a rename, to a different function; after a deletion, to nothing, and
+/// silently. Neither failure is visible to a reader. A row here records the
+/// fields that *can* be re-checked: the repository, the revision, the path, the
+/// symbol, and the hash of the symbol's own text.
+///
+/// `verdict` is re-derived on every audit and is never inferred from age or read
+/// count: `fresh` means the symbol is where it was *and* its text still hashes
+/// to the recorded value; `stale` means the symbol resolves but its text
+/// changed; `orphaned` means the file or the symbol is gone at the recorded
+/// revision; `unchecked` is the honest answer when no repository could be opened
+/// or no revision was recorded. `unchecked` is deliberately not `fresh`:
+/// "we could not check" and "we checked and it holds" are different claims.
+///
+/// `content_hash` may be NULL. An anchor with no symbol (a bare path) has
+/// nothing to hash but the file, and hashing the whole file would mark the
+/// memory stale on every unrelated edit; such an anchor can only be `fresh` or
+/// `orphaned`, which is the honest ceiling of what a path alone supports.
+///
+/// `hint_line` is a hint and nothing else — never a locator. It is kept because
+/// a reader benefits from knowing where the symbol sat, and it is *named* as a
+/// hint so no later query mistakes it for a verified position.
+///
+/// `node_id` carries **no** foreign key, for the reason V17 gives: GDPR
+/// Article 17 erasure names every child table explicitly (`storage/sqlite/
+/// gdpr.rs`) so the deletion stays auditable, and a `REFERENCES ... ON DELETE
+/// CASCADE` would put it behind a `PRAGMA foreign_keys` setting instead.
+///
+/// The index on `node_id` serves the read path (a search result's anchors are
+/// fetched per node); the index on `verdict` serves the audit and any operator
+/// question of the shape "what is stale in this store".
+pub(super) const MIGRATION_V19_UP: &str = r#"
+CREATE TABLE IF NOT EXISTS code_refs (
+    id INTEGER PRIMARY KEY,
+    node_id TEXT NOT NULL,
+    repo_remote TEXT,
+    commit_sha TEXT,
+    path TEXT NOT NULL,
+    symbol TEXT,
+    hint_line INTEGER,
+    content_hash TEXT,
+    resolved_at TEXT,
+    verdict TEXT NOT NULL DEFAULT 'unchecked'
+        CHECK (verdict IN ('fresh', 'stale', 'orphaned', 'unchecked'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_refs_node ON code_refs(node_id);
+CREATE INDEX IF NOT EXISTS idx_code_refs_verdict ON code_refs(verdict);
+
+UPDATE schema_version SET version = 19, applied_at = datetime('now');
+"#;

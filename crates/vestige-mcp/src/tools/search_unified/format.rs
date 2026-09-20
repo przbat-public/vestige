@@ -2,9 +2,58 @@
 
 use serde_json::Value;
 
+/// The anchors a result carries, as the reader sees them.
+///
+/// This is the read half of the design's one rule: a memory that cites code must
+/// not be returned as fact when the citation no longer holds. The verdict and
+/// its one-line reason travel with the result, so a reader learns "this anchor
+/// is stale" instead of trusting a path that silently points at an old copy.
+///
+/// `note` is computed here rather than stored: it is a pure function of the
+/// verdict, the anchor and when the check ran, and persisting prose that can be
+/// recomputed is how a row's text drifts away from its columns.
+fn code_refs_json(code_refs: &[vestige_core::CodeRef]) -> Option<Value> {
+    if code_refs.is_empty() {
+        return None;
+    }
+    Some(Value::Array(
+        code_refs
+            .iter()
+            .map(|code_ref| {
+                let anchor = &code_ref.anchor;
+                serde_json::json!({
+                    "reference": anchor.reference(),
+                    "path": anchor.path,
+                    "symbol": anchor.symbol,
+                    "commit": anchor.commit_sha,
+                    // A hint, and named as one: nothing resolves through it.
+                    "hintLine": anchor.hint_line,
+                    "verdict": code_ref.verdict,
+                    "note": vestige_core::code_refs::verdict_note(
+                        code_ref.verdict,
+                        anchor,
+                        code_ref.resolved_at,
+                    ),
+                    "resolvedAt": code_ref.resolved_at.map(|at| at.to_rfc3339()),
+                })
+            })
+            .collect(),
+    ))
+}
+
 /// Format a search result based on the requested detail level.
-pub(super) fn format_search_result(r: &vestige_core::SearchResult, detail_level: &str) -> Value {
-    match detail_level {
+///
+/// `code_refs` are the anchors stored for this memory, empty when it has none.
+/// Every detail level carries them: `brief` is what a reader scans first, and an
+/// anchor verdict that only appears at `full` is a warning most readers never
+/// reach.
+pub(super) fn format_search_result(
+    r: &vestige_core::SearchResult,
+    detail_level: &str,
+    code_refs: &[vestige_core::CodeRef],
+) -> Value {
+    let anchors = code_refs_json(code_refs);
+    let mut formatted = match detail_level {
         "brief" => serde_json::json!({
             "id": r.node.id,
             "nodeType": r.node.node_type,
@@ -64,7 +113,11 @@ pub(super) fn format_search_result(r: &vestige_core::SearchResult, detail_level:
             "epistemicStatus": r.node.epistemic_status().to_string(),
             "memorySystem": r.node.memory_system().to_string(),
         }),
+    };
+    if let Some(anchors) = anchors {
+        formatted["codeRefs"] = anchors;
     }
+    formatted
 }
 
 /// Format a KnowledgeNode based on the requested detail level.

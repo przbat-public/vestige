@@ -275,24 +275,6 @@ const RELATIVE_TIME: &[(&str, &str)] = &[
     ("w przyszłym tygodniu", "użyj absolutnej daty"),
 ];
 
-/// Extensions that mark a token as a code reference rather than prose.
-const CODE_EXTENSIONS: &[&str] = &[
-    ".rs", ".ts", ".tsx", ".js", ".jsx", ".py", ".md", ".json", ".toml", ".yml", ".yaml", ".sql",
-    ".sh", ".go", ".java", ".rb", ".c", ".h", ".cpp",
-];
-
-/// Path prefixes that only make sense inside a checkout.
-const CODE_PREFIXES: &[&str] = &[
-    "src/",
-    "crates/",
-    "apps/",
-    "tests/",
-    "docs/",
-    "packages/",
-    "scripts/",
-    "./src/",
-];
-
 /// First-person markers: content that speaks as the author is self-locating even
 /// without a proper noun, so it must not be flagged as subject-less.
 const FIRST_PERSON: &[&str] = &[" i ", " i'", "we ", "we'", "my ", "our ", "me ", "us "];
@@ -338,13 +320,32 @@ const CODE_LINE_PREFIXES: &[&str] = &[
     "#!/",
 ];
 
+/// Detect why `content` will not stand on its own, with no code anchors known.
+///
+/// Kept as the two-argument entry point so the rule tests read as before; the
+/// write paths call [`detect_with_anchors`].
+#[cfg(test)]
+pub(super) fn detect(content: &str, has_anchored_time: bool) -> Report {
+    detect_with_anchors(content, has_anchored_time, &[])
+}
+
 /// Detect why `content` will not stand on its own.
 ///
 /// `has_anchored_time` is the caller's knowledge that temporal anchoring already
 /// attached an absolute time to this memory; it suppresses the relative-time
 /// rule, because an anchored "next Friday" is a solved problem rather than a
 /// dangling one.
-pub(super) fn detect(content: &str, has_anchored_time: bool) -> Report {
+///
+/// `anchored_paths` is the same idea for code: the paths this write stored a
+/// `code_refs` row for. `bare_code_reference` exists to demand an anchor, so a
+/// path that now *has* one must not be flagged — otherwise the gate would tell a
+/// caller to do what the write path had just done, and the warning would be
+/// noise on exactly the memories that got it right.
+pub(super) fn detect_with_anchors(
+    content: &str,
+    has_anchored_time: bool,
+    anchored_paths: &[String],
+) -> Report {
     let mut report = Report::default();
     let lower = content.to_lowercase();
     let subject = has_named_subject(content);
@@ -424,7 +425,7 @@ pub(super) fn detect(content: &str, has_anchored_time: bool) -> Report {
         });
     }
 
-    if let Some(span) = bare_code_reference(content) {
+    if let Some(span) = bare_code_reference(content, anchored_paths) {
         report.findings.push(Finding {
             kind: KIND_BARE_CODE_REFERENCE,
             span,
@@ -506,31 +507,21 @@ fn has_first_person(lower: &str) -> bool {
 }
 
 /// A token that points into the checkout without saying which revision it meant.
-fn bare_code_reference(content: &str) -> Option<String> {
-    for raw in content.split_whitespace() {
-        let token = raw.trim_matches(|c: char| {
-            !c.is_alphanumeric() && !matches!(c, '/' | '.' | '_' | '-' | ':')
-        });
-        if token.is_empty() {
-            continue;
-        }
-        // An anchored reference is the fix, not the problem: `path@sha#symbol`.
-        if token.contains('@') && token.contains('#') {
-            continue;
-        }
-        let lower = token.to_lowercase();
-        let looks_like_path = CODE_PREFIXES.iter().any(|p| lower.starts_with(p))
-            || CODE_EXTENSIONS.iter().any(|e| lower.ends_with(e))
-            || lower.split_once(':').is_some_and(|(head, tail)| {
-                tail.chars().all(|c| c.is_ascii_digit())
-                    && !tail.is_empty()
-                    && CODE_EXTENSIONS.iter().any(|e| head.ends_with(e))
-            });
-        if looks_like_path {
-            return Some(token.to_string());
-        }
-    }
-    None
+///
+/// The scanner itself lives in `vestige_core::code_refs`, which is also what the
+/// write path derives anchors from. Sharing it is the point: two scanners would
+/// eventually disagree about what a path is, and then the gate would either warn
+/// about a reference that was anchored or stay silent about one that was not.
+///
+/// Two shapes are not the problem and are skipped: `path@sha#symbol`, which is
+/// already anchored, and any path the caller's write stored an anchor for.
+fn bare_code_reference(content: &str, anchored_paths: &[String]) -> Option<String> {
+    vestige_core::code_refs::path_candidates(content)
+        .into_iter()
+        .find(|candidate| {
+            !candidate.is_anchored() && !anchored_paths.iter().any(|path| path == &candidate.path)
+        })
+        .map(|candidate| candidate.raw)
 }
 
 /// Statements the repository already owns, which must not be copied into memory.
@@ -797,6 +788,30 @@ mod tests {
             !kinds(&report).contains(&KIND_BARE_CODE_REFERENCE),
             "path@sha#symbol is the anchored form: {:?}",
             report
+        );
+    }
+
+    /// The pairing the write path depends on: a path the write anchored is no
+    /// longer a bare reference, so the rule that demands an anchor must not fire
+    /// on it. Without this the gate would tell a caller to do what the write had
+    /// just done.
+    #[test]
+    fn a_path_that_carries_an_anchor_is_not_a_bare_reference() {
+        let content = "the merge bug was in crates/vestige-core/src/search/decompose.rs";
+        let bare = detect_with_anchors(content, true, &[]);
+        assert!(
+            kinds(&bare).contains(&KIND_BARE_CODE_REFERENCE),
+            "the fixture must be a bare reference to begin with: {bare:?}"
+        );
+
+        let anchored = detect_with_anchors(
+            content,
+            true,
+            &["crates/vestige-core/src/search/decompose.rs".to_string()],
+        );
+        assert!(
+            !kinds(&anchored).contains(&KIND_BARE_CODE_REFERENCE),
+            "an anchored path must not be flagged: {anchored:?}"
         );
     }
 

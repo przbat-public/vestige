@@ -9,9 +9,10 @@ use vestige_core::{ContentType, ImportanceContext, IngestInput, Storage};
 
 use crate::cognitive::CognitiveEngine;
 
+use super::anchors;
 use super::args::BatchItem;
 use super::post_ingest::run_post_ingest;
-use super::self_contained::{detect as detect_self_containment, reject_response};
+use super::self_contained::{detect_with_anchors, reject_response};
 
 /// Execute batch mode: process up to 20 items, each with full cognitive pipeline.
 ///
@@ -51,7 +52,7 @@ pub(super) async fn execute_batch(
     let mut errors = 0u32;
     let mut rejected = 0u32;
 
-    for (i, item) in items.into_iter().enumerate() {
+    for (i, mut item) in items.into_iter().enumerate() {
         // An empty item is the gate's second refusal case, and it is refused
         // here in the same vocabulary as the first: `rejected`, never
         // `skipped`. "Skipped" reads as a queue that may be drained later,
@@ -84,6 +85,7 @@ pub(super) async fn execute_batch(
 
         // Extract per-item force_create before consuming other fields
         let item_force_create = item.force_create.unwrap_or(false);
+        let explicit_anchors = std::mem::take(&mut item.code_refs);
 
         // ================================================================
         // COGNITIVE PRE-INGEST (per item) — see signal-routing note on the
@@ -155,13 +157,20 @@ pub(super) async fn execute_batch(
 
         tags.extend(batch_pp_tags);
 
+        // Anchors, exactly as in single mode: explicit first, then the paths the
+        // stored text names. Collected before the gate so the gate can see which
+        // of its `bare_code_reference` findings this write already answered.
+        let item_anchors = anchors::resolve(anchors::collect(&explicit_anchors, &item_content));
+        let anchored_paths = anchors::anchored_paths(&item_anchors);
+
         // The same gate the single-item path runs, on the preprocessed text and
         // for the same reason: a pronoun that survived coreference rewriting is
         // one the rewriter could not resolve. It has to run here as well, or
         // batch mode would be an open door past the one refusal that exists.
-        let self_contained = detect_self_containment(
+        let self_contained = detect_with_anchors(
             &item_content,
             batch_pp_from.is_some() || batch_pp_until.is_some(),
+            &anchored_paths,
         );
         if let Some(mut refusal) = reject_response(&self_contained) {
             refusal["index"] = serde_json::json!(i);
@@ -194,6 +203,7 @@ pub(super) async fn execute_batch(
             self_contained: Some(self_contained.marker()),
             self_contained_findings: self_contained.findings_json(),
             actor: actor.map(str::to_string),
+            anchors: item_anchors,
             ..Default::default()
         };
 
@@ -225,14 +235,18 @@ pub(super) async fn execute_batch(
                         importance_composite,
                     );
 
-                    results.push(serde_json::json!({
+                    let mut saved = serde_json::json!({
                         "index": i,
                         "status": "saved",
                         "decision": "create",
                         "nodeId": node_id,
                         "importanceScore": importance_composite,
                         "reason": "Forced creation - skipped similarity check"
-                    }));
+                    });
+                    if !input.anchors.is_empty() {
+                        saved["anchors"] = anchors::response_anchors(&input.anchors);
+                    }
+                    results.push(saved);
                 }
                 Err(e) => {
                     errors += 1;
@@ -275,7 +289,7 @@ pub(super) async fn execute_batch(
                         importance_composite,
                     );
 
-                    results.push(serde_json::json!({
+                    let mut saved = serde_json::json!({
                         "index": i,
                         "status": "saved",
                         "decision": result.decision,
@@ -283,7 +297,11 @@ pub(super) async fn execute_batch(
                         "similarity": result.similarity,
                         "importanceScore": importance_composite,
                         "reason": result.reason
-                    }));
+                    });
+                    if !input.anchors.is_empty() {
+                        saved["anchors"] = anchors::response_anchors(&input.anchors);
+                    }
+                    results.push(saved);
                 }
                 Err(e) => {
                     errors += 1;
@@ -319,14 +337,18 @@ pub(super) async fn execute_batch(
                         importance_composite,
                     );
 
-                    results.push(serde_json::json!({
+                    let mut saved = serde_json::json!({
                         "index": i,
                         "status": "saved",
                         "decision": "create",
                         "nodeId": node_id,
                         "importanceScore": importance_composite,
                         "reason": "Embeddings not available - used regular ingest"
-                    }));
+                    });
+                    if !input.anchors.is_empty() {
+                        saved["anchors"] = anchors::response_anchors(&input.anchors);
+                    }
+                    results.push(saved);
                 }
                 Err(e) => {
                     errors += 1;

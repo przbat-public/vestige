@@ -14,6 +14,7 @@
 //!   Pre-ingest: importance scoring (4-channel) + intent detection → auto-tag
 //!   Post-ingest: synaptic tagging + novelty update + hippocampal indexing
 
+mod anchors;
 mod args;
 mod batch;
 mod compound;

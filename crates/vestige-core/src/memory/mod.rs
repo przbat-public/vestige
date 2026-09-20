@@ -358,6 +358,13 @@ pub struct ConsolidationResult {
     pub activations_computed: i64,
     /// Personalized w20 if optimized this cycle
     pub w20_optimized: Option<f64>,
+    /// What the code-anchor rot audit found this cycle.
+    ///
+    /// Report-only: the audit re-resolves each anchor against the revision the
+    /// memory recorded and writes back the verdict, but it never rewrites a
+    /// reference. A broken pointer is information; a new pointer the audit
+    /// invented is a claim nobody checked.
+    pub code_anchor_audit: crate::code_refs::CodeAnchorAudit,
 }
 
 // ============================================================================

@@ -213,6 +213,15 @@ impl Storage {
                 ],
             )?;
 
+            // Code anchors, in the same transaction as the memory they belong
+            // to. An anchor committed without its memory would point at nothing;
+            // a memory committed without its anchors would lose the citation it
+            // was written with, and nothing would ever notice — which is the
+            // failure mode the whole table exists to end.
+            for anchor in &input.anchors {
+                Self::insert_code_ref(&tx, &id, anchor)?;
+            }
+
             tx.commit()?;
         }
 
@@ -459,6 +468,10 @@ impl Storage {
                 .map_err(|_| StorageError::Init("Writer lock poisoned".into()))?;
             let tx = super::helpers::begin_write_transaction(&mut writer)?;
             Self::delete_revisions_for(&tx, id)?;
+            // Anchors are keyed by node id with no foreign key (V19), so a node
+            // delete that skipped them would leave a record of which files the
+            // memory pointed at — the same leak erasure closes, one path over.
+            Self::delete_code_refs_for(&tx, id)?;
             let rows = tx.execute("DELETE FROM knowledge_nodes WHERE id = ?1", params![id])?;
             tx.commit()?;
             rows

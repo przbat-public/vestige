@@ -187,7 +187,7 @@ The dashboard runs automatically at `http://localhost:3927/dashboard` when the M
 │  Light/Dark Mode · a11y · 16 pages                  │
 ├─────────────────────────────────────────────────────┤
 │  Axum HTTP + WebSocket Server (port 3927)           │
-│  42 routes (34 REST API paths) · ts-rs/Zod · WS     │
+│  43 routes (35 REST API paths) · ts-rs/Zod · WS     │
 ├─────────────────────────────────────────────────────┤
 │  MCP Server (stdio JSON-RPC + HTTP on :3928)        │
 │  29 tools · 11 resources · per-session instances    │
