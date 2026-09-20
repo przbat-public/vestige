@@ -19,7 +19,7 @@ pub mod temporal;
 use chrono::{DateTime, Utc};
 
 use coref::CorefResult;
-use entities::{ExtractedEntity, entities_to_tags, extract_entities};
+use entities::{ExtractedEntity, entities_to_tags, extract_entities, extract_mentioned_names};
 use provenance::ProvenanceMetadata;
 use relations::{ExtractedRelation, extract_relations};
 use temporal::{TemporalResult, anchor_temporal};
@@ -44,7 +44,10 @@ pub struct PreprocessingResult {
     pub relations: Vec<ExtractedRelation>,
     /// Provenance metadata for this memory
     pub provenance: ProvenanceMetadata,
-    /// Raw extracted entities (for downstream use)
+    /// The entities that earned a tag — the strict list, aligned with
+    /// `auto_tags`. Consumers asking who or what a text mentions want
+    /// [`entities::extract_mentioned_names`], which also counts a name that
+    /// only opens a sentence.
     pub entities: Vec<ExtractedEntity>,
     /// How many pronoun→entity replacements were made
     pub coref_rewrites: usize,
@@ -67,20 +70,28 @@ pub struct PreprocessingConfig {
 ///
 /// Pipeline order:
 /// 1. Extract entities from original content
-/// 2. Resolve coreferences using entities → rewritten content
+/// 2. Resolve coreferences using the mentioned names → rewritten content
 /// 3. Anchor temporal expressions from rewritten content
-/// 4. Extract relations from rewritten content
+/// 4. Extract relations from rewritten content, using the mentioned names
 /// 5. Assemble provenance metadata
+///
+/// Step 1 produces two lists on purpose (see the `entities` module docs): the
+/// strict one decides the tags, the permissive one — names in any position —
+/// feeds steps 2 and 4. Coreference and relation extraction are asking "who is
+/// this text about?", and a memory that opens with its subject answers that
+/// even though the opening capital earns no tag; reading the strict list there
+/// loses the actor of the first sentence.
 pub fn preprocess(content: &str, config: &PreprocessingConfig) -> PreprocessingResult {
-    // 1. Entity extraction
+    // 1. Entity extraction: strict for tags, permissive for the NLP stages.
     let entities = extract_entities(content, MAX_ENTITIES);
     let auto_tags = entities_to_tags(&entities, MAX_AUTO_TAGS);
+    let mentions = extract_mentioned_names(content, MAX_ENTITIES);
 
     // 2. Coreference rewriting
     let CorefResult {
         content: rewritten,
         rewrites,
-    } = coref::resolve_coreferences(content, &entities);
+    } = coref::resolve_coreferences(content, &mentions);
 
     // 3. Temporal anchoring (on rewritten content)
     let TemporalResult {
@@ -93,8 +104,9 @@ pub fn preprocess(content: &str, config: &PreprocessingConfig) -> PreprocessingR
         config.existing_valid_until,
     );
 
-    // 4. Relation extraction (on rewritten content, using original entities)
-    let relations = extract_relations(&rewritten, &entities);
+    // 4. Relation extraction (on rewritten content, using the mentioned names —
+    //    the subject of "Alice manages the Auth Team" is a mention, not a tag)
+    let relations = extract_relations(&rewritten, &mentions);
 
     // 5. Assemble provenance
     let mut provenance =
@@ -197,6 +209,33 @@ mod tests {
         assert!(result.relations.is_empty());
         assert_eq!(result.coref_rewrites, 0);
         assert_eq!(result.content, "");
+    }
+
+    /// The shape we want writers to produce: the memory opens with its actor.
+    /// The opening capital earns no tag (it is positional in every language
+    /// that capitalises sentences), but the actor is still the subject of the
+    /// relation — losing it would punish the good shape while fixing the noisy
+    /// one.
+    #[test]
+    fn test_pipeline_keeps_the_actor_of_an_opening_subject() {
+        let result = preprocess(
+            "Alice manages the Auth Team since January.",
+            &PreprocessingConfig::default(),
+        );
+
+        assert!(
+            !result.auto_tags.contains(&"entity:alice".to_string()),
+            "the opening capital earns no tag, got {:?}",
+            result.auto_tags
+        );
+        assert!(
+            result
+                .relations
+                .iter()
+                .any(|r| r.subject == "Alice" && r.predicate == "manages"),
+            "the relation must keep its actor, got {:?}",
+            result.relations
+        );
     }
 
     #[test]

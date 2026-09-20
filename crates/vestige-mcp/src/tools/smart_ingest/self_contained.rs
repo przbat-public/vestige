@@ -52,7 +52,7 @@ const REJECT_HINT: &str =
 /// text that fired the rule (the fence, the tree glyph, the version token) so
 /// the caller can see the evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Reject {
+pub(crate) struct Reject {
     pub kind: &'static str,
     pub span: String,
     pub reason: &'static str,
@@ -61,7 +61,7 @@ pub(super) struct Reject {
 
 /// One reason a memory will not stand on its own, with the text that triggered it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Finding {
+pub(crate) struct Finding {
     pub kind: &'static str,
     /// The exact substring that fired the rule, so the caller can see what to fix.
     pub span: String,
@@ -71,9 +71,9 @@ pub(super) struct Finding {
 /// Outcome of the gate. `findings` means "written, but will need context";
 /// `reject` means "this must not be stored at all".
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(super) struct Report {
-    pub findings: Vec<Finding>,
-    pub reject: Option<Reject>,
+pub(crate) struct Report {
+    findings: Vec<Finding>,
+    reject: Option<Reject>,
 }
 
 impl Report {
@@ -241,7 +241,7 @@ const DISCOURSE_DEIXIS_WEAK: &[(&str, &str)] = &[
 /// the content names no subject; "it" alone is deliberately absent because it is
 /// ordinary English prose far more often than it is a dangling reference.
 const PRONOUNS: &[&str] = &[
-    "he ", "she ", "they ", "him ", "her ", "them ", "his ", "hers ", "their ",
+    "he", "she", "they", "him", "her", "them", "his", "hers", "their",
 ];
 const BARE_DEMONSTRATIVES: &[&str] = &[
     "this is",
@@ -378,10 +378,10 @@ pub(super) fn detect_with_anchors(
 
     if !subject {
         for pronoun in PRONOUNS {
-            if lower.contains(pronoun) {
+            if contains_word(&lower, pronoun) {
                 report.findings.push(Finding {
                     kind: KIND_UNRESOLVED_PRONOUN,
-                    span: (*pronoun).trim().to_string(),
+                    span: (*pronoun).to_string(),
                     hint: "name the person the pronoun refers to",
                 });
                 break;
@@ -444,22 +444,55 @@ pub(super) fn detect_with_anchors(
     report
 }
 
+/// Whether `haystack` contains `word` as a word rather than as a substring.
+///
+/// The pronoun rule used to be `contains("he ")`, which matches the "he " inside
+/// "the " — so every English memory mentioning "the" something was reported as
+/// leaning on a person it never named. A rule that fires on the most common word
+/// in the language teaches writers to ignore it.
+fn contains_word(haystack: &str, word: &str) -> bool {
+    let mut from = 0;
+    while let Some(found) = haystack[from..].find(word) {
+        let start = from + found;
+        let end = start + word.len();
+        let before_ok = haystack[..start]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric());
+        let after_ok = haystack[end..]
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric());
+        if before_ok && after_ok {
+            return true;
+        }
+        from = end;
+    }
+    false
+}
+
 /// True when the text names something a later reader can look up: a proper noun,
 /// a URL, an email or a monetary amount. File paths deliberately do not count —
 /// a path is an anchor, not a subject.
 fn has_named_subject(content: &str) -> bool {
     #[cfg(feature = "preprocessing")]
     {
-        use vestige_core::preprocessing::entities::{EntityType, extract_entities};
+        use vestige_core::preprocessing::entities::{
+            EntityType, extract_entities, extract_mentioned_names,
+        };
+        // The names come from the permissive list, because the question here is
+        // "does this memory name its subject": a memory that opens with its
+        // subject ("Marek said …", "Vestige merges …") names something even
+        // though that capital earns no tag (see the `entities` module docs).
+        // The strict list still supplies the look-up-able tokens that are not
+        // names, and it is the one that must never be relaxed for tags.
+        if !extract_mentioned_names(content, 8).is_empty() {
+            return true;
+        }
         if extract_entities(content, 8).iter().any(|e| {
             matches!(
                 e.entity_type,
-                EntityType::ProperNoun
-                    | EntityType::Person
-                    | EntityType::Organization
-                    | EntityType::Url
-                    | EntityType::Email
-                    | EntityType::Monetary
+                EntityType::Url | EntityType::Email | EntityType::Monetary
             )
         }) {
             return true;
@@ -601,10 +634,17 @@ fn derivable_reason(content: &str) -> Option<Reject> {
 ///
 /// These are refused, because a version claim copied out of the repository is
 /// stale after the next release and the repository is where it belongs.
+///
+/// A bare `N.N` is deliberately **not** enough. That shape is also a duration
+/// ("1.5 ms"), a frame budget ("16.6 ms"), a ratio or a weight ("(weight 1.5)"),
+/// and a refusal writes nothing — so the rule would silently drop memories about
+/// measurements to catch a version claim that the next token would have
+/// identified anyway. Evidence of being a version is required: a `v` prefix,
+/// three numeric parts (`1.2.3`), or the word in front of it.
 fn version_string(content: &str) -> Option<String> {
     let lower = content.to_lowercase();
     let tokens: Vec<&str> = content.split_whitespace().collect();
-    for (i, token) in tokens.iter().enumerate() {
+    for token in tokens.iter() {
         let cleaned = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '.');
         // The `v` prefix is stripped before the digits are checked: keeping it in
         // the first part made every `v1.2.3` fail the all-digits test, so the most
@@ -614,20 +654,26 @@ fn version_string(content: &str) -> Option<String> {
             None => (cleaned, false),
         };
         let parts: Vec<&str> = body.split('.').collect();
-        if parts.len() >= 2
+        let all_numeric = !parts.is_empty()
             && parts
                 .iter()
-                .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
-            && (prefixed || i > 0)
-        {
+                .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+        // Three parts (`1.2.3`) is a version shape; two parts only when something
+        // says so — the `v`, or the word, handled below.
+        if all_numeric && (prefixed || parts.len() >= 3) {
             return Some(cleaned.to_string());
         }
     }
-    // "version 1.2" / "wersja 1.2" — the word plus a dotted number. The dotted
-    // shape is required: "version 2024-11-05" is a date-stamped revision label,
-    // and a memory about which protocol revision a server speaks is knowledge,
-    // not a stale product claim. Refusing on the bare word would lose it.
-    for word in ["version ", "wersja "] {
+    // "version 1.2" / "wersja 1.2" / "pipeline 1.0" — an artifact word plus a
+    // dotted number. The word is what makes it a claim about a release rather
+    // than a measurement: "1.5 ms" and "(weight 1.5)" have no such word in front
+    // of them, and refusing those would drop real memories about how long
+    // something takes. The dotted shape is required: "version 2024-11-05" is a
+    // date-stamped revision label, and a memory about which protocol revision a
+    // server speaks is knowledge, not a stale product claim.
+    const VERSION_CONTEXT_WORDS: [&str; 5] =
+        ["version ", "wersja ", "pipeline ", "release ", "schema "];
+    for word in VERSION_CONTEXT_WORDS {
         if let Some(rest) = lower.split(word).nth(1)
             && let Some(candidate) = rest.split_whitespace().next()
         {
@@ -759,6 +805,46 @@ mod tests {
         assert!(tree.is_rejected());
     }
 
+    /// A decimal number is a measurement, not a version claim.
+    ///
+    /// The rule used to refuse any `N.N` token that was not the first word of
+    /// the content, which is what a duration, a budget, a ratio and a weight all
+    /// look like. A refusal writes nothing, so the cost was a lost memory about
+    /// how long a frame takes, and it also blocked a decision matrix whose
+    /// criteria read "(weight 1.5)". A version claim needs evidence of being
+    /// one: a `v` prefix, three numeric parts, or the word "version"/"wersja" in
+    /// front of it.
+    #[test]
+    fn a_decimal_measurement_is_not_a_version_claim() {
+        let measurement = detect(
+            "The frame budget is 16.6 ms, and the panel transmission takes 1.5 ms of it.",
+            false,
+        );
+        assert!(
+            !measurement.is_rejected(),
+            "a measurement must not be refused as a version: {measurement:?}"
+        );
+
+        let weight = detect("## Criteria\n- latency (weight 1.5)\n", false);
+        assert!(
+            !weight.is_rejected(),
+            "a weighted criterion must not be refused as a version: {weight:?}"
+        );
+
+        // The shapes that really are version claims stay refused.
+        for text in [
+            "Vestige pipeline v1.2.3 broke the merge",
+            "The schema is 1.2.3 and the migration is behind",
+            "The deployment speaks version 1.2 of the protocol",
+        ] {
+            let verdict = detect(text, false);
+            assert!(
+                verdict.is_rejected(),
+                "{text:?} is a version claim and must stay refused: {verdict:?}"
+            );
+        }
+    }
+
     /// The counter-case that keeps the gate honest: a lesson is the target
     /// output of this system, and flagging it would make the gate worse than
     /// having none.
@@ -838,6 +924,33 @@ mod tests {
         );
 
         assert!(report.is_rejected(), "{report:?}");
+    }
+
+    /// A pronoun rule that fires on "the" is a rule writers learn to ignore.
+    ///
+    /// The list carried trailing spaces as a stand-in for word boundaries and was
+    /// matched with `contains`, so "he " matched inside "the " and any English
+    /// memory without a named entity was reported as leaning on a person. The
+    /// real pronoun must still be caught.
+    #[test]
+    fn the_word_the_is_not_a_pronoun() {
+        let no_pronoun = detect(
+            "The frame budget is 16.6 ms, and the panel transmission takes 1.5 ms of it.",
+            false,
+        );
+        assert!(
+            !kinds(&no_pronoun).contains(&KIND_UNRESOLVED_PRONOUN),
+            "the word 'the' is not a pronoun: {no_pronoun:?}"
+        );
+
+        let pronoun = detect(
+            "He said the migration failed while the pipeline was down.",
+            false,
+        );
+        assert!(
+            kinds(&pronoun).contains(&KIND_UNRESOLVED_PRONOUN),
+            "a real pronoun with no antecedent must still be reported: {pronoun:?}"
+        );
     }
 
     /// The wire shape is part of the tool contract, so it is pinned.
