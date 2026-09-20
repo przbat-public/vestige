@@ -325,3 +325,45 @@ i zostaje zapisane — inaczej bramka zamieniłaby jeden problem (śmieci) na go
 6. „Nie symuluj bazy w testach integracyjnych, bo testy przechodziły, a migracja padła" → **brak**
    ostrzeżeń (to wzorcowe wspomnienie: lekcja, nie opis).
 7. Wpis z `code_ref` (fala 3) i nazwanym podmiotem → brak ostrzeżeń.
+
+---
+
+## 12. Załącznik: jak mierzymy skutek (fala 5) — specyfikacja
+
+§0 mówi, że sukces mierzymy „wskaźnikiem samodzielności i wskaźnikiem użycia". To za mało, żeby
+cokolwiek rozstrzygnąć, więc poniżej definicja wykonawcza. Zasada nadrzędna: **mierzymy przed
+wdrożeniem i po nim, na tym samym magazynie**, bo bez punktu odniesienia każda liczba jest anegdotą.
+
+### 12.1 Cztery liczby i ich pułapki
+
+| miara | definicja | pułapka, którą trzeba obejść |
+|---|---|---|
+| **samodzielność** | udział wspomnień z `self_contained = 1` w oknie, wobec `= 0` (oflagowane) | `NULL` znaczy „bramka nie chodziła" i **nie wolno** go liczyć jako czystego; trzy kategorie raportujemy osobno |
+| **rozwiązywalność kotwic** | rozkład werdyktów `code_refs`: `fresh` / `stale` / `orphaned` / `unchecked` | `unchecked` to brak repozytorium albo brak commita — awaria **środowiska**, nie kodu; mieszanie go z `orphaned` zafałszuje obraz w obie strony |
+| **użycie** | udział wspomnień pobranych co najmniej raz po zapisie (z logu dostępów) | liczby odczytów są **złym** sygnałem do retencji (badania) i dobrym do wartości; nie używamy ich do wygaszania, tylko do oceny |
+| **odrzucenia i flagi** | udział zapisów odrzuconych i oflagowanych, w rozbiciu na `kind` reguły | wysoki odsetek odrzuceń nie jest sukcesem sam w sobie: jeśli dominuje `no_subject` na dobrych wpisach, bramka jest za głośna i trzeba ją zawęzić |
+
+### 12.2 A/B na `dream`/`reflect` — jedyny uczciwy sposób
+
+Badania pokazują, że destylacja potrafi zejść **poniżej** poziomu „brak pamięci" (0 z 121 refleksji
+trafiło w cel, a agenci na surowych epizodach mieli dwukrotnie wyższą dokładność niż ci pod przymusem
+konsolidacji). Dlatego:
+
+1. **Dwie próby na tym samym korpusie**: z przebiegiem i bez, ten sam wsad, ten sam seed.
+2. **Mierzymy samodzielność i użycie**, a nie wynik benchmarku — benchmark nie jest celem tego projektu (§7).
+3. **Wynik negatywny jest wynikiem.** Jeśli przebieg nie poprawia żadnej miary, zapisujemy to
+   i **nie** włączamy go szerzej; „nic nie zaszkodziło" to nie to samo co „pomogło".
+4. **Żadnych wniosków z jednego przebiegu**: ten sam kierunek w trzech kolejnych albo raport mówi
+   „nierozstrzygnięte".
+
+### 12.3 Czego nie mierzymy i dlaczego
+
+- **Nie mierzymy LoCoMo/LongMemEval jako kryterium akceptacji.** Jeden kontrolowane badanie pokazuje,
+  że metoda wyszukiwania rusza wynik o ~20 punktów, a strategia zapisu o 3–8, a surowy dialog bije
+  ekstrakcję faktów — czyli te benchmarki mierzą coś innego niż to, co budujemy. Zostają jako straż
+  regresji, nie jako cel.
+- **Nie mierzymy „czy wspomnienie było prawdziwe"** — nie mamy źródła prawdy, a udawanie, że mamy,
+  byłoby najgorszym rodzajem metryki.
+- **Nie ogłaszamy wzrostu bez kontroli.** Każdy raport z wynikiem musi nieść informację, **jaka zmiana**
+  go wywołała i czym to potwierdzono — tak jak binarka kontrolna w pomiarze FactConsolidation, gdzie
+  identyczny wynik na wersji sprzed zmiany obalił pokusę przypisania sobie poprawy.
