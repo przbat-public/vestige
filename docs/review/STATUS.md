@@ -356,7 +356,7 @@ Naprawy (kod, nie dane użytkownika):
 | Detektor: wspólne orzeczenie zamiast wspólnego rzeczownika; kontrast w zdaniu, zdania warunkowe i podwójne przeczenie rozpoznane | `210974ba` |
 | Bramka: próg pewności dla decyzji niszczącej, koniec z przepisywaniem sąsiada, `prefer_updates` usunięty, `similarity` raportowane na ścieżce `create` | `5191d29a` |
 | Odczyt: `source` w widoku `summary` i w dashboardzie (nagłówek, stopka, wiersz listy) | `f904f1e8` |
-| **Ścieżka automatyczna przestała wycofywać wspomnienia w ogóle** — `GateDecision::Contradiction`, krawędź `contradicts`, `valid_until` tylko na wyraźne żądanie | ten sam strumień |
+| **Ścieżka automatyczna przestała wycofywać wspomnienia w ogóle** — `GateDecision::Contradiction`, krawędź `contradiction` (typ, który scoring wyszukiwania już karze), `valid_until` tylko na wyraźne żądanie | `b3e3b0c3` |
 
 Pomiar po ostatniej zmianie: odtworzenie trzynastu wspomnień wszystkimi 156 parami daje
 `supersede = 0` i `merge = 0` (przy samym zaostrzeniu detektora było 39 fałszywych `Correction`).

@@ -12,11 +12,16 @@ zależy od drogi odczytu.
 > **Status usterek po wdrożeniu napraw.** U1 (fałszywe „Correction") — domknięte szerzej, niż
 > zakładał ten dokument: po pomiarze okazało się, że nawet zaostrzony detektor oznacza 39 z 156
 > par jako korekty, więc **ścieżka automatyczna przestała wycofywać wspomnienia w ogóle**
-> (`GateDecision::Contradiction`, krawędź `contradicts`, `valid_until` tylko na wyraźne żądanie).
+> (`GateDecision::Contradiction`, krawędź `contradiction`, `valid_until` tylko na wyraźne żądanie).
 > U2 (scalanie) — domknięte: podobna treść trafia do osobnego wspomnienia i zostaje powiązana.
-> U3 (bramka na ścieżce `codebase`), U4 (tytuł decyzji) i U5 (tagi `entity:*`) — w toku; status
-> zostanie dopisany po weryfikacji. U6 (`source` u czytelnika) — domknięte: widok `summary`
-> i dashboard.
+> U3 (bramka na ścieżce `codebase`), U4 (tytuł decyzji) i U5 (tagi `entity:*`) — domknięte
+> i zweryfikowane: obie akcje decyzyjne przechodzą przez wspólny krok zapisu
+> (`smart_ingest::prepare`), `files` trafiają do `code_refs`, nagłówek decyzji jest tytułem,
+> a odtworzenie magazynu po zmianie ekstraktora daje 21 śmieciowych tagów → 0 przy zachowaniu
+> nazw własnych (`castlevania-iii`, `emulator-nes`, `stm32`). Trzecie drzwi zapisu
+> (`remember_decision_v2`) też przeszły na ten sam kontrakt. U6 (`source` u czytelnika) —
+> domknięte: widok `summary` i dashboard; `memory get`/`get_batch` pokazują dodatkowo kotwice
+> i znacznik bramki.
 > Trzy wspomnienia w magazynie użytkownika nadal noszą fałszywe `valid_until` — ich poprawienie
 > jest zapisem do danych i czeka na zgodę.
 

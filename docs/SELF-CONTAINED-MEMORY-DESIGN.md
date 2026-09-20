@@ -412,7 +412,7 @@ i to twierdzenie zostaje w magazynie na zawsze, więc nie może powstawać w tle
 sprzeczności w bramce zwraca `Contradiction`, a nie `Supersede`:
 
 - nowe wspomnienie zostaje zapisane jako osobne,
-- powstaje krawędź `contradicts` o sile równej pewności dowodu,
+- powstaje krawędź `contradiction` (typ, który scoring wyszukiwania już rozpoznaje) o sile równej pewności dowodu,
 - starsze wspomnienie zachowuje treść, okno ważności i pozycję,
 - odpowiedź niesie `contradiction { existingId, similarity, confidence, evidence, hint }`,
 - `SmartIngestResult.contradiction` (`ContradictionReport`) jest tym nośnikiem.
