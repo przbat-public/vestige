@@ -257,3 +257,67 @@ erasure kontra historia (rozstrzygnięte w §5.4); pokusa, by „przy okazji" do
 Nie obiecuje lepszych wyników w benchmarkach ani tego, że `dream`/`reflect` poprawią pamięć — to
 trzeba zmierzyć. Obiecuje coś węższego i sprawdzalnego: **wpis, który za pół roku da się przeczytać
 bez naszej rozmowy, z jawnym czasem zapisu i widoczną historią zmian.**
+
+---
+
+## 11. Załącznik: reguły bramki zapisu (fala 2) — specyfikacja wykonawcza
+
+Bramka rozszerza istniejący kanał ostrzeżeń, którym jest dziś `compound_content_warning`
+(`smart_ingest/compound.rs::detect_compound_content` → `smart_ingest/execute.rs:249/328/384`).
+Nie tworzy nowego mechanizmu: **dokłada drugi, ustrukturyzowany komunikat** o innym kształcie.
+
+### 11.1 Kształt danych
+
+Dziś ostrzeżenie to `String`. Dodajemy obok niego obiekt:
+
+```json
+{
+  "self_contained": {
+    "ok": false,
+    "findings": [
+      { "kind": "discourse_deixis", "span": "the fix", "hint": "nazwij, co zostało naprawione" },
+      { "kind": "bare_code_reference", "span": "search.rs:112", "hint": "użyj code_ref (path@commit#symbol)" }
+    ],
+    "requires_context": true
+  }
+}
+```
+
+Zgodnie z decyzją z nagłówka: wpis **zostaje zapisany**, otrzymuje znacznik `self_contained: false`
+i ostrzeżenie trafia do odpowiedzi oraz do renderowanego wyniku. Kwarantanna pozostaje opcją
+wywołującego (`strict: true`), nie domyślnym losem.
+
+### 11.2 Reguły (każda zwraca `kind`, `span` i podpowiedź naprawy)
+
+| `kind` | Co wykrywa | Warunek zapalenia | Uwaga |
+|---|---|---|---|
+| `discourse_deixis` | „as discussed", „as mentioned", „the above", „the fix", „the bug", „last time", „earlier", „we decided", „the file", „the function", „the test" | fraza występuje **i** w tym samym wpisie nie ma nazwanej encji/podmiotu, który mógłby być jej poprzednikiem | To nie zaimki — `coref.rs` ich nie widzi, bo to frazy rzeczownikowe |
+| `unresolved_pronoun` | zaimek, którego `coref.rs` **nie** rozwiązał | `CorefResult` musi zacząć raportować nierozwiązane (`unresolved: Vec<String>`) — dziś milczy o porażce | Cisza przy porażce jest tu tym samym błędem, co wszędzie |
+| `relative_time` | „today", „yesterday", „recently", „soon", „last week", „next Friday" | **brak** absolutnego znacznika czasu w treści i brak `valid_from`/`valid_until` | Letta zakazuje tego wprost w swoim promptcie |
+| `bare_code_reference` | `\S+\.(rs\|ts\|tsx\|py\|md\|json\|toml\|yml\|yaml)`, `path:linia`, `src/...` | brak odpowiadającego `code_ref` (fala 3) | Dodatkowy powód: ścieżki to też klasa wycieku (mapa topologii maszyny) |
+| `no_subject` | brak jakiejkolwiek nazwanej encji **i** brak pierwszej osoby | treść nie mówi, o czym jest | Najtańszy wskaźnik „to jest fragment czyjegoś myślenia" |
+| `derivable_from_repo` | zawartość plików, opis architektury, układ katalogów, numer wersji, liczba testów | heurystyka frazowa + wykrycie bloku kodu | Odrzucenie, nie ostrzeżenie: repozytorium jest źródłem prawdy |
+
+### 11.3 Ścieżka odrzucenia (`Reject`) — brakująca zdolność
+
+`GateDecision` (`advanced/prediction_error/decision.rs`) zna `Create`, `Update`, `Supersede`, `Merge`.
+Dodajemy wariant `Reject { reason, findings }`, używany **wyłącznie** dla `derivable_from_repo` i dla
+treści pustej/bez treści. `smart_ingest` zwraca wtedy `decision: "reject"` **i nic nie zapisuje**,
+a komunikat mówi wprost, dlaczego i co zrobić zamiast tego (wskaż `AGENTS.md` / repozytorium).
+
+Zakres zamierzony jako wąski: odrzucenie jest dla rzeczy, których **nie należy** przechowywać.
+Wszystko, co da się naprawić (deiksa, zaimek, czas względny, naga ścieżka), dostaje ostrzeżenie
+i zostaje zapisane — inaczej bramka zamieniłaby jeden problem (śmieci) na gorszy (cicha utrata).
+
+### 11.4 Przypadki testowe, które muszą failować przed wdrożeniem
+
+1. „BUG FIX: naprawiłem to, co omawialiśmy; Files: src/search.rs:112" → `discourse_deixis` +
+   `bare_code_reference`; wpis **zapisany** ze znacznikiem, ostrzeżenie w odpowiedzi.
+2. „He said the migration failed" bez poprzednika → `unresolved_pronoun` (dziś `coref.rs` milczy).
+3. „Deploy dopiero w przyszłym tygodniu" bez kotwicy → `relative_time`; ta sama treść z
+   `valid_from` → brak ostrzeżenia.
+4. „Zawartość `Cargo.toml` to \[…\]" → `derivable_from_repo` → **`Reject`**, nic nie zapisane.
+5. „Postgres 16" → `derivable_from_repo` (wersja starzeje się z każdym commitem).
+6. „Nie symuluj bazy w testach integracyjnych, bo testy przechodziły, a migracja padła" → **brak**
+   ostrzeżeń (to wzorcowe wspomnienie: lekcja, nie opis).
+7. Wpis z `code_ref` (fala 3) i nazwanym podmiotem → brak ostrzeżeń.
