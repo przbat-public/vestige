@@ -374,7 +374,9 @@ export function MemoriesPage() {
       committed = true;
       clearTimeout(pendingBulkRef.current?.timer as ReturnType<typeof setTimeout>);
       pendingBulkRef.current = null;
-      runWithConcurrency(ids, (id) => api.memories.delete(id), 5)
+      // The alertdialog above already collected the user's confirmation; pass
+      // it through so the route's gate (and the MCP tool's) is satisfied.
+      runWithConcurrency(ids, (id) => api.memories.delete(id, { confirmed: true }), 5)
         .then((result) => {
           const okCount = result.succeeded.length;
           const failCount = result.failed.length;

@@ -14,6 +14,7 @@ import type {
   IntentionItem,
   IntentionPriority,
   MemoryChangelog,
+  MemoryRevisions,
   MemoryStatus,
   PredictResponse,
   RetentionDistribution,
@@ -79,6 +80,60 @@ async function fetcher<T>(path: string, options?: FetcherOptions): Promise<T> {
   return res.json();
 }
 
+/**
+ * One rule the write-time self-containedness gate fired.
+ *
+ * `kind` names the rule, `span` is the exact text that tripped it, `hint` says
+ * what to write instead. Identical to the persisted
+ * `SelfContainedFindingDto` the detail view receives, so both surfaces can
+ * render the same list.
+ */
+export interface SmartIngestFinding {
+  kind: string;
+  span: string;
+  hint: string;
+}
+
+/** The gate's verdict attached to a write it flagged (never to a clean one). */
+export interface SmartIngestSelfContained {
+  ok: boolean;
+  requiresContext: boolean;
+  rejected: boolean;
+  rejectReason?: string;
+  findings: SmartIngestFinding[];
+}
+
+/**
+ * Response of `POST /api/smart_ingest`.
+ *
+ * Fields are optional because the tool's outcomes differ: a refusal carries
+ * `stored`, `reason`, `guidance` and `findings` and no `nodeId`; a flagged
+ * write carries `self_contained`; a clean write carries neither.
+ */
+export interface SmartIngestResult {
+  success: boolean;
+  decision: string;
+  /** `false` only on a refusal — the flag that says nothing was written. */
+  stored?: boolean;
+  nodeId?: string;
+  message?: string;
+  hasEmbedding?: boolean;
+  similarity?: number;
+  predictionError?: number;
+  supersededId?: string;
+  importanceScore?: number;
+  reason?: string;
+  /** A refusal's "what to do instead", when the gate wrote one. */
+  guidance?: string;
+  explanation?: string;
+  /** Findings on a *refusal* response. Flagged writes carry them under `self_contained`. */
+  findings?: SmartIngestFinding[];
+  compound_content_warning?: string;
+  near_duplicate_warning?: string;
+  /** Present only when the gate flagged the write as needing its context. */
+  self_contained?: SmartIngestSelfContained;
+}
+
 export const api = {
   memories: {
     list: async (params?: Record<string, string>) => {
@@ -94,7 +149,14 @@ export const api = {
     // used to hand-write `{ deleted: boolean }` / `{ promoted: boolean, … }`,
     // which lied about the field names — a future caller reading
     // `result.promoted` would have silently received `undefined`.
-    delete: (id: string) => fetcher<MemoryStatus>(`/memories/${id}`, { method: 'DELETE' }),
+    //
+    // `confirmed: true` is required, matching the MCP
+    // `memory(action="delete")` gate: the route refuses without it. The literal
+    // type makes an unconfirmed delete unrepresentable in the dashboard — every
+    // caller is a user-initiated affordance (bulk: themed alertdialog; single:
+    // the Delete action with its undo window).
+    delete: (id: string, acknowledgement: { confirmed: true }) =>
+      fetcher<MemoryStatus>(`/memories/${id}?confirmed=${acknowledgement.confirmed}`, { method: 'DELETE' }),
     promote: (id: string) => fetcher<MemoryStatus>(`/memories/${id}/promote`, { method: 'POST' }),
     demote: (id: string) => fetcher<MemoryStatus>(`/memories/${id}/demote`, { method: 'POST' }),
     // `PATCH` answers with `MemoryUpdateResultDto { memory, field }`, not a
@@ -108,6 +170,14 @@ export const api = {
         }),
       ),
     changelog: (id: string) => fetcher<MemoryChangelog>(`/memories/${id}/changelog`),
+    /**
+     * A memory's *content* history, newest first (`memory_revisions`, V17).
+     *
+     * Separate from `changelog` on purpose: that one lists life-cycle state
+     * transitions, this one lists what the memory used to say. `limit` is
+     * clamped server-side against `GET /api/_meta/limits`.
+     */
+    revisions: (id: string, limit: number) => fetcher<MemoryRevisions>(`/memories/${id}/revisions?limit=${limit}`),
     review: (id: string, rating: FsrsRating) =>
       fetcher<ReviewResult>(`/memories/${id}/review`, {
         method: 'POST',
@@ -120,6 +190,14 @@ export const api = {
      * decide to update or merge into an existing memory rather than create
      * a new one, and the response carries the decision so the UI can
      * surface it (e.g. "We merged this with an existing memory because…").
+     *
+     * The route returns the MCP tool's `Value` verbatim (`handlers/memory.rs`
+     * `smart_ingest_memory`), so the shape below is the tool's contract, not a
+     * DTO. Two outcomes are not saves and the dialog must branch on them:
+     * `stored: false` / `decision: "reject"` (nothing was written — the
+     * response carries `reason`, `guidance` and `findings`), and
+     * `self_contained.requiresContext` (written, and flagged as leaning on the
+     * conversation it came from).
      */
     smartIngest: (body: {
       content: string;
@@ -128,21 +206,7 @@ export const api = {
       source?: string;
       forceCreate?: boolean;
     }) =>
-      fetcher<{
-        success: boolean;
-        decision: string;
-        nodeId: string;
-        message: string;
-        hasEmbedding: boolean;
-        similarity?: number;
-        predictionError: number;
-        supersededId?: string;
-        importanceScore: number;
-        reason: string;
-        explanation?: string;
-        compound_content_warning?: string;
-        near_duplicate_warning?: string;
-      }>('/smart_ingest', {
+      fetcher<SmartIngestResult>('/smart_ingest', {
         method: 'POST',
         body: JSON.stringify(body),
       }),
@@ -186,7 +250,7 @@ export const api = {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       }),
-    gc: (body?: { min_retention?: number; max_age_days?: number; dry_run?: boolean }) =>
+    gc: (body?: { min_retention?: number; max_age_days?: number; dry_run?: boolean; confirmed?: boolean }) =>
       fetcher<{
         dryRun: boolean;
         candidateCount: number;

@@ -142,14 +142,43 @@ pub async fn get_memory(
     Ok(Json(MemoryDto::from(&node)))
 }
 
+/// Query parameters for `DELETE /api/memories/{id}`.
+///
+/// The MCP `memory(action="delete")` path refuses without `confirmed: true`
+/// (`tools/memory_unified/actions.rs`), and it is the reference: deletion is
+/// permanent (row, FSRS state, embeddings, graph edges), so it must be an
+/// explicit act on every surface. This route used to call `delete_node`
+/// directly, which made the unauthenticated loopback API the cheapest way for
+/// any local process to destroy a memory the tool contract protects.
+#[derive(Debug, Deserialize)]
+pub struct DeleteMemoryParams {
+    pub confirmed: Option<bool>,
+}
+
 /// Delete a memory by ID. Returns `MemoryStatusDto { action: Deleted }`
 /// so the dashboard can confirm the operation; retention is the value
 /// the node had immediately before deletion (0.0 if unknown — we don't
 /// re-fetch).
+///
+/// Status codes:
+/// - 200 — deleted,
+/// - 400 — no `?confirmed=true` acknowledgement. A refusal is a client error,
+///   never a 5xx: the deletion was not attempted, and the dashboard must not
+///   render a crash over a call it can fix by confirming,
+/// - 404 — no such memory (including one that a confirmed call just deleted).
 pub async fn delete_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(params): Query<DeleteMemoryParams>,
 ) -> Result<Json<MemoryStatusDto>, StatusCode> {
+    if params.confirmed != Some(true) {
+        tracing::warn!(
+            memory_id = %id,
+            "delete refused: the caller did not acknowledge the deletion"
+        );
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     // Capture retention BEFORE deletion so the response carries an
     // accurate "what was promoted away" value. Storage `get_node` is a
     // single SQL query; the cost is negligible compared to the actual
@@ -427,10 +456,18 @@ pub async fn update_memory(
 mod tests {
     use super::*;
     use crate::cognitive::CognitiveEngine;
+    use axum::Router;
+    use axum::body::Body;
+    use axum::http::{Request, header};
     use std::sync::Arc;
     use tempfile::tempdir;
+    use tower::ServiceExt;
     use vestige_core::Storage;
     use vestige_core::memory::IngestInput;
+
+    /// Same port the router is normally built with, so the OriginGuard layer
+    /// sees the same-origin Host it expects.
+    const PORT: u16 = 3927;
 
     fn make_state() -> (AppState, tempfile::TempDir) {
         let dir = tempdir().unwrap();
@@ -452,6 +489,34 @@ mod tests {
                 })
                 .unwrap();
         }
+    }
+
+    fn ingest_one(state: &AppState, content: &str) -> String {
+        state
+            .storage
+            .ingest(IngestInput {
+                content: content.to_string(),
+                node_type: "fact".to_string(),
+                tags: vec!["seed".to_string()],
+                ..Default::default()
+            })
+            .unwrap()
+            .id
+    }
+
+    async fn delete(state: &AppState, uri: &str) -> axum::response::Response {
+        let (app, _): (Router, AppState) =
+            crate::dashboard::build_router(state.storage.clone(), None, PORT);
+        app.oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(uri)
+                .header(header::HOST, format!("127.0.0.1:{PORT}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
     }
 
     /// The previous handler returned `memories.len()` as `total`, which
@@ -554,5 +619,58 @@ mod tests {
         let p2_ids: std::collections::HashSet<_> =
             page2.0.memories.iter().map(|m| m.id.clone()).collect();
         assert!(p1_ids.is_disjoint(&p2_ids), "pages must not overlap");
+    }
+
+    /// The REST delete used to call `delete_node` unconditionally, so any local
+    /// process could destroy a memory through the loopback API while the MCP
+    /// `memory(action="delete")` tool refused without an acknowledgement. The
+    /// tool is the reference: deletion is permanent and needs the explicit act.
+    #[tokio::test]
+    async fn delete_route_refuses_without_confirmation() {
+        let (state, _dir) = make_state();
+        let id = ingest_one(&state, "must survive");
+
+        let response = delete(&state, &format!("/api/memories/{id}")).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            state.storage.get_node(&id).unwrap().is_some(),
+            "a refused delete must leave the memory untouched"
+        );
+    }
+
+    /// `?confirmed=false` is not a confirmation either — only a literal `true`
+    /// counts, the same rule `tools::common::is_confirmed` applies.
+    #[tokio::test]
+    async fn delete_route_refuses_an_explicit_false() {
+        let (state, _dir) = make_state();
+        let id = ingest_one(&state, "must survive");
+
+        let response = delete(&state, &format!("/api/memories/{id}?confirmed=false")).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.storage.get_node(&id).unwrap().is_some());
+    }
+
+    /// The dashboard's own path: the user confirmed in the UI, the client sends
+    /// the acknowledgement, the deletion happens.
+    #[tokio::test]
+    async fn delete_route_deletes_when_confirmed() {
+        let (state, _dir) = make_state();
+        let id = ingest_one(&state, "delete me");
+
+        let response = delete(&state, &format!("/api/memories/{id}?confirmed=true")).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["ok"], true);
+        assert_eq!(body["action"], "deleted");
+        assert!(
+            state.storage.get_node(&id).unwrap().is_none(),
+            "a confirmed delete must remove the memory"
+        );
     }
 }

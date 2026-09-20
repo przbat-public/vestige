@@ -286,6 +286,9 @@
     "retrieval": "Retrieval strength",
     "reviews": "Times reviewed",
     "created": "Created",
+    "recorded": "Recorded",
+    "recordedOn": "Recorded {{date}}",
+    "recordedTooltip": "When Vestige wrote this memory down. Unlike 'Last accessed', it never changes.",
     "updated": "Last updated",
     "accessed": "Last accessed",
     "retentionForecast": "Retention forecast",
@@ -304,9 +307,24 @@
     "editTagsPlaceholder": "acme, web-sdk, debugging",
     "editTagsHint": "Comma- or newline-separated. Trimmed and deduplicated automatically.",
     "changelog": {
-      "title": "Edit history",
+      "title": "State history",
       "empty": "No state transitions recorded yet.",
       "changedTo": "changed to"
+    },
+    "revisions": {
+      "title": "Content history",
+      "empty": "No content revisions recorded yet.",
+      "before": "Before",
+      "after": "After",
+      "reason": "Reason",
+      "actor": "by {{actor}}",
+      "kind": {
+        "create": "Created",
+        "edit": "Edited",
+        "supersede": "Superseded",
+        "invalidate": "Invalidated",
+        "quarantine": "Quarantined"
+      }
     },
     "localGraph": {
       "title": "Local connections",
@@ -494,6 +512,13 @@
     "toastCreated": "Memory created.",
     "toastMerged": "Smart-ingest decided to {{decision}} — see dialog for details.",
     "toastWithWarning": "Memory created — review the warning in the dialog before continuing.",
+    "toastRejected": "Nothing was saved — the write was refused. The dialog has the reason.",
+    "toastFlagged": "Memory written, but flagged as needing context — review the findings.",
+    "rejectTitle": "Not saved — smart-ingest refused this content",
+    "rejectHint": "Nothing was written. Rewrite the text so it stands on its own, then save again — or save the lesson it was meant to carry.",
+    "guidanceLabel": "What to do instead",
+    "selfContainedTitle": "Saved, but flagged — this memory needs its conversation",
+    "selfContainedHint": "The memory is stored and searchable. Name what the text refers to (who, what, when) and save the improved version.",
     "errors": {
       "contentRequired": "Memory content is required.",
       "contentTooLarge": "Memory content exceeds the 1MB limit.",
@@ -506,9 +531,17 @@
       "supersede": "Superseded older memory",
       "merge": "Merged with related",
       "replace": "Replaced existing",
-      "add_context": "Added as context"
+      "add_context": "Added as context",
+      "reject": "Rejected"
     },
     "required": "Required"
+  },
+  "selfContained": {
+    "findingsTitle": "What the gate flagged",
+    "spanLabel": "text:",
+    "detailTitle": "Flagged: this memory needs its conversation",
+    "detailExplanation": "It was written and is searchable, but the write-time gate found text that only makes sense next to the conversation it came from. The marker records the verdict at write time, so editing the memory now does not clear it.",
+    "badge": "needs context"
   },
   "briefing": {
     "title": "Morning briefing",

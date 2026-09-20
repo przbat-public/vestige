@@ -54,6 +54,13 @@ pub struct DashboardLimitsDto {
     /// Pure UI cap — backend doesn't care, but exposing it here means
     /// the value lives next to the others instead of in `useWebSocket`.
     pub ws_max_events: u32,
+    /// Default `?limit=` for `GET /api/memories/{id}/revisions`. The panel
+    /// renders a scrollable list, so the default is what a reader sees without
+    /// asking for more.
+    pub revision_history_limit_default: u32,
+    /// Hard ceiling for the revision page size. Content rows carry two copies
+    /// of the memory's text each, so an unbounded read is the one that hurts.
+    pub revision_history_limit_max: u32,
 }
 
 impl DashboardLimitsDto {
@@ -66,6 +73,8 @@ impl DashboardLimitsDto {
         search_limit_default: 20,
         search_limit_max: 100,
         ws_max_events: 200,
+        revision_history_limit_default: 30,
+        revision_history_limit_max: 200,
     };
 }
 
@@ -81,6 +90,7 @@ mod tests {
         assert!(d.graph_max_nodes_default <= d.graph_max_nodes_max);
         assert!(d.graph_depth_default <= d.graph_depth_max);
         assert!(d.search_limit_default <= d.search_limit_max);
+        assert!(d.revision_history_limit_default <= d.revision_history_limit_max);
     }
 
     /// Pin the values so a casual change shows up in CR. Updating any
@@ -95,5 +105,7 @@ mod tests {
         assert_eq!(d.search_limit_default, 20);
         assert_eq!(d.search_limit_max, 100);
         assert_eq!(d.ws_max_events, 200);
+        assert_eq!(d.revision_history_limit_default, 30);
+        assert_eq!(d.revision_history_limit_max, 200);
     }
 }

@@ -20,6 +20,8 @@ function makeMemory(overrides: Partial<Memory>): Memory {
     storageStrength: 1,
     retrievalStrength: 0.5,
     createdAt: '2026-04-01T00:00:00Z',
+    // Record time (V17) — required by `MemoryDto`.
+    recordedAt: '2026-04-01T00:00:00Z',
     updatedAt: '2026-04-01T00:00:00Z',
     reviewCount: 0,
     // The wire DTO requires both — server infers them from `nodeType` +

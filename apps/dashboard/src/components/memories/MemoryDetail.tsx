@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 import { RetentionCurve } from '@/components/RetentionCurve';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useMemoryMutations } from '@/hooks/useMemoryMutations';
@@ -17,9 +18,11 @@ import { MemoryEditPanel } from './MemoryEditPanel';
 import { MemoryLocalGraph } from './MemoryLocalGraph';
 import { MemoryMarkdownView } from './MemoryMarkdownView';
 import { MemoryMetadataFooter } from './MemoryMetadataFooter';
+import { MemoryRevisionsPanel } from './MemoryRevisionsPanel';
 import { MemoryStrengthBars } from './MemoryStrengthBars';
 import { MemoryTemporalPanel } from './MemoryTemporalPanel';
 import { parseTagsInput } from './memoryDetailUtils';
+import { SelfContainedFindings } from './SelfContainedFindings';
 
 interface MemoryDetailProps {
   memory: Memory;
@@ -165,6 +168,21 @@ export function MemoryDetail({ memory: listSnapshot, onUpdate, onClose }: Memory
 
       <MemoryStrengthBars memory={memory} />
 
+      {/* The gate's verdict. `selfContained === false` means it ran and flagged
+          this memory; `undefined` means it never ran, which is deliberately not
+          rendered as "clean". A flagged memory is findable, and a reader who
+          cannot see the flag cannot know the entry needs its context. */}
+      {memory.selfContained === false && (
+        <Alert variant="warning">
+          <p className="font-medium mb-1">{t('selfContained.detailTitle')}</p>
+          <p className="text-xs">{t('selfContained.detailExplanation')}</p>
+          {(memory.selfContainedFindings?.length ?? 0) > 0 && (
+            <p className="mt-2 text-xs font-medium">{t('selfContained.findingsTitle')}</p>
+          )}
+          <SelfContainedFindings findings={memory.selfContainedFindings ?? []} />
+        </Alert>
+      )}
+
       <MemoryTemporalPanel memory={memory} />
 
       <MemoryMetadataFooter memory={memory} />
@@ -179,7 +197,11 @@ export function MemoryDetail({ memory: listSnapshot, onUpdate, onClose }: Memory
         <MemoryLocalGraph memoryId={memory.id} />
       </div>
 
+      {/* Two histories, two panels, each labelled for what it shows: state
+          transitions (life cycle) and content revisions (what it used to say). */}
       <MemoryChangelogPanel memoryId={memory.id} />
+
+      <MemoryRevisionsPanel memoryId={memory.id} />
 
       <Button variant="dream" className="w-full" size="sm" onClick={() => navigate(`/explore?from=${memory.id}`)}>
         ◬ {t('memories.exploreConnections')}

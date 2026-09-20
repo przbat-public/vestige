@@ -2,6 +2,7 @@
 import type { EpistemicStatusDto } from "./EpistemicStatusDto";
 import type { InsightDto } from "./InsightDto";
 import type { MemorySystemDto } from "./MemorySystemDto";
+import type { SelfContainedFindingDto } from "./SelfContainedFindingDto";
 
 /**
  * One memory as the dashboard sees it.
@@ -17,6 +18,18 @@ export type MemoryDto = { id: string, content: string, nodeType: string, tags: A
  * ISO-8601 RFC 3339 — frontend parses with `new Date(...)`.
  */
 createdAt: string, 
+/**
+ * ISO-8601 RFC 3339 — when we *recorded* the memory (V17
+ * `knowledge_nodes.recorded_at`).
+ *
+ * Distinct from `created_at` (row birth) and from `last_accessed_at`
+ * (refreshed by every search hit, so it carries no claim about age).
+ * `created_at` is the only other anchor the dashboard has, and it is
+ * not the same claim: "when did we learn this" is what a reader uses
+ * to date the picture, and until this field existed the dashboard
+ * could not answer it at all.
+ */
+recordedAt: string, 
 /**
  * ISO-8601 RFC 3339.
  */
@@ -47,6 +60,23 @@ epistemicStatus: EpistemicStatusDto,
  * Coarse memory-system bucket (episodic / semantic / procedural).
  */
 memorySystem: MemorySystemDto, 
+/**
+ * What the write-time self-containedness gate said (V18):
+ * `Some(true)` it ran and passed, `Some(false)` it ran and flagged the
+ * memory as leaning on the conversation it came from, `None` no gate ran.
+ *
+ * `None` is deliberately *not* rendered as "clean" by the dashboard: the
+ * column is NULL for every row written before V18 or by a writer that is
+ * not `smart_ingest`, and a store that reports "no flags" must not be
+ * reporting on rows it never checked.
+ */
+selfContained?: boolean, 
+/**
+ * The findings behind a `self_contained: Some(false)`, so a reader learns
+ * what to fix and not only that something is wrong. Empty/absent when the
+ * gate passed, never ran, or the persisted JSON is unreadable.
+ */
+selfContainedFindings?: Array<SelfContainedFindingDto>, 
 /**
  * Structured Insight Tier metadata (Proposal B) when the host
  * node is `node_type="insight"` and `extra_json.insight` parses

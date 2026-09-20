@@ -18,6 +18,8 @@ const baseMemory: Memory = {
   storageStrength: 1.0,
   retrievalStrength: 0.9,
   createdAt: '2026-04-01T10:00:00Z',
+  // Record time (V17) — a plain `fact` keeps both equal until it is edited.
+  recordedAt: '2026-04-01T10:00:00Z',
   updatedAt: '2026-05-01T10:00:00Z',
   reviewCount: 3,
   // Required by the wire DTO; defaults match what the server would
@@ -176,5 +178,37 @@ describe('MemoryDetail', () => {
       memory: { ...baseMemory, nextReviewAt: undefined },
     });
     expect(screen.queryByText(/next review/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the record time next to the creation time', () => {
+    // `createdAt` is row birth, `recordedAt` is when we learned it. A reader
+    // could not tell them apart before the DTO carried the second one.
+    renderDetail({
+      memory: { ...baseMemory, createdAt: '2026-04-01T10:00:00Z', recordedAt: '2026-05-01T10:00:00Z' },
+    });
+    const recordedRow = screen.getByText(/^Recorded:/).parentElement;
+    expect(recordedRow).toHaveTextContent('2026');
+    expect(screen.getByText(/^Created:/)).toBeInTheDocument();
+  });
+
+  it('renders the gate flag and its findings for a memory that needs context', () => {
+    renderDetail({
+      memory: {
+        ...baseMemory,
+        selfContained: false,
+        selfContainedFindings: [{ kind: 'discourse_deixis', span: 'as we discussed', hint: 'name what was discussed' }],
+      },
+    });
+
+    expect(screen.getByText(/flagged: this memory needs its conversation/i)).toBeInTheDocument();
+    expect(screen.getByText(/as we discussed/)).toBeInTheDocument();
+    expect(screen.getByText(/name what was discussed/i)).toBeInTheDocument();
+  });
+
+  it('shows no gate flag when the gate never ran (undefined is not "clean")', () => {
+    // The column is NULL for every pre-V18 row; rendering a "passed" state
+    // here would claim a check that never happened.
+    renderDetail();
+    expect(screen.queryByText(/flagged: this memory needs its conversation/i)).not.toBeInTheDocument();
   });
 });

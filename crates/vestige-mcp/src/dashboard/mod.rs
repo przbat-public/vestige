@@ -172,6 +172,12 @@ fn build_router_inner(state: AppState, port: u16) -> (Router, AppState) {
             "/api/memories/{id}/changelog",
             get(handlers::get_memory_changelog),
         )
+        // Content history (V17 `memory_revisions`) — what the memory used to
+        // say, as distinct from the changelog's state transitions.
+        .route(
+            "/api/memories/{id}/revisions",
+            get(handlers::get_memory_revisions),
+        )
         .route("/api/memories/{id}/review", post(handlers::review_memory))
         .route("/api/review/queue", get(handlers::get_review_queue))
         // Maintenance — thin REST wrappers around MCP tools, used by Settings UI

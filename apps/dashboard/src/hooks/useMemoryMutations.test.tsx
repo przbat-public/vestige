@@ -83,6 +83,7 @@ function memory(id: string, content = `Memory ${id}`): Memory {
     storageStrength: 0.7,
     retrievalStrength: 0.6,
     createdAt: '2026-01-01T00:00:00Z',
+    recordedAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     epistemicStatus: 'world',
     memorySystem: 'semantic',
@@ -204,7 +205,7 @@ describe('useMemoryMutations — deferred delete', () => {
     act(() => {
       vi.advanceTimersByTime(5000);
     });
-    expect(api.memories.delete).toHaveBeenCalledWith('a');
+    expect(api.memories.delete).toHaveBeenCalledWith('a', { confirmed: true });
 
     // `waitFor` polls with real timers — switching out of fake timer mode
     // before polling avoids the test hanging forever (vitest's `waitFor`
@@ -276,16 +277,16 @@ describe('useMemoryMutations — deferred delete', () => {
 
     // First delete is forced to commit (we mustn't sit on two unresolved
     // windows fighting over snapshots).
-    expect(api.memories.delete).toHaveBeenCalledWith('a');
+    expect(api.memories.delete).toHaveBeenCalledWith('a', { confirmed: true });
     // Second delete is still inside its own window.
-    expect(api.memories.delete).not.toHaveBeenCalledWith('b');
+    expect(api.memories.delete).not.toHaveBeenCalledWith('b', { confirmed: true });
 
     // Let the second window expire and flush the promise chain.
     await act(async () => {
       vi.advanceTimersByTime(5000);
       await Promise.resolve();
     });
-    expect(api.memories.delete).toHaveBeenCalledWith('b');
+    expect(api.memories.delete).toHaveBeenCalledWith('b', { confirmed: true });
   });
 
   it('restores the snapshot and toasts the error when the API call fails', async () => {
@@ -300,7 +301,7 @@ describe('useMemoryMutations — deferred delete', () => {
     act(() => {
       vi.advanceTimersByTime(5000);
     });
-    expect(api.memories.delete).toHaveBeenCalledWith('a');
+    expect(api.memories.delete).toHaveBeenCalledWith('a', { confirmed: true });
 
     // Switch to real timers so `waitFor` can poll for the catch handler
     // to land — see the comment in the success-path test for context.
@@ -323,7 +324,7 @@ describe('useMemoryMutations — deferred delete', () => {
 
     // Unmount cleanup is supposed to call commit() synchronously; the API
     // call should already be in flight when we return from `unmount`.
-    expect(api.memories.delete).toHaveBeenCalledWith('a');
+    expect(api.memories.delete).toHaveBeenCalledWith('a', { confirmed: true });
   });
 });
 

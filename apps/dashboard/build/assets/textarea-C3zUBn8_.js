@@ -1,1 +1,0 @@
-import{j as t}from"./react-CstDIzCn.js";import{c as n}from"./index-CWvV4Zxa.js";function a({className:r,ref:e,...o}){return t.jsx("textarea",{ref:e,className:n("w-full px-4 py-3 rounded-xl text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-ring transition",r),...o})}export{a as T};

@@ -65,7 +65,7 @@ describe('MemoryChangelogPanel', () => {
     const user = userEvent.setup();
     renderPanel();
 
-    const summary = screen.getByText(/edit history/i);
+    const summary = screen.getByText(/state history/i);
     await user.click(summary);
 
     expect(await screen.findByText(/decay/)).toBeInTheDocument();
@@ -85,7 +85,7 @@ describe('MemoryChangelogPanel', () => {
     const user = userEvent.setup();
     renderPanel();
 
-    await user.click(screen.getByText(/edit history/i));
+    await user.click(screen.getByText(/state history/i));
     expect(await screen.findByText(/no state transitions/i)).toBeInTheDocument();
   });
 
@@ -95,7 +95,7 @@ describe('MemoryChangelogPanel', () => {
     const user = userEvent.setup();
     renderPanel();
 
-    await user.click(screen.getByText(/edit history/i));
+    await user.click(screen.getByText(/state history/i));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     // Retry button is present.
     expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();

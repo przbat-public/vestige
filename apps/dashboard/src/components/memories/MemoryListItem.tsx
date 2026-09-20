@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { formatDate } from '@/lib/format';
 import type { Memory } from '@/types';
 import { EPISTEMIC_STATUS_COLORS, NODE_TYPE_COLORS, retentionColor } from '@/types';
 
@@ -57,7 +58,7 @@ function MemoryListItemRow({
   onActivate,
   onToggleSelect,
 }: MemoryListItemProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (e.shiftKey) {
@@ -133,12 +134,31 @@ function MemoryListItemRow({
               {t(`epistemic.${memory.epistemicStatus}`)}
             </span>
           )}
+          {/* A flagged memory is findable, so the flag has to be visible where
+              it is found — a reader who only sees the list cannot otherwise
+              know the entry needs the conversation it came from. */}
+          {memory.selfContained === false && (
+            <span
+              className="text-amber-500 text-[10px] leading-none flex-shrink-0"
+              title={t('selfContained.detailTitle')}
+            >
+              ⚑ {t('selfContained.badge')}
+            </span>
+          )}
           <ProgressBar
             value={memory.retentionStrength * 100}
             label={t('memories.retention')}
             color={retentionColor(memory.retentionStrength)}
             className="flex-1 max-w-[80px]"
           />
+          {/* Record time, not creation time: it is the one timestamp that says
+              when we learned this, and it never moves. */}
+          <span
+            className="text-muted-foreground/70 tabular-nums ml-auto flex-shrink-0"
+            title={t('memories.recordedTooltip')}
+          >
+            {t('memories.recordedOn', { date: formatDate(memory.recordedAt, i18n.language) })}
+          </span>
         </div>
       </button>
     </div>

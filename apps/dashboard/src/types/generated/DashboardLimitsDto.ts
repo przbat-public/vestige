@@ -46,4 +46,15 @@ searchLimitMax: number,
  * Pure UI cap — backend doesn't care, but exposing it here means
  * the value lives next to the others instead of in `useWebSocket`.
  */
-wsMaxEvents: number, };
+wsMaxEvents: number, 
+/**
+ * Default `?limit=` for `GET /api/memories/{id}/revisions`. The panel
+ * renders a scrollable list, so the default is what a reader sees without
+ * asking for more.
+ */
+revisionHistoryLimitDefault: number, 
+/**
+ * Hard ceiling for the revision page size. Content rows carry two copies
+ * of the memory's text each, so an unbounded read is the one that hurts.
+ */
+revisionHistoryLimitMax: number, };

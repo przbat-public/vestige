@@ -26,6 +26,12 @@ export const queryKeys = {
   memories: (params: Record<string, string>) => ['memories', params] as const,
   memory: (id: string) => ['memory', id] as const,
   memoryChangelog: (id: string) => ['memory', id, 'changelog'] as const,
+  /**
+   * Content history (`memory_revisions`) — a different question from
+   * `memoryChangelog`, which caches life-cycle state transitions. Keyed on the
+   * page size too, because the limits endpoint can change it between builds.
+   */
+  memoryRevisions: (id: string, limit: number) => ['memory', id, 'revisions', limit] as const,
   graph: (params?: { query?: string; max_nodes?: number; depth?: number }) => ['graph', params] as const,
   search: (q: string, limit: number) => ['search', q, limit] as const,
   timeline: (days: number, limit: number) => ['timeline', days, limit] as const,

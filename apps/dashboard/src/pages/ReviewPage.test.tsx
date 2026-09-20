@@ -19,6 +19,7 @@ function makeItem(overrides: Partial<ReviewItem> = {}): ReviewItem {
     storageStrength: 1.0,
     retrievalStrength: 0.8,
     createdAt: '2026-04-01T10:00:00Z',
+    recordedAt: '2026-04-01T10:00:00Z',
     updatedAt: '2026-05-01T10:00:00Z',
     reviewCount: 1,
     difficulty: 5.0,

@@ -170,7 +170,9 @@ export function useMemoryMutations(options?: MemoryMutationsCallbacks) {
         clearTimeout(pendingDeleteRef.current?.timer as ReturnType<typeof setTimeout>);
         pendingDeleteRef.current = null;
         api.memories
-          .delete(id)
+          // The user pressed Delete and saw the undo affordance; that act is
+          // the acknowledgement the route (and the MCP tool) requires.
+          .delete(id, { confirmed: true })
           .then(() => {
             invalidate();
             optionsRef.current?.onDelete?.();

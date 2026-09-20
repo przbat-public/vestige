@@ -7,6 +7,7 @@
 //   - GraphPage / MemoryLocalGraph (max_nodes, depth)
 //   - useWebSocket (events ring buffer cap)
 //   - SearchPage (default page size)
+//   - MemoryRevisionsPanel (content-history page size)
 //
 // Falls back to `DEFAULT_LIMITS` when the endpoint hasn't responded yet
 // — the values match the backend `DashboardLimitsDto::DEFAULT` exactly,
@@ -30,6 +31,8 @@ export const DEFAULT_LIMITS: DashboardLimitsDto = {
   searchLimitDefault: 20,
   searchLimitMax: 100,
   wsMaxEvents: 200,
+  revisionHistoryLimitDefault: 30,
+  revisionHistoryLimitMax: 200,
 };
 
 async function fetchLimits(): Promise<DashboardLimitsDto> {

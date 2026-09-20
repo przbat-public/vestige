@@ -153,7 +153,10 @@ describe('MaintenancePanel', () => {
     await user.click(within(dialog).getByRole('button', { name: /delete/i }));
 
     await waitFor(() => expect(gcSpy).toHaveBeenCalledTimes(2));
-    expect(gcSpy.mock.calls[1][0]).toEqual({ dry_run: false, min_retention: 0.1 });
+    // `confirmed` must ride along: `tools::maintenance::execute_gc` refuses
+    // `dry_run: false` without it, and the refusal used to surface as a 500 —
+    // so this button failed on every single click.
+    expect(gcSpy.mock.calls[1][0]).toEqual({ dry_run: false, min_retention: 0.1, confirmed: true });
   });
 
   it('backup button calls api and shows the saved path', async () => {

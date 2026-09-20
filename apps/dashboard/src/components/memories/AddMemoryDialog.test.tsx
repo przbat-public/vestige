@@ -103,6 +103,71 @@ describe('AddMemoryDialog', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('keeps the dialog open and shows why when the write is refused', async () => {
+    // A refusal arrives as HTTP 200 with `stored: false`. The dialog used to
+    // branch on `decision === 'create' || 'supersede'`, so a reject fell into
+    // the "merged" branch: the user saw a toast about a decision, the dialog
+    // closed, and the typed text was gone while nothing had been written.
+    vi.spyOn(api.memories, 'smartIngest').mockResolvedValue(
+      makeResult({
+        success: false,
+        decision: 'reject',
+        stored: false,
+        nodeId: undefined,
+        reason: 'content duplicates the repository',
+        explanation: undefined,
+        guidance: 'Nothing was written. Save the lesson instead.',
+        findings: [{ kind: 'code_block', span: '```rust fn main()', hint: 'the repository owns this code' }],
+      }),
+    );
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderDialog(onClose);
+
+    const draft = 'as we discussed, the fix is in the file';
+    await user.type(screen.getByLabelText(/content/i), draft);
+    await user.click(screen.getByRole('button', { name: /save memory/i }));
+
+    expect(await screen.findByText(/not saved — smart-ingest refused this content/i)).toBeInTheDocument();
+    expect(screen.getByText(/content duplicates the repository/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing was written\. save the lesson instead\./i)).toBeInTheDocument();
+    expect(screen.getByText(/the repository owns this code/i)).toBeInTheDocument();
+
+    // The user must be able to edit and retry: the draft is still there and
+    // the dialog is still mounted.
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/content/i)).toHaveValue(draft);
+  });
+
+  it('does not present a flagged write as a clean save', async () => {
+    // `self_contained.requiresContext` means the memory WAS written and is
+    // searchable, but the gate found text that leans on the conversation.
+    // Surfacing those findings is the whole point of the gate, so it must not
+    // be toasted as "Memory created" and closed.
+    vi.spyOn(api.memories, 'smartIngest').mockResolvedValue(
+      makeResult({
+        decision: 'create',
+        self_contained: {
+          ok: false,
+          requiresContext: true,
+          rejected: false,
+          findings: [{ kind: 'discourse_deixis', span: 'as we discussed', hint: 'name what was discussed' }],
+        },
+      }),
+    );
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderDialog(onClose);
+
+    await user.type(screen.getByLabelText(/content/i), 'as we discussed, ship it on Friday');
+    await user.click(screen.getByRole('button', { name: /save memory/i }));
+
+    expect(await screen.findByText(/saved, but flagged/i)).toBeInTheDocument();
+    expect(screen.getByText(/as we discussed/)).toBeInTheDocument();
+    expect(screen.getByText(/name what was discussed/i)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('does not call smartIngest when the content is empty (client-side validation)', async () => {
     const ingest = vi.spyOn(api.memories, 'smartIngest').mockResolvedValue(makeResult());
     const onClose = vi.fn();

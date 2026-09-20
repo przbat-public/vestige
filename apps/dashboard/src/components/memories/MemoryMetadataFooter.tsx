@@ -63,6 +63,14 @@ export function MemoryMetadataFooter({ memory }: Props) {
         <div>
           {t('memories.created')}: {formatDateTime(memory.createdAt, i18n.language)}
         </div>
+        {/* Record time sits next to row birth on purpose: a reader has to be
+            able to tell when we learned something from when the row was
+            created, and neither of those is `lastAccessedAt`, which every
+            search hit moves. */}
+        <div>
+          {t('memories.recorded')}: {formatDateTime(memory.recordedAt, i18n.language)}
+          <InfoTooltip content={t('memories.recordedTooltip')} />
+        </div>
         <div>
           {t('memories.updated')}: {formatDateTime(memory.updatedAt, i18n.language)}
         </div>

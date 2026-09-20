@@ -73,6 +73,10 @@ const memorySchema = z.object({
   storageStrength: z.number(),
   retrievalStrength: z.number(),
   createdAt: z.string(),
+  // Record time (V17). Required, not optional: the DTO always serializes it, so
+  // a response without it means the wire drifted and the detail panel would
+  // silently lose the only anchor for "when did we learn this".
+  recordedAt: z.string(),
   updatedAt: z.string(),
   lastAccessedAt: z.string().optional(),
   nextReviewAt: z.string().optional(),
@@ -83,6 +87,11 @@ const memorySchema = z.object({
   sentimentMagnitude: z.number().optional(),
   validFrom: z.string().optional(),
   validUntil: z.string().optional(),
+  // Omitted means the gate never ran; `false` means it ran and flagged the
+  // memory. Collapsing the two here would re-create exactly the "no flags"
+  // ambiguity the column exists to remove.
+  selfContained: z.boolean().optional(),
+  selfContainedFindings: z.array(z.object({ kind: z.string(), span: z.string(), hint: z.string() })).optional(),
   epistemicStatus,
   memorySystem,
   insight: insightSchema.optional(),

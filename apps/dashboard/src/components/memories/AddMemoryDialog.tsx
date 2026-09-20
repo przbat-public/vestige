@@ -11,9 +11,11 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
+import type { SmartIngestFinding, SmartIngestResult } from '@/stores/api';
 import { api } from '@/stores/api';
 import { queryKeys } from '@/stores/query';
 import { toast } from '@/stores/toast';
+import { SelfContainedFindings } from './SelfContainedFindings';
 
 /**
  * Node types we expose in the dashboard form. Aligned with the canonical set
@@ -36,6 +38,39 @@ const schema = z.object({
 });
 
 type AddMemoryForm = z.infer<typeof schema>;
+
+/**
+ * What the engine actually did with the draft.
+ *
+ * The dialog used to branch on `decision === 'create' || decision ===
+ * 'supersede'` and treat every other decision as a processed write. A refusal
+ * arrives as HTTP 200 with `stored: false`, so it fell into the `else` branch,
+ * the dialog closed over text that was never written, and the user's only clue
+ * was a toast that read "smart-ingest decided to reject". Classifying once, in
+ * one place, keeps the toast, the inline alert and the close/reset decision
+ * from ever disagreeing again.
+ */
+type IngestOutcome =
+  | { kind: 'refused'; findings: SmartIngestFinding[] }
+  | { kind: 'flagged'; findings: SmartIngestFinding[] }
+  | { kind: 'warned' }
+  | { kind: 'stored' };
+
+function classifyIngest(result: SmartIngestResult): IngestOutcome {
+  if (result.stored === false || result.decision === 'reject') {
+    // Refusals carry their findings at the top level; a stored response that
+    // the gate flagged carries them under `self_contained`.
+    return { kind: 'refused', findings: result.findings ?? result.self_contained?.findings ?? [] };
+  }
+  const findings = result.self_contained?.findings ?? [];
+  if (result.self_contained?.requiresContext || findings.length > 0) {
+    return { kind: 'flagged', findings };
+  }
+  if (result.compound_content_warning || result.near_duplicate_warning) {
+    return { kind: 'warned' };
+  }
+  return { kind: 'stored' };
+}
 
 interface AddMemoryDialogProps {
   open: boolean;
@@ -91,6 +126,27 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
       qc.invalidateQueries({ queryKey: queryKeys.memoriesPrefix });
       qc.invalidateQueries({ queryKey: queryKeys.stats });
 
+      const outcome = classifyIngest(result);
+
+      // A refusal is not a save. Nothing was written, so the dialog stays open
+      // with the draft intact — closing it here is exactly how the typed
+      // content was thrown away while the toast claimed the write had been
+      // processed. The inline Alert renders `reason`, `guidance` and `findings`
+      // so the user can edit and retry without leaving the dialog.
+      if (outcome.kind === 'refused') {
+        toast(t('addMemory.toastRejected'), 'error');
+        return;
+      }
+
+      // Written, and flagged: it exists and is searchable, but it leans on the
+      // conversation it came from. Surfacing the findings is the whole point of
+      // the gate, so this must not be toasted as a clean save either — keep the
+      // dialog open so the findings stay next to the text they describe.
+      if (outcome.kind === 'flagged') {
+        toast(t('addMemory.toastFlagged'), 'info');
+        return;
+      }
+
       // The backend may flag the write with a `compound_content_warning`
       // or `near_duplicate_warning` that is actionable — the user should
       // either split the memory into atomics or re-submit with
@@ -99,7 +155,7 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
       // navigate to the new memory just to read it. Keep the dialog open
       // so the inline Alert (rendered below) can deliver the message
       // where the user can still act on it.
-      if (result.compound_content_warning || result.near_duplicate_warning) {
+      if (outcome.kind === 'warned') {
         toast(t('addMemory.toastWithWarning'), 'info');
         return;
       }
@@ -108,7 +164,7 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
       // dumping the raw `decision` string. The decision shapes the toast:
       // create/supersede → success ("Created"); reinforce/update/merge →
       // info ("Merged with existing memory"). Both close the dialog —
-      // either way the user's input was successfully processed.
+      // either way the user's input was successfully written.
       const decision = result.decision;
       if (decision === 'create' || decision === 'supersede') {
         toast(t('addMemory.toastCreated'), 'success');
@@ -258,30 +314,7 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
             </Alert>
           )}
 
-          {mutation.data && (
-            <Alert variant={mutation.data.decision === 'create' ? 'success' : 'default'}>
-              <p className="font-medium mb-1">
-                {t(`addMemory.decision.${mutation.data.decision}`, { defaultValue: mutation.data.decision })}
-              </p>
-              <p>{mutation.data.explanation || mutation.data.reason}</p>
-              {mutation.data.compound_content_warning && (
-                <p className="mt-2 text-amber-600 dark:text-amber-400">
-                  <Badge variant="warning" className="mr-1">
-                    {t('addMemory.compoundWarning')}
-                  </Badge>
-                  {mutation.data.compound_content_warning}
-                </p>
-              )}
-              {mutation.data.near_duplicate_warning && (
-                <p className="mt-2 text-amber-600 dark:text-amber-400">
-                  <Badge variant="warning" className="mr-1">
-                    {t('addMemory.nearDuplicateWarning')}
-                  </Badge>
-                  {mutation.data.near_duplicate_warning}
-                </p>
-              )}
-            </Alert>
-          )}
+          {mutation.data && <IngestResultAlert result={mutation.data} />}
 
           <div className="flex gap-2 justify-end pt-2 border-t border-border">
             <Button type="button" variant="ghost" onClick={onClose} disabled={mutation.isPending}>
@@ -294,5 +327,81 @@ export function AddMemoryDialog({ open, onClose }: AddMemoryDialogProps) {
         </form>
       </div>
     </div>
+  );
+}
+
+/** The findings a reader can act on — refusals and flagged writes only. */
+function actionableFindings(outcome: IngestOutcome): SmartIngestFinding[] {
+  return outcome.kind === 'refused' || outcome.kind === 'flagged' ? outcome.findings : [];
+}
+
+/**
+ * The inline result of the last submit, shaped by what the engine actually did.
+ *
+ * `destructive` for a refusal (nothing was written), `warning` for a write the
+ * gate flagged or for an actionable compound/near-duplicate warning, `success`
+ * only for a clean create. The old version coloured the alert by
+ * `decision === 'create'` alone, so a refusal — whose `decision` is `"reject"`
+ * — rendered as a neutral box that the dialog closed a moment later.
+ */
+function IngestResultAlert({ result }: { result: SmartIngestResult }) {
+  const { t } = useTranslation();
+  const outcome = classifyIngest(result);
+  const findings = actionableFindings(outcome);
+
+  const variant =
+    outcome.kind === 'stored' && result.decision === 'create' ? 'success' : OUTCOME_ALERT_VARIANT[outcome.kind];
+  const title =
+    outcome.kind === 'refused' || outcome.kind === 'flagged'
+      ? t(`addMemory.${outcome.kind === 'refused' ? 'rejectTitle' : 'selfContainedTitle'}`)
+      : t(`addMemory.decision.${result.decision}`, { defaultValue: result.decision });
+  // A refusal's own `reason` is the claim that matters; `explanation` describes
+  // a write decision and a refusal never has one. Preferring the decision text
+  // there would print the wrong story next to "not saved".
+  const body = outcome.kind === 'refused' ? (result.reason ?? result.explanation) : result.explanation || result.reason;
+
+  return (
+    <Alert variant={variant}>
+      <p className="font-medium mb-1">{title}</p>
+      <p>{body}</p>
+
+      {result.guidance && (
+        <p className="mt-2">
+          <span className="font-medium">{t('addMemory.guidanceLabel')}: </span>
+          {result.guidance}
+        </p>
+      )}
+
+      {findings.length > 0 && <p className="mt-2 font-medium">{t('selfContained.findingsTitle')}</p>}
+      <SelfContainedFindings findings={findings} />
+
+      {outcome.kind === 'refused' && <p className="mt-2 font-medium">{t('addMemory.rejectHint')}</p>}
+      {outcome.kind === 'flagged' && <p className="mt-2">{t('addMemory.selfContainedHint')}</p>}
+
+      {result.compound_content_warning && <AdvisoryNotice kind="compound" text={result.compound_content_warning} />}
+      {result.near_duplicate_warning && <AdvisoryNotice kind="nearDuplicate" text={result.near_duplicate_warning} />}
+    </Alert>
+  );
+}
+
+/** Alert colour per outcome; `stored` is refined by the decision in the caller. */
+const OUTCOME_ALERT_VARIANT = {
+  refused: 'destructive',
+  flagged: 'warning',
+  warned: 'warning',
+  stored: 'default',
+} as const;
+
+/** One of smart-ingest's two advisory warnings, badge plus message. */
+function AdvisoryNotice({ kind, text }: { kind: 'compound' | 'nearDuplicate'; text: string }) {
+  const { t } = useTranslation();
+  const label = kind === 'compound' ? t('addMemory.compoundWarning') : t('addMemory.nearDuplicateWarning');
+  return (
+    <p className="mt-2">
+      <Badge variant="warning" className="mr-1">
+        {label}
+      </Badge>
+      {text}
+    </p>
   );
 }

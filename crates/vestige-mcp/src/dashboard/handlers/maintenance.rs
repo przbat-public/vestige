@@ -19,6 +19,24 @@ fn maintenance_err(tool: &'static str) -> impl Fn(String) -> StatusCode {
     }
 }
 
+/// True when a tool error is the destructive-operation gate refusing the call.
+///
+/// The gate's refusal is the *caller's* mistake, not a server fault. Answering
+/// 500 makes a dashboard render a crash where the user needs the sentence the
+/// gate wrote ("re-issue with `confirmed: true`"), and the dashboard's gc
+/// button did exactly that until the client started sending the
+/// acknowledgement.
+///
+/// `tools::common::missing_confirmation_error` is the only producer of this
+/// wording, and the tool surface is `Result<Value, String>` — there is no
+/// typed error to match on from here, so the message prefix is the contract
+/// available at this layer. Kept as its own predicate so widening it later
+/// cannot silently change what the other maintenance handlers answer.
+fn is_confirmation_refusal(message: &str) -> bool {
+    message.starts_with("Destructive operation `")
+        && message.contains("requires explicit confirmation")
+}
+
 /// `POST /api/maintenance/regenerate-embeddings` — backfill or rebuild embeddings.
 pub async fn maintenance_regenerate_embeddings(
     State(state): State<AppState>,
@@ -44,6 +62,13 @@ pub async fn maintenance_find_duplicates(
 }
 
 /// `POST /api/maintenance/gc` — list (or delete, with dry_run=false) low-retention memories.
+///
+/// Status codes:
+/// - 200 — the report (a dry run's report is the complete answer),
+/// - 400 — the destructive variant arrived without `confirmed: true`. A
+///   refusal is a client error: the call was never attempted, and a 5xx here
+///   would read as "the deletion ran and failed".
+/// - 500 — storage failed.
 pub async fn maintenance_gc(
     State(state): State<AppState>,
     body: Option<Json<Value>>,
@@ -52,7 +77,15 @@ pub async fn maintenance_gc(
     crate::tools::maintenance::execute_gc(&state.storage, args)
         .await
         .map(Json)
-        .map_err(maintenance_err("gc"))
+        .map_err(|e| {
+            if is_confirmation_refusal(&e) {
+                tracing::warn!(tool = "gc", error = %e, "gc refused without confirmation");
+                StatusCode::BAD_REQUEST
+            } else {
+                tracing::error!(tool = "gc", error = %e, "maintenance handler failed");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        })
 }
 
 /// `POST /api/maintenance/backup` — write a SQLite snapshot into the Vestige data
@@ -150,11 +183,19 @@ mod tests {
         storage: Arc<Storage>,
         body: serde_json::Value,
     ) -> axum::response::Response {
+        post_json(storage, "/api/maintenance/erase", body).await
+    }
+
+    async fn post_json(
+        storage: Arc<Storage>,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> axum::response::Response {
         let (app, _state): (Router, AppState) = crate::dashboard::build_router(storage, None, PORT);
         app.oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/maintenance/erase")
+                .uri(uri)
                 .header(header::HOST, format!("127.0.0.1:{PORT}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(body.to_string()))
@@ -271,5 +312,95 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// The dashboard's destructive GC button sent `dry_run: false` without
+    /// `confirmed: true`, so the gate refused every time and this handler
+    /// answered 500 — the user saw a crash where the gate had written a
+    /// perfectly good explanation. A refusal is a client error.
+    #[tokio::test]
+    async fn gc_route_refuses_without_confirmation_as_a_client_error() {
+        let dir = TempDir::new().unwrap();
+        let storage = test_storage(&dir.path().join("gc-refuse.db"));
+        let id = ingest(&storage, "weak memory", &["seed"]);
+
+        let response = post_json(
+            storage.clone(),
+            "/api/maintenance/gc",
+            serde_json::json!({ "dry_run": false, "min_retention": 1.0 }),
+        )
+        .await;
+
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "a missing acknowledgement must not be reported as a server fault"
+        );
+        assert!(
+            storage.get_node(&id).unwrap().is_some(),
+            "a refused gc must delete nothing"
+        );
+    }
+
+    /// With the acknowledgement the same call runs — this is the request the
+    /// dashboard now sends after its confirm dialog resolves.
+    #[tokio::test]
+    async fn gc_route_deletes_once_confirmed() {
+        let dir = TempDir::new().unwrap();
+        let storage = test_storage(&dir.path().join("gc-confirm.db"));
+        let id = ingest(&storage, "weak memory", &["seed"]);
+        // A freshly ingested memory sits at retention 1.0, and GC's filter is
+        // `retention < min_retention`, so the candidate has to be decayed
+        // first — otherwise the test would pass on an empty candidate set and
+        // prove nothing about the delete.
+        storage
+            .downscale_retention_batch(&[id.as_str()], 0.5)
+            .unwrap();
+
+        let response = post_json(
+            storage.clone(),
+            "/api/maintenance/gc",
+            serde_json::json!({
+                "dry_run": false, "min_retention": 0.9, "confirmed": true
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["dryRun"], false);
+        assert_eq!(body["deleted"], 1);
+        assert!(
+            storage.get_node(&id).unwrap().is_none(),
+            "a confirmed gc must actually delete the candidate"
+        );
+    }
+
+    /// The dry run never needs the acknowledgement — it deletes nothing, and
+    /// requiring it would make the preview button fail for no reason.
+    #[tokio::test]
+    async fn gc_route_previews_without_confirmation() {
+        let dir = TempDir::new().unwrap();
+        let storage = test_storage(&dir.path().join("gc-preview.db"));
+        let id = ingest(&storage, "weak memory", &["seed"]);
+        storage
+            .downscale_retention_batch(&[id.as_str()], 0.5)
+            .unwrap();
+
+        let response = post_json(
+            storage.clone(),
+            "/api/maintenance/gc",
+            serde_json::json!({ "dry_run": true, "min_retention": 0.9 }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["dryRun"], true);
+        assert_eq!(body["candidateCount"], 1);
+        assert!(
+            storage.get_node(&id).unwrap().is_some(),
+            "a dry run must leave the candidate in place"
+        );
     }
 }

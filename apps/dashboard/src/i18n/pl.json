@@ -326,6 +326,9 @@
     "retrieval": "Siła przywołania",
     "reviews": "Liczba powtórzeń",
     "created": "Utworzono",
+    "recorded": "Czas zapisu",
+    "recordedOn": "Zapisano {{date}}",
+    "recordedTooltip": "Kiedy Vestige zapisał to wspomnienie. W przeciwieństwie do „Ostatniego dostępu” nigdy się nie zmienia.",
     "updated": "Ostatnia zmiana",
     "accessed": "Ostatni dostęp",
     "retentionForecast": "Prognoza zapamiętania",
@@ -344,9 +347,24 @@
     "editTagsPlaceholder": "acme, web-sdk, debugowanie",
     "editTagsHint": "Oddzielone przecinkiem lub nową linią. Automatycznie przycinane i deduplikowane.",
     "changelog": {
-      "title": "Historia zmian",
+      "title": "Historia stanu",
       "empty": "Brak zarejestrowanych przejść stanów.",
       "changedTo": "zmieniono na"
+    },
+    "revisions": {
+      "title": "Historia treści",
+      "empty": "Brak zarejestrowanych wersji treści.",
+      "before": "Przed",
+      "after": "Po",
+      "reason": "Powód",
+      "actor": "autor: {{actor}}",
+      "kind": {
+        "create": "Utworzono",
+        "edit": "Edytowano",
+        "supersede": "Zastąpiono",
+        "invalidate": "Unieważniono",
+        "quarantine": "Kwarantanna"
+      }
     },
     "localGraph": {
       "title": "Lokalne połączenia",
@@ -604,6 +622,13 @@
     "toastCreated": "Wspomnienie zapisane.",
     "toastMerged": "Smart-ingest zdecydował: {{decision}} — szczegóły w oknie.",
     "toastWithWarning": "Wspomnienie zapisane — przeczytaj ostrzeżenie w oknie przed zamknięciem.",
+    "toastRejected": "Nic nie zapisano — zapis został odrzucony. Powód znajdziesz w oknie.",
+    "toastFlagged": "Wspomnienie zapisane, ale oznaczone jako wymagające kontekstu — sprawdź ustalenia.",
+    "rejectTitle": "Nie zapisano — smart-ingest odrzucił tę treść",
+    "rejectHint": "Nic nie zostało zapisane. Przepisz tekst tak, by był zrozumiały samodzielnie, i zapisz ponownie — albo zapisz wniosek, który miał nieść.",
+    "guidanceLabel": "Co zrobić zamiast tego",
+    "selfContainedTitle": "Zapisano, ale oznaczono — to wspomnienie wymaga swojej rozmowy",
+    "selfContainedHint": "Wspomnienie jest zapisane i wyszukiwalne. Nazwij w tekście, czego dotyczy (kto, co, kiedy), i zapisz poprawioną wersję.",
     "errors": {
       "contentRequired": "Treść wspomnienia jest wymagana.",
       "contentTooLarge": "Treść wspomnienia przekracza limit 1MB.",
@@ -616,9 +641,17 @@
       "supersede": "Zastąpiono starsze wspomnienie",
       "merge": "Połączono z powiązanymi",
       "replace": "Zastąpiono istniejące",
-      "add_context": "Dodano jako kontekst"
+      "add_context": "Dodano jako kontekst",
+      "reject": "Odrzucono"
     },
     "required": "Pole wymagane"
+  },
+  "selfContained": {
+    "findingsTitle": "Co wykryła bramka",
+    "spanLabel": "tekst:",
+    "detailTitle": "Oznaczone: to wspomnienie wymaga swojej rozmowy",
+    "detailExplanation": "Zostało zapisane i jest wyszukiwalne, ale bramka zapisu znalazła tekst, który ma sens tylko obok rozmowy, z której pochodzi. Oznaczenie zapisuje werdykt z momentu zapisu, więc edycja wspomnienia go nie usuwa.",
+    "badge": "wymaga kontekstu"
   },
   "epistemic": {
     "world": "Zweryfikowany fakt",

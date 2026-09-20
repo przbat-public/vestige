@@ -80,7 +80,12 @@ export function MaintenancePanel() {
   });
 
   const gcDelete = useMutation({
-    mutationFn: () => api.maintenance.gc({ dry_run: false, min_retention: 0.1 }),
+    // `confirmed: true` is not decoration: `tools::maintenance::execute_gc`
+    // refuses `dry_run: false` without it, and the refusal used to surface as
+    // an HTTP 500 — so the destructive button behind the themed confirm dialog
+    // failed every single time. The user's confirmation *is* the
+    // acknowledgement the MCP gate asks for.
+    mutationFn: () => api.maintenance.gc({ dry_run: false, min_retention: 0.1, confirmed: true }),
     onSuccess: (res) => {
       setGcResult(res);
       toast(t('maintenance.gcDeleteSuccess', { count: res.deleted ?? 0 }), 'success');

@@ -1,0 +1,1 @@
+import{j as t}from"./react-CstDIzCn.js";import{c as e}from"./index-2nvQWWe3.js";function i({className:r,ref:o,...n}){return t.jsx("input",{ref:o,className:e("w-full px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition",r),...n})}export{i as I};

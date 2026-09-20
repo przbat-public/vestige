@@ -72,8 +72,8 @@ pub use graph::{
     ExploreResponseDto, ExploreResultDto, GraphEdgeDto, GraphNodeDto, GraphResponseDto,
 };
 pub use history::{
-    MemoryChangelogDto, MemoryChangelogEntryDto, TimelineDayDto, TimelineMemoryDto,
-    TimelineResponseDto,
+    MemoryChangelogDto, MemoryChangelogEntryDto, MemoryRevisionDto, MemoryRevisionsDto,
+    TimelineDayDto, TimelineMemoryDto, TimelineResponseDto,
 };
 pub use hubs::{HubDto, HubListResponseDto};
 pub use insights::{InsightDto, InsightListResponseDto};
@@ -84,7 +84,7 @@ pub use intentions::{
 pub use limits::DashboardLimitsDto;
 pub use memory::{
     EpistemicStatusDto, MemoryDto, MemoryListResponseDto, MemoryStatusDto, MemorySystemDto,
-    MemoryUpdateResultDto,
+    MemoryUpdateResultDto, SelfContainedFindingDto,
 };
 pub use metacognitive::{
     ConfidenceDimensionsDto, ConfidenceEntryDto, ConfidenceResultDto, ReflectInsightDto,

@@ -43,6 +43,8 @@ import type {
   MemoryChangelogEntryDto,
   MemoryDto,
   MemoryListResponseDto,
+  MemoryRevisionDto,
+  MemoryRevisionsDto,
   MemoryStatusDto,
   MemoryUpdateResultDto,
   PredictedMemoryDto,
@@ -80,6 +82,8 @@ export type MemoryStatus = MemoryStatusDto;
 export type MemoryUpdateResult = MemoryUpdateResultDto;
 export type MemoryChangelog = MemoryChangelogDto;
 export type MemoryChangelogEntry = MemoryChangelogEntryDto;
+export type MemoryRevision = MemoryRevisionDto;
+export type MemoryRevisions = MemoryRevisionsDto;
 export type ReviewResult = ReviewResultDto;
 export type ReviewItem = ReviewItemDto;
 export type ReviewQueueResponse = ReviewQueueResponseDto;
