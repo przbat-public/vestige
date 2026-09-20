@@ -92,6 +92,16 @@ Zakres migracji w dokumentacji i w bramce metadanych przechodzi na **v1–v17**.
    „security / privacy leaks" (130 wpisów, 2,1%), obok adresów IP i identyfikatorów czatu — czyli
    magazyn, który automatycznie wyciąga ścieżki, gromadzi **wewnętrzną mapę topologii maszyny**.
    Audytorzy klasyfikują to jako wyciek, nie jako szum. To argument niezależny od tego, że ścieżki gniją.
+
+   **A gniją po cichu — w obie strony.** Najczystszy znany przypadek (claude-code #95095): plik
+   pamięci zawierający jedną linię — przypiętą ścieżkę pluginu. Po podbiciu wersji stare kopie
+   zostały, więc przypięcie „nadal się rozwiązuje — do starej kopii": *„każda sesja ładowała reguły
+   z 0.10.2 i umiejętności z 0.11.0 jednocześnie… nic w żadnym interfejsie nie sygnalizowało, że
+   załadowane reguły są o wersję do tyłu"*. A gdy cel zostanie usunięty: *„nierozwiązywalny import
+   nie objawia się niczym… cały wspólny zestaw reguł znika bez sygnału"*. **Zapisana ścieżka zawodzi
+   cicho w obie strony — rozkłada się w nieprawdę albo w nicość, nigdy w błąd.** Stąd reguła:
+   odwołanie do pliku może występować **wyłącznie jako niewstrzykiwana proweniencja**, nigdy wewnątrz
+   tekstu wspomnienia, który trafia do kontekstu.
 5. **Wyjątek na znaczniki czasu** w przyszłym walidatorze ugruntowania: absolutna data nigdy nie
    występuje dosłownie w transkrypcji, więc bez wyjątku walidator uzna każde poprawnie zakotwiczone
    `valid_until` za halucynację i **dwie funkcje zaczną ze sobą walczyć**.
@@ -103,6 +113,21 @@ Zakres migracji w dokumentacji i w bramce metadanych przechodzi na **v1–v17**.
    — 97,8% śmieci) wskazuje jako dwie główne remedies **bramkę jakości między ekstrakcją a zapisem**
    i właśnie **akcję REJECT w prompcie decyzyjnym**. Ich własny wniosek: dedup nie był zawodzącą
    warstwą (po dwóch przebiegach wciąż 96,9% śmieci przy ręcznym czytaniu).
+
+   **Zewnętrzne potwierdzenie, że nasza reguła atomowości jest wyborem, nie oczywistością.**
+   Prompt ekstrakcji mem0 (`ADDITIVE_EXTRACTION_PROMPT`) jest **świadomie napisany pod maksymalny
+   recall** i głosi coś przeciwnego: *„Contextually Rich, Not Atomic"*, *„15–80 words"*, z przykładami
+   *„Extract ALL Dimensions — Don't Miss Secondary Info"*. Maintainer mem0 w notce triage'owej do
+   issue #5730 (czerwiec 2026) potwierdza zarówno sam problem, jak i jego mechanizm: *„The
+   precision/noise concern is legitimate and consistent with #4573. A stronger model following the
+   high-recall prompt more faithfully is a real observed pattern."* Czyli „jeden fakt na wspomnienie"
+   w Vestige **nie jest konwencją, której nikt nie egzekwuje — jest świadomym odejściem od
+   najczęściej kopiowanego promptu w ekosystemie**, a 97,8% śmieci to dowód, co produkuje domyślne
+   ustawienie. mem0 dodatkowo **usunął** furtkę nadpisania promptu (PR #4805, zamieniona na
+   append-only `custom_instructions`), więc użytkownicy stracili dźwignię do zmniejszenia recallu.
+   Warto też odnotować, gdzie jesteśmy z przodu: pipeline mem0 jest **ADD-only** i nie zastępuje
+   nieaktualnych faktów (issue #4956/#5867) — czyli nie ma inwalidacji czasowej ani wykrywania
+   sprzeczności, które Vestige już ma.
 
 ---
 
@@ -138,9 +163,28 @@ Zakres migracji w dokumentacji i w bramce metadanych przechodzi na **v1–v17**.
 1. **Audyt rot kotwic** (raport-only, nigdy automatyczna naprawa): rozwiąż `code_refs` względem
    zapisanego SHA; porażka → `stale`/`orphaned`, demote i kolejka do przeglądu. Podstawa dowodowa:
    nieaktualne odniesienia do elementów kodu w **23,0% z 356 repozytoriów**.
-2. **Pomiar `dream`/`reflect` przed/po wskaźniku samodzielności** — nie zakładamy, że pomagają;
+   **Kluczowanie musi być na weryfikowalnej nieaktualności, nigdy na wieku ani liczbie odczytów.**
+   To nie preferencja, to pomiar: automatyczny przebieg wycofywania nigdy nieużywanych wspomnień
+   zwrócił **zero kandydatów** przy progu 30 dni (claude-code #92998), a „liczby odczytów to zły
+   test" potwierdza niezależne źródło. Na zdrowym magazynie przebieg kluczowany po wieku **nie ma
+   na czym pracować** — dokładnie odwrotnie, niż podpowiada intuicja.
+2. **Ewikcja musi być świadoma supersesji — inaczej tworzy „pewnych siebie i nieprawdziwych".**
+   Zapisane wprost: *„wspomnienie, które poprawia wcześniejsze, jest zawsze nowsze niż to, co
+   poprawia — więc obcinanie pojemności wyrzuca najpierw supersesje, zostawiając załadowaną
+   i autorytatywną wersję nieaktualną"*. Każdy mechanizm limitowania pojemności lub retencji
+   w Vestige, który nie respektuje łańcucha zastąpień, odtworzy ten błąd.
+3. **Ktoś musi być właścicielem uzgadniania — w obie strony.** Użytkownik, który **zbudował**
+   system plikowy (a więc nie jest stromy w sporze „pliki kontra baza"), zgłasza te same klasy awarii:
+   przepełnienie indeksu ukrywające własny ogon, pliki sieroce niewidoczne dla nowych sesji,
+   synchronizacja nadpisująca nowszą pamięć z innej maszyny, nieaktualne wpisy wskazujące na usunięte
+   pliki, duplikaty z równoległych sesji. **Zmiana nośnika przenosi te awarie, nie usuwa ich** —
+   różnicą jest to, czy cokolwiek odpowiada za uzgadnianie. Dwa mechanizmy, które u niego zadziałały:
+   blokada zakończenia sesji przy istniejących sierotach („złapała trzy prawdziwe pierwszego dnia")
+   oraz bramka rozmiaru przy zapisie. Wniosek dla nas: bramki przy zapisie **uzupełniają** przebieg
+   porządkowy, nie zastępują go, a magazyn i indeks wymagają uzgadniania w obu kierunkach.
+4. **Pomiar `dream`/`reflect` przed/po wskaźniku samodzielności** — nie zakładamy, że pomagają;
    dane pokazują, że destylacja może zejść poniżej poziomu „brak pamięci".
-3. **Nie** dodajemy wygaszania po wieku ani „większego streszczacza".
+5. **Nie** dodajemy wygaszania po wieku ani „większego streszczacza".
 
 ---
 

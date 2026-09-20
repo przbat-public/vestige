@@ -79,9 +79,49 @@ magnitude, and the failure mode changed shape rather than shrinking:
 This is independently corroborated in spirit by `TRON4R` in mem0 #4289, who upgraded his decision
 model from `gpt-4.1-nano` to `gpt-4.1-mini` and reported it *"didn't really make a noticeable
 difference deciding which information is worth to be stored and which to be ignored"* — while
-doubling response times. Two independent production reports agreeing that model quality is not the
-lever is a genuinely counterintuitive and report-worthy result, and it means "use a smarter
-extractor" is not an available fix.
+doubling response times.
+
+**And mem0's own maintainer has now conceded the mechanism.** **MAINTAINER**, `kartik-mem0`
+(Contributor), triage note on mem0 issue #5730, June 2026 — filed as *"v3 additive extraction prompt
+over-extracts; no way to dial down recall on self-hosted (OSS)"*:
+
+> "The precision/noise concern is legitimate and consistent with #4573. **A stronger model following
+> the high-recall prompt more faithfully is a real observed pattern.**"
+
+**The root cause, from the same issue, is the most directly actionable finding in this report for
+Vestige.** The over-extraction is not an accident — it is a documented property of the shipped
+extraction prompt, which is written for maximum recall. Quoting the issue's analysis of
+`ADDITIVE_EXTRACTION_PROMPT`:
+
+> A few examples from the prompt: `## Memory Quality Standards`: ***"Contextually Rich, Not Atomic"***,
+> *"15–80 words, up to 100 for detail-rich content"*. `# EXAMPLES` includes entries explicitly titled
+> ***"Extract ALL Dimensions — Don't Miss Secondary Info"*** and ***"Long Multi-Topic Conversation —
+> Don't Stop After First Topic"***. The majority of in-context examples demonstrate aggressive
+> multi-memory extraction."
+
+Read that against Vestige's own canonical rule — *"Every memory must contain exactly ONE fact,
+decision, event, or insight. Compound content degrades search recall by 40-60%"*. **The largest
+memory project in the ecosystem ships the exact opposite instruction as its default, and names it in
+the prompt.** Vestige's atomicity rule is therefore not a neutral convention that everyone shares and
+nobody enforces; it is a deliberate departure from the field's most-copied prompt, and the mem0
+audit is the evidence that the field's default is what produces 97.8% junk.
+
+The maintainer's stated root cause is worth carrying into design reviews:
+
+> "**Root cause:** The extraction system prompt conflates recall policy, output schema, and examples
+> into a single monolithic block, so there is no safe seam at which to expose user-facing recall
+> tuning without breaking the JSON contract."
+
+Supporting detail with a lesson about configuration escape hatches: `custom_fact_extraction_prompt`
+was originally a full system-prompt override, was renamed to `custom_instructions`, and then had the
+override branch **removed entirely** in PR #4805 — leaving `custom_instructions` as an appended
+section that "can append guidance but cannot override the high-recall system prompt, and the two
+often contradict each other (e.g. 'be concise' vs '15–80 words')." A user who needed lower recall
+lost the lever. The issue also records a related and separate defect class (#4956, #5867): mem0's
+ADD-only pipeline *"never superseding stale facts over time"* — which is precisely the failure
+Vestige's temporal invalidation and contradiction detection already address. Vestige is ahead here;
+the field's largest implementation is not.
+[github.com/mem0ai/mem0/issues/5730](https://github.com/mem0ai/mem0/issues/5730)
 
 **(2) The extraction pipeline re-ingests its own recalled memory — a feedback loop.** This is the
 mechanism behind the whole Rank 7 (self-referential memory) category, measured:
@@ -716,6 +756,43 @@ And for conversation-turn references, the counterpart rule is Dawn's:
 > claim, or is it implicit in the timestamp of insertion? If a claim is correct at insert-time and
 > wrong six weeks later, what tells your retrieval system to demote it?"
 
+**(e) The definitive case study of a path reference failing both ways.** This is the closest thing in
+the corpus to a complete, controlled demonstration of exactly the user's complaint, so it is worth
+giving in full.
+
+**FIRST-HAND**, `sealab2066`, anthropics/claude-code issue #95095, Sept 2026. An infra team ships
+shared rules as `team/CLAUDE.md` inside a versioned plugin. A skill writes the user's memory file as
+**exactly one line**:
+
+```
+@/Users/<me>/.claude/plugins/cache/sw-infra/infra-ai-skills/0.10.2/team/CLAUDE.md
+```
+
+The plugin was updated to 0.11.0. Old versions are retained in the cache, so the pinned path **kept
+resolving — to the old copy**:
+
+> "From then until 2026-09-17, every session loaded **rules from 0.10.2 and skills from 0.11.0 at the
+> same time**. … The two versions were not equivalent. 0.11.0 added a whole `## Merge Request
+> Description` section and flipped MR-description language from English to Russian. … the rule
+> governing MR descriptions was not in the agent's context, because the context held the 0.10.2 file.
+> **Nothing in any surface indicated that the loaded rules were a version behind the installed
+> plugin.**"
+
+And the second half — what happens when the stale target is *removed*:
+
+> "If the old version is ever pruned, an unresolvable import surfaces as nothing. Checked on 2.1.274:
+> a `CLAUDE.md` containing `@./missing-rules.md` plus a marker line loads the marker, keeps the import
+> line verbatim, and shows no warning that it did not resolve. **So the failure mode after a prune is
+> the entire shared rule set disappearing with no signal.**"
+
+Two properties make it silent, in the reporter's own summary: retained old versions mean the pin
+"keeps resolving. There is no error, just older content"; and a pruned target means total silent
+loss. **This is the strongest available evidence for the §3 conclusion: a stored path is a
+fail-silent construct in both directions — it does not break loudly, it breaks into wrongness or into
+nothing.** It also retroactively justifies the "surface the drift, never auto-repair, never assume"
+policy in §4, since *both* failure modes here were invisible until a human noticed a missing rule.
+[github.com/anthropics/claude-code/issues/95095](https://github.com/anthropics/claude-code/issues/95095)
+
 **Practical synthesis.** The field's de-facto answer is: *a memory should not contain a pointer; it
 should contain the rule, the reason, or the correction — and the agent should re-derive the code
 location by reading the code.* Where a pointer is unavoidable, the convention is to (i) store it as a
@@ -799,6 +876,40 @@ Pruning worked. It did not matter. He eventually abandoned the tool (see §5).
 `lastRecalledAt` is *refreshed daily as a side-effect*, so it cannot stand in for creation time —
 *"Without it, no retention strategy that filters by age is honest."*
 
+**Age-based retirement is measured to yield literally nothing on an active store.** **FIRST-HAND,
+with measurements.** `No-Smoke`, anthropics/claude-code issue #92998, Sept 2026 — a project silo at
+199 memories / 201 lines. The age profile at the moment it hit the cap:
+
+| written | memories |
+|---|---|
+| current month | 96 |
+| previous month | 91 |
+| older than ~5 weeks | 12 |
+
+> "An automated retirement pass over never-consulted memories returned **0 eligible candidates** at a
+> 30-day floor. The floor is load-bearing: 'never consulted' is not evidence without an opportunity to
+> consult, so lowering it starts retiring live material. **Any project writing memories at a steady
+> rate therefore reaches the cap with the automated route already exhausted.**"
+
+This is the single most important constraint on the maintenance pass recommended in §7. It is direct,
+measured evidence that **an age-and-unused-based pruning pass is not merely suboptimal — on a
+healthy, actively-used store it selects nothing at all.** Combined with `brtkwr`'s argument that read
+counts are the wrong test (§4.4), the implication is that pruning heuristics keyed on *age* or *use*
+have little to work with, and the pass has to be keyed on **verifiable staleness** instead — which is
+exactly what the §7 recommendation does. The reporter also found the *byte* cap binds before the line
+cap, and that truncation runs from the bottom:
+
+> "A memory that corrects an earlier memory is always newer than the thing it corrects. So the
+> truncation preferentially discards **supersessions**, leaving the superseded version loaded and
+> authoritative. The silo doesn't degrade toward 'less information' — it degrades toward
+> **'confidently wrong'**."
+
+That inversion is worth stating carefully: a naive capacity policy doesn't just lose data, it
+systematically loses *the corrections first*. For Vestige, whose `temporal invalidate` records
+supersessions as newer entries, any capacity- or retention-based eviction applied without awareness of
+supersession would reproduce this bug exactly.
+[github.com/anthropics/claude-code/issues/92998](https://github.com/anthropics/claude-code/issues/92998)
+
 **Ranking by read count is a bad pruning signal.** `brtkwr` (quoted in §1, Rank 4): a guardrail that
 fires once looks "never read" for months *"while being the most valuable line in the file."* His
 alternative: *"I pruned by category (is this durable, is this mine, is it better enforced
@@ -816,14 +927,55 @@ as a secondary aggregator; the underlying paper is [arXiv:2606.22528](https://ar
 
 **Yes — but only for the migration-to-zero, not for an ongoing automatic loop.**
 
-`brtkwr` is the one clean success report: ~166 auto-written files triaged to **zero**, with the
-knowledge preserved. His process was categorisation, not curation: *"project state got deleted,
-anything a repo's own docs should cover got turned into a pull request against that repo, work that
-deserved doing later got ticketed, and the small durable remainder got kept."* Outcome: *"the slop is
-gone, the guardrails survived, and the project knowledge got promoted to a place where it stops being
-mine alone."* End state: *"nothing gets saved unless I ask for it"*, and *"It is config with an AI
-drafting assistant: the agent proposes, I prune, git versions it, and nothing gets written as a side
-effect of a task."*
+**One mechanical check that worked, with a number.** **FIRST-HAND**. `simplydominus1-cpu`,
+anthropics/claude-code issue #91473, Sept 2026 — field notes after a year of a home-grown memory
+system (~25 KB index budget, ~300 topic files, two machines synced over git):
+
+> "I now block a session from ending while orphans exist — **it caught three real ones on its first
+> day.**"
+
+and on the write-time size gate:
+
+> "**Expose the write-time size gate.** The post-write 'index over its read limit' error is the best
+> anti-bloat mechanism I have seen; I have adopted the pattern for my own injected files."
+
+Both of those are *deterministic, cheap, and mechanical* — an orphan linter and a write-time
+admission gate — rather than a judgement-based cleanup pass. Notably, this is the same shape as the
+two mechanisms the rest of this report independently recommends (§7).
+
+#### The balance point: hand-written memory has the *same* failure classes
+
+This report has been mostly unflattering to automatic extraction, so this evidence matters for
+honesty. The same reporter, having **built the file-based alternative himself**, lists what a year of
+it taught him:
+
+> "lessons learned the hard way: **index overflow silently hiding its own tail; orphaned files
+> invisible to new sessions; one machine's sync overwriting the other's newer memory; stale recall
+> entries pointing at deleted files; duplicates born from parallel sessions** with fuzzy task
+> boundaries."
+
+Every one of those maps onto a failure mode documented above for automatic stores: overflow/truncation
+(#92998), orphans (`orchestkit` PR #4263), last-write-wins lost updates (#91473's own bug 2), stale
+pointers (§3), and duplication (Rank 5). **Substituting markdown files for a store does not remove any
+of these failure classes — it relocates them.** The differentiator in the sources is not the storage
+technology but whether anything owns the reconciliation: this reporter's orphan linter worked; his
+index had no such guard and silently lost its tail.
+
+This is the correct conclusion to draw from §5 as well. Both migrations in the corpus — `brtkwr`,
+`jamebobob` and Theo Browne going automatic → files, and `simplydominus1-cpu` going files →
+"bundle this into the harness" — report *overlapping* failure lists. The lesson for Vestige is not
+"prefer files"; it is that the mechanisms worth building are the ones that survive either substrate:
+write-time admission gates, and a periodic reconciliation that reports rather than repairs.
+[github.com/anthropics/claude-code/issues/91473](https://github.com/anthropics/claude-code/issues/91473)
+
+`brtkwr` is the one clean success report for a full migration: ~166 auto-written files triaged to
+**zero**, with the knowledge preserved. His process was categorisation, not curation: *"project state
+got deleted, anything a repo's own docs should cover got turned into a pull request against that repo,
+work that deserved doing later got ticketed, and the small durable remainder got kept."* Outcome:
+*"the slop is gone, the guardrails survived, and the project knowledge got promoted to a place where
+it stops being mine alone."* End state: *"nothing gets saved unless I ask for it"*, and *"It is config
+with an AI drafting assistant: the agent proposes, I prune, git versions it, and nothing gets written
+as a side effect of a task."*
 
 Note what that success required: **a human in the loop, git as the version store, and writes that are
 not a side effect of a task.** No source reports a fully automatic prune/dedup loop restoring trust
@@ -1038,11 +1190,11 @@ hermes-agent, orchestkit), or (c) a study with a published method (Augment) — 
    (`/r/ClaudeAI/comments/1thyy3k/`) is frequently cited by secondary sources, but **no Reddit quote
    appears anywhere in this report as evidence**, and the anecdotes attributed to it elsewhere should
    be treated as unconfirmed until someone reads the thread in a browser.
-8. **A mem0 maintainer concession.** I found claims that a mem0 maintainer acknowledged the #4573
-   audit's precision concern in a later issue. I did not retrieve that comment, so I make no such
-   claim. What I can verify is narrower: the #4573 audit is detailed, methodologically explicit, and
-   was still open and unrefuted at the time of writing, and it has been independently corroborated in
-   direction by `TRON4R`'s separate production experience in #4289.
+8. ~~A mem0 maintainer concession.~~ **CORRECTED — this claim is TRUE and I was wrong to disclaim
+   it.** I first recorded that I could not verify a maintainer concession about the #4573 audit. I
+   subsequently retrieved it directly. It is real and it is stronger than the second-hand version I
+   had been offered (which named the wrong issue). See §1, Rank 1 — the maintainer statement, the
+   root cause, and the prompt text are now quoted from the primary source.
 
 ---
 
@@ -1152,10 +1304,28 @@ the one that turns a merely-useless store into an actively-misleading one.
 - **Keep the credential prohibition two-layer, as n8n did**: a mechanical scrub *plus* an explicit
   "never record secret values, only that one was provided" instruction in the save prompt. Vestige's
   current hygiene line ("Never save: secrets, API keys, passwords…") is the instruction layer only.
+- **Reject a bare path as content.** Per §3(e), a stored path fails silently in *both* directions —
+  it resolves to a stale target or it resolves to nothing, and neither is reported. Practical rule:
+  a file reference may appear only as non-injected provenance metadata, never inside the memory text
+  that gets loaded. This is the single change that most directly addresses the user's second
+  complaint, and it is a one-line change to the `BUG_FIX` template plus a validator.
 
 ### The one maintenance pass most worth running
 
 **A reference-rot and freshness audit — report-only, evidence-gated, never auto-deleting.**
+
+Two independent, *measured* results now determine its design, and they rule out the obvious
+implementations:
+
+1. **Do not key it on age or on use-count.** `No-Smoke`'s measurements (#92998) show an automated
+   retirement pass over never-consulted memories returned **0 eligible candidates** at a 30-day floor,
+   and that *"any project writing memories at a steady rate therefore reaches the cap with the
+   automated route already exhausted"* — while `brtkwr` argues that read counts are a biased signal
+   because *"a guardrail that fires once and stops a destructive mistake looks 'never read' for months
+   while being the most valuable line in the file."* Age-based and popularity-based pruning therefore
+   both have nothing to work with on a healthy store.
+2. **Key it on verifiable staleness instead** — re-resolve external referents against the world, and
+   re-confirm status claims against a source of truth. That is the only signal the evidence supports.
 
 Not another dedup pass, and not another summarizer. Rationale from the evidence:
 
@@ -1196,6 +1366,31 @@ Design, directly from the sources that shipped:
    ADD/UPDATE/DELETE/MERGE/MOVE, contradictions resolved *with the source of truth used for each*,
    drift items escalated, and a line count against the ceiling. The per-item "source of truth used"
    is what makes the pass auditable rather than another opaque agent action.
+7. **Reconcile the store against the index, in both directions.** `tonydzi` measured 564 memory files
+   across three silos with **no index line at all** — at only 57% of the byte budget, so this was not
+   an overflow problem — of which 312 were written in the last 30 days and the newest was 44 minutes
+   old. His conclusion is the generalisable one: *"A write-time reconciliation between store and index
+   catches both roads, and it is the only one of your five that would flag a silo bleeding memories at
+   57% of its byte budget."* Two shapes to detect: **stored but never injected** (invisible to the
+   agent, so it cannot be corrected by anyone) and **referenced but absent** (a dangling pointer). His
+   catch that *"you cannot hook a call that was never made"* is the reason this belongs in a periodic
+   pass and not in a write hook.
+8. **Make eviction displace by strength, not by age — and only in a pass with evidence.** The one
+   practitioner who reports fixing this describes keying eviction on *strength* rather than age or
+   append order: *"each line carries a confidence and a hit counter (how often it actually fired), and
+   a new lesson has to beat the weakest incumbent to get in. **Corrections then displace the thing
+   they corrected instead of losing to it.** I run it as a milestone ritual rather than at write time
+   so the judgment happens when there's evidence."* This directly answers #92998's finding that
+   truncation-by-recency discards supersessions first, and it is the design most compatible with
+   Vestige's existing contradiction detection and `temporal invalidate`. Note the two halves: a
+   *strength* signal for ordering, and a *milestone ritual* (not a write-time hook) for the judgement.
+9. **Admit at write time; do not only sweep later.** Both the orphan linter (*"I now block a session
+   from ending while orphans exist — it caught three real ones on its first day"*) and the size gate
+   (*"the best anti-bloat mechanism I have seen"*) that `simplydominus1-cpu` reports adopting are
+   **write-time admission gates**, and both produced results immediately, unlike any retrospective
+   cleanup pass in this corpus. The pairing matters: the §7 write-time rules prevent entry, and this
+   pass catches drift that no gate can see (the world changing underneath a memory that was valid when
+   written). Gates and reconciliation are complements, not substitutes.
 
 ### Two things not to do
 
