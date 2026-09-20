@@ -87,7 +87,10 @@ export async function fetchSearch(query: string, limit = 5): Promise<{ results: 
 
 /** Returns false when the memory is already gone (cleanup after a UI delete). */
 export async function deleteMemory(id: string): Promise<boolean> {
-  const response = await fetch(`${E2E.dashboardUrl}/api/memories/${id}`, { method: 'DELETE' });
+  // `?confirmed=true` mirrors the MCP `memory(action="delete")` gate the route
+  // now enforces. This helper is test cleanup, so the acknowledgement is
+  // unconditional and stands in for the operator's.
+  const response = await fetch(`${E2E.dashboardUrl}/api/memories/${id}?confirmed=true`, { method: 'DELETE' });
   if (response.ok || response.status === 404) return response.ok;
   const body = await response.text().catch(() => '<unreadable body>');
   throw new Error(`DELETE /api/memories/${id} failed with ${response.status}: ${body.slice(0, 500)}`);
