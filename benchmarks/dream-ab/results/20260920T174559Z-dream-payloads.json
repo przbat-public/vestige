@@ -1,0 +1,333 @@
+{
+  "stamp": "20260920T174559Z",
+  "pass": "dream",
+  "calls": [
+    {
+      "tool": "dream",
+      "arguments": {
+        "memory_count": 50
+      },
+      "isError": false,
+      "seconds": 0.218,
+      "result": {
+        "connectionsPersisted": 12,
+        "contradictions": [],
+        "insights": [
+          {
+            "confidence": 0.5384615384615384,
+            "insight": "Shared pattern 'emulowanego  procesora' found across 7 memories",
+            "noveltyScore": 0.7999999999999999,
+            "sourceMemories": [
+              "23fec144-bc4f-428f-9187-12cfa079a149",
+              "97bbe4ca-8b15-4b6d-b516-48fa5ae64541"
+            ],
+            "type": "CrossDomain"
+          },
+          {
+            "confidence": 0.4766355140186916,
+            "insight": "Cross-domain pattern between [diagnostyka] and [pattern]: 'Objaw: emulowana gra nie wchodzi\u0142a do poziomu, tylko w k\u00f3...' connects to '# Code Pattern: Diagnostyka zawieszonego emulatora przez lic...'",
+            "noveltyScore": 0.7999999999999999,
+            "sourceMemories": [
+              "7e7dff16-9b84-474f-b531-8996ac234a38",
+              "ae68d8d5-66d2-42ea-b455-85587c70ea41"
+            ],
+            "type": "CrossDomain"
+          },
+          {
+            "confidence": 0.4723064435564436,
+            "insight": "Recurring pattern in 'topic': 13 instances identified with common characteristics",
+            "noveltyScore": 1.0,
+            "sourceMemories": [
+              "ed25287e-0157-415e-8af5-9902d8be3a05",
+              "5925e4a8-ef89-4ce0-aeb3-de1ba0ac60c0",
+              "97bbe4ca-8b15-4b6d-b516-48fa5ae64541",
+              "7e7dff16-9b84-474f-b531-8996ac234a38",
+              "ae68d8d5-66d2-42ea-b455-85587c70ea41",
+              "d7446713-eac3-42d4-a3f9-754e4ebc9d83",
+              "b96153d2-d104-409d-a2b7-4d4adf71e66c",
+              "d59cea00-f21d-4ed6-95c8-5d57c511ced7",
+              "c225a8c7-0987-4129-a16e-6bc7605814dd",
+              "973f329d-1974-459e-b30d-0702a0fadb5f",
+              "da17bf5d-00e6-4573-920e-e70122296da1",
+              "23fec144-bc4f-428f-9187-12cfa079a149",
+              "127860f3-26cb-4bd8-8ab7-68c13bf48175"
+            ],
+            "type": "RecurringPattern"
+          }
+        ],
+        "memoriesReplayed": 13,
+        "phases": [
+          {
+            "actions": [
+              "Scored 13 memories",
+              "Categories: {\"standard\": 13}",
+              "Replay queue: 10 high-value + 3 noise = 13 total"
+            ],
+            "durationMs": 4,
+            "memoriesProcessed": 13,
+            "phase": "NREM1_Triage"
+          },
+          {
+            "actions": [
+              "Processed 1 waves of 13 memories",
+              "Strengthened 13 memories via synaptic tagging"
+            ],
+            "durationMs": 0,
+            "memoriesProcessed": 13,
+            "phase": "NREM3_Consolidation"
+          },
+          {
+            "actions": [
+              "Cross-domain pairing: 7 tag groups, 2 connections found",
+              "Pattern extraction: 10 shared patterns found"
+            ],
+            "durationMs": 1,
+            "memoriesProcessed": 13,
+            "phase": "REM_Creative"
+          },
+          {
+            "actions": [
+              "Validated 2/12 connections (threshold: 0.4)",
+              "Generated 2 dream insights",
+              "Average retention across dreamed memories: 0.85"
+            ],
+            "durationMs": 0,
+            "memoriesProcessed": 13,
+            "phase": "Integration"
+          }
+        ],
+        "stats": {
+          "connectionsPersisted": 12,
+          "contradictionsFound": 0,
+          "creativeConnectionsFound": 12,
+          "durationMs": 6,
+          "emotionalProcessed": 0,
+          "insightsGenerated": 3,
+          "memoriesDownscaled": 0,
+          "memoriesStrengthened": 13
+        },
+        "status": "dreamed",
+        "wakingTagsCleared": 0,
+        "wakingTagsProcessed": 13
+      }
+    },
+    {
+      "tool": "dream",
+      "arguments": {
+        "memory_count": 50
+      },
+      "isError": false,
+      "seconds": 0.571,
+      "result": {
+        "connectionsPersisted": 12,
+        "contradictions": [],
+        "insights": [
+          {
+            "confidence": 0.5384615384615384,
+            "insight": "Shared pattern 'emulowanego  procesora' found across 7 memories",
+            "noveltyScore": 0.7999999999999999,
+            "sourceMemories": [
+              "23fec144-bc4f-428f-9187-12cfa079a149",
+              "97bbe4ca-8b15-4b6d-b516-48fa5ae64541"
+            ],
+            "type": "CrossDomain"
+          },
+          {
+            "confidence": 0.4766355140186916,
+            "insight": "Cross-domain pattern between [diagnostyka] and [pattern]: 'Objaw: emulowana gra nie wchodzi\u0142a do poziomu, tylko w k\u00f3...' connects to '# Code Pattern: Diagnostyka zawieszonego emulatora przez lic...'",
+            "noveltyScore": 0.7999999999999999,
+            "sourceMemories": [
+              "7e7dff16-9b84-474f-b531-8996ac234a38",
+              "ae68d8d5-66d2-42ea-b455-85587c70ea41"
+            ],
+            "type": "CrossDomain"
+          },
+          {
+            "confidence": 0.4723064435564436,
+            "insight": "Recurring pattern in 'topic': 13 instances identified with common characteristics",
+            "noveltyScore": 1.0,
+            "sourceMemories": [
+              "ed25287e-0157-415e-8af5-9902d8be3a05",
+              "c225a8c7-0987-4129-a16e-6bc7605814dd",
+              "b96153d2-d104-409d-a2b7-4d4adf71e66c",
+              "127860f3-26cb-4bd8-8ab7-68c13bf48175",
+              "ae68d8d5-66d2-42ea-b455-85587c70ea41",
+              "97bbe4ca-8b15-4b6d-b516-48fa5ae64541",
+              "d7446713-eac3-42d4-a3f9-754e4ebc9d83",
+              "7e7dff16-9b84-474f-b531-8996ac234a38",
+              "5925e4a8-ef89-4ce0-aeb3-de1ba0ac60c0",
+              "da17bf5d-00e6-4573-920e-e70122296da1",
+              "d59cea00-f21d-4ed6-95c8-5d57c511ced7",
+              "973f329d-1974-459e-b30d-0702a0fadb5f",
+              "23fec144-bc4f-428f-9187-12cfa079a149"
+            ],
+            "type": "RecurringPattern"
+          }
+        ],
+        "memoriesReplayed": 13,
+        "phases": [
+          {
+            "actions": [
+              "Scored 13 memories",
+              "Categories: {\"standard\": 13}",
+              "Replay queue: 10 high-value + 3 noise = 13 total"
+            ],
+            "durationMs": 5,
+            "memoriesProcessed": 13,
+            "phase": "NREM1_Triage"
+          },
+          {
+            "actions": [
+              "Processed 1 waves of 13 memories",
+              "Strengthened 13 memories via synaptic tagging"
+            ],
+            "durationMs": 0,
+            "memoriesProcessed": 13,
+            "phase": "NREM3_Consolidation"
+          },
+          {
+            "actions": [
+              "Cross-domain pairing: 7 tag groups, 2 connections found",
+              "Pattern extraction: 10 shared patterns found"
+            ],
+            "durationMs": 1,
+            "memoriesProcessed": 13,
+            "phase": "REM_Creative"
+          },
+          {
+            "actions": [
+              "Validated 2/12 connections (threshold: 0.4)",
+              "Generated 2 dream insights",
+              "Average retention across dreamed memories: 0.85"
+            ],
+            "durationMs": 0,
+            "memoriesProcessed": 13,
+            "phase": "Integration"
+          }
+        ],
+        "stats": {
+          "connectionsPersisted": 12,
+          "contradictionsFound": 0,
+          "creativeConnectionsFound": 12,
+          "durationMs": 7,
+          "emotionalProcessed": 0,
+          "insightsGenerated": 3,
+          "memoriesDownscaled": 0,
+          "memoriesStrengthened": 13
+        },
+        "status": "dreamed",
+        "wakingTagsCleared": 0,
+        "wakingTagsProcessed": 13
+      }
+    },
+    {
+      "tool": "dream",
+      "arguments": {
+        "memory_count": 50
+      },
+      "isError": false,
+      "seconds": 0.211,
+      "result": {
+        "connectionsPersisted": 12,
+        "contradictions": [],
+        "insights": [
+          {
+            "confidence": 0.5384615384615384,
+            "insight": "Shared pattern 'emulowanego  procesora' found across 7 memories",
+            "noveltyScore": 0.7999999999999999,
+            "sourceMemories": [
+              "23fec144-bc4f-428f-9187-12cfa079a149",
+              "97bbe4ca-8b15-4b6d-b516-48fa5ae64541"
+            ],
+            "type": "CrossDomain"
+          },
+          {
+            "confidence": 0.4766355140186916,
+            "insight": "Cross-domain pattern between [diagnostyka] and [pattern]: 'Objaw: emulowana gra nie wchodzi\u0142a do poziomu, tylko w k\u00f3...' connects to '# Code Pattern: Diagnostyka zawieszonego emulatora przez lic...'",
+            "noveltyScore": 0.7999999999999999,
+            "sourceMemories": [
+              "7e7dff16-9b84-474f-b531-8996ac234a38",
+              "ae68d8d5-66d2-42ea-b455-85587c70ea41"
+            ],
+            "type": "CrossDomain"
+          },
+          {
+            "confidence": 0.4723064435564436,
+            "insight": "Recurring pattern in 'topic': 13 instances identified with common characteristics",
+            "noveltyScore": 1.0,
+            "sourceMemories": [
+              "d7446713-eac3-42d4-a3f9-754e4ebc9d83",
+              "d59cea00-f21d-4ed6-95c8-5d57c511ced7",
+              "7e7dff16-9b84-474f-b531-8996ac234a38",
+              "ed25287e-0157-415e-8af5-9902d8be3a05",
+              "127860f3-26cb-4bd8-8ab7-68c13bf48175",
+              "ae68d8d5-66d2-42ea-b455-85587c70ea41",
+              "973f329d-1974-459e-b30d-0702a0fadb5f",
+              "5925e4a8-ef89-4ce0-aeb3-de1ba0ac60c0",
+              "da17bf5d-00e6-4573-920e-e70122296da1",
+              "b96153d2-d104-409d-a2b7-4d4adf71e66c",
+              "c225a8c7-0987-4129-a16e-6bc7605814dd",
+              "23fec144-bc4f-428f-9187-12cfa079a149",
+              "97bbe4ca-8b15-4b6d-b516-48fa5ae64541"
+            ],
+            "type": "RecurringPattern"
+          }
+        ],
+        "memoriesReplayed": 13,
+        "phases": [
+          {
+            "actions": [
+              "Scored 13 memories",
+              "Categories: {\"standard\": 13}",
+              "Replay queue: 10 high-value + 3 noise = 13 total"
+            ],
+            "durationMs": 9,
+            "memoriesProcessed": 13,
+            "phase": "NREM1_Triage"
+          },
+          {
+            "actions": [
+              "Processed 1 waves of 13 memories",
+              "Strengthened 13 memories via synaptic tagging"
+            ],
+            "durationMs": 0,
+            "memoriesProcessed": 13,
+            "phase": "NREM3_Consolidation"
+          },
+          {
+            "actions": [
+              "Cross-domain pairing: 7 tag groups, 2 connections found",
+              "Pattern extraction: 10 shared patterns found"
+            ],
+            "durationMs": 2,
+            "memoriesProcessed": 13,
+            "phase": "REM_Creative"
+          },
+          {
+            "actions": [
+              "Validated 2/12 connections (threshold: 0.4)",
+              "Generated 2 dream insights",
+              "Average retention across dreamed memories: 0.85"
+            ],
+            "durationMs": 0,
+            "memoriesProcessed": 13,
+            "phase": "Integration"
+          }
+        ],
+        "stats": {
+          "connectionsPersisted": 12,
+          "contradictionsFound": 0,
+          "creativeConnectionsFound": 12,
+          "durationMs": 11,
+          "emotionalProcessed": 0,
+          "insightsGenerated": 3,
+          "memoriesDownscaled": 0,
+          "memoriesStrengthened": 13
+        },
+        "status": "dreamed",
+        "wakingTagsCleared": 0,
+        "wakingTagsProcessed": 13
+      }
+    }
+  ]
+}

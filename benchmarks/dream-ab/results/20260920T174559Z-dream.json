@@ -1,0 +1,2844 @@
+{
+  "harness": "benchmarks/dream-ab/run.py",
+  "spec": "docs/SELF-CONTAINED-MEMORY-DESIGN.md \u00a712 (12.2 rules, 12.4 contract)",
+  "stamp": "20260920T174559Z",
+  "startedAt": "2026-09-20T17:45:59.126451+00:00",
+  "finishedAt": "2026-09-20T17:46:47.842345+00:00",
+  "pass": "dream",
+  "runs": [
+    {
+      "index": 1,
+      "control": {
+        "before": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run1/control/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:45:59.591278+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 6,
+              "total": 13
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 8,
+              "everAccessed": 10,
+              "total": 13
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 13,
+              "value": "7/13",
+              "float": 0.5384615384615384,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 13,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 6,
+              "denominator": 13,
+              "value": "6/13",
+              "float": 0.46153846153846156,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 8,
+              "denominator": 13,
+              "value": "8/13",
+              "float": 0.6153846153846154,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 10,
+              "denominator": 13,
+              "value": "10/13",
+              "float": 0.7692307692307693,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:45:59.591278+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        },
+        "after": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run1/control/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:15.470375+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 6,
+              "total": 13
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 8,
+              "everAccessed": 10,
+              "total": 13
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 13,
+              "value": "7/13",
+              "float": 0.5384615384615384,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 13,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 6,
+              "denominator": 13,
+              "value": "6/13",
+              "float": 0.46153846153846156,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 8,
+              "denominator": 13,
+              "value": "8/13",
+              "float": 0.6153846153846154,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 10,
+              "denominator": 13,
+              "value": "10/13",
+              "float": 0.7692307692307693,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:15.470375+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        }
+      },
+      "treatment": {
+        "before": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run1/treatment/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:45:59.612499+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 6,
+              "total": 13
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 8,
+              "everAccessed": 10,
+              "total": 13
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 13,
+              "value": "7/13",
+              "float": 0.5384615384615384,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 13,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 6,
+              "denominator": 13,
+              "value": "6/13",
+              "float": 0.46153846153846156,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 8,
+              "denominator": 13,
+              "value": "8/13",
+              "float": 0.6153846153846154,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 10,
+              "denominator": 13,
+              "value": "10/13",
+              "float": 0.7692307692307693,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:45:59.612499+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        },
+        "after": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run1/treatment/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:15.453359+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 10,
+              "total": 17
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 13,
+              "everAccessed": 13,
+              "total": 17
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 17,
+              "value": "7/17",
+              "float": 0.4117647058823529,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 17,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 10,
+              "denominator": 17,
+              "value": "10/17",
+              "float": 0.5882352941176471,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 13,
+              "denominator": 17,
+              "value": "13/17",
+              "float": 0.7647058823529411,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 13,
+              "denominator": 17,
+              "value": "13/17",
+              "float": 0.7647058823529411,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:15.453359+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        }
+      },
+      "pass": {
+        "kind": "dream",
+        "startedAt": "2026-09-20T17:45:59.614858+00:00",
+        "finishedAt": "2026-09-20T17:46:15.416471+00:00",
+        "serverCommand": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run1/treatment/home /Users/przemek/Projects/vestige/target/release/vestige serve --port 51722 --dashboard-port 51723",
+        "calls": [
+          {
+            "tool": "dream",
+            "arguments": {
+              "memory_count": 50
+            },
+            "isError": false,
+            "seconds": 0.218
+          }
+        ]
+      },
+      "serverProcessQuality": {
+        "anchors": {
+          "fresh": 0,
+          "orphaned": 0,
+          "stale": 0,
+          "total": 0,
+          "unchecked": 0
+        },
+        "containment": {
+          "clean": 7,
+          "flagged": 0,
+          "total": 17,
+          "unchecked": 10
+        },
+        "flaggedByKind": [],
+        "notes": [
+          "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+          "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+          "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+          "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+        ],
+        "process": {
+          "flagged": 0,
+          "flaggedByKind": [],
+          "rejected": 0,
+          "rejectedByKind": []
+        },
+        "since": null,
+        "until": "2026-09-20T17:46:15.416172+00:00",
+        "useCounts": {
+          "everAccessed": 13,
+          "retrievedAtLeastOnce": 13,
+          "total": 17
+        },
+        "windowBasis": "recorded_at"
+      },
+      "supplementary": {
+        "accessLogDuringPass": {
+          "queried": true,
+          "window": {
+            "since": "2026-09-20T17:45:59.614858+00:00",
+            "until": "2026-09-20T17:46:15.416471+00:00"
+          },
+          "byType": [
+            {
+              "accessType": "search_hit",
+              "rows": 13,
+              "distinctNodes": 13
+            }
+          ],
+          "totalRows": 13
+        }
+      },
+      "denominatorInflation": {
+        "treatment": 4,
+        "control": 0
+      }
+    },
+    {
+      "index": 2,
+      "control": {
+        "before": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run2/control/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:15.490566+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 6,
+              "total": 13
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 8,
+              "everAccessed": 10,
+              "total": 13
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 13,
+              "value": "7/13",
+              "float": 0.5384615384615384,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 13,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 6,
+              "denominator": 13,
+              "value": "6/13",
+              "float": 0.46153846153846156,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 8,
+              "denominator": 13,
+              "value": "8/13",
+              "float": 0.6153846153846154,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 10,
+              "denominator": 13,
+              "value": "10/13",
+              "float": 0.7692307692307693,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:15.490566+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        },
+        "after": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run2/control/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:31.720772+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 6,
+              "total": 13
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 8,
+              "everAccessed": 10,
+              "total": 13
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 13,
+              "value": "7/13",
+              "float": 0.5384615384615384,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 13,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 6,
+              "denominator": 13,
+              "value": "6/13",
+              "float": 0.46153846153846156,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 8,
+              "denominator": 13,
+              "value": "8/13",
+              "float": 0.6153846153846154,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 10,
+              "denominator": 13,
+              "value": "10/13",
+              "float": 0.7692307692307693,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:31.720772+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        }
+      },
+      "treatment": {
+        "before": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run2/treatment/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:15.508824+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 6,
+              "total": 13
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 8,
+              "everAccessed": 10,
+              "total": 13
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 13,
+              "value": "7/13",
+              "float": 0.5384615384615384,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 13,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 6,
+              "denominator": 13,
+              "value": "6/13",
+              "float": 0.46153846153846156,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 8,
+              "denominator": 13,
+              "value": "8/13",
+              "float": 0.6153846153846154,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 10,
+              "denominator": 13,
+              "value": "10/13",
+              "float": 0.7692307692307693,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:15.508824+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        },
+        "after": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run2/treatment/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:31.688194+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 10,
+              "total": 17
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 13,
+              "everAccessed": 13,
+              "total": 17
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 17,
+              "value": "7/17",
+              "float": 0.4117647058823529,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 17,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 10,
+              "denominator": 17,
+              "value": "10/17",
+              "float": 0.5882352941176471,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 13,
+              "denominator": 17,
+              "value": "13/17",
+              "float": 0.7647058823529411,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 13,
+              "denominator": 17,
+              "value": "13/17",
+              "float": 0.7647058823529411,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:31.688194+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        }
+      },
+      "pass": {
+        "kind": "dream",
+        "startedAt": "2026-09-20T17:46:15.511000+00:00",
+        "finishedAt": "2026-09-20T17:46:31.611287+00:00",
+        "serverCommand": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run2/treatment/home /Users/przemek/Projects/vestige/target/release/vestige serve --port 51732 --dashboard-port 51733",
+        "calls": [
+          {
+            "tool": "dream",
+            "arguments": {
+              "memory_count": 50
+            },
+            "isError": false,
+            "seconds": 0.571
+          }
+        ]
+      },
+      "serverProcessQuality": {
+        "anchors": {
+          "fresh": 0,
+          "orphaned": 0,
+          "stale": 0,
+          "total": 0,
+          "unchecked": 0
+        },
+        "containment": {
+          "clean": 7,
+          "flagged": 0,
+          "total": 17,
+          "unchecked": 10
+        },
+        "flaggedByKind": [],
+        "notes": [
+          "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+          "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+          "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+          "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+        ],
+        "process": {
+          "flagged": 0,
+          "flaggedByKind": [],
+          "rejected": 0,
+          "rejectedByKind": []
+        },
+        "since": null,
+        "until": "2026-09-20T17:46:31.610475+00:00",
+        "useCounts": {
+          "everAccessed": 13,
+          "retrievedAtLeastOnce": 13,
+          "total": 17
+        },
+        "windowBasis": "recorded_at"
+      },
+      "supplementary": {
+        "accessLogDuringPass": {
+          "queried": true,
+          "window": {
+            "since": "2026-09-20T17:46:15.511000+00:00",
+            "until": "2026-09-20T17:46:31.611287+00:00"
+          },
+          "byType": [
+            {
+              "accessType": "search_hit",
+              "rows": 13,
+              "distinctNodes": 13
+            }
+          ],
+          "totalRows": 13
+        }
+      },
+      "denominatorInflation": {
+        "treatment": 4,
+        "control": 0
+      }
+    },
+    {
+      "index": 3,
+      "control": {
+        "before": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run3/control/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:31.760753+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 6,
+              "total": 13
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 8,
+              "everAccessed": 10,
+              "total": 13
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 13,
+              "value": "7/13",
+              "float": 0.5384615384615384,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 13,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 6,
+              "denominator": 13,
+              "value": "6/13",
+              "float": 0.46153846153846156,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 8,
+              "denominator": 13,
+              "value": "8/13",
+              "float": 0.6153846153846154,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 10,
+              "denominator": 13,
+              "value": "10/13",
+              "float": 0.7692307692307693,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:31.760753+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        },
+        "after": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run3/control/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:47.839430+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 6,
+              "total": 13
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 8,
+              "everAccessed": 10,
+              "total": 13
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 13,
+              "value": "7/13",
+              "float": 0.5384615384615384,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 13,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 6,
+              "denominator": 13,
+              "value": "6/13",
+              "float": 0.46153846153846156,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 8,
+              "denominator": 13,
+              "value": "8/13",
+              "float": 0.6153846153846154,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 10,
+              "denominator": 13,
+              "value": "10/13",
+              "float": 0.7692307692307693,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:47.839430+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        }
+      },
+      "treatment": {
+        "before": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run3/treatment/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:31.797521+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 6,
+              "total": 13
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 8,
+              "everAccessed": 10,
+              "total": 13
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 13,
+              "value": "7/13",
+              "float": 0.5384615384615384,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 13,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 6,
+              "denominator": 13,
+              "value": "6/13",
+              "float": 0.46153846153846156,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 8,
+              "denominator": 13,
+              "value": "8/13",
+              "float": 0.6153846153846154,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 10,
+              "denominator": 13,
+              "value": "10/13",
+              "float": 0.7692307692307693,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:31.797521+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        },
+        "after": {
+          "surface": "cli",
+          "command": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run3/treatment/home /Users/przemek/Projects/vestige/target/release/vestige quality --json",
+          "report": {
+            "since": null,
+            "until": "2026-09-20T17:46:47.822298+00:00",
+            "windowBasis": "recorded_at",
+            "containment": {
+              "clean": 7,
+              "flagged": 0,
+              "unchecked": 10,
+              "total": 17
+            },
+            "flaggedByKind": [],
+            "anchors": {
+              "fresh": 0,
+              "stale": 0,
+              "orphaned": 0,
+              "unchecked": 0,
+              "total": 0
+            },
+            "useCounts": {
+              "retrievedAtLeastOnce": 13,
+              "everAccessed": 13,
+              "total": 17
+            },
+            "process": {
+              "rejectedByKind": [],
+              "flaggedByKind": [],
+              "rejected": 0,
+              "flagged": 0
+            },
+            "notes": [
+              "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+              "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+              "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+              "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+            ]
+          },
+          "stderr": "",
+          "measures": {
+            "containment.selfContainmentRate": {
+              "id": "containment.selfContainmentRate",
+              "label": "memory self-containment: clean / (clean + flagged)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 7,
+              "denominator": 7,
+              "value": "1",
+              "float": 1.0,
+              "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+            },
+            "containment.clean": {
+              "id": "containment.clean",
+              "label": "clean memories, share of window",
+              "good": "+",
+              "isRate": false,
+              "numerator": 7,
+              "denominator": 17,
+              "value": "7/17",
+              "float": 0.4117647058823529,
+              "note": ""
+            },
+            "containment.flagged": {
+              "id": "containment.flagged",
+              "label": "flagged memories, share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 17,
+              "value": "0",
+              "float": 0.0,
+              "note": ""
+            },
+            "containment.unchecked": {
+              "id": "containment.unchecked",
+              "label": "never-checked memories (self_contained IS NULL), share of window",
+              "good": "-",
+              "isRate": false,
+              "numerator": 10,
+              "denominator": 17,
+              "value": "10/17",
+              "float": 0.5882352941176471,
+              "note": "not a synonym for clean"
+            },
+            "anchors.resolvabilityRate": {
+              "id": "anchors.resolvabilityRate",
+              "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+              "good": "+",
+              "isRate": true,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+            },
+            "anchors.fresh": {
+              "id": "anchors.fresh",
+              "label": "fresh anchors, share of all anchors",
+              "good": "+",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.stale": {
+              "id": "anchors.stale",
+              "label": "stale anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.orphaned": {
+              "id": "anchors.orphaned",
+              "label": "orphaned anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": ""
+            },
+            "anchors.unchecked": {
+              "id": "anchors.unchecked",
+              "label": "uncheckable anchors, share of all anchors",
+              "good": "-",
+              "isRate": false,
+              "numerator": 0,
+              "denominator": 0,
+              "value": null,
+              "float": null,
+              "note": "environment failure (no repository or revision), not code rot"
+            },
+            "use.retrievalRate": {
+              "id": "use.retrievalRate",
+              "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 13,
+              "denominator": 17,
+              "value": "13/17",
+              "float": 0.7647058823529411,
+              "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+            },
+            "use.everAccessedRate": {
+              "id": "use.everAccessedRate",
+              "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+              "good": "+",
+              "isRate": true,
+              "numerator": 13,
+              "denominator": 17,
+              "value": "13/17",
+              "float": 0.7647058823529411,
+              "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+            },
+            "_meta": {
+              "window": {
+                "since": null,
+                "until": "2026-09-20T17:46:47.822298+00:00",
+                "windowBasis": "recorded_at"
+              },
+              "flaggedByKind": [],
+              "rateCrossCheck": [],
+              "process": {
+                "rejected": 0,
+                "flagged": 0,
+                "rejectedByKind": [],
+                "flaggedByKind": [],
+                "comparable": false,
+                "note": "process.* counts the process that answered, not the window and not the store (\u00a712.4). Each arm is read by a different process, so these numbers are not comparable across arms and carry no verdict."
+              },
+              "notes": [
+                "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+                "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+                "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+                "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+              ]
+            }
+          }
+        }
+      },
+      "pass": {
+        "kind": "dream",
+        "startedAt": "2026-09-20T17:46:31.801192+00:00",
+        "finishedAt": "2026-09-20T17:46:47.793586+00:00",
+        "serverCommand": "HOME=/tmp/dream-ab-20260920T174559Z-qb2sz1mn/run3/treatment/home /Users/przemek/Projects/vestige/target/release/vestige serve --port 51742 --dashboard-port 51743",
+        "calls": [
+          {
+            "tool": "dream",
+            "arguments": {
+              "memory_count": 50
+            },
+            "isError": false,
+            "seconds": 0.211
+          }
+        ]
+      },
+      "serverProcessQuality": {
+        "anchors": {
+          "fresh": 0,
+          "orphaned": 0,
+          "stale": 0,
+          "total": 0,
+          "unchecked": 0
+        },
+        "containment": {
+          "clean": 7,
+          "flagged": 0,
+          "total": 17,
+          "unchecked": 10
+        },
+        "flaggedByKind": [],
+        "notes": [
+          "`self_contained: null` means the gate never ran on that memory; it is counted as `unchecked` and never as `clean`.",
+          "`anchors.unchecked` means no repository or revision was available to check; it is reported beside resolvability, not inside it.",
+          "`useCounts` describe value, not retention: nothing in the store decays because of them.",
+          "`process.*` counts come from this process's lifetime, not from the window: a refused write stores nothing, so the store cannot remember it."
+        ],
+        "process": {
+          "flagged": 0,
+          "flaggedByKind": [],
+          "rejected": 0,
+          "rejectedByKind": []
+        },
+        "since": null,
+        "until": "2026-09-20T17:46:47.793296+00:00",
+        "useCounts": {
+          "everAccessed": 13,
+          "retrievedAtLeastOnce": 13,
+          "total": 17
+        },
+        "windowBasis": "recorded_at"
+      },
+      "supplementary": {
+        "accessLogDuringPass": {
+          "queried": true,
+          "window": {
+            "since": "2026-09-20T17:46:31.801192+00:00",
+            "until": "2026-09-20T17:46:47.793586+00:00"
+          },
+          "byType": [
+            {
+              "accessType": "search_hit",
+              "rows": 13,
+              "distinctNodes": 13
+            }
+          ],
+          "totalRows": 13
+        }
+      },
+      "denominatorInflation": {
+        "treatment": 4,
+        "control": 0
+      }
+    }
+  ],
+  "qualitySurface": "cli",
+  "since": null,
+  "config": {
+    "warmupSeconds": 15.0,
+    "requestTimeoutSeconds": 900.0,
+    "keepWork": false,
+    "workDir": "/tmp/dream-ab-20260920T174559Z-qb2sz1mn",
+    "fastembedCache": "/Users/przemek/Library/Caches/vestige.vestige/fastembed",
+    "cliBinary": "/Users/przemek/Projects/vestige/target/release/vestige",
+    "mcpBinary": "/Users/przemek/Projects/vestige/target/release/vestige-mcp",
+    "binarySha256": "6ab64aef27e9c89b4d435dfcbed06a9af984b177c45e3c18fb0803d0aca06e42",
+    "binaryMtime": "2026-09-20T17:44:58.407646+00:00"
+  },
+  "sourceStore": {
+    "sourcePath": "/Users/przemek/Library/Application Support/com.vestige.core/vestige.db",
+    "snapshotPath": "/tmp/dream-ab-20260920T174559Z-qb2sz1mn/snapshot/vestige.db",
+    "method": "sqlite3 backup API (source opened mode=ro)",
+    "sha256": "48f678588348614823fbb56a6400722baf23b3c17a6594fe7e2d12ce06a7d1d3",
+    "bytes": 524288,
+    "integrityCheck": "ok",
+    "rows": {
+      "knowledge_nodes": 13,
+      "memory_access_log": 13,
+      "code_refs": 0
+    },
+    "liveMtimeBefore": 1789918033.2560453,
+    "liveMtimeAfterSnapshot": 1789918033.2560453,
+    "liveRowsBefore": {
+      "knowledge_nodes": 13,
+      "memory_access_log": 13,
+      "code_refs": 0
+    },
+    "liveRowsAfter": {
+      "knowledge_nodes": 13,
+      "memory_access_log": 13,
+      "code_refs": 0
+    },
+    "liveMtimeFinal": 1789918033.2560453
+  },
+  "isolation": {
+    "checks": {
+      "reportTotalMatchesSnapshotRows": true,
+      "homeSelectsTheCopy": true,
+      "canaryWriteLandedInTheCopy": true
+    },
+    "ok": true,
+    "pristineTotal": 13,
+    "snapshotRows": {
+      "knowledge_nodes": 13,
+      "memory_access_log": 13,
+      "code_refs": 0
+    },
+    "perturbedTotal": 12,
+    "canaryIngestExit": 0,
+    "canaryIngestStderr": "",
+    "canaryTotal": 14,
+    "liveStoreBefore": {
+      "knowledge_nodes": 13,
+      "memory_access_log": 13,
+      "code_refs": 0
+    }
+  },
+  "passFailures": [],
+  "measures": {
+    "containment.selfContainmentRate": {
+      "label": "memory self-containment: clean / (clean + flagged)",
+      "good": "+",
+      "isRate": true,
+      "effects": [
+        {
+          "num": 0,
+          "den": 1,
+          "float": 0.0
+        },
+        {
+          "num": 0,
+          "den": 1,
+          "float": 0.0
+        },
+        {
+          "num": 0,
+          "den": 1,
+          "float": 0.0
+        }
+      ],
+      "verdict": "no effect",
+      "verdictFromDeltas": "no effect",
+      "passFailures": [],
+      "confoundedInThisDesign": false,
+      "note": "unchecked (gate never ran) is excluded from the denominator and reported separately"
+    },
+    "containment.clean": {
+      "label": "clean memories, share of window",
+      "good": "+",
+      "isRate": false,
+      "effects": [
+        {
+          "num": -28,
+          "den": 221,
+          "float": -0.12669683257918551
+        },
+        {
+          "num": -28,
+          "den": 221,
+          "float": -0.12669683257918551
+        },
+        {
+          "num": -28,
+          "den": 221,
+          "float": -0.12669683257918551
+        }
+      ],
+      "verdict": "worse",
+      "verdictFromDeltas": "worse",
+      "passFailures": [],
+      "confoundedInThisDesign": false,
+      "note": ""
+    },
+    "containment.flagged": {
+      "label": "flagged memories, share of window",
+      "good": "-",
+      "isRate": false,
+      "effects": [
+        {
+          "num": 0,
+          "den": 1,
+          "float": 0.0
+        },
+        {
+          "num": 0,
+          "den": 1,
+          "float": 0.0
+        },
+        {
+          "num": 0,
+          "den": 1,
+          "float": 0.0
+        }
+      ],
+      "verdict": "no effect",
+      "verdictFromDeltas": "no effect",
+      "passFailures": [],
+      "confoundedInThisDesign": false,
+      "note": ""
+    },
+    "containment.unchecked": {
+      "label": "never-checked memories (self_contained IS NULL), share of window",
+      "good": "-",
+      "isRate": false,
+      "effects": [
+        {
+          "num": 28,
+          "den": 221,
+          "float": 0.12669683257918551
+        },
+        {
+          "num": 28,
+          "den": 221,
+          "float": 0.12669683257918551
+        },
+        {
+          "num": 28,
+          "den": 221,
+          "float": 0.12669683257918551
+        }
+      ],
+      "verdict": "worse",
+      "verdictFromDeltas": "worse",
+      "passFailures": [],
+      "confoundedInThisDesign": false,
+      "note": "not a synonym for clean"
+    },
+    "anchors.resolvabilityRate": {
+      "label": "anchor resolvability: fresh / (fresh + stale + orphaned)",
+      "good": "+",
+      "isRate": true,
+      "effects": [
+        null,
+        null,
+        null
+      ],
+      "verdict": "unmeasured",
+      "verdictFromDeltas": "unmeasured",
+      "passFailures": [],
+      "confoundedInThisDesign": false,
+      "note": "unchecked anchors (no repo/revision) sit outside this denominator"
+    },
+    "anchors.fresh": {
+      "label": "fresh anchors, share of all anchors",
+      "good": "+",
+      "isRate": false,
+      "effects": [
+        null,
+        null,
+        null
+      ],
+      "verdict": "unmeasured",
+      "verdictFromDeltas": "unmeasured",
+      "passFailures": [],
+      "confoundedInThisDesign": false,
+      "note": ""
+    },
+    "anchors.stale": {
+      "label": "stale anchors, share of all anchors",
+      "good": "-",
+      "isRate": false,
+      "effects": [
+        null,
+        null,
+        null
+      ],
+      "verdict": "unmeasured",
+      "verdictFromDeltas": "unmeasured",
+      "passFailures": [],
+      "confoundedInThisDesign": false,
+      "note": ""
+    },
+    "anchors.orphaned": {
+      "label": "orphaned anchors, share of all anchors",
+      "good": "-",
+      "isRate": false,
+      "effects": [
+        null,
+        null,
+        null
+      ],
+      "verdict": "unmeasured",
+      "verdictFromDeltas": "unmeasured",
+      "passFailures": [],
+      "confoundedInThisDesign": false,
+      "note": ""
+    },
+    "anchors.unchecked": {
+      "label": "uncheckable anchors, share of all anchors",
+      "good": "-",
+      "isRate": false,
+      "effects": [
+        null,
+        null,
+        null
+      ],
+      "verdict": "unmeasured",
+      "verdictFromDeltas": "unmeasured",
+      "passFailures": [],
+      "confoundedInThisDesign": false,
+      "note": "environment failure (no repository or revision), not code rot"
+    },
+    "use.retrievalRate": {
+      "label": "retrievedAtLeastOnce / useCounts.total  [CONFOUNDED HERE]",
+      "good": "+",
+      "isRate": true,
+      "effects": [
+        {
+          "num": 33,
+          "den": 221,
+          "float": 0.1493212669683258
+        },
+        {
+          "num": 33,
+          "den": 221,
+          "float": 0.1493212669683258
+        },
+        {
+          "num": 33,
+          "den": 221,
+          "float": 0.1493212669683258
+        }
+      ],
+      "verdict": "improved",
+      "verdictFromDeltas": "improved",
+      "passFailures": [],
+      "confoundedInThisDesign": true,
+      "note": "the pass reads the store it is measured on; its own search_hit rows land in this numerator"
+    },
+    "use.everAccessedRate": {
+      "label": "everAccessed / useCounts.total  [CONFOUNDED HERE]",
+      "good": "+",
+      "isRate": true,
+      "effects": [
+        {
+          "num": -1,
+          "den": 221,
+          "float": -0.004524886877828055
+        },
+        {
+          "num": -1,
+          "den": 221,
+          "float": -0.004524886877828055
+        },
+        {
+          "num": -1,
+          "den": 221,
+          "float": -0.004524886877828055
+        }
+      ],
+      "verdict": "worse",
+      "verdictFromDeltas": "worse",
+      "passFailures": [],
+      "confoundedInThisDesign": true,
+      "note": "same confound as retrievalRate, plus any access_count the pass itself writes"
+    }
+  },
+  "determinism": {
+    "comparedKeys": "everything in MemoryQualityReport except `until` and `process`",
+    "excluded": {
+      "until": "the wall clock at read time; it cannot be equal across runs",
+      "process": "process-lifetime gate counters; every read is its own process"
+    },
+    "acrossRuns": [
+      {
+        "leftRun": 1,
+        "rightRun": 2,
+        "identical": true
+      },
+      {
+        "leftRun": 1,
+        "rightRun": 3,
+        "identical": true
+      },
+      {
+        "leftRun": 2,
+        "rightRun": 3,
+        "identical": true
+      }
+    ],
+    "withinRunBeforeAfter": [
+      {
+        "run": 1,
+        "identical": true
+      },
+      {
+        "run": 2,
+        "identical": true
+      },
+      {
+        "run": 3,
+        "identical": true
+      }
+    ],
+    "ok": true,
+    "conclusion": "two control runs on two identical copies produced identical store measures"
+  },
+  "caveats": [
+    "Every rate is printed with its denominator; a rate over 0 rows is `unmeasured`, not 0.",
+    "`unchecked` (gate never ran) is never counted as clean, and uncheckable anchors are never folded into resolvability.",
+    "`useCounts` are confounded in this design: the treatment pass retrieves from the store it is measured on, so its own search_hit rows and access_count bumps are inside the treatment delta. The control arm performs no reads at all. A positive use delta is not evidence of value.",
+    "The treatment arm is `the pass run through the server`, per \u00a712.4, so any inline consolidation the server performs while serving the call is inside the treatment delta.",
+    "`process.*` gate counters describe the process that answered the read, not the store; they are not comparable across arms and carry no verdict.",
+    "The pass's own new rows (insights, connections) change the window total; every rate that moves is reported next to the denominator it moved against."
+  ]
+}

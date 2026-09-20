@@ -368,3 +368,57 @@ osiąga też automatyczny decay — do rozstrzygnięcia, czy oprzeć „zdemotow
 (b) trzy wspomnienia w magazynie użytkownika nadal noszą fałszywe `valid_until` — wymaga zgody na
 zapis do danych (poza zakresem tej sesji); (c) `memory_timeline` grupuje po `created_at`, nie po
 `recorded_at`.
+
+---
+
+## 15. Fala 5: pomiar i uczciwe A/B na `dream`/`reflect` (2026-09-20)
+
+Fala 5 z §12 designu. Kontrakt wykonawczy: `docs/SELF-CONTAINED-MEMORY-DESIGN.md` §12.4.
+Harness i surowe artefakty: `benchmarks/dream-ab/` (`RESULTS.md` + `results/`).
+
+**Cztery miary są implementacją, nie deklaracją.** `Storage::memory_quality(since)` (rdzeń,
+commit `d9de257a`) liczy je jednym czytnikiem, a trzy pułapki §12.1 są w kształcie danych:
+`unchecked` (`NULL` = bramka nie chodziła) nigdy nie wchodzi do wskaźnika; `anchors.unchecked`
+stoi obok rozwiązywalności, nie w niej; puste okno daje `null`, nie `0.0`; użycie to dwie liczby
+(pobranie vs dotknięcie) niepodłączone do wygaszania; odrzucenia pochodzą z liczników procesu
+i są tak nazwane. Wskaźniki jadą w payloadzie (`rates.*`), żeby konsument nie wybierał sobie
+mianownika. Powierzchnie: `memory_health.quality`, `vestige quality [--since] [--json]`,
+`vestige_gate_outcomes_total{outcome,kind}` (commit `2bc1f8f0`); liczniki zapisuje jeden wspólny
+krok zapisu, więc żadna ścieżka nie może liczyć czego innego niż jej sąsiedzi.
+
+**Liczba „przed" dla magazynu użytkownika** (kopia, 13 wspomnień): samodzielność 7/7 czystych
+wobec **6 nigdy nie sprawdzonych**, kotwice `total = 0` (niemierzalne), użycie 8/13 pobranych,
+10/13 dotkniętych. Zapisane w `docs/review/2026-09-20-memory-store-review.md` §6.
+
+**Wynik A/B (trzy pary przebiegów, zgodne co do kierunku, determinizm potwierdzony):**
+
+| przebieg | samodzielność | udział czystych | `unchecked` | kotwice | pobrania | dotknięcia |
+|---|---|---|---|---|---|---|
+| `dream` | brak efektu | **gorzej** (7/13 → 7/17) | **gorzej** (6/13 → 10/17) | niemierzalne | „poprawa" +0,149 — **obciążona: to własne 13 odczytów przebiegu** | „gorzej" −0,005 — artefakt mianownika |
+| `reflect` | brak efektu | brak efektu | brak efektu | niemierzalne | brak efektu | brak efektu |
+
+**Nic nie poprawiło się w sposób przypisywalny przebiegowi.** Zgodnie z §12.2 pkt 3 to jest
+wynik: `dream` dokłada cztery nigdy niesprawdzone wiersze (3 `insight` + 1 `hub`) i czyta własny
+korpus, a `reflect` przeanalizował 13 wspomnień i nie zapisał nic (`insights_generated: 0`).
+Wniosek wykonawczy: **nie włączamy tych przebiegów szerzej** — zostają wywoływane świadomie,
+tak jak dotąd, a nie z automatu.
+
+**Znalezisko produktowe przy okazji:** `dream` nie mógł wcześniej w ogóle się wykonać na magazynie
+z polską treścią — panika `byte index 60 is not a char boundary` w fazie REM (`rem.rs`), a po
+naprawie drugie takie miejsce w `dreamer_hubs.rs` (limit 160 B) i trzecie w CLI odtwarzania
+(`vestige-restore`). Trzy commity: `0b923220`, `4d431765` (plus testy). To dokładnie ta klasa,
+o której ostrzega §12.3: bez uruchomienia przebiegu na prawdziwym magazynie nikt by nie zauważył,
+że `dream` na nim nie działa.
+
+**Otwarte po fali 5:**
+1. **Zapis własny przebiegów omija bramkę.** `dream` zapisuje `insight` i `hub` przez inne API niż
+   krok zapisu narzędzi, więc te wiersze mają `self_contained = NULL` i zwiększają `unchecked`
+   w mierze (7/13 → 7/17). Do rozstrzygnięcia, czy (a) bramka ma objąć także treści pochodne,
+   (b) raport ma je wyłączać z mianownika jako osobną kategorię, czy (c) zostawić i pokazywać —
+   dzisiejsza liczba jest prawdziwa, ale miesza „bramka nie chodziła" z „bramka nie dotyczy".
+2. **Rozwiązywalność kotwic jest niemierzalna w tym magazynie** dopóki nie powstaną wspomnienia
+   z kotwicami; kryterium „`fresh` po 30 dniach" wymaga najpierw danych, potem czasu.
+3. **`Improvement`** — jedyna automatyczna ścieżka nadania `valid_until`, wciąż oparta na progu,
+   który osiąga decay (patrz §14 designu).
+4. Trzy wspomnienia w magazynie użytkownika nadal noszą fałszywe `valid_until` — poprawka wymaga
+   zgody na zapis do danych.

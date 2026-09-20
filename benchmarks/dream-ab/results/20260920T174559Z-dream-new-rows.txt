@@ -1,0 +1,27 @@
+# Supplementary inspection: what the pass's 4 new rows are
+# (the harness records the delta; this names the rows. Not a measure.)
+# command:
+#   python3 benchmarks/dream-ab/run.py --runs 1 --label inspect --keep-work --warmup 5 --json-out /tmp/dream-ab-inspect --pass dream
+#   python3 -c 'import sqlite3;con=sqlite3.connect("file:<work>/run1/treatment/home/Library/Application Support/com.vestige.core/vestige.db?mode=ro",uri=True);print(con.execute("select node_type, self_contained, count(*) from knowledge_nodes group by 1,2").fetchall())'
+
+--- treatment copy after the pass ---
+knowledge_nodes total: 17
+node_type, self_contained, count:
+    ('concept', 1, 1)
+    ('decision', None, 3)
+    ('event', 1, 6)
+    ('hub', None, 1)
+    ('insight', None, 3)
+    ('pattern', None, 3)
+newest 4 rows (node_type, self_contained, first 70 chars):
+    ('hub', None, '[Topic Hub: (no shared tags)]\n\nThis cluster contains 13 memories (2026')
+    ('insight', None, "Recurring pattern in 'topic': 13 instances identified with common char")
+    ('insight', None, "Possible causal link: '# Code Pattern: Diagnostyka zawieszonego emulat")
+    ('insight', None, "Shared pattern 'emulowanego  procesora' found across 7 memories")
+
+--- snapshot before the pass, same query (from the isolation pristine copy) ---
+knowledge_nodes total: 13
+    ('concept', 1, 1)
+    ('decision', None, 3)
+    ('event', 1, 6)
+    ('pattern', None, 3)

@@ -1,0 +1,297 @@
+{
+  "stamp": "20260920T174647Z",
+  "pass": "reflect",
+  "calls": [
+    {
+      "tool": "reflect",
+      "arguments": {
+        "depth": "standard"
+      },
+      "isError": false,
+      "seconds": 0.002,
+      "result": {
+        "contradictions": [],
+        "depth": "standard",
+        "focus": null,
+        "insights": [],
+        "knowledgeGaps": [
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "architektura"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "entity:ka"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "sprzet"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "narzedzia"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "entity:kierunek"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "entity:wniosek"
+          },
+          {
+            "avg_retention": "0.74",
+            "memory_count": 2,
+            "risk": "sparse",
+            "topic": "obraz"
+          },
+          {
+            "avg_retention": "0.86",
+            "memory_count": 2,
+            "risk": "sparse",
+            "topic": "diagnostyka"
+          },
+          {
+            "avg_retention": "0.89",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "kompilator"
+          },
+          {
+            "avg_retention": "0.94",
+            "memory_count": 2,
+            "risk": "sparse",
+            "topic": "rdzen"
+          },
+          {
+            "avg_retention": "1.00",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "testy"
+          }
+        ],
+        "memoriesAnalyzed": 13,
+        "overconfidentMemories": [],
+        "patternClusters": [],
+        "staleDecisions": [],
+        "stats": {
+          "contradictions_found": 0,
+          "insights_generated": 0,
+          "knowledge_gaps": 11,
+          "overconfident": 0,
+          "pattern_clusters": 0,
+          "stale_decisions": 0
+        },
+        "status": "reflected",
+        "structuredInsights": [],
+        "summary": "Knowledge base looks consistent \u2014 no contradictions, gaps, or stale decisions detected."
+      }
+    },
+    {
+      "tool": "reflect",
+      "arguments": {
+        "depth": "standard"
+      },
+      "isError": false,
+      "seconds": 0.002,
+      "result": {
+        "contradictions": [],
+        "depth": "standard",
+        "focus": null,
+        "insights": [],
+        "knowledgeGaps": [
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "entity:kierunek"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "architektura"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "entity:wniosek"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "narzedzia"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "entity:ka"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "sprzet"
+          },
+          {
+            "avg_retention": "0.74",
+            "memory_count": 2,
+            "risk": "sparse",
+            "topic": "obraz"
+          },
+          {
+            "avg_retention": "0.86",
+            "memory_count": 2,
+            "risk": "sparse",
+            "topic": "diagnostyka"
+          },
+          {
+            "avg_retention": "0.89",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "kompilator"
+          },
+          {
+            "avg_retention": "0.94",
+            "memory_count": 2,
+            "risk": "sparse",
+            "topic": "rdzen"
+          },
+          {
+            "avg_retention": "1.00",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "testy"
+          }
+        ],
+        "memoriesAnalyzed": 13,
+        "overconfidentMemories": [],
+        "patternClusters": [],
+        "staleDecisions": [],
+        "stats": {
+          "contradictions_found": 0,
+          "insights_generated": 0,
+          "knowledge_gaps": 11,
+          "overconfident": 0,
+          "pattern_clusters": 0,
+          "stale_decisions": 0
+        },
+        "status": "reflected",
+        "structuredInsights": [],
+        "summary": "Knowledge base looks consistent \u2014 no contradictions, gaps, or stale decisions detected."
+      }
+    },
+    {
+      "tool": "reflect",
+      "arguments": {
+        "depth": "standard"
+      },
+      "isError": false,
+      "seconds": 0.002,
+      "result": {
+        "contradictions": [],
+        "depth": "standard",
+        "focus": null,
+        "insights": [],
+        "knowledgeGaps": [
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "entity:ka"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "sprzet"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "entity:wniosek"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "entity:kierunek"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "narzedzia"
+          },
+          {
+            "avg_retention": "0.73",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "architektura"
+          },
+          {
+            "avg_retention": "0.74",
+            "memory_count": 2,
+            "risk": "sparse",
+            "topic": "obraz"
+          },
+          {
+            "avg_retention": "0.86",
+            "memory_count": 2,
+            "risk": "sparse",
+            "topic": "diagnostyka"
+          },
+          {
+            "avg_retention": "0.89",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "kompilator"
+          },
+          {
+            "avg_retention": "0.94",
+            "memory_count": 2,
+            "risk": "sparse",
+            "topic": "rdzen"
+          },
+          {
+            "avg_retention": "1.00",
+            "memory_count": 1,
+            "risk": "sparse",
+            "topic": "testy"
+          }
+        ],
+        "memoriesAnalyzed": 13,
+        "overconfidentMemories": [],
+        "patternClusters": [],
+        "staleDecisions": [],
+        "stats": {
+          "contradictions_found": 0,
+          "insights_generated": 0,
+          "knowledge_gaps": 11,
+          "overconfident": 0,
+          "pattern_clusters": 0,
+          "stale_decisions": 0
+        },
+        "status": "reflected",
+        "structuredInsights": [],
+        "summary": "Knowledge base looks consistent \u2014 no contradictions, gaps, or stale decisions detected."
+      }
+    }
+  ]
+}
